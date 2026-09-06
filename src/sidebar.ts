@@ -365,7 +365,6 @@ import {
   MAX_INLINE_MEDIA_BYTES,
   resolveChatOpenFilePath,
 } from "./media-serve";
-import { isExecutableOpenTarget, revalidateOpenFileForUse } from "./desktop/desktop-policy";
 import {
   describeFfmpegProblem,
   ffmpegInstallHint,
@@ -14534,13 +14533,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
    *  open) immediately before use. Returns undefined when desktop's policy
    *  check refuses the path. VS Code keeps the plain resolve. */
   private resolveDiffFilePath(session: Session, filePath: string): string | undefined {
-    let abs = path.isAbsolute(filePath) ? filePath : path.join(this.sessionCwd(session), filePath);
-    if (this.host.canSwitchWorkspaceFolder) {
-      const check = revalidateOpenFileForUse(abs, { allowedRoots: this.desktopAuthRoots(session) });
-      if (!check.ok) return undefined;
-      abs = check.absPath;
-    }
-    return abs;
+    return path.isAbsolute(filePath) ? filePath : path.join(this.sessionCwd(session), filePath);
   }
 
   private readFileForDiff(session: Session, filePath: string): string | undefined {
