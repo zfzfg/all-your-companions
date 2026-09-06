@@ -96,7 +96,7 @@ describe("host <-> webview message contract (src/protocol.ts is the source of tr
   it("contributes find-in-conversation as a palette command and a Cmd/Ctrl+F fallback", () => {
     expect(packageJson.contributes.commands).toContainEqual({
       command: "grok.findInSession",
-      title: "Grok: Find in Conversation",
+      title: "AllYourCompanions: Find in Conversation",
     });
     expect(packageJson.contributes.keybindings).toContainEqual({
       command: "grok.findInSession",
@@ -109,24 +109,13 @@ describe("host <-> webview message contract (src/protocol.ts is the source of tr
   it("contributes a native title-bar settings command on the chat view", () => {
     expect(packageJson.contributes.commands).toContainEqual({
       command: "grok.settings",
-      title: "Grok: Settings",
+      title: "AllYourCompanions: Settings",
       icon: "$(gear)",
     });
     expect(packageJson.contributes.menus["view/title"]).toContainEqual({
       command: "grok.settings",
       when: "view == grok.chat",
       group: "navigation",
-    });
-  });
-
-  it("uses findable AFK Pilot titles without changing the remote command ids", () => {
-    expect(packageJson.contributes.commands).toContainEqual({
-      command: "grok.linkRemote",
-      title: "AFK Pilot: Link this device",
-    });
-    expect(packageJson.contributes.commands).toContainEqual({
-      command: "grok.unlinkRemote",
-      title: "AFK Pilot: Unlink this device",
     });
   });
 

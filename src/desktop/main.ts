@@ -1,6 +1,10 @@
 /**
+ * [DEPRECATED / LEGACY STANDALONE]
  * Electron main process — constructs GrokSidebar with an Electron Host so the
  * same agent runs with no VS Code present.
+ *
+ * NOTE: For AllYourCompanions, development is 100% focused on the VS Code / Cursor
+ * extension. This standalone electron wrapper is maintained solely for legacy compatibility.
  *
  * Launch: `npm run desktop` → `electron out/desktop/main.js`
  *

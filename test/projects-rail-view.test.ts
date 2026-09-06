@@ -6,6 +6,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  COMPANIONS_PROJECTS_VIEW_ID,
   GROK_PROJECTS_VIEW_ID,
   PANEL_CONTAINER_ID,
   PRIMARY_CONTAINER_ID,
@@ -30,42 +31,39 @@ describe("projects rail view registration", () => {
       };
     };
 
-  it("registers grok.projects in its own activity bar container", () => {
+  it("registers companions.projects in its own activity bar container", () => {
     const containers = pkg().contributes.viewsContainers.activitybar;
     // Container ids without the workbench.view.extension. prefix.
-    expect(containers.some((c) => c.id === "grokPrimary")).toBe(true);
-    expect(containers.some((c) => c.id === "grokProjects")).toBe(true);
-    expect(PRIMARY_CONTAINER_ID).toBe("workbench.view.extension.grokPrimary");
-    expect(PROJECTS_CONTAINER_ID).toBe("workbench.view.extension.grokProjects");
+    expect(containers.some((c) => c.id === "companionsPrimary" || c.id === "grokPrimary")).toBe(true);
+    expect(containers.some((c) => c.id === "companionsProjects" || c.id === "grokProjects")).toBe(true);
+    expect(PRIMARY_CONTAINER_ID).toBe("workbench.view.extension.companionsPrimary");
+    expect(PROJECTS_CONTAINER_ID).toBe("workbench.view.extension.companionsProjects");
 
-    const rail = pkg().contributes.views.grokProjects;
+    const rail = pkg().contributes.views.companionsProjects ?? pkg().contributes.views.grokProjects;
     expect(rail).toBeDefined();
-    expect(rail.find((v) => v.id === "grok.projects")).toEqual({
+    expect(rail.find((v) => v.id === "companions.projects" || v.id === "grok.projects")).toEqual({
       type: "webview",
-      id: "grok.projects",
+      id: "companions.projects",
       name: "Projects",
     });
-    expect(GROK_PROJECTS_VIEW_ID).toBe("grok.projects");
+    expect(COMPANIONS_PROJECTS_VIEW_ID).toBe("companions.projects");
 
     // Chat stays in the secondary container — rail is alongside, not inside.
-    const chat = pkg().contributes.views.grokSidebar?.find((v) => v.id === "grok.chat");
+    const chat = (pkg().contributes.views.companionsSidebar ?? pkg().contributes.views.grokSidebar)?.find(
+      (v) => v.id === "companions.chat" || v.id === "grok.chat",
+    );
     expect(chat).toBeDefined();
-    expect(rail.some((v) => v.id === "grok.chat")).toBe(false);
+    expect(rail.some((v) => v.id === "companions.chat" || v.id === "grok.chat")).toBe(false);
   });
 
   it("keeps the rail out of every container chat can be moved into", () => {
-    // The regression this exists for: the rail shipped inside `grokPrimary`,
-    // which moveViewContainerFor("sidebar") also hands the CHAT view. One
-    // container for both roles welds them — moving chat drags the rail along,
-    // and dragging the rail drags chat. Whatever the move targets are, the
-    // rail's container must not be one of them.
     const moveTargets = [PRIMARY_CONTAINER_ID, PANEL_CONTAINER_ID, SECONDARY_CONTAINER_ID];
     expect(moveTargets).not.toContain(PROJECTS_CONTAINER_ID);
     for (const target of moveTargets) {
       const id = target.replace("workbench.view.extension.", "");
-      expect(pkg().contributes.views[id]?.some((v) => v.id === "grok.projects") ?? false).toBe(
-        false,
-      );
+      expect(
+        pkg().contributes.views[id]?.some((v) => v.id === "companions.projects" || v.id === "grok.projects") ?? false,
+      ).toBe(false);
     }
   });
 
@@ -74,7 +72,7 @@ describe("projects rail view registration", () => {
     // the folder glyph that was here briefly read as a file explorer. What still
     // matters is that the icon exists in the package.
     const containers = pkg().contributes.viewsContainers.activitybar;
-    const railIcon = containers.find((c) => c.id === "grokProjects")?.icon;
+    const railIcon = containers.find((c) => c.id === "companionsProjects" || c.id === "grokProjects")?.icon;
     expect(railIcon).toBeTruthy();
     expect(fs.existsSync(path.join(root, railIcon!))).toBe(true);
   });

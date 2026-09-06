@@ -18,41 +18,31 @@
 // — so nothing may be issued after it. A reveal tried there stole focus and
 // dismissed the picker.
 
-export const GROK_VIEW_ID = "grok.chat";
+export const COMPANIONS_VIEW_ID = "companions.chat";
+export const GROK_VIEW_ID = "companions.chat";
 
-/** Projects rail — its own activity-bar container (`grokProjects`). Separate from
+/** Projects rail — its own activity-bar container (`companionsProjects`). Separate from
  *  the chat view so opening it never creates a second chat client. */
-export const GROK_PROJECTS_VIEW_ID = "grok.projects";
+export const COMPANIONS_PROJECTS_VIEW_ID = "companions.projects";
+export const GROK_PROJECTS_VIEW_ID = "companions.projects";
 
 /** The chat view. Mirrors `GrokSidebar.viewId`; VS Code derives a
  *  `<id>.focus` command from every contributed view, which is how opening a
  *  conversation from the rail brings the chat forward. */
-export const GROK_CHAT_VIEW_ID = "grok.chat";
+export const GROK_CHAT_VIEW_ID = COMPANIONS_VIEW_ID;
 
 /** Contributed containers, one per dock location (package.json prefixes each id
- *  with `workbench.view.extension.`). `grokSidebar` homes the chat view;
- *  `grokPrimary` and `grokPanel` are empty by default and exist only as
- *  `vscode.moveViews` targets for chat; `grokProjects` homes the rail. */
-export const SECONDARY_CONTAINER_ID = "workbench.view.extension.grokSidebar";
-export const PRIMARY_CONTAINER_ID = "workbench.view.extension.grokPrimary";
-export const PANEL_CONTAINER_ID = "workbench.view.extension.grokPanel";
+ *  with `workbench.view.extension.`). `companionsSidebar` homes the chat view;
+ *  `companionsPrimary` and `companionsPanel` are empty by default and exist only as
+ *  `vscode.moveViews` targets for chat; `companionsProjects` homes the rail. */
+export const SECONDARY_CONTAINER_ID = "workbench.view.extension.companionsSidebar";
+export const PRIMARY_CONTAINER_ID = "workbench.view.extension.companionsPrimary";
+export const PANEL_CONTAINER_ID = "workbench.view.extension.companionsPanel";
 
 /**
- * The rail's own container — deliberately NOT `grokPrimary`.
- *
- * The rail first shipped inside `grokPrimary`, and that container is also the
- * destination the gear's "Sidebar" entry moves the CHAT view to
- * ({@link moveViewContainerFor}). One container serving both roles means the two
- * views are welded together: move chat to the sidebar and the rail comes with
- * it, and drag that container anywhere and the rail goes there too. The owner
- * hit exactly this — the rail arrived docked beside the chat and had to be
- * dragged out by hand.
- *
- * A container of its own also gets the rail a fresh default placement on
- * upgrade, which is what un-sticks anyone already living with the welded
- * layout: VS Code has no remembered location for an id it has not seen.
+ * The rail's own container — `companionsProjects`.
  */
-export const PROJECTS_CONTAINER_ID = "workbench.view.extension.grokProjects";
+export const PROJECTS_CONTAINER_ID = "workbench.view.extension.companionsProjects";
 
 /** Which edge the panel must be docked on for a destination to mean what its
  *  menu label says. */
@@ -100,7 +90,10 @@ export function panelPositionFor(location: unknown): PanelPosition | null {
  * the gear can offer destinations that exist. Capability, never `env.appName`.
  */
 export function hostAcceptedSecondarySideBar(availableCommands: readonly string[]): boolean {
-  return availableCommands.includes(SECONDARY_CONTAINER_ID);
+  return (
+    availableCommands.includes(SECONDARY_CONTAINER_ID) ||
+    availableCommands.includes("workbench.view.extension.grokSidebar")
+  );
 }
 
 /** Diagnostics only — which release performed the one correction. Writing it is
@@ -266,12 +259,21 @@ export function viewPlacementCorrection(opts: {
  * lands.
  */
 export function revealCommandFor(availableCommands: readonly string[]): string {
-  const viewFocus = `${GROK_VIEW_ID}.focus`;
-  if (availableCommands.includes(viewFocus)) return viewFocus;
-  for (const id of [SECONDARY_CONTAINER_ID, PRIMARY_CONTAINER_ID, PANEL_CONTAINER_ID]) {
+  for (const viewId of [COMPANIONS_VIEW_ID, "grok.chat"]) {
+    const viewFocus = `${viewId}.focus`;
+    if (availableCommands.includes(viewFocus)) return viewFocus;
+  }
+  for (const id of [
+    SECONDARY_CONTAINER_ID,
+    "workbench.view.extension.grokSidebar",
+    PRIMARY_CONTAINER_ID,
+    "workbench.view.extension.grokPrimary",
+    PANEL_CONTAINER_ID,
+    "workbench.view.extension.grokPanel",
+  ]) {
     if (availableCommands.includes(id)) return id;
   }
   // Nothing of ours registered. Returning the view focus is the likeliest to
   // exist of the options and keeps the failure to one command rather than none.
-  return viewFocus;
+  return `${COMPANIONS_VIEW_ID}.focus`;
 }

@@ -1,6 +1,7 @@
+# [DEPRECATED / LEGACY STANDALONE]
 # Grok Build Desktop — electron-builder config (signed + notarised on macOS).
 # Entry: out/desktop/main.js (see package.json scripts dist / dist:mac / dist:win).
-# Does not affect the VS Code VSIX path (npm run package).
+# AllYourCompanions prioritises the VS Code / Cursor extension (npm run package).
 
 appId: com.productcompass.grok-build-desktop
 productName: Grok Build Desktop

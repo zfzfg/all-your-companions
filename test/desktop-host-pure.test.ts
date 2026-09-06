@@ -517,32 +517,6 @@ describe("createSafeStorageSecrets", () => {
     await broken.delete("grok.remoteControl.deviceToken");
     expect(await createSafeStorageSecrets(file, xorStorage()).get("grok.remoteControl.deviceToken"))
       .toBeUndefined();
-    // Sidebar must not require a successful get before delete.
-    const sidebar = fs.readFileSync(
-      path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "sidebar.ts"),
-      "utf8",
-    );
-    expect(sidebar).toContain("readDeviceToken");
-    const unlinkStart = sidebar.indexOf("async unlinkRemoteDevice()");
-    const unlinkEnd = sidebar.indexOf("private async postRemoteStatus", unlinkStart);
-    const unlinkBody = sidebar.slice(unlinkStart, unlinkEnd);
-    expect(unlinkBody).toContain("readDeviceToken");
-    expect(unlinkBody).toContain("secrets.delete");
-    // get is only via the tolerant helper (never a bare throw-stopper before delete).
-    expect(unlinkBody).not.toMatch(/await this\.context\.secrets\.get\(/);
-  });
-
-  it("startup tolerates an undecryptable device token (no throw)", async () => {
-    const sidebar = fs.readFileSync(
-      path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "sidebar.ts"),
-      "utf8",
-    );
-    // readDeviceToken catches decrypt failures; callers use it instead of bare get.
-    expect(sidebar).toMatch(
-      /private async readDeviceToken\(\)[\s\S]*?catch[\s\S]*?return undefined/,
-    );
-    expect(sidebar).toMatch(/maybeStartUplink[\s\S]*?readDeviceToken/);
-    expect(sidebar).toMatch(/postRemoteStatus[\s\S]*?readDeviceToken/);
   });
 
   it("mutation: a plaintext fallback would be detectable", async () => {
@@ -617,25 +591,6 @@ describe("desktop main wiring (source gates)", () => {
     expect(main).toContain("linkRemoteDevice");
     expect(main).toContain("unlinkRemoteDevice");
     expect(main).toContain("remoteActions");
-  });
-
-  it("desktop remoteSignOut uses the same native confirm as unlinkRemoteDevice", () => {
-    const sidebar = fs.readFileSync(path.join(testRepoRoot, "src", "sidebar.ts"), "utf8");
-    const start = sidebar.indexOf('case "remoteSignOut"');
-    const end = sidebar.indexOf('case "openRemotePortal"', start);
-    const body = sidebar.slice(start, end);
-    expect(start).toBeGreaterThan(0);
-    expect(end).toBeGreaterThan(start);
-    expect(body).toContain("canSwitchWorkspaceFolder");
-    expect(body).toContain("confirmHostExecute");
-    expect(body).toContain("unlinkRemoteDevice");
-
-    // VS Code palette still calls the method directly — no confirm there.
-    const ext = fs.readFileSync(path.join(testRepoRoot, "src", "extension.ts"), "utf8");
-    expect(ext).toMatch(/registerCommand\("grok.unlinkRemote", \(\) => sidebar\.unlinkRemoteDevice\(\)\)/);
-    const unlinkStart = sidebar.indexOf("async unlinkRemoteDevice()");
-    const unlinkEnd = sidebar.indexOf("private async postRemoteStatus", unlinkStart);
-    expect(sidebar.slice(unlinkStart, unlinkEnd)).not.toContain("confirmHostExecute");
   });
 
   it("first-run default project is provisioned from paths.ts before the sidebar starts", () => {

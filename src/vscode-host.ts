@@ -82,6 +82,58 @@ function wrapConfiguration(cfg: vscode.WorkspaceConfiguration): HostConfiguratio
   };
 }
 
+function wrapDualConfiguration(
+  primaryCfg: vscode.WorkspaceConfiguration,
+  fallbackCfg: vscode.WorkspaceConfiguration,
+): HostConfiguration {
+  return {
+    get<T>(section: string, defaultValue?: T): T | undefined {
+      const primaryInspect = primaryCfg.inspect<T>(section);
+      const hasPrimary =
+        primaryInspect &&
+        (primaryInspect.globalValue !== undefined ||
+          primaryInspect.workspaceValue !== undefined ||
+          primaryInspect.workspaceFolderValue !== undefined);
+
+      if (hasPrimary) {
+        return primaryCfg.get<T>(section);
+      }
+
+      const fallbackInspect = fallbackCfg.inspect<T>(section);
+      const hasFallback =
+        fallbackInspect &&
+        (fallbackInspect.globalValue !== undefined ||
+          fallbackInspect.workspaceValue !== undefined ||
+          fallbackInspect.workspaceFolderValue !== undefined);
+
+      if (hasFallback) {
+        return fallbackCfg.get<T>(section);
+      }
+
+      if (arguments.length >= 2) {
+        return primaryCfg.get<T>(section, fallbackCfg.get<T>(section, defaultValue as T));
+      }
+      return primaryCfg.get<T>(section) ?? fallbackCfg.get<T>(section);
+    },
+    update(section, value, target) {
+      return primaryCfg.update(section, value, toVsCodeTarget(target));
+    },
+    inspect<T>(section: string): ConfigInspect<T> | undefined {
+      const rawPrimary = primaryCfg.inspect<T>(section);
+      const rawFallback = fallbackCfg.inspect<T>(section);
+      const raw = rawPrimary ?? rawFallback;
+      if (!raw) return undefined;
+      return {
+        key: raw.key,
+        defaultValue: rawPrimary?.defaultValue ?? rawFallback?.defaultValue,
+        globalValue: rawPrimary?.globalValue ?? rawFallback?.globalValue,
+        workspaceValue: rawPrimary?.workspaceValue ?? rawFallback?.workspaceValue,
+        workspaceFolderValue: rawPrimary?.workspaceFolderValue ?? rawFallback?.workspaceFolderValue,
+      };
+    },
+  };
+}
+
 /** Split a rest-arg list that may lead with `{ modal?: boolean }` (VS Code's
  *  MessageOptions overload) from the trailing string button labels. */
 function splitMessageArgs(
@@ -276,6 +328,11 @@ export function createVsCodeHost(
 
     getConfiguration(section?: string, resourcePath?: string) {
       const resource = resourcePath ? vscode.Uri.file(resourcePath) : undefined;
+      if (section === "companions" || section === "grok") {
+        const companionsCfg = vscode.workspace.getConfiguration("companions", resource);
+        const grokCfg = vscode.workspace.getConfiguration("grok", resource);
+        return wrapDualConfiguration(companionsCfg, grokCfg);
+      }
       return wrapConfiguration(
         section === undefined
           ? vscode.workspace.getConfiguration(undefined, resource)

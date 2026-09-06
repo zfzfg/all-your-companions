@@ -712,9 +712,11 @@ function guessMediaMime(p: string): string {
 }
 
 export class GrokSidebar {
-  public static readonly viewId = "grok.chat";
+  public static readonly viewId = "companions.chat";
+  public static readonly legacyViewId = "grok.chat";
   /** Primary side bar projects rail — separate webview, not a second chat client. */
-  public static readonly projectsViewId = "grok.projects";
+  public static readonly projectsViewId = "companions.projects";
+  public static readonly legacyProjectsViewId = "grok.projects";
   private view?: HostWebviewView;
   /** Second local consumer of catalog-shaped host messages. Absent until resolved. */
   private projectsRail?: HostWebviewView;
@@ -11141,8 +11143,6 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         // and got the panel there, then no confirmation at all. So start a fresh
         // session first and run the whole flow in it.
         // Not without a project: on desktop with nothing open, workspaceRoot()
-     
-... [truncated for diff preview]
         // is deliberately empty rather than the install directory, so there is
         // nowhere to start a session. Connecting still works — it only opens a
         // terminal — and the panel below still shows; the fresh session simply

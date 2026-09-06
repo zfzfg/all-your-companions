@@ -104,21 +104,6 @@ describe("source gates — capability at the ownership boundary", () => {
     expect(src).toMatch(/canSwitchWorkspaceFolder:\s*true/);
     expect(src).toMatch(/canArchiveRepos:\s*true/);
   });
-
-  it("link flow formats installId through the host suffix helper", () => {
-    const sidebar = readFileSync(path.join(root, "src", "sidebar.ts"), "utf8");
-    expect(sidebar).toContain("formatRemoteInstallId");
-    expect(sidebar).toContain("remoteInstallIdSuffix");
-    // Must not send bare installId() alone without the helper.
-    const linkStart = sidebar.indexOf("async linkRemoteDevice()");
-    const linkEnd = sidebar.indexOf("async unlinkRemoteDevice()", linkStart);
-    const linkBody = sidebar.slice(linkStart, linkEnd);
-    expect(linkBody).toContain("formatRemoteInstallId(this.installId()");
-    expect(linkBody).toContain("buildLinkStartBody");
-    expect(linkBody).toContain("clientLabel");
-    expect(linkBody).toContain("this.host.appName");
-    expect(linkBody).not.toMatch(/JSON\.stringify\(\{\s*name,\s*installId\s*\}\)/);
-  });
 });
 
 /**

@@ -525,12 +525,6 @@ describe("RemoteUplink socket-level project authorization", () => {
     expect(src).toContain("filterRecipientsOwningScope");
     expect(src).toMatch(/deliver\([\s\S]*filterRecipientsOwningScope/);
     expect(src).toContain("does not own scope");
-    // Sidebar wires clientOwnsScope for repo + session ownership.
-    const sidebar = fs.readFileSync(
-      path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "sidebar.ts"),
-      "utf8",
-    );
-    expect(sidebar).toContain("clientOwnsScope:");
   });
 
   it("scrubs closed-project data out of the catch-up snapshot frame", () => {

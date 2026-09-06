@@ -172,23 +172,28 @@ export function activate(context: vscode.ExtensionContext): GrokExtensionApi {
     : undefined;
   testHooks?.isolateFromInstalledGrok();
 
+  const chatProvider = {
+    resolveWebviewView(view: vscode.WebviewView) {
+      sidebar.resolveWebviewView(wrapWebviewView(view));
+    },
+  };
+
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(
       GrokSidebar.viewId,
-      {
-        resolveWebviewView(view) {
-          sidebar.resolveWebviewView(wrapWebviewView(view));
-        },
-      },
+      chatProvider,
       {
         webviewOptions: { retainContextWhenHidden: true },
       },
     ),
-    // Projects rail: its own activity-bar container (`grokProjects`), never the
-    // chat's move target — see PROJECTS_CONTAINER_ID for why sharing one welded
-    // the two views together. No Cursor special-casing: registering a view in
-    // the primary bar works the same in both editors (Cursor only reserves the
-    // *secondary* bar for its agent UI).
+    vscode.window.registerWebviewViewProvider(
+      GrokSidebar.legacyViewId,
+      chatProvider,
+      {
+        webviewOptions: { retainContextWhenHidden: true },
+      },
+    ),
+    // Projects rail
     vscode.window.registerWebviewViewProvider(
       GROK_PROJECTS_VIEW_ID,
       {
@@ -201,74 +206,74 @@ export function activate(context: vscode.ExtensionContext): GrokExtensionApi {
         webviewOptions: { retainContextWhenHidden: true },
       },
     ),
+    vscode.window.registerWebviewViewProvider(
+      GrokSidebar.legacyProjectsViewId,
+      {
+        resolveWebviewView(view) {
+          sidebar.resolveProjectsRailView(wrapWebviewView(view));
+          view.onDidDispose(() => sidebar.disposeProjectsRailView());
+        },
+      },
+      {
+        webviewOptions: { retainContextWhenHidden: true },
+      },
+    ),
     output,
     { dispose: () => sidebar.dispose() },
-    vscode.commands.registerCommand("grok.open", async () => {
-      // Resolved per invocation rather than baked in: the view can be moved
-      // between docks from the gear menu, and in a host that refuses the
-      // secondary side bar the container this used to hardcode never exists at
-      // all — which is how `grok.open` came to fail with "command not found".
-      const cmds = await vscode.commands.getCommands(true);
-      await vscode.commands.executeCommand(revealCommandFor(cmds));
-    }),
-    // Reachable from the palette when the view itself is not — which is the
-    // state this whole mechanism exists for. Records nothing: the automatic
-    // correction fires only on a first-ever run, so there is no later one for a
-    // choice to need protecting from, and nothing to get wrong if the user opens
-    // this picker and cancels.
-    vscode.commands.registerCommand("grok.moveView", async () => {
-      output.appendLine("[placement] palette -> host picker");
-      // The host's own picker, preselected on our view. It targets a LOCATION
-      // and builds its own container, so it reaches docks no container id of
-      // ours can address — in Cursor, the secondary side bar it refuses to give
-      // us directly. The view-id argument is what makes it work there at all:
-      // without it the command reads the `focusedView` context key, which Cursor
-      // never sets for webview views.
-      // Same recording the gear does, through the same method, and before the
-      // picker for the same reason — see GrokSidebar.retireMoveViewHint.
-      await sidebar.retireMoveViewHint();
-      await vscode.commands.executeCommand("workbench.action.moveFocusedView", GROK_VIEW_ID);
-    }),
-    vscode.commands.registerCommand("grok.newSession", () => sidebar.newSession()),
-    vscode.commands.registerCommand("grok.newWorktreeSession", () => sidebar.newWorktreeSession()),
-    vscode.commands.registerCommand("grok.applyWorktree", () => sidebar.applyFocusedWorktree()),
-    vscode.commands.registerCommand("grok.removeWorktree", () => sidebar.removeFocusedWorktree()),
-    vscode.commands.registerCommand("grok.rewind", () => sidebar.rewindFocusedSession()),
-    vscode.commands.registerCommand("grok.compact", () => {
-      // emulated by sending the slash command as a prompt; CLI handles it
-      vscode.window.showInformationMessage(
-        "Type /compact in the composer to compress the conversation.",
-      );
-    }),
-    vscode.commands.registerCommand("grok.pickModel", () => sidebar.pickModel()),
-    vscode.commands.registerCommand("grok.toggleMode", () => sidebar.openModePopover()),
-    vscode.commands.registerCommand("grok.sendSelection", () =>
-      sidebar.insertActiveMention({ selection: true }),
-    ),
-    vscode.commands.registerCommand(
-      "grok.sendFile",
-      // Pass the explorer Uri intact — flattening to fsPath drops remote authority.
-      (uri?: vscode.Uri) =>
-        sidebar.insertActiveMention({
-          uri: uri ? fromVsCodeUri(uri) : undefined,
-          pickIfMissing: true,
-        }),
-    ),
-    vscode.commands.registerCommand("grok.insertAtMention", () =>
-      sidebar.insertActiveMention(),
-    ),
-    vscode.commands.registerCommand("grok.showLogs", () => output.show()),
-    vscode.commands.registerCommand("grok.settings", () => sidebar.openSettingsEditor()),
-    vscode.commands.registerCommand("grok.expandAllToolDetails", () => sidebar.setAllToolDetails(true)),
-    vscode.commands.registerCommand("grok.collapseAllToolDetails", () => sidebar.setAllToolDetails(false)),
-    vscode.commands.registerCommand("grok.findInSession", () => sidebar.findInSession()),
-    vscode.commands.registerCommand("grok.logout", () => sidebar.logout()),
-    vscode.commands.registerCommand("grok.composerForward", () => sidebar.moveComposerCaret("forward")),
-    vscode.commands.registerCommand("grok.composerPreviousLine", () => sidebar.moveComposerCaret("previousLine")),
-    // Internal debug helper for manually exercising the plan-review card UI
-    // (Approve / Reject / Cancel flows) without a live CLI session.
-    vscode.commands.registerCommand("grok._debugDummyPlan", () => sidebar.debugShowDummyPlan()),
   );
+
+  const registerPair = (companionsCmd: string, grokCmd: string, handler: (...args: any[]) => any) => {
+    context.subscriptions.push(
+      vscode.commands.registerCommand(companionsCmd, handler),
+      vscode.commands.registerCommand(grokCmd, handler),
+    );
+  };
+
+  registerPair("companions.open", "grok.open", async () => {
+    const cmds = await vscode.commands.getCommands(true);
+    await vscode.commands.executeCommand(revealCommandFor(cmds));
+  });
+  registerPair("companions.moveView", "grok.moveView", async () => {
+    output.appendLine("[placement] palette -> host picker");
+    await sidebar.retireMoveViewHint();
+    await vscode.commands.executeCommand("workbench.action.moveFocusedView", GROK_VIEW_ID);
+  });
+  registerPair("companions.newSession", "grok.newSession", () => sidebar.newSession());
+  registerPair("companions.newWorktreeSession", "grok.newWorktreeSession", () => sidebar.newWorktreeSession());
+  registerPair("companions.applyWorktree", "grok.applyWorktree", () => sidebar.applyFocusedWorktree());
+  registerPair("companions.removeWorktree", "grok.removeWorktree", () => sidebar.removeFocusedWorktree());
+  registerPair("companions.rewind", "grok.rewind", () => sidebar.rewindFocusedSession());
+  registerPair("companions.compact", "grok.compact", () => {
+    vscode.window.showInformationMessage(
+      "Type /compact in the composer to compress the conversation.",
+    );
+  });
+  registerPair("companions.pickModel", "grok.pickModel", () => sidebar.pickModel());
+  registerPair("companions.toggleMode", "grok.toggleMode", () => sidebar.openModePopover());
+  registerPair("companions.sendSelection", "grok.sendSelection", () =>
+    sidebar.insertActiveMention({ selection: true }),
+  );
+  registerPair(
+    "companions.sendFile",
+    "grok.sendFile",
+    (uri?: vscode.Uri) =>
+      sidebar.insertActiveMention({
+        uri: uri ? fromVsCodeUri(uri) : undefined,
+        pickIfMissing: true,
+      }),
+  );
+  registerPair("companions.insertAtMention", "grok.insertAtMention", () =>
+    sidebar.insertActiveMention(),
+  );
+  registerPair("companions.showLogs", "grok.showLogs", () => output.show());
+  registerPair("companions.settings", "grok.settings", () => sidebar.openSettingsEditor());
+  registerPair("companions.expandAllToolDetails", "grok.expandAllToolDetails", () => sidebar.setAllToolDetails(true));
+  registerPair("companions.collapseAllToolDetails", "grok.collapseAllToolDetails", () => sidebar.setAllToolDetails(false));
+  registerPair("companions.findInSession", "grok.findInSession", () => sidebar.findInSession());
+  registerPair("companions.logout", "grok.logout", () => sidebar.logout());
+  registerPair("companions.composerForward", "grok.composerForward", () => sidebar.moveComposerCaret("forward"));
+  registerPair("companions.composerPreviousLine", "grok.composerPreviousLine", () => sidebar.moveComposerCaret("previousLine"));
+  registerPair("companions._debugDummyPlan", "grok._debugDummyPlan", () => sidebar.debugShowDummyPlan());
 
   // Not awaited: activation must not block on a workbench command, and nothing
   // below depends on where the view ended up.

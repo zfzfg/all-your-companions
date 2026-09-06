@@ -53,48 +53,137 @@
     "viewsContainers": {
       "secondarySidebar": [
         {
-          "id": "grokSidebar",
+          "id": "companionsSidebar",
           "title": "AllYourCompanions",
           "icon": "resources/grok-icon.svg"
         }
       ],
       "activitybar": [
         {
-          "id": "grokPrimary",
+          "id": "companionsPrimary",
           "title": "AllYourCompanions",
           "icon": "resources/grok-icon.svg"
         },
         {
-          "id": "grokProjects",
+          "id": "companionsProjects",
           "title": "Projects",
           "icon": "resources/grok-icon.svg"
         }
       ],
       "panel": [
         {
-          "id": "grokPanel",
+          "id": "companionsPanel",
           "title": "AllYourCompanions",
           "icon": "resources/grok-icon.svg"
         }
       ]
     },
     "views": {
-      "grokSidebar": [
+      "companionsSidebar": [
         {
           "type": "webview",
-          "id": "grok.chat",
+          "id": "companions.chat",
           "name": "Companions"
         }
       ],
-      "grokProjects": [
+      "companionsProjects": [
         {
           "type": "webview",
-          "id": "grok.projects",
+          "id": "companions.projects",
           "name": "Projects"
         }
       ]
     },
     "commands": [
+      {
+        "command": "companions.open",
+        "title": "AllYourCompanions: Open"
+      },
+      {
+        "command": "companions.moveView",
+        "title": "AllYourCompanions: Move Chat View"
+      },
+      {
+        "command": "companions.newSession",
+        "title": "AllYourCompanions: New Session"
+      },
+      {
+        "command": "companions.newWorktreeSession",
+        "title": "AllYourCompanions: New Worktree Session"
+      },
+      {
+        "command": "companions.applyWorktree",
+        "title": "AllYourCompanions: Apply Worktree"
+      },
+      {
+        "command": "companions.removeWorktree",
+        "title": "AllYourCompanions: Remove Worktree"
+      },
+      {
+        "command": "companions.rewind",
+        "title": "AllYourCompanions: Rewind Conversation"
+      },
+      {
+        "command": "companions.compact",
+        "title": "AllYourCompanions: Compact Conversation"
+      },
+      {
+        "command": "companions.pickModel",
+        "title": "AllYourCompanions: Pick Model"
+      },
+      {
+        "command": "companions.toggleMode",
+        "title": "AllYourCompanions: Toggle Plan / Agent Mode"
+      },
+      {
+        "command": "companions.sendSelection",
+        "title": "Add Selection to AllYourCompanions"
+      },
+      {
+        "command": "companions.sendFile",
+        "title": "AllYourCompanions: Send File"
+      },
+      {
+        "command": "companions.insertAtMention",
+        "title": "AllYourCompanions: Insert @-Mention"
+      },
+      {
+        "command": "companions.showLogs",
+        "title": "AllYourCompanions: Show Logs"
+      },
+      {
+        "command": "companions.settings",
+        "title": "AllYourCompanions: Settings",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "companions.expandAllToolDetails",
+        "title": "AllYourCompanions: Expand All Tool Details (This Session)"
+      },
+      {
+        "command": "companions.collapseAllToolDetails",
+        "title": "AllYourCompanions: Collapse All Tool Details (This Session)"
+      },
+      {
+        "command": "companions.findInSession",
+        "title": "AllYourCompanions: Find in Conversation"
+      },
+      {
+        "command": "companions.logout",
+        "title": "AllYourCompanions: Log Out"
+      },
+      {
+        "command": "companions._debugDummyPlan",
+        "title": "AllYourCompanions: Debug — Show dummy plan card (for testing Approve/Reject/Cancel)"
+      },
+      {
+        "command": "companions.composerForward",
+        "title": "AllYourCompanions: Composer — Move Forward"
+      },
+      {
+        "command": "companions.composerPreviousLine",
+        "title": "AllYourCompanions: Composer — Move to Previous Line"
+      },
       {
         "command": "grok.open",
         "title": "AllYourCompanions: Open"
@@ -187,9 +276,19 @@
     ],
     "keybindings": [
       {
+        "command": "companions.open",
+        "key": "ctrl+;",
+        "mac": "cmd+;"
+      },
+      {
         "command": "grok.open",
         "key": "ctrl+;",
         "mac": "cmd+;"
+      },
+      {
+        "command": "companions.insertAtMention",
+        "key": "alt+g",
+        "when": "editorTextFocus"
       },
       {
         "command": "grok.insertAtMention",
@@ -197,14 +296,30 @@
         "when": "editorTextFocus"
       },
       {
+        "command": "companions.composerForward",
+        "key": "ctrl+f",
+        "when": "isMac && (companions.composerFocus || grok.composerFocus)"
+      },
+      {
         "command": "grok.composerForward",
         "key": "ctrl+f",
         "when": "isMac && grok.composerFocus"
       },
       {
+        "command": "companions.composerPreviousLine",
+        "key": "ctrl+p",
+        "when": "isMac && (companions.composerFocus || grok.composerFocus)"
+      },
+      {
         "command": "grok.composerPreviousLine",
         "key": "ctrl+p",
         "when": "isMac && grok.composerFocus"
+      },
+      {
+        "command": "companions.findInSession",
+        "key": "ctrl+f",
+        "mac": "cmd+f",
+        "when": "focusedView == companions.chat || focusedView == grok.chat"
       },
       {
         "command": "grok.findInSession",
@@ -216,6 +331,11 @@
     "menus": {
       "view/title": [
         {
+          "command": "companions.settings",
+          "when": "view == companions.chat || view == grok.chat",
+          "group": "navigation"
+        },
+        {
           "command": "grok.settings",
           "when": "view == grok.chat",
           "group": "navigation"
@@ -223,11 +343,23 @@
       ],
       "commandPalette": [
         {
+          "command": "companions._debugDummyPlan",
+          "when": "false"
+        },
+        {
           "command": "grok._debugDummyPlan",
           "when": "false"
         },
         {
+          "command": "companions.composerForward",
+          "when": "false"
+        },
+        {
           "command": "grok.composerForward",
+          "when": "false"
+        },
+        {
+          "command": "companions.composerPreviousLine",
           "when": "false"
         },
         {
@@ -237,6 +369,11 @@
       ],
       "editor/context": [
         {
+          "command": "companions.sendSelection",
+          "when": "editorHasSelection",
+          "group": "companions@1"
+        },
+        {
           "command": "grok.sendSelection",
           "when": "editorHasSelection",
           "group": "grok@1"
@@ -244,12 +381,22 @@
       ],
       "explorer/context": [
         {
+          "command": "companions.sendFile",
+          "when": "resourceScheme == file",
+          "group": "companions@1"
+        },
+        {
           "command": "grok.sendFile",
           "when": "resourceScheme == file",
           "group": "grok@1"
         }
       ],
       "editor/title/context": [
+        {
+          "command": "companions.sendFile",
+          "when": "resourceScheme == file",
+          "group": "companions@1"
+        },
         {
           "command": "grok.sendFile",
           "when": "resourceScheme == file",
@@ -260,6 +407,123 @@
     "configuration": {
       "title": "AllYourCompanions",
       "properties": {
+        "companions.cliPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the companion CLI binary. Empty = auto-discover."
+        },
+        "companions.antigravityCliPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the Google Antigravity CLI (`agy` / `antigravity`). Empty = auto-discover on PATH."
+        },
+        "companions.geminiCliPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the Google Gemini CLI (`agy` / `gemini`). Empty = auto-discover on PATH."
+        },
+        "companions.grokCliPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the xAI Grok CLI (`grok`). Empty = auto-discover on PATH."
+        },
+        "companions.codexCliPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the OpenAI Codex binary. Empty = auto-discover on PATH."
+        },
+        "companions.claudeCliPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the Anthropic Claude Code CLI (`claude`). Empty = auto-discover on PATH."
+        },
+        "companions.defaultModel": {
+          "type": "string",
+          "default": "",
+          "description": "Model ID to use on new sessions. Empty = companion default."
+        },
+        "companions.defaultMode": {
+          "type": "string",
+          "enum": [
+            "",
+            "agent",
+            "yolo"
+          ],
+          "enumDescriptions": [
+            "Agent mode (default)",
+            "Agent mode",
+            "Auto accept — auto-approve every permission request"
+          ],
+          "default": "",
+          "description": "Mode for new sessions. Empty = Agent."
+        },
+        "companions.defaultEffort": {
+          "type": "string",
+          "enum": [
+            "",
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "default": "",
+          "description": "Reasoning effort passed to companion stdio."
+        },
+        "companions.includeActiveFileByDefault": {
+          "type": "boolean",
+          "default": true,
+          "description": "Auto-add the active editor file as a context chip."
+        },
+        "companions.mentionIndexLimit": {
+          "type": "number",
+          "default": 5000,
+          "minimum": 100,
+          "description": "Max workspace files indexed for composer @ file autocomplete."
+        },
+        "companions.showThinking": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show companion internal reasoning / thinking traces in chat."
+        },
+        "companions.expandCommandOutputs": {
+          "type": "boolean",
+          "default": false,
+          "description": "Expand tool details and command IN/OUT blocks by default."
+        },
+        "companions.steerByDefault": {
+          "type": "boolean",
+          "default": false,
+          "description": "Inject typed messages straight into running turns instead of queueing."
+        },
+        "companions.soundNotifications": {
+          "type": "boolean",
+          "default": false,
+          "description": "Play an audible chime when a background companion finishes a turn."
+        },
+        "companions.chatFontScale": {
+          "type": "number",
+          "default": 100,
+          "minimum": 50,
+          "maximum": 300,
+          "description": "Zoom for the chat panel as a percent."
+        },
+        "companions.voiceStreaming": {
+          "type": "boolean",
+          "default": true,
+          "description": "Stream voice transcription live as you speak."
+        },
+        "companions.voiceSendPhrase": {
+          "type": "string",
+          "default": "companion send",
+          "description": "Spoken phrase that auto-submits when it ends a transcription."
+        },
+        "companions.telemetry.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable anonymous, privacy-first usage telemetry."
+        },
         "grok.cliPath": {
           "type": "string",
           "default": "",
@@ -413,11 +677,6 @@
           "default": true,
           "markdownDescription": "Read simplified summaries of spoken Grok replies. Each reply costs an extra xAI call and adds network delay; the full reply is used if summarization fails. Uses the same credential resolution as Voice input. AFK Pilot keeps its own per-device browser preference."
         },
-        "grok.remote.keepAwake": {
-          "type": "boolean",
-          "default": true,
-          "markdownDescription": "Keep this machine awake while it's linked to an **AFK Pilot** account, so a remote turn isn't cut off by idle sleep. Only active once you've signed in (gear → AFK Pilot → *Sign in*); unlinking releases the lock immediately. The display is still free to sleep — only system/idle sleep is blocked. Uses `caffeinate` on macOS, `SetThreadExecutionState` on Windows and `systemd-inhibit` on Linux. **A closed laptop lid still sleeps** on every platform — that's an OS-level decision no application can override."
-        },
         "grok.thumbsFeedback": {
           "type": "boolean",
           "default": false,
@@ -501,7 +760,7 @@
     "telemetry:probe": "tsc -p . && node scripts/telemetry-probe.cjs",
     "check:relay": "node scripts/check-production-relay.mjs",
     "check:vsix": "npm run compile && node scripts/check-vsix-requires.mjs",
-    "prepackage": "node -e \"const fs=require('fs'); for (const f of fs.readdirSync('.')) if (f.endsWith('.vsix')) fs.unlinkSync(f); fs.rmSync('out',{recursive:true,force:true})\" && npm run check:relay && npm run check:vsix",
+    "prepackage": "npm run check:relay && node -e \"const fs=require('fs'); for (const f of fs.readdirSync('.')) if (f.endsWith('.vsix')) fs.unlinkSync(f); fs.rmSync('out',{recursive:true,force:true})\" && npm run check:vsix",
     "package": "vsce package --readme-path README.marketplace.md",
     "publish": "vsce publish --readme-path README.marketplace.md",
     "publish:ovsx": "node scripts/publish-ovsx.mjs",

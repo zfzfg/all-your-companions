@@ -17,25 +17,24 @@ const path = require("node:path");
 
 const root = path.resolve(__dirname, "..");
 
-const header = `# Grok Build for VS Code (Community)
+const header = `# AllYourCompanions (formerly Grok Build for VS Code (Community))
 
-[![License: FSL-1.1-MIT](https://img.shields.io/badge/License-FSL--1.1--MIT-blue.svg)](https://github.com/phuryn/grok-build-vscode/blob/main/LICENSE) ![Agents](https://img.shields.io/badge/Agents-Grok%20Build%20%C2%B7%20Codex%20%C2%B7%20Claude%20Code-000000) [![VS Code](https://img.shields.io/badge/VS%20Code-Extension-007ACC?logo=visualstudiocode&logoColor=white)](https://code.visualstudio.com) [![Cursor](https://badgen.net/badge/Cursor/Extension/007ACC)](https://cursor.com) [![The Product Compass](https://img.shields.io/badge/The%20Product%20Compass-productcompass.pm-FF6B35)](https://www.productcompass.pm)
+### *All your Companions — in one place!*
 
-> **GUI for Grok Build CLI (incl. Grok 4.6)** — not affiliated with or endorsed by SpaceXAI (formerly xAI). *Grok*, *Grok Build*, and *xAI* are trademarks of xAI; this project uses those names only to describe what it's compatible with.
+[![License: FSL-1.1-MIT](https://img.shields.io/badge/License-FSL--1.1--MIT-blue.svg)](https://github.com/phuryn/grok-build-vscode/blob/main/LICENSE) ![Agents](https://img.shields.io/badge/Agents-Antigravity%20%C2%B7%20Grok%20%C2%B7%20Codex%20%C2%B7%20Claude-000000) [![VS Code](https://img.shields.io/badge/VS%20Code-Extension-007ACC?logo=visualstudiocode&logoColor=white)](https://code.visualstudio.com) [![Cursor](https://badgen.net/badge/Cursor/Extension/007ACC)](https://cursor.com)
 
-The GUI for **Grok Build CLI** (incl. **Grok 4.6**), right in your editor — with **Remote Control**: pair **[AFK Pilot](https://afkpilot.com)** once and watch, approve, and steer your agent from your phone or any browser while away from your desk. Drop open files in as \`@\`-context, run **multiple sessions** at once, keep **resumable chat history**, generate **images & video inline**, and dictate by **voice**. If you'd rather stay in VS Code than a terminal, this brings Grok Build's agent into your sidebar.
+> **Unified GUI for AI Coding Companions** — Google Antigravity, Grok Build, OpenAI Codex, and Anthropic Claude Code.
+>
+> **Maintainer:** Collin Lerche (zfzfg) | STERRA ([https://sterra.online](https://sterra.online))  
+> **Community Fork:** Derived from *Grok Build for VS Code* (upstream v4.1.8 by Paweł Huryn).
 
-No manual setup: the extension **walks you through installing the \`grok\` CLI and signing in** — with a **SuperGrok or X Premium+ subscription**, or an **xAI API key** — right from the sidebar, one click per step.
-
-![Grok Build in the VS Code sidebar, running Grok](https://raw.githubusercontent.com/phuryn/grok-build-vscode/main/docs/screenshots/grok_4.5.png)
-
-![Generated image rendered inline from /imagine](https://raw.githubusercontent.com/phuryn/grok-build-vscode/main/docs/screenshots/imagine.webp)
+The unified, local-first GUI for your favorite AI coding companions: **Google Antigravity CLI** (Gemini 2.5/3), **Grok Build** (Grok 4.6), **OpenAI Codex**, and **Claude Code** — right inside your editor. Drop open files in as \`@\`-context, run **parallel sessions**, inspect **native diff previews** with **one-click revert**, keep **resumable chat history**, typeset **LaTeX & Mermaid diagrams**, and dictate by **voice**.
 
 ---
 
 ## Why use this?
 
-If you live in your editor, this puts Grok Build right next to your code — a graphical workflow on top of the CLI: the **native diff editor** on every proposed edit, your **open files and selection as context**, **parallel sessions** with status dots, **resumable history**, **inline images & video**, and **voice dictation**. The CLI does the heavy lifting; this is the GUI for when you'd rather not be in a terminal.
+If you live in your editor, this puts your AI companions right next to your code in a unified graphical workflow: **native diff preview** on every proposed edit with **one-click revert**, **open files and selection as context**, **parallel sessions** with status dots, **resumable history**, **inline images & video**, and **voice dictation**.
 
 `;
 
@@ -45,11 +44,11 @@ If you live in your editor, this puts Grok Build right next to your code — a g
 // Open VSX the way README.md does: this page IS the store page.
 const installBlock = `## Install
 
-**1. Install the extension.** In VS Code or Cursor, open **Extensions** (\`Ctrl/Cmd+Shift+X\`) and search **"Grok Build for VS Code (Community)"**.
+**1. Install the extension.** In VS Code or Cursor, open **Extensions** (\`Ctrl/Cmd+Shift+X\`) and search **"AllYourCompanions"**.
 
-**2. Open Grok and sign in.** Press \`Ctrl/Cmd+;\`. The sidebar **walks you through installing the \`grok\` CLI and signing in** — one click per step, with your SuperGrok / X Premium+ subscription or an xAI API key. That's the whole setup.
+**2. Open Companions and sign in.** Press \`Ctrl/Cmd+;\`. The sidebar walks you through choosing your companion and getting started in one click.
 
-Grok opens in the **Secondary Side Bar** (right side, next to other AI tools). Prefer it elsewhere? Gear → **Config & debug** → **Move view** relocates it to the Panel or Primary Side Bar in one click.
+Companions opens in the **Secondary Side Bar** (right side, next to other AI tools). Prefer it elsewhere? Gear → **Config & debug** → **Move view** relocates it to the Panel or Primary Side Bar in one click.
 
 > Prefer the terminal, building from source, or installing into several IDEs at once? See the project [INSTALL docs](https://github.com/phuryn/grok-build-vscode/blob/main/docs/INSTALL.md).
 
@@ -57,34 +56,27 @@ Grok opens in the **Secondary Side Bar** (right side, next to other AI tools). P
 
 ## Quick start
 
-1. **Open** the Grok view (\`Ctrl/Cmd+;\`, or **Grok: Open** from the command palette) — it lives in the Secondary Side Bar by default.
-2. **Type a prompt** and press **Enter**. Grok streams its answer, showing a *Thinking…* line while it reasons. Want the full reasoning inline? Turn on **Show thinking traces** in the gear menu → *Config & debug*.
-3. **Approve actions.** When Grok wants to write a file or run a command it may raise a permission card — preview an edit in the native **diff editor**, with full-file context focused on the first changed line, then *Allow once / always / Reject*.
-4. **Pick your mode** (Agent / Plan / Auto accept), **model**, and **reasoning effort** from the bottom toolbar and gear menu.
-5. **Resume anytime** — the clock icon lists past sessions for this project.
+1. **Open** Companions: \`Ctrl/Cmd+;\` (or Command Palette: **Companions: Open**).
+2. **Type a prompt** and press **Enter**. Your companion streams its response and displays live reasoning traces.
+3. **Approve actions.** Preview file edits with the native VS Code diff editor, then *Allow once*, *Always allow*, or *Reject*.
+4. **Pick your mode** (Agent / Plan / Auto accept) and **model** from the bottom toolbar.
+5. **Resume anytime** — the clock icon lists past sessions.
 
 ---
 
 `;
 
-// The companions the listing may mention. The marketplace Install section is
-// extension-only, so this is the one place a reader learns AFK Pilot and the
-// desktop app exist. Generator-owned rather than carried from README.md,
-// because README.md covers the same ground inside `## Install` — the section
-// this file replaces wholesale.
+// The companions the listing may mention.
 const companionBlock = `## Companion apps
 
-This extension is complete on its own. Two optional companions share the same
-chat UI and the same Grok Build CLI:
+AllYourCompanions is completely standalone and local-first — no external relay servers or third-party cloud brokers required. It natively coordinates:
 
-- **[AFK Pilot](https://afkpilot.com)** — watch, approve, and steer this
-  extension's agent from your phone or any browser. Pair once from the gear
-  menu.
-- **[Grok Build Desktop (Community)](https://afkpilot.com/desktop)** — the same
-  agent as a standalone app for Windows and macOS, for machines where you would
-  rather not install an editor. Free.
+- **Google Antigravity CLI (\`agy\`)** — Gemini 2.5 Pro/Flash and Gemini 3 with massive context and streaming reasoning traces.
+- **xAI Grok Build (\`grok\`)** — Grok 4.6, SuperGrok, and xAI API integration.
+- **OpenAI Codex CLI (\`codex\`)** — High-speed ACP JSON-RPC bridge.
+- **Anthropic Claude Code CLI (\`claude\`)** — Full ACP terminal and session integration.
 
-Neither is required, and nothing here depends on them.
+*(AFK Pilot remote control functions are legacy/deprecated in AllYourCompanions in favor of local-first execution).*
 
 ---
 

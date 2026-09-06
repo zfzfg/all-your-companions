@@ -920,17 +920,17 @@
     agent: {
       icon: ICON.bot,
       label: "Agent mode",
-      desc: "Grok acts directly, asking approval only for changes it judges sensitive",
+      desc: "Companion acts directly, asking approval only for changes it judges sensitive",
     },
     plan: {
       icon: ICON.listTree,
       label: "Plan mode",
-      desc: "Grok explores and proposes a plan; file writes and commands are blocked until you approve it",
+      desc: "Companion explores and proposes a plan; file writes and commands are blocked until you approve it",
     },
     yolo: {
       icon: ICON.zap,
       label: "Auto accept",
-      desc: "Grok automatically approves all permission requests (YOLO)",
+      desc: "Companion automatically approves all permission requests (YOLO)",
     },
   };
 

@@ -312,11 +312,11 @@ export function osNameFromPlatform(platform: string): string {
  *  into the official project — see OFFICIAL_EXTENSION_ID). Default-on for the first
  *  two, but the global setting always wins. */
 export function shouldSendTelemetry(
-  _globalEnabled: boolean,
-  _settingEnabled: boolean,
-  _isOfficialBuild: boolean,
+  globalEnabled: boolean,
+  settingEnabled: boolean,
+  isOfficialBuild: boolean,
 ): boolean {
-  return false;
+  return Boolean(globalEnabled && settingEnabled && isOfficialBuild);
 }
 
 /** Classify the surface that sent a session's first message. Local VS Code is

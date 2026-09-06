@@ -1,8 +1,8 @@
-# CLAUDE.md — grok-build-vscode
+# CLAUDE.md — AllYourCompanions
 
-VS Code sidebar and desktop client for Grok Build and OpenAI Codex, driven through the [Agent Client Protocol (ACP)](https://agentclientprotocol.com). The host owns presentation and provider metadata; each CLI owns its conversation state, tools, memory, and provider-specific plan enforcement.
+### *All your Companions — in one place!*
 
-The Remote Control server half — the AFK Pilot relay + browser client — is open source at [phuryn/afkpilot](https://github.com/phuryn/afkpilot), which also hosts the system-wide engineering docs (two-repo map, wire contract, auth, test matrix, CI/CD). The wire contract is mirrored: `src/remote-frames.ts` here ↔ `src/frames.ts` there; bump `REMOTE_PROTO_VERSION` in both on any incompatible change, and prefer additive, capability-detected changes. Issues for BOTH repos are tracked here (afkpilot's tracker is deliberately disabled).
+Unified VS Code and Cursor sidebar client for **Google Antigravity CLI (Gemini)**, **xAI Grok Build**, **OpenAI Codex**, and **Anthropic Claude Code**, driven through native ACP adapters. Decoupled from external remote control relay architecture to focus 100% on editor-native capabilities: local-first execution, privacy, universal diff inspection and one-click revert across all AI providers, git worktree isolation, and voice control.
 
 ## Status
 

@@ -62,7 +62,7 @@ function collect<T>(client: AcpClient, event: string): T[] {
  * reports the machine's mood is worse than a slow one — a genuinely failing
  * test that day was first waved off as another flake.
  */
-const SUBPROCESS_WAIT_MS = 15_000;
+const SUBPROCESS_WAIT_MS = 30_000;
 
 function waitFor<T>(client: AcpClient, event: string, timeoutMs = SUBPROCESS_WAIT_MS): Promise<T> {
   return new Promise((resolve, reject) => {

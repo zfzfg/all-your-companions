@@ -182,7 +182,7 @@ describe("buildSessionStartEvent", () => {
   it("reports system props incl. a versioned sdk label", () => {
     expect(ev.systemProps.osName).toBe("macOS");
     expect(ev.systemProps.appVersion).toBe("1.4.24");
-    expect(ev.systemProps.sdkVersion).toBe("grok-vscode-phuryn@1.4.24");
+    expect(ev.systemProps.sdkVersion).toBe("all-your-companions@1.4.24");
     expect(ev.systemProps.isDebug).toBe(false);
   });
 });

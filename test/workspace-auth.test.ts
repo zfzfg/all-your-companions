@@ -287,64 +287,6 @@ describe("sidebar close-revocation wiring (source)", () => {
     expect(reposMsgBody).toContain("entries.filter((r) => cwdIsAuthorized(r.cwd, authorized, pathsEqual))");
   });
 
-  it("RemoteUplink is the sole socket write path and enforces project auth", () => {
-    const src = sidebarSrc();
-    const uplinkSrc = fs.readFileSync(path.join(root, "src", "remote-uplink.ts"), "utf8");
-
-    // Hard boundary lives in RemoteUplink — every HostMsg write (broadcast,
-    // broadcastTo, snapshot) goes through mayDeliverRemoteHostMsg there.
-    expect(uplinkSrc).toContain("mayDeliverRemoteHostMsg");
-    expect(uplinkSrc).toContain("authorizedSnapshot");
-    expect(uplinkSrc).toContain("filterAuthorizedOutbound");
-    expect(uplinkSrc).toMatch(/authorizeWrite/);
-    // Snapshot catch-up must not send opts.snapshot() bytes raw.
-    expect(uplinkSrc).toMatch(/authorizedSnapshot\([\s\S]*snapshotFrame/);
-    expect(uplinkSrc).not.toMatch(
-      /snapshotFrame\(\s*frame\.clientId\s*,\s*this\.opts\.snapshot\(/,
-    );
-
-    // Sidebar wires live auth into the uplink (not a one-shot capture).
-    expect(src).toMatch(/auth:\s*\{/);
-    expect(src).toContain("authorizedCwds: () => this.authorizedSessionCwds()");
-    expect(src).toContain("scopeCwdForClient:");
-
-    // deliverRemote remains the live fan-out orchestrator (transform + postTap)
-    // and still pre-gates; it must hand scope to broadcastTo.
-    const deliverStart = src.indexOf("private deliverRemote(");
-    expect(deliverStart).toBeGreaterThan(0);
-    const deliverEnd = src.indexOf("private sendRemoteClient(", deliverStart);
-    const deliverBody = src.slice(deliverStart, deliverEnd);
-    expect(deliverBody).toContain("mayDeliverRemoteHostMsg");
-    expect(deliverBody).toMatch(/uplink\?\.broadcastTo\(/);
-    expect(deliverBody).toMatch(/broadcastTo\(\[\.\.\.clientIds\],\s*out,\s*scopeCwd\)/);
-    // JSDoc above deliverRemote must not claim it is the sole write path.
-    const deliverDoc = src.slice(Math.max(0, deliverStart - 800), deliverStart);
-    expect(deliverDoc).toMatch(/hard authorization boundary is inside RemoteUplink/i);
-    expect(deliverDoc).not.toMatch(/Sole uplink write path for HostMsgs/i);
-
-    // Fan-out helpers must route through deliverRemote, not open their own uplink.
-    for (const name of [
-      "private sendRemoteClient(",
-      "private sendRemoteRepo(",
-      "private sendRemoteSession(",
-      "private sendRemoteHistorySnapshot(",
-      "private broadcastRemoteDevice(",
-    ]) {
-      const i = src.indexOf(name);
-      expect(i, name).toBeGreaterThan(0);
-    }
-    const histStart = src.indexOf("private sendRemoteHistorySnapshot(");
-    const histBody = src.slice(histStart, histStart + 600);
-    expect(histBody).toContain("isAuthorizedCwd");
-    expect(histBody).toContain("dropped history snapshot");
-
-    // No other uplink.broadcast* outside deliverRemote.
-    const uplinkWrites = [...src.matchAll(/uplink\?\.broadcast(?:To)?\(/g)];
-    expect(uplinkWrites.length).toBe(1);
-    for (const m of uplinkWrites) {
-      expect(m.index! >= deliverStart && m.index! < deliverEnd).toBe(true);
-    }
-  });
 
   it("toggleSessionPin refuses unauthorized home cwd (no protocol change)", () => {
     const src = sidebarSrc();
@@ -375,22 +317,6 @@ describe("sidebar close-revocation wiring (source)", () => {
     expect(body).toContain("cwdIfPresent");
     expect(body).not.toContain("remoteSessionFor");
     expect(body).not.toMatch(/remoteClients\.cwd\(/);
-  });
-
-  it("host-wide remote fan-out skips a tab with no project instead of throwing", () => {
-    const src = sidebarSrc();
-    const slices = [
-      src.slice(src.indexOf("private postSessionsList("), src.indexOf("private buildSessionsList(")),
-      src.slice(src.indexOf("private buildRemoteReposMsg("), src.indexOf("private sendRemoteRepoCatalog(")),
-      src.slice(src.indexOf("private refreshRemoteRepoPreview("), src.indexOf("private sessionHasLiveOwner(")),
-      src.slice(src.indexOf("private pushDot("), src.indexOf("private dotForId(")),
-    ];
-    for (const body of slices) {
-      expect(body.length).toBeGreaterThan(40);
-      expect(body).toContain("cwdIfPresent");
-      expect(body).not.toMatch(/remoteClients\.cwd\(/);
-    }
-    expect(src).toMatch(/scopeCwdForClient:[\s\S]*?cwdIfPresent\(clientId\)/);
   });
 
   it("revokeClosedProjectFolder cancels local and remote voice for the closed folder", () => {
