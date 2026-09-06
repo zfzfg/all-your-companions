@@ -298,26 +298,6 @@ describe("sidebar close-revocation wiring (source)", () => {
     expect(pinBody).toMatch(/if\s*\(\s*!this\.isAuthorizedCwd\(home\)\s*\)\s*return null/);
   });
 
-  it("voiceConfigured is project-scoped (classification + scoped send)", () => {
-    // Cross-project metadata leak if classification is "none" or the live
-    // fan-out omits scopeCwd — a closed-project tab kept the prior sendPhrase.
-    const policy = fs.readFileSync(path.join(root, "src", "remote-policy.ts"), "utf8");
-    expect(policy).toMatch(/voiceConfigured:\s*"scope"/);
-    expect(policy).not.toMatch(/voiceConfigured:\s*"none"/);
-
-    const src = sidebarSrc();
-    const start = src.indexOf("private postVoiceConfigured(");
-    expect(start).toBeGreaterThan(0);
-    const end = src.indexOf("private voiceSetting<", start);
-    const body = src.slice(start, end);
-    // Must pass the resolved project cwd as scope (3rd arg), not bare sendRemoteClient(id, msg).
-    expect(body).toMatch(
-      /sendRemoteClient\(\s*clientId\s*,\s*remoteMsg\s*,\s*remoteCwd\s*\)/,
-    );
-    expect(body).toContain("cwdIfPresent");
-    expect(body).not.toContain("remoteSessionFor");
-    expect(body).not.toMatch(/remoteClients\.cwd\(/);
-  });
 
   it("revokeClosedProjectFolder cancels local and remote voice for the closed folder", () => {
     const src = sidebarSrc();

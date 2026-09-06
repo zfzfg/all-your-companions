@@ -87,22 +87,6 @@ describe("source gates — capability at the ownership boundary", () => {
     expect(src).toMatch(/canPreviewInApp:\s*false/);
     expect(src).toMatch(/canOpenSettingsEditor:\s*true/);
     expect(src).toMatch(/canSwitchWorkspaceFolder:\s*false/);
-    expect(src).toMatch(/canArchiveRepos:\s*true/);
-  });
-
-  it("Electron host declares rehydrate capability true and :desktop suffix", () => {
-    const src = readFileSync(path.join(root, "src", "desktop", "electron-host.ts"), "utf8");
-    expect(src).toMatch(/webviewReloadsUnderLiveSession:\s*true/);
-    expect(src).toMatch(/remoteInstallIdSuffix:\s*":desktop"/);
-    expect(src).toMatch(/canRelocateView:\s*false/);
-    expect(src).toMatch(/canShowOutput:\s*false/);
-    expect(src).toMatch(/canToggleDevTools/);
-    expect(src).toMatch(/canShowMcpSettings/);
-    expect(src).toMatch(/canOpenInEditor:\s*false/);
-    expect(src).toMatch(/canPreviewInApp:\s*true/);
-    expect(src).toMatch(/canOpenSettingsEditor:\s*false/);
-    expect(src).toMatch(/canSwitchWorkspaceFolder:\s*true/);
-    expect(src).toMatch(/canArchiveRepos:\s*true/);
   });
 });
 

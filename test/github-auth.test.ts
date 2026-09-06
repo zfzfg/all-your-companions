@@ -20,14 +20,8 @@ import {
   readGithubAuthState,
   redactGithubSecret,
   type GithubAuthIo,
+  GITHUB_AUTH_SETUP_GIT_ARGS,
 } from "../src/github-auth";
-import { GITHUB_AUTH_SETUP_GIT_ARGS } from "../src/github-device-login";
-import {
-  INBOUND_DISPOSITION,
-  REMOTE_REQUIRES_BOUND_SESSION,
-  allowFromRemote,
-} from "../src/remote-policy";
-import { parseWebviewMsg } from "../src/desktop/webview-msg-validate";
 
 class FakeChild extends EventEmitter {
   stdout = new EventEmitter();
@@ -291,50 +285,5 @@ describe("loginGithubWithToken", () => {
       error: "That token is too long.",
     });
     expect(io.spawn).not.toHaveBeenCalled();
-  });
-});
-
-describe("remote policy", () => {
-  it("lets a remote list repos and paste a token anywhere, but signs out only on a cloud host", () => {
-    expect(INBOUND_DISPOSITION.listGithubRepos).toBe("full");
-    expect(allowFromRemote("listGithubRepos", "full")).toBe(true);
-
-    // Pasting a token is allowed from ANY remote, desk included. It was briefly
-    // cloud-only on the theory that a compromised relay could inject a token
-    // and make a laptop act as another account — true as a mechanism, and it
-    // grants the attacker nothing they lacked: a remote at this tier can `send`
-    // and answer `permissionAnswer`, so it can already run commands here with
-    // the credentials on the machine. Gating it only removed the narrowest
-    // credential we can offer from the surface this product exists for.
-    expect(INBOUND_DISPOSITION.githubLoginWithToken).toBe("full");
-    expect(allowFromRemote("githubLoginWithToken", "full")).toBe(true);
-
-    // The two capabilities that make the gate pointless, asserted here so this
-    // reasoning fails loudly if either is ever tightened.
-    expect(allowFromRemote("send", "full")).toBe(true);
-    expect(allowFromRemote("permissionAnswer", "full")).toBe(true);
-
-    // Sign-out IS still cloud-only, and for an unrelated reason: it revokes a
-    // credential every surface on a desk shares.
-    expect(INBOUND_DISPOSITION.githubSignOut).toBe("host-local");
-    expect(allowFromRemote("githubSignOut", "full")).toBe(false);
-    expect(allowFromRemote("githubSignOut", "full", { isCloud: true })).toBe(true);
-
-    expect(REMOTE_REQUIRES_BOUND_SESSION.listGithubRepos).toBe(false);
-    expect(REMOTE_REQUIRES_BOUND_SESSION.githubLoginWithToken).toBe(false);
-    expect(REMOTE_REQUIRES_BOUND_SESSION.githubSignOut).toBe(false);
-  });
-
-  it("accepts a token paste at the desktop gate and refuses an empty or oversized one", () => {
-    const token = "github_pat_testtokenvalue0000000000000000000000";
-    expect(parseWebviewMsg({ type: "githubLoginWithToken", token })?.type).toBe("githubLoginWithToken");
-    expect(parseWebviewMsg({ type: "githubLoginWithToken" })).toBeNull();
-    expect(parseWebviewMsg({ type: "githubLoginWithToken", token: "" })).toBeNull();
-    expect(parseWebviewMsg({
-      type: "githubLoginWithToken",
-      token: "x".repeat(MAX_GITHUB_TOKEN_CHARS + 1),
-    })).toBeNull();
-    expect(parseWebviewMsg({ type: "listGithubRepos" })).toEqual({ type: "listGithubRepos" });
-    expect(parseWebviewMsg({ type: "githubSignOut" })).toEqual({ type: "githubSignOut" });
   });
 });

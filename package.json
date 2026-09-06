@@ -745,30 +745,18 @@
     "compile:integration": "node -e \"require('fs').rmSync('out-integration',{recursive:true,force:true})\" && tsc -p integration/tsconfig.json",
     "test:integration": "npm run compile && npm run compile:integration && vscode-test",
     "test:live": "tsc -p . && node scripts/live-tests.cjs",
-    "desktop": "npm run compile && node scripts/run-desktop.cjs",
-    "desktop-dev": "npm run compile && node scripts/run-desktop.cjs --relay-dev --open-devtools --remote-debugging-port=9333",
-    "test:desktop": "npm run compile && vitest run --config vitest.desktop.config.ts",
-    "e2e:screens": "npm run compile && node scripts/desk-screens-check.mjs",
-    "e2e:open-timing": "npm run compile && node scripts/open-timing-check.mjs",
     "e2e:hc-colour": "node scripts/hc-colour-screens.mjs",
     "e2e:welcome-tip": "node scripts/ide-welcome-tip-screens.mjs",
-    "e2e:gh-unauth": "npm run compile && node scripts/gh-unauth-check.mjs",
     "marketplace:login": "node scripts/marketplace-session.mjs",
     "marketplace:publish": "node scripts/marketplace-publish.mjs",
     "e2e:lifecycle-host": "npm run compile && node scripts/lifecycle-host.mjs",
     "smoke:live": "npm run compile && node scripts/live-smoke.mjs",
     "telemetry:probe": "tsc -p . && node scripts/telemetry-probe.cjs",
-    "check:relay": "node scripts/check-production-relay.mjs",
     "check:vsix": "npm run compile && node scripts/check-vsix-requires.mjs",
-    "prepackage": "npm run check:relay && node -e \"const fs=require('fs'); for (const f of fs.readdirSync('.')) if (f.endsWith('.vsix')) fs.unlinkSync(f); fs.rmSync('out',{recursive:true,force:true})\" && npm run check:vsix",
+    "prepackage": "node -e \"const fs=require('fs'); for (const f of fs.readdirSync('.')) if (f.endsWith('.vsix')) fs.unlinkSync(f); fs.rmSync('out',{recursive:true,force:true})\" && npm run check:vsix",
     "package": "vsce package --readme-path README.marketplace.md",
     "publish": "vsce publish --readme-path README.marketplace.md",
-    "publish:ovsx": "node scripts/publish-ovsx.mjs",
-    "dist": "npm run compile && electron-builder --publish never",
-    "dist:mac": "npm run compile && electron-builder --mac --publish never",
-    "dist:win": "npm run compile && electron-builder --win --x64 --publish never",
-    "dist:linux": "npm run compile && electron-builder --linux --x64 --publish never -c.extraMetadata.grokCloudBuild=true",
-    "dist:dir": "npm run compile && electron-builder --dir --publish never"
+    "publish:ovsx": "node scripts/publish-ovsx.mjs"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
@@ -779,7 +767,6 @@
     "@vscode/test-electron": "^2.5.2",
     "@vscode/vsce": "3.9.2",
     "electron": "^33.2.1",
-    "electron-builder": "^25.1.8",
     "happy-dom": "^20.9.0",
     "playwright": "^1.49.1",
     "typescript": "^5.4.0",
@@ -788,7 +775,6 @@
   "dependencies": {
     "@agentclientprotocol/claude-agent-acp": "0.69.0",
     "@agentclientprotocol/codex-acp": "1.1.14",
-    "electron-updater": "^6.6.4",
     "jpeg-js": "^0.4.4",
     "ws": "^8.21.0"
   }

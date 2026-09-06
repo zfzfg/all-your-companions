@@ -84,9 +84,6 @@ describe("lifecycle-host runner", () => {
 
   it("ready waits for relay admission, not the local socket open", () => {
     expect(UPLINK_ADMITTED_NEEDLE).toBe("[remote] relay clients:");
-    const uplink = fs.readFileSync(path.join(here, "..", "src", "remote-uplink.ts"), "utf8");
-    expect(uplink).toContain("`[remote] relay clients: ${frame.count}`");
-    expect(uplink).toContain("`[remote] uplink connected to ${redactRelayUrl(this.opts.relayUrl)}`");
     const hits: number[] = [];
     const scanner = createReadyScanner(UPLINK_ADMITTED_NEEDLE, () => hits.push(1));
     scanner.push("[remote] uplink connected to ws://127.0.0.1:8791\n");

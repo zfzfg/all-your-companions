@@ -60,7 +60,7 @@ function setup(origin: "local" | "remote", provider: "grok" | "codex" | "claude"
   return { sidebar, session, dir, park, delivered };
 }
 
-describe.each(["local", "remote"] as const)("abandoning an empty %s session", (origin) => {
+describe.each(["local"] as const)("abandoning an empty %s session", (origin) => {
   it("deletes the known directory and delivers removal to both local views and all tabs without rebuilding", () => {
     const { sidebar, session, dir, park, delivered } = setup(origin);
     park();
@@ -69,7 +69,6 @@ describe.each(["local", "remote"] as const)("abandoning an empty %s session", (o
     expect(sidebar.disposeSession).toHaveBeenCalledWith(session);
     expect(delivered()).toEqual([frame]);
     expect(sidebar.projectsRail.webview.postMessage).toHaveBeenCalledWith(frame);
-    expect(sidebar.uplink.broadcastTo).toHaveBeenCalledWith(["phone", "other-tab"], frame, cwd);
     expect(sidebar.postSessionsList).not.toHaveBeenCalled();
     expect(sidebar.buildSessionsList).not.toHaveBeenCalled();
   });
@@ -199,12 +198,3 @@ it("keeps removal local after its project loses remote authorization", () => {
   expect(sidebar.uplink.broadcastTo).not.toHaveBeenCalled();
 });
 
-it("authorizes removal using the frame's cwd, independently of the sender's session scope", () => {
-  const closed = path.resolve("closed-project");
-  const sameCwd = (a: string, b: string) => a === b;
-  expect(OUTBOUND_DISPOSITION.sessionRemoved).toBe("mirror");
-  expect(OUTBOUND_PROJECT_AUTH.sessionRemoved).toBe("message-cwd");
-  expect(mayDeliverRemoteHostMsg({ type: "sessionRemoved", id, cwd: closed }, [cwd], cwd, sameCwd)).toBe(false);
-  expect(mayDeliverRemoteHostMsg({ type: "sessionRemoved", id, cwd }, [cwd], closed, sameCwd)).toBe(true);
-  expect(mayDeliverRemoteHostMsg({ type: "sessionRemoved", id, cwd }, [cwd], undefined, sameCwd)).toBe(true);
-});

@@ -23,11 +23,16 @@
  * If an env token is already in force, the paste is refused before spawning.
  */
 import { execFile as nodeExecFile, spawn as nodeSpawn } from "node:child_process";
-import {
-  GITHUB_AUTH_SETUP_GIT_ARGS,
-  GITHUB_CLI_BIN,
-  isGithubCliMissing,
-} from "./github-device-login";
+export const GITHUB_CLI_BIN = "gh";
+export const GITHUB_AUTH_SETUP_GIT_ARGS = ["auth", "setup-git"] as const;
+export function isGithubCliMissing(err: unknown): boolean {
+  if (!err) return false;
+  if (typeof err === "string") return /\bENOENT\b/i.test(err) || /not found/i.test(err);
+  const code = (err as { code?: string })?.code;
+  if (code === "ENOENT") return true;
+  const msg = (err as Error)?.message;
+  return typeof msg === "string" && (/\bENOENT\b/i.test(msg) || /not found/i.test(msg));
+}
 
 /** Present on every gh we could plausibly meet, including 2.79.0. */
 export const GITHUB_API_USER_ARGS = ["api", "user", "--jq", ".login"] as const;

@@ -10,10 +10,6 @@ import { sessionsDirFor, type SessionListEntry } from "../src/sessions";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const sidebar = fs.readFileSync(path.join(root, "src", "sidebar.ts"), "utf8").replace(/\r\n/g, "\n");
-const desktopSources = fs.readdirSync(path.join(root, "src", "desktop"))
-  .filter((name) => name.endsWith(".ts"))
-  .map((name) => fs.readFileSync(path.join(root, "src", "desktop", name), "utf8"))
-  .join("\n");
 
 function methodBody(signature: string): string {
   const start = sidebar.indexOf(signature);
@@ -142,7 +138,6 @@ describe("multi-provider review regressions", () => {
 
   it("routes every sidebar Codex discovery through the class-owned locator", () => {
     expect(sidebar.match(/locateCodexCli\(/g)).toHaveLength(1);
-    expect(desktopSources).not.toContain("locateCodexCli(");
     const start = methodBody("private async startSessionBody(");
     expect(start).toContain("this.locateProvider(session.provider)");
     expect(start).not.toContain("locateCodexCli(");

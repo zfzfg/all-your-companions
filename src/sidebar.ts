@@ -62,7 +62,7 @@ import {
   type RoutineRun,
 } from "./routines";
 import { RoutineRunStore } from "./routine-store";
-import { routinesMessageForRemote } from "./remote-policy";
+import { routinesMessageForRemote } from "./remote-compat";
 import { PersistedState } from "./persisted-state";
 import {
   Session,
@@ -121,14 +121,16 @@ import {
   deviceLoginCodeNote,
   noRemoteSignInMessage,
   deviceLoginUnavailable,
-} from "./device-login";
-import { probeClaudeAuthStatus, runDeviceLogin, type DeviceLoginHandle } from "./device-login-run";
+  probeClaudeAuthStatus,
+  runDeviceLogin,
+  type DeviceLoginHandle,
+  githubDeviceLoginFailureText,
+  runGithubDeviceLogin,
+} from "./remote-compat";
 import {
   GITHUB_CLI_BIN,
-  githubDeviceLoginFailureText,
   isGithubCliMissing,
-  runGithubDeviceLogin,
-} from "./github-device-login";
+} from "./github-auth";
 import {
   GITHUB_CLI_DOWNLOAD,
   classifyCloneFailure,
@@ -269,22 +271,42 @@ import { isPrimerText } from "./grok-primer";
 import { AsyncSerialQueue } from "./async-serial";
 import { HOST_CAPABILITIES, HostMsg, INTERRUPTED_SEND_CODE, SESSION_SUPERSEDED_CODE, WebviewMsg, type GithubState, type ProjectSetupGithub } from "./protocol";
 import { withoutArchiveFields } from "./project-discovery";
-import { RemoteUplink } from "./remote-uplink";
-import { RemoteClientState, serializesRemoteSessionTransition } from "./remote-client-state";
-import { RemotePcmIngress, acceptRemotePcm } from "./remote-voice";
 import { SessionRequestState } from "./session-request-state";
-import { allowFromRemote, capabilitiesForRemote, allowRemoteRepoTarget, bracketRemoteSnapshot, mayDeliverRemoteHostMsg, remoteRequiresBoundSession, repoScopeFor, repoSessionsMessageForRemote, sessionCwdBelongsToRepo, sessionForRequest, shouldAdoptDeskSession, transformHostMsgForRemote, type MediaInlineDeps, type MsgOrigin, type RemoteTier } from "./remote-policy";
 import {
+  RemoteUplink,
+  RemoteClientState,
+  serializesRemoteSessionTransition,
+  RemotePcmIngress,
+  acceptRemotePcm,
+  allowFromRemote,
+  capabilitiesForRemote,
+  allowRemoteRepoTarget,
+  bracketRemoteSnapshot,
+  mayDeliverRemoteHostMsg,
+  remoteRequiresBoundSession,
+  repoScopeFor,
+  repoSessionsMessageForRemote,
+  sessionCwdBelongsToRepo,
+  sessionForRequest,
+  shouldAdoptDeskSession,
+  transformHostMsgForRemote,
+  type MediaInlineDeps,
+  type MsgOrigin,
+  type RemoteTier,
   listRemoteProjectDir,
   projectFileContentForWire,
   readRemoteProjectFile,
   resolveRemoteFileRoot,
   writeRemoteProjectFile,
-} from "./remote-files";
-import {
   isCloudEnvironment,
-  CLOUD_ENVIRONMENT_ENV, buildLinkStartBody, deviceDisplayName, httpBaseFromRelayUrl, parseRelayFrame, RELAY_DEVICE_TOKEN_SECRET, resolveRelayUrl } from "./remote-frames";
-import { KeepAwake, shouldKeepAwake } from "./keep-awake";
+  CLOUD_ENVIRONMENT_ENV,
+  buildLinkStartBody,
+  deviceDisplayName,
+  httpBaseFromRelayUrl,
+  parseRelayFrame,
+  RELAY_DEVICE_TOKEN_SECRET,
+  resolveRelayUrl,
+} from "./remote-compat";
 
 /**
  * How long an unanswered card keeps a cloud machine awake.
@@ -869,10 +891,6 @@ export class GrokSidebar {
   };
   /** Stalled boot must not hang a resume; the miss then stands as a real refusal. */
   private static readonly FIRST_BOOT_SCAN_WAIT_MS = 8_000;
-  // OS wake lock, held for exactly as long as the uplink is (linked device token
-  // + live extension host) so an AFK machine can't idle-suspend out from under a
-  // remote turn. `grok.remote.keepAwake` is the opt-out. See src/keep-awake.ts.
-  private readonly keepAwake = new KeepAwake((l) => this.host.appendLine(l), process.platform, process.pid, os.release());
   private static readonly DEVICE_GLOBAL_REMOTE_TYPES = new Set<HostMsg["type"]>([
     "showThinking", "appPurpose", "fontScale", "grokUpdateStatus", "cliUpdating",
     "onboarding", "providerState", "mcpServers", "mcpConnectors", "expandCommandOutputs", "steerByDefault", "soundNotifications",
@@ -8408,7 +8426,6 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     this.uplink = undefined;
     this.codexInstallAbort?.abort(new Error("Installation cancelled."));
     this.codexInstallAbort = undefined;
-    try { this.keepAwake.stop(); } catch { /* the pid watcher reaps it anyway */ }
     try { this.settingsEditor?.dispose(); } catch { /* tab already gone */ }
     this.settingsEditor = undefined;
     void this.disposePool();
@@ -19218,45 +19235,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
    *  config change over. The opt-out key remains `grok.remote.keepAwake` (ships
    *  today) even though local turns are now covered too. */
   private refreshKeepAwake(): void {
-    try {
-      const enabled = this.host.getConfiguration("grok").get<boolean>("remote.keepAwake", true);
-      const turnInFlight = this.anyTurnInFlight();
-      // The remote twin of the OS wake lock below, and the one that matters in
-      // the cloud: an OS wake lock cannot stop a hypervisor suspending the whole
-      // machine, and a suspended machine takes the turn down with it. Not gated
-      // on the opt-out — that setting is about a laptop's battery, and this
-      // costs a few bytes a minute on a socket that is already open.
-      try {
-        // A device sign-in is WORK, even though no turn is running. The relay
-        // holds a cloud machine awake only while frames keep arriving, and a
-        // machine with nothing to say goes quiet, gets released after 90s and
-        // is paused by the platform seconds later — killing the CLI's polling
-        // connection mid-flow. cloud-environments.md recorded exactly that
-        // ("a grok login --device-auth was left polling, the sprite paused,
-        // and the login never completed"), and it is the likeliest cause of
-        // the first Codex attempt that approved at the vendor and wrote no
-        // credential. The phone is on another tab by then, so nothing else is
-        // generating traffic either (owner, 2026-08-31).
-        this.uplink?.setWorking(this.anyTurnWorking() || this.deviceLoginInFlight());
-      } catch { /* never worth failing over */ }
-      if (shouldKeepAwake({
-        enabled,
-        linked: !!this.uplink,
-        turnInFlight,
-        cloudHost: isCloudEnvironment(),
-      })) {
-        this.keepAwake.start();
-      } else {
-        this.keepAwake.stop();
-      }
-    } catch (e) {
-      // Keeping a machine awake is never worth failing a caller over, and this
-      // now runs from every path that answers a card — so the handler itself
-      // must not throw either.
-      try {
-        this.host.appendLine?.(`[keep-awake] skipped: ${(e as Error)?.message ?? e}`);
-      } catch { /* nothing left to say it with */ }
-    }
+    // No-op: keep-awake removed in standalone AllYourCompanions extension
   }
 
   /** "AFK Pilot: Link this device" — disabled in standalone build. */

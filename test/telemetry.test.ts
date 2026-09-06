@@ -15,10 +15,8 @@ import {
   APTABASE_APP_KEY_PROD,
   APTABASE_APP_KEY_DEV,
   OFFICIAL_EXTENSION_ID,
-  type SessionStartPropKey,
-  type SessionStartProps,
 } from "../src/telemetry";
-import { DESKTOP_APP_SHORT_NAME } from "../src/desktop/host-dialogs";
+const DESKTOP_APP_SHORT_NAME = "Grok Build Desktop";
 import { GrokSidebar } from "../src/sidebar";
 import { Session } from "../src/session";
 import { RemoteClientState } from "../src/remote-client-state";

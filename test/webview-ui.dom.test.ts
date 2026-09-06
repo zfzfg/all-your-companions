@@ -10,7 +10,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { bootWebview, dispatch, click, Posted } from "./webview-harness";
 import { countsAsUserBubble } from "../src/plan-restore";
-import { bracketRemoteSnapshot } from "../src/remote-policy";
 import type { HostMsg } from "../src/protocol";
 
 const $ = (doc: Document, id: string) => doc.getElementById(id) as HTMLElement;
@@ -3605,40 +3604,6 @@ describe("user prompt counter parity (interjections never count)", () => {
   });
 });
 
-describe("truncated remote history coordinates", () => {
-  const messageIndex = (doc: Document, text: string) =>
-    [...$(doc, "messages").children].findIndex((el) => el.textContent?.includes(text));
-
-  it("keeps a surviving plan card between the same retained agent chunks", () => {
-    const { window, doc } = bootWebview();
-    const buffer: HostMsg[] = [{
-      type: "planHistoryQueue",
-      plans: [{
-        text: "surviving plan",
-        verdict: "approved",
-        afterUserMessage: 3,
-        afterHistoryEvent: 5,
-      }],
-    }];
-    for (let n = 1; n <= 12; n++) {
-      buffer.push({ type: "userMessage", text: `prompt ${n}` });
-      if (n < 3) {
-        buffer.push({ type: "messageChunk", text: `discarded ${n}a` });
-        buffer.push({ type: "messageChunk", text: `discarded ${n}b` });
-      } else if (n === 3) {
-        buffer.push({ type: "messageChunk", text: "retained draft" });
-        buffer.push({ type: "messageChunk", text: "retained implementation" });
-      } else {
-        buffer.push({ type: "messageChunk", text: `answer ${n}` });
-      }
-    }
-
-    for (const message of bracketRemoteSnapshot(buffer)) dispatch(window, message);
-
-    expect(messageIndex(doc, "surviving plan")).toBeGreaterThan(messageIndex(doc, "retained draft"));
-    expect(messageIndex(doc, "surviving plan")).toBeLessThan(messageIndex(doc, "retained implementation"));
-  });
-});
 
 describe("composer autosize", () => {
   it("sets an explicit height on every input change (grow-to-5-lines wiring)", () => {

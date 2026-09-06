@@ -9,12 +9,6 @@ import {
   isTrustedPlanReviewPath,
   planReviewSessionDirectoryName,
 } from "../src/plan-review";
-import {
-  authorizeDesktopWebviewMsg,
-  authorizeOpenFile,
-  desktopAuthRoots,
-  resolveAuthorizedFileForOpen,
-} from "../src/desktop/desktop-policy";
 
 describe("plan-review path fence", () => {
   it("accepts only a session segment and one Markdown file", () => {
@@ -147,86 +141,5 @@ describe("plan-review path fence", () => {
         realpath,
       }),
     ).toBe(false);
-  });
-
-  it("allows only the focused conversation's snapshot without widening project roots", () => {
-    const base = fs.mkdtempSync(path.join(os.tmpdir(), "grok-plan-open-"));
-    const repo = path.join(base, "repo");
-    const planReviewsRoot = path.join(base, "globalStorage", "plan-reviews");
-    const focusedRoot = path.join(planReviewsRoot, "focused-session");
-    const plan = path.join(focusedRoot, "no-op-plan.md");
-    const otherPlan = path.join(planReviewsRoot, "other-session", "secret-plan.md");
-    try {
-      fs.mkdirSync(path.dirname(plan), { recursive: true });
-      fs.mkdirSync(path.dirname(otherPlan), { recursive: true });
-      fs.mkdirSync(repo, { recursive: true });
-      fs.writeFileSync(plan, "# no-op\n");
-      fs.writeFileSync(otherPlan, "# another conversation\n");
-      const ctx = { workspaceRoot: repo, planReviewSessionRoot: focusedRoot };
-
-      expect(desktopAuthRoots(ctx)).toEqual([path.resolve(repo)]);
-      expect(authorizeOpenFile(plan, ctx)).toEqual({ ok: true, absPath: path.resolve(plan) });
-      expect(resolveAuthorizedFileForOpen(plan, ctx)).toEqual({
-        ok: true,
-        absPath: path.resolve(plan),
-      });
-      expect(authorizeDesktopWebviewMsg({ type: "openFile", path: plan }, ctx)).toEqual({
-        msg: { type: "openFile", path: plan },
-      });
-      expect(authorizeOpenFile(otherPlan, ctx).ok).toBe(false);
-      expect(resolveAuthorizedFileForOpen(otherPlan, ctx).ok).toBe(false);
-      expect(authorizeDesktopWebviewMsg({ type: "openFile", path: otherPlan }, ctx)).toEqual({
-        type: "openFile",
-        refused: true,
-        reason: "path escapes authorized roots",
-      });
-
-      const outside = path.join(base, "globalStorage", "other.md");
-      fs.writeFileSync(outside, "not a plan review");
-      expect(authorizeOpenFile(outside, ctx).ok).toBe(false);
-      expect(resolveAuthorizedFileForOpen(outside, ctx).ok).toBe(false);
-    } finally {
-      fs.rmSync(base, { recursive: true, force: true });
-    }
-  });
-
-  it("opens a Claude plan from its own plans directory, and nothing else there", () => {
-    // Claude writes a plan under <home>/.claude/plans and then cites the path,
-    // so refusing it left the link the agent had just handed the user dead.
-    // Same narrow rule as the review root: a direct .md child, and never a
-    // general read root.
-    const base = fs.mkdtempSync(path.join(os.tmpdir(), "claude-plans-"));
-    const plansRoot = path.join(base, ".claude", "plans");
-    const repo = path.join(base, "repo");
-    const plan = path.join(plansRoot, "in-the-plan-mode-happy-cook.md");
-    const nested = path.join(plansRoot, "deeper", "nested-plan.md");
-    const notMarkdown = path.join(plansRoot, "notes.txt");
-    try {
-      fs.mkdirSync(path.dirname(nested), { recursive: true });
-      fs.mkdirSync(repo, { recursive: true });
-      fs.writeFileSync(plan, "# plan\n");
-      fs.writeFileSync(nested, "# nested\n");
-      fs.writeFileSync(notMarkdown, "not markdown");
-      const ctx = { workspaceRoot: repo, claudePlansRoot: plansRoot };
-
-      expect(authorizeOpenFile(plan, ctx)).toEqual({ ok: true, absPath: path.resolve(plan) });
-      // The directory is a provenance class, not an auth root.
-      expect(desktopAuthRoots(ctx)).toEqual([path.resolve(repo)]);
-      expect(authorizeOpenFile(nested, ctx).ok).toBe(false);
-      expect(authorizeOpenFile(notMarkdown, ctx).ok).toBe(false);
-    } finally {
-      fs.rmSync(base, { recursive: true, force: true });
-    }
-  });
-
-  it("wires the focused review root lazily from the sidebar", () => {
-    const repoRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
-    const main = fs.readFileSync(path.join(repoRoot, "src", "desktop", "main.ts"), "utf8");
-    const sidebar = fs.readFileSync(path.join(repoRoot, "src", "sidebar.ts"), "utf8");
-    expect(main).toContain("get planReviewSessionRoot()");
-    expect(main).toContain("sidebar!.desktopPlanReviewSessionRoot()");
-    expect(main).not.toContain('planReviewsRoot: path.join(globalStorageDir, "plan-reviews")');
-    expect(sidebar).toContain("desktopPlanReviewSessionRoot(session: Session = this.focused)");
-    expect(sidebar).toContain("planReviewSessionDirectoryName(sessionId)");
   });
 });
