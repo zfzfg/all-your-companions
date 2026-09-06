@@ -17,10 +17,6 @@
     // apart from General/Voice/Notifications, which are preferences.
     { id: "routines", title: "Routines", restore: false },
     { id: "connectors", title: "Connectors", restore: false },
-    // "Remote control" rather than "Account": the page is about driving this
-    // desk from a phone or browser — linking, the device list, the AFK Pilot
-    // sign-in that enables it. "Account" invited confusion with the agent
-    // accounts (Grok / Codex / Claude), which live under Providers.
     { id: "account", title: "Remote control", restore: false },
     { id: "advanced", title: "Advanced", restore: false },
     { id: "about", title: "About", restore: false },
@@ -124,9 +120,11 @@
   const GITHUB_ISSUE_FEATURE_URL = GITHUB_REPO_URL + "/issues/new?labels=enhancement";
   const SUPPORT_MAILTO = "mailto:support@productcompass.pm";
   const ABOUT_DISCLAIMER =
-    "Unofficial · community-built · MIT | " +
-    "A VS Code UI for SpaceXAI’s Grok Build CLI - not affiliated with or endorsed by SpaceXAI (formerly xAI). " +
-    "Grok, Grok Build, and xAI are trademarks of xAI; this project uses those names only to describe what it’s compatible with.";
+    "AllYourCompanions v0.1.0 · Community-built · FSL-1.1-MIT | " +
+    "Forked from Grok Build for VS Code (v4.1.8) by Paweł Huryn. " +
+    "Maintained by Collin Lerche (zfzfg) | STERRA (https://sterra.online). " +
+    "Unified multi-companion GUI for Google Antigravity, Grok Build, OpenAI Codex, and Claude Code. " +
+    "All product names and trademarks belong to their respective owners.";
 
   const TELEMETRY_COPY =
     "Anonymous usage stats only: a single session-start event with an anonymous install id — never prompts, code, file paths or names, and no identity. The IP address is discarded, never stored.";
@@ -1328,8 +1326,8 @@
       id: "aboutRepo",
       category: "about",
       icon: "github",
-      title: "phuryn/grok-build-vscode",
-      description: "Source repository on GitHub.",
+      title: "AllYourCompanions",
+      description: "Community fork based on phuryn/grok-build-vscode (v4.1.8).",
       kind: "action",
       actionLabel: "Open",
       href: GITHUB_REPO_URL,

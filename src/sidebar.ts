@@ -10509,7 +10509,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         break;
       }
       case "openRemotePortal":
-        void this.host.openExternal(httpBaseFromRelayUrl(this.relayUrl()) + (msg.withHint ? "/?remoteHint=1" : ""));
+        void this.host.showInformationMessage("Remote portal is disabled in this standalone build.");
         break;
       case "rewindSession":
         await this.rewindFocusedSession(
@@ -11141,6 +11141,8 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         // and got the panel there, then no confirmation at all. So start a fresh
         // session first and run the whole flow in it.
         // Not without a project: on desktop with nothing open, workspaceRoot()
+     
+... [truncated for diff preview]
         // is deliberately empty rather than the install directory, so there is
         // nowhere to start a session. Connecting still works — it only opens a
         // terminal — and the panel below still shows; the fresh session simply
@@ -19154,56 +19156,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
   /** Start the relay uplink when a device token is stored (from the link flow).
    *  Idempotent. */
   private async maybeStartUplink(): Promise<void> {
-    if (this.uplink) return;
-    const token = await this.readDeviceToken();
-    if (!token) return; // not linked yet — the link command starts the uplink itself
-    const uplink = new RemoteUplink({
-      relayUrl: this.relayUrl(),
-      token,
-      deviceName: deviceDisplayName(os.hostname(), process.platform, os.release()),
-      client: {
-        platform: process.platform,
-        release: os.release(),
-        appName: this.host.appName,
-        isDesktop: this.host.remoteInstallIdSuffix === ":desktop",
-        isCloud: isCloudEnvironment(),
-      },
-      snapshot: (clientId) => this.buildRemoteSnapshot(clientId),
-      // Socket-level project gate — also covers the catch-up snapshot path,
-      // which never enters deliverRemote.
-      auth: {
-        authorizedCwds: () => this.authorizedSessionCwds(),
-        scopeCwdForClient: (clientId) => {
-          const active = this.remoteClients.active(clientId);
-          if (active) return this.sessionCwd(active);
-          return this.remoteClients.cwdIfPresent(clientId);
-        },
-        // Repo fan-out uses selected cwd; session fan-out uses active session
-        // cwd. Either counts as ownership of that scope (default ownership
-        // only compares scopeCwdForClient, which is session-first).
-        clientOwnsScope: (clientId, scopeCwd) => {
-          const selected = this.remoteClients.cwdIfPresent(clientId);
-          if (selected && pathsEqual(selected, scopeCwd)) return true;
-          const active = this.remoteClients.active(clientId);
-          if (active && pathsEqual(this.sessionCwd(active), scopeCwd)) return true;
-          return false;
-        },
-        sameCwd: pathsEqual,
-      },
-      onClientReady: (clientId, tabToken) => this.handleRemoteClientReady(clientId, tabToken),
-      onClientLeft: (clientId) => {
-        this.releaseRemoteClient(clientId);
-      },
-      onClientRoster: (clientIds) => this.retainRemoteClients(clientIds),
-      onCredentialRevoked: () => {
-        void this.handleRemoteCredentialRevoked(token, uplink);
-      },
-      onClientMessage: (clientId, m) => this.handleRemoteMessage(clientId, m),
-      log: (l) => this.host.appendLine(l),
-    });
-    this.uplink = uplink;
-    uplink.start();
-    this.refreshKeepAwake();
+    return;
   }
 
   /**
@@ -19313,115 +19266,24 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     }
   }
 
-  /** "AFK Pilot: Link this device" — the device-code flow against the relay's REST
-   *  edge: start a link, open the browser for the (mock for now) approval, poll
-   *  until the relay hands back a long-lived device token, store it in secrets,
-   *  connect. Mirrors how a CLI links to a web account. */
+  /** "AFK Pilot: Link this device" — disabled in standalone build. */
   async linkRemoteDevice(): Promise<void> {
-    const base = httpBaseFromRelayUrl(this.relayUrl());
-    try {
-      // Already persisted by the time this returns — getOrCreate writes the file
-      // synchronously — so a first-ever link cannot outrun persistence and needs
-      // no second write. Re-writing it would only add a way to mark the key
-      // degraded on a link. Desktop appends `:desktop` (host capability) so the
-      // relay shares one device-cap slot with the same machine's VS Code install.
-      const installId = formatRemoteInstallId(this.installId(), this.host.remoteInstallIdSuffix);
-      const startBody = buildLinkStartBody({
-        hostname: os.hostname(),
-        platform: process.platform,
-        release: os.release(),
-        installId,
-        appName: this.host.appName,
-        isDesktop: this.host.remoteInstallIdSuffix === ":desktop",
-        isCloud: isCloudEnvironment(),
-      });
-      const startRes = await fetch(`${base}/api/link/start`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        // Stable per install so the relay can relink this machine instead of
-        // minting duplicate device rows for the same hostname. `name` stays the
-        // legacy HOST (Windows 11) form; clientLabel/platform/osLabel are optional
-        // extras for relays that render richer device rows.
-        body: JSON.stringify(startBody),
-      });
-      if (!startRes.ok) throw new Error(`link/start ${startRes.status}`);
-      const { code } = (await startRes.json()) as { code: string };
-      void this.host.openExternal(`${base}/link?code=${encodeURIComponent(code)}`);
-      const token = await this.host.withProgress(
-        { title: `Approve this device in the browser (code ${code})…`, cancellable: true },
-        (cancel) => this.pollLinkApproval(base, code, cancel),
-      );
-      if (!token) return; // cancelled / expired — poll loop already surfaced why
-      await this.context.secrets.store(GrokSidebar.DEVICE_TOKEN_SECRET, token);
-      this.uplink?.dispose();
-      this.uplink = undefined;
-      await this.maybeStartUplink();
-      this.post({ type: "remoteStatus", linked: true });
-      void this.host.showInformationMessage("Remote device linked — this workspace is now reachable from the web client.");
-    } catch (e) {
-      void this.host.showErrorMessage(`Remote link failed: ${(e as Error)?.message ?? String(e)}`);
-    }
+    void this.host.showInformationMessage("Remote access is disabled in this standalone build.");
   }
 
-  private async pollLinkApproval(base: string, code: string, cancel: HostCancellationToken): Promise<string | undefined> {
-    const deadline = Date.now() + 5 * 60_000;
-    while (Date.now() < deadline && !cancel.isCancellationRequested) {
-      await new Promise((r) => setTimeout(r, 2000));
-      const res = await fetch(`${base}/api/link/poll`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ code }),
-      });
-      if (!res.ok) continue;
-      const body = (await res.json()) as { status: string; token?: string };
-      if (body.status === "approved" && body.token) return body.token;
-      if (body.status === "expired" || body.status === "unknown") {
-        void this.host.showErrorMessage("Remote link code expired — run the link command again.");
-        return undefined;
-      }
-    }
-    return undefined;
-  }
-
-  /** "AFK Pilot: Unlink this device" — drop the token + connection. */
+  /** "AFK Pilot: Unlink this device" — drop stored token if present. */
   async unlinkRemoteDevice(): Promise<void> {
-    // Best-effort server-side revoke first: without it the device row lingers
-    // on the account and keeps counting against the relay's device cap (a
-    // locally-unlinked machine used to block relinking at the free tier's
-    // 1-device limit). Local unlink proceeds regardless — offline stays a
-    // working kill-switch, including when the OS keychain cannot decrypt the
-    // stored ciphertext (get throws; delete still drops the bytes).
-    const token = await this.readDeviceToken();
-    if (token) {
-      try {
-        await fetch(`${httpBaseFromRelayUrl(this.relayUrl())}/api/device/unlink`, {
-          method: "POST",
-          headers: { authorization: `Bearer ${token}` },
-          signal: AbortSignal.timeout(5000),
-        });
-      } catch (e) {
-        this.host.appendLine(`[remote] server-side unlink failed (local unlink continues): ${(e as Error)?.message ?? e}`);
-      }
-    }
     try {
       await this.context.secrets.delete(GrokSidebar.DEVICE_TOKEN_SECRET);
-    } catch (e) {
-      this.host.appendLine(`[remote] failed to clear device token: ${(e as Error)?.message ?? e}`);
-      void this.host.showErrorMessage(
-        "Could not clear the stored device token. Try again, or remove it from OS secure storage.",
-      );
-      // Still tear the runtime down so the machine stops advertising.
+    } catch {
+      // ignore
     }
-    this.clearRemoteRuntime();
     this.post({ type: "remoteStatus", linked: false });
-    void this.host.showInformationMessage("Remote device unlinked.");
   }
 
-  /** Tell the webview whether this machine holds a relay device token (drives
-   *  the gear "AFK Pilot" section's sign-in vs account/sign-out items). */
+  /** Tell the webview whether this machine holds a relay device token. Always false in standalone build. */
   private async postRemoteStatus(): Promise<void> {
-    const token = await this.readDeviceToken();
-    this.post({ type: "remoteStatus", linked: !!token });
+    this.post({ type: "remoteStatus", linked: false });
   }
 
   /** Ordered catch-up built from this client's cwd and active remote session. */
@@ -19582,7 +19444,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     }
     const panel = this.host.openEditorWebview({
       viewType: "grok.settings",
-      title: "Grok Settings",
+      title: "AllYourCompanions Settings",
       localResourceRoots: [
         Uri.joinPath(this.context.extensionUri, "media"),
         Uri.joinPath(this.context.extensionUri, "resources"),
@@ -19688,7 +19550,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; img-src ${webview.cspSource} data:; font-src ${webview.cspSource}; script-src 'nonce-${nonce}';" />
 <link rel="stylesheet" href="${mediaUri("settings.css")}" />
-<title>Grok Settings</title>
+<title>AllYourCompanions Settings</title>
 </head>
 <body class="settings-page">
   <div id="settings-root"></div>
@@ -19886,8 +19748,8 @@ ${fileShellOpen}
   <main id="messages" class="messages">
     <div class="welcome" id="welcome">
       <span class="welcome-mark" role="img" aria-label="Grok" style="--welcome-mark:url('${resourceUri("grok-icon.svg")}')"></span>
-      <h2>${isCloudEnvironment() ? "AFK Pilot (Cloud)" : "Grok Build (Community)"}</h2>
-      <p class="welcome-byline muted">by Paweł Huryn (<a href="https://www.productcompass.pm/" class="muted-link">The Product Compass</a>)</p>
+      <h2>AllYourCompanions</h2>
+      <p class="welcome-byline muted">Unified AI Companions · Antigravity, Grok, Codex &amp; Claude</p>
       <p id="welcome-version" class="muted welcome-status-busy"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg><span>Starting</span></p>
       <div id="welcome-onboarding"></div>
     </div>

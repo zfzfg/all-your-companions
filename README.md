@@ -1,8 +1,24 @@
+# AllYourCompanions (v0.1.0)
+
+> **AllYourCompanions** is a community fork of **[Grok Build for VS Code (Community)](https://github.com/phuryn/grok-build-vscode)** (upstream release v4.1.8) originally created by **Paweł Huryn** under the Functional Source License 1.1 ([FSL-1.1-MIT](LICENSE)).
+> 
+> **Maintainer:** Collin Lerche (zfzfg) | STERRA ([https://sterra.online](https://sterra.online))
+> 
+> **Equal Multi-Companion Focus:** AllYourCompanions shifts the core focus from primarily Grok to treating **all leading AI coding CLIs equally**:
+> - **Google Antigravity & Gemini** (Gemini 2.5 Pro/Flash, Gemini 3)
+> - **Grok Build** (Grok 4.6, SuperGrok, xAI API)
+> - **OpenAI Codex** (Codex CLI via ACP)
+> - **Anthropic Claude Code** (Claude CLI via ACP)
+> 
+> Provides a unified, standalone multi-session sidebar UI with universal diff review, LaTeX/Mermaid, rich media, and voice control.
+
+---
+
 # Grok Build (Community)
 
-[![License: FSL-1.1-MIT](https://img.shields.io/badge/License-FSL--1.1--MIT-blue.svg)](LICENSE) ![Agents](https://img.shields.io/badge/Agents-Grok%20Build%20%C2%B7%20Codex%20%C2%B7%20Claude%20Code-000000) [![VS Code](https://img.shields.io/badge/VS%20Code-Extension-007ACC?logo=visualstudiocode&logoColor=white)](https://code.visualstudio.com) [![Cursor](https://badgen.net/badge/Cursor/Extension/007ACC)](https://cursor.com) [![Companion](https://img.shields.io/badge/Companion-afkpilot-0E639C)](https://github.com/phuryn/afkpilot) [![The Product Compass](https://img.shields.io/badge/The%20Product%20Compass-productcompass.pm-FF6B35)](https://www.productcompass.pm)
+[![License: FSL-1.1-MIT](https://img.shields.io/badge/License-FSL--1.1--MIT-blue.svg)](LICENSE) ![Agents](https://img.shields.io/badge/Agents-Antigravity%20%C2%B7%20Grok%20%C2%B7%20Codex%20%C2%B7%20Claude-000000) [![VS Code](https://img.shields.io/badge/VS%20Code-Extension-007ACC?logo=visualstudiocode&logoColor=white)](https://code.visualstudio.com) [![Cursor](https://badgen.net/badge/Cursor/Extension/007ACC)](https://cursor.com)
 
-> **GUI for Grok Build CLI (incl. Grok 4.6)** — not affiliated with or endorsed by SpaceXAI (formerly xAI). *Grok*, *Grok Build*, and *xAI* are trademarks of xAI; this project uses those names only to describe what it's compatible with.
+> **GUI for AI Coding Companions** — not affiliated with or endorsed by Google, SpaceXAI / xAI, OpenAI, or Anthropic. All product names and trademarks are property of their respective owners.
 
 Two ways to use the same agent UI on top of the **Grok Build CLI**:
 

@@ -232,7 +232,7 @@ function readPackageMeta(
   } catch {
     // Unreadable metadata must not promote a build to one that trusts its
     // environment. The safe answer to "is this a cloud build" is no.
-    return { version: "0.0.0", id: "PawelHuryn.grok-vscode-phuryn", cloudBuild: false };
+    return { version: "0.0.0", id: "zfzfg.all-your-companions", cloudBuild: false };
   }
 }
 

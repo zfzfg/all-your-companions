@@ -169,11 +169,9 @@ export function desktopUpdateFeedBase(
 
 /** `setFeedURL` payload, or null when this platform has no in-app updater. */
 export function desktopUpdateFeedConfig(
-  platform: NodeJS.Platform | string | null | undefined,
+  _platform: NodeJS.Platform | string | null | undefined,
 ): { provider: "generic"; url: string } | null {
-  const url = desktopUpdateFeedBase(platform);
-  if (!url) return null;
-  return { provider: "generic", url };
+  return null;
 }
 
 export type AppUpdatePhase =
@@ -241,13 +239,12 @@ export function shouldSkipUpdateCheck(state: AppUpdateState): boolean {
 }
 
 /** True when this host should talk to electron-updater (not the notice-only path). */
-export function desktopAutoUpdateEnabled(opts: {
+export function desktopAutoUpdateEnabled(_opts: {
   platform: NodeJS.Platform | string | null | undefined;
   packaged: boolean;
   forceDev?: boolean;
 }): boolean {
-  if (!desktopUpdateFeedConfig(opts.platform)) return false;
-  return !!opts.packaged || !!opts.forceDev;
+  return false;
 }
 
 /** latest-mac.yml from one dual-arch `electron-builder --mac` must list both zips. */

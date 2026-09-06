@@ -161,7 +161,7 @@ export function activate(context: vscode.ExtensionContext): GrokExtensionApi {
   // view, nobody chose it — that is the entire licence the placement correction
   // has to move it, and it evaporates the moment any other subsystem writes.
   const firstEverRun = isFirstEverRun(context.globalState.keys());
-  const output = vscode.window.createOutputChannel("Grok");
+  const output = vscode.window.createOutputChannel("AllYourCompanions");
   const host = createVsCodeHost(output, context);
   const hostContext = createVsCodeHostContext(context);
   const sidebar = new GrokSidebar(hostContext, host);
@@ -263,8 +263,6 @@ export function activate(context: vscode.ExtensionContext): GrokExtensionApi {
     vscode.commands.registerCommand("grok.collapseAllToolDetails", () => sidebar.setAllToolDetails(false)),
     vscode.commands.registerCommand("grok.findInSession", () => sidebar.findInSession()),
     vscode.commands.registerCommand("grok.logout", () => sidebar.logout()),
-    vscode.commands.registerCommand("grok.linkRemote", () => sidebar.linkRemoteDevice()),
-    vscode.commands.registerCommand("grok.unlinkRemote", () => sidebar.unlinkRemoteDevice()),
     vscode.commands.registerCommand("grok.composerForward", () => sidebar.moveComposerCaret("forward")),
     vscode.commands.registerCommand("grok.composerPreviousLine", () => sidebar.moveComposerCaret("previousLine")),
     // Internal debug helper for manually exercising the plan-review card UI

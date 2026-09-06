@@ -1162,8 +1162,7 @@
   // their phone. Local client only (a remote is already remote), and only
   // once this machine is linked; syncRemoteButton flips it live.
   if (remoteBtn) {
-    remoteBtn.innerHTML = ICON.smartphone;
-    remoteBtn.onclick = () => vscode.postMessage({ type: "openRemotePortal", withHint: true });
+    remoteBtn.hidden = true;
   }
   updateSendButton(); // spinner by default — session is starting up (busy+locked)
   gearBtn.innerHTML = ICON.gear;
@@ -3331,33 +3330,6 @@
       `<span class="gear-lead" title="Adds worktrees, thinking traces, and tool details (still off by default).">${ICON.squareChevronRight}<span>Coding</span></span>${state.appPurpose === "coding" ? '<span class="popover-check">✓</span>' : ""}`,
       () => { setAppPurpose("coding"); renderGearMain(); gearPopover.hidden = false; },
     );
-
-    // ── Remote Control ────────────────────────────────────────────────────
-    // Hidden in the browser client: a remote can't (un)link the desk.
-    // `remoteLinked === null` = the host hasn't answered yet: show NOTHING
-    // rather than guessing. Unlink lives only in Settings → Account.
-    if (!IS_REMOTE && state.remoteLinked !== null) {
-      addSection("Remote Control");
-      if (state.remoteLinked) {
-        addGearItem(`<span class="gear-lead">${ICON.smartphone}<span>Continue remotely</span></span>`, () => {
-          vscode.postMessage({ type: "openRemotePortal", withHint: true });
-          closePopovers();
-        });
-        addGearItem(`<span class="gear-lead">${ICON.user}<span>Your account</span></span>`, () => {
-          vscode.postMessage({ type: "openRemotePortal" });
-          closePopovers();
-        });
-      } else {
-        addGearItem(`<span class="gear-lead">${ICON.user}<span>Sign in (link this device)</span></span>`, () => {
-          vscode.postMessage({ type: "remoteSignIn" });
-          closePopovers();
-        });
-        addGearItem(`<span class="gear-lead">${ICON.info}<span>How it works</span></span>`, () => {
-          closePopovers();
-          showRemoteExplainer();
-        });
-      }
-    }
 
     addSection("Settings");
     addGearItem(`<span class="gear-lead">${ICON.gear}<span>Settings</span></span>`, () => openAllSettings());
@@ -14399,7 +14371,7 @@
   }
 
   function syncRemoteButton() {
-    if (remoteBtn) remoteBtn.hidden = IS_REMOTE || !state.remoteLinked;
+    if (remoteBtn) remoteBtn.hidden = true;
   }
 
   // REMOTE ONLY — paint the user's message the instant they send it.

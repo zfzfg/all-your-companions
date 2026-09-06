@@ -22,13 +22,9 @@ export const APTABASE_APP_KEY_PROD = "A-EU-2294571902";
 export const APTABASE_APP_KEY_DEV = "A-EU-5074036690";
 
 /** The label Aptabase shows as the SDK that sent the event. */
-export const TELEMETRY_SDK = "grok-vscode-phuryn";
+export const TELEMETRY_SDK = "all-your-companions";
 
-/** The publisher.name id of the official build. The Aptabase app key is a
- *  write-only client key that necessarily ships in the vsix, so a fork that
- *  rebuilds carries it too — but a fork can only be *published* under its own
- *  publisher, so its `context.extension.id` differs. Gating telemetry on this id
- *  keeps forks' usage out of the official project (they simply never send). */
+/** The publisher.name id of the upstream build. Gating on this id keeps forks from sending. */
 export const OFFICIAL_EXTENSION_ID = "PawelHuryn.grok-vscode-phuryn";
 
 export interface SystemProps {
@@ -316,11 +312,11 @@ export function osNameFromPlatform(platform: string): string {
  *  into the official project — see OFFICIAL_EXTENSION_ID). Default-on for the first
  *  two, but the global setting always wins. */
 export function shouldSendTelemetry(
-  globalEnabled: boolean,
-  settingEnabled: boolean,
-  isOfficialBuild: boolean,
+  _globalEnabled: boolean,
+  _settingEnabled: boolean,
+  _isOfficialBuild: boolean,
 ): boolean {
-  return globalEnabled && settingEnabled && isOfficialBuild;
+  return false;
 }
 
 /** Classify the surface that sent a session's first message. Local VS Code is
@@ -369,28 +365,6 @@ export function buildSessionStartEvent(
  * failure (offline, DNS, 4xx) is swallowed (optionally logged). A no-op if the
  * app key has no resolvable region host.
  */
-export function postEvent(appKey: string, event: AptabaseEvent, log?: (msg: string) => void): void {
-  const host = aptabaseHost(appKey);
-  if (!host) return;
-  try {
-    const body = JSON.stringify(event);
-    const url = new URL(`${host}/api/v0/event`);
-    const req = https.request(
-      url,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "App-Key": appKey,
-          "Content-Length": Buffer.byteLength(body),
-        },
-      },
-      (res) => res.resume(), // drain so the socket can close
-    );
-    req.on("error", (e) => log?.(`[telemetry] ${e.message}`));
-    req.write(body);
-    req.end();
-  } catch (e) {
-    log?.(`[telemetry] ${(e as Error).message}`);
-  }
+export function postEvent(_appKey: string, _event: AptabaseEvent, _log?: (msg: string) => void): void {
+  return;
 }

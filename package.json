@@ -1,12 +1,12 @@
 {
-  "name": "grok-vscode-phuryn",
-  "displayName": "Grok Build for VS Code (Community)",
-  "description": "GUI for Grok Build CLI (incl. Grok 4.6). Remote Control from your phone, voice control, multiple sessions, images and videos, Mermaid diagrams, and LaTeX. Works with SuperGrok, X Premium+, and xAI API key. Fair Source (FSL-1.1-MIT). Not affiliated with or endorsed by SpaceXAI (formerly xAI).",
-  "version": "4.1.8",
-  "publisher": "PawelHuryn",
+  "name": "all-your-companions",
+  "displayName": "AllYourCompanions",
+  "description": "Unified GUI for AI Coding Companions: Google Antigravity, Grok Build, OpenAI Codex, and Claude Code. Multi-session chat, voice control, rich media, and universal diff review. Fork of Grok Build for VS Code (v4.1.8) by Paweł Huryn.",
+  "version": "0.1.0",
+  "publisher": "zfzfg",
   "author": {
-    "name": "Paweł Huryn",
-    "url": "https://www.productcompass.pm"
+    "name": "Collin Lerche (zfzfg) | STERRA",
+    "url": "https://sterra.online"
   },
   "license": "FSL-1.1-MIT",
   "homepage": "https://github.com/phuryn/grok-build-vscode",
@@ -25,10 +25,15 @@
     "Chat"
   ],
   "keywords": [
+    "antigravity",
+    "gemini",
     "grok",
     "grok-build",
-    "xai",
-    "xai-grok",
+    "codex",
+    "claude",
+    "claude-code",
+    "companions",
+    "all-your-companions",
     "acp",
     "acp-client",
     "agent-client-protocol",
@@ -39,7 +44,7 @@
     "tool-calls",
     "sidebar"
   ],
-  "icon": "resources/grok-icon.png",
+  "icon": "resources/AllYourCompanions-LOGO.png",
   "main": "./out/extension.js",
   "activationEvents": [
     "onStartupFinished"
@@ -49,26 +54,26 @@
       "secondarySidebar": [
         {
           "id": "grokSidebar",
-          "title": "Grok",
+          "title": "AllYourCompanions",
           "icon": "resources/grok-icon.svg"
         }
       ],
       "activitybar": [
         {
           "id": "grokPrimary",
-          "title": "Grok",
+          "title": "AllYourCompanions",
           "icon": "resources/grok-icon.svg"
         },
         {
           "id": "grokProjects",
-          "title": "Grok",
+          "title": "Projects",
           "icon": "resources/grok-icon.svg"
         }
       ],
       "panel": [
         {
           "id": "grokPanel",
-          "title": "Grok",
+          "title": "AllYourCompanions",
           "icon": "resources/grok-icon.svg"
         }
       ]
@@ -78,7 +83,7 @@
         {
           "type": "webview",
           "id": "grok.chat",
-          "name": "Grok"
+          "name": "Companions"
         }
       ],
       "grokProjects": [
@@ -92,100 +97,92 @@
     "commands": [
       {
         "command": "grok.open",
-        "title": "Grok: Open"
+        "title": "AllYourCompanions: Open"
       },
       {
         "command": "grok.moveView",
-        "title": "Grok: Move Chat View"
+        "title": "AllYourCompanions: Move Chat View"
       },
       {
         "command": "grok.newSession",
-        "title": "Grok: New Session"
+        "title": "AllYourCompanions: New Session"
       },
       {
         "command": "grok.newWorktreeSession",
-        "title": "Grok: New Worktree Session"
+        "title": "AllYourCompanions: New Worktree Session"
       },
       {
         "command": "grok.applyWorktree",
-        "title": "Grok: Apply Worktree"
+        "title": "AllYourCompanions: Apply Worktree"
       },
       {
         "command": "grok.removeWorktree",
-        "title": "Grok: Remove Worktree"
+        "title": "AllYourCompanions: Remove Worktree"
       },
       {
         "command": "grok.rewind",
-        "title": "Grok: Rewind Conversation"
+        "title": "AllYourCompanions: Rewind Conversation"
       },
       {
         "command": "grok.compact",
-        "title": "Grok: Compact Conversation"
+        "title": "AllYourCompanions: Compact Conversation"
       },
       {
         "command": "grok.pickModel",
-        "title": "Grok: Pick Model"
+        "title": "AllYourCompanions: Pick Model"
       },
       {
         "command": "grok.toggleMode",
-        "title": "Grok: Toggle Plan / Agent Mode"
+        "title": "AllYourCompanions: Toggle Plan / Agent Mode"
       },
       {
         "command": "grok.sendSelection",
-        "title": "Add Selection to Grok"
+        "title": "Add Selection to AllYourCompanions"
       },
       {
         "command": "grok.sendFile",
-        "title": "Grok: Send File"
+        "title": "AllYourCompanions: Send File"
       },
       {
         "command": "grok.insertAtMention",
-        "title": "Grok: Insert @-Mention"
+        "title": "AllYourCompanions: Insert @-Mention"
       },
       {
         "command": "grok.showLogs",
-        "title": "Grok: Show Logs"
+        "title": "AllYourCompanions: Show Logs"
       },
       {
         "command": "grok.settings",
-        "title": "Grok: Settings",
+        "title": "AllYourCompanions: Settings",
         "icon": "$(gear)"
       },
       {
         "command": "grok.expandAllToolDetails",
-        "title": "Grok: Expand All Tool Details (This Session)"
+        "title": "AllYourCompanions: Expand All Tool Details (This Session)"
       },
       {
         "command": "grok.collapseAllToolDetails",
-        "title": "Grok: Collapse All Tool Details (This Session)"
+        "title": "AllYourCompanions: Collapse All Tool Details (This Session)"
       },
       {
         "command": "grok.findInSession",
-        "title": "Grok: Find in Conversation"
+        "title": "AllYourCompanions: Find in Conversation"
       },
       {
         "command": "grok.logout",
-        "title": "Grok: Log Out"
-      },
-      {
-        "command": "grok.linkRemote",
-        "title": "AFK Pilot: Link this device"
-      },
-      {
-        "command": "grok.unlinkRemote",
-        "title": "AFK Pilot: Unlink this device"
+        "title": "AllYourCompanions: Log Out"
       },
       {
         "command": "grok._debugDummyPlan",
-        "title": "Grok: Debug — Show dummy plan card (for testing Approve/Reject/Cancel)"
+        "title": "AllYourCompanions: Debug — Show dummy plan card (for testing Approve/Reject/Cancel)"
       },
       {
         "command": "grok.composerForward",
-        "title": "Grok: Composer — Move Forward"
+        "title": "AllYourCompanions: Composer — Move Forward"
       },
       {
         "command": "grok.composerPreviousLine",
-        "title": "Grok: Composer — Move to Previous Line"
+        "title": "AllYourCompanions: Composer — Move to Previous Line"
       }
     ],
     "keybindings": [
@@ -261,7 +258,7 @@
       ]
     },
     "configuration": {
-      "title": "Grok",
+      "title": "AllYourCompanions",
       "properties": {
         "grok.cliPath": {
           "type": "string",
