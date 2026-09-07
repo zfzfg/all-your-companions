@@ -2049,15 +2049,24 @@
     // Every popover row is a DIV: a <button> here drags in native chrome
     // (background + border) that reads as a stray box in the popover.
     const act = document.createElement("div");
-    act.className = "toolbar-popover-item popover-action context-compact" + (used ? "" : " disabled");
-    act.textContent = "Compact conversation";
-    act.title = used ? "Summarize the conversation so far to free up context" : "Nothing to compact yet";
-    if (used) {
-      act.onclick = (e) => {
-        e.stopPropagation();
-        vscode.postMessage({ type: "send", text: "/compact", bare: true });
-        closePopovers();
-      };
+    if (state.activeProvider === "gemini") {
+      const isHighUsage = pct >= 80 || used >= state.contextWindow;
+      act.className = "toolbar-popover-item context-compact auto-managed";
+      act.textContent = isHighUsage
+        ? "Context probably compacted automatically by now"
+        : "Context managed automatically by Antigravity";
+      act.title = "Antigravity automatically summarizes and compresses long sessions in the background. No manual compaction needed — keep chatting normally.";
+    } else {
+      act.className = "toolbar-popover-item popover-action context-compact" + (used ? "" : " disabled");
+      act.textContent = "Compact conversation";
+      act.title = used ? "Summarize the conversation so far to free up context" : "Nothing to compact yet";
+      if (used) {
+        act.onclick = (e) => {
+          e.stopPropagation();
+          vscode.postMessage({ type: "send", text: "/compact", bare: true });
+          closePopovers();
+        };
+      }
     }
     contextPopover.appendChild(act);
 
@@ -14175,8 +14184,12 @@
     else if (pct > 70) color = "var(--vscode-charts-yellow, #d7ba7d)";
     donutArc.setAttribute("stroke", color);
     donutLabel.textContent = `${toK(used)}/${toK(max)}`;
-    donutLabel.title = `${used.toLocaleString()} / ${max.toLocaleString()} tokens`;
-    donutEl.title = `Context usage — ${used.toLocaleString()} / ${max.toLocaleString()} tokens`;
+    const isGeminiAutoCompacted = state.activeProvider === "gemini" && used >= max;
+    const usageDetail = isGeminiAutoCompacted
+      ? `${used.toLocaleString()} / ${max.toLocaleString()} tokens (automatically compressed in background by Antigravity)`
+      : `${used.toLocaleString()} / ${max.toLocaleString()} tokens`;
+    donutLabel.title = usageDetail;
+    donutEl.title = `Context usage — ${usageDetail}`;
     // Occupancy can move without a contextUsage frame (promptComplete,
     // modelChanged). Re-paint, then re-fetch session/info while the popover
     // is open so the group stays and catches up instead of vanishing.

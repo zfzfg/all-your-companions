@@ -15538,6 +15538,21 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       session.adapterCompactThisTurn = false;
       session.compactUsageArmed = false;
       session.adapterTurnCallUsed = [];
+
+      if (slashCommand === "compact" && session.provider === "gemini") {
+        this.emit(session, {
+          type: "messageChunk",
+          text: "Antigravity manages and compacts context automatically in the background. No manual compaction is needed — you can continue chatting normally.",
+        });
+        if (endTurn(session, turn)) {
+          if (!turnIsInFlight(session)) this.emit(session, { type: "agentEnd" });
+          this.noteLiveTurnEnded(session);
+          if (!turnIsInFlight(session)) this.setStatus(session, "done");
+          this.noteSessionActivity(session);
+        }
+        return;
+      }
+
       // Arm the compact-notification watch BEFORE the prompt: the live
       // auto_compact_completed / auto_compact_failed land DURING this turn.
       if (slashCommand === "compact") {

@@ -1237,7 +1237,7 @@ export function errorDetail(err: any): string {
  */
 export function isRateLimitErrorText(msg: unknown): boolean {
   const s = String(msg ?? "");
-  return /rate.?limit|too many requests|\b429\b|(?:usage|weekly|monthly|daily)\s+limit|spending\s+(?:cap|limit)|free.usage.exhausted/i.test(s);
+  return /rate.?limit|too many requests|\b429\b|(?:usage|weekly|monthly|daily)\s+limit|spending\s+(?:cap|limit)|free.usage.exhausted|resource_exhausted|quota\s*(?:exceeded|metric|limit)/i.test(s);
 }
 
 /**

@@ -257,6 +257,48 @@ describe("AgyAcpAdapterServer", () => {
     server.dispose();
   });
 
+  it("intercepts manual /compact prompt and answers without spawning process", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    let spawnCalled = false;
+
+    const server = new AgyAcpAdapterServer({
+      conversationStorePath: nextStore(),
+      inputStream: input,
+      outputStream: output,
+      spawnFn: () => {
+        spawnCalled = true;
+        return new FakeProcess() as any;
+      },
+    });
+    server.start();
+
+    const messages: any[] = [];
+    output.on("data", (chunk) => {
+      for (const line of chunk.toString().trim().split("\n")) {
+        if (line.trim()) messages.push(JSON.parse(line));
+      }
+    });
+
+    input.write(JSON.stringify({
+      jsonrpc: "2.0",
+      id: 66,
+      method: "session/prompt",
+      params: { prompt: [{ type: "text", text: "/compact" }] },
+    }) + "\n");
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(spawnCalled).toBe(false);
+    const update = messages.find((m) => m.method === "session/update");
+    expect(update).toBeDefined();
+    expect(update.params.update.content.text).toContain("Antigravity automatically manages and compacts context in the background");
+    const res = messages.find((m) => m.id === 66);
+    expect(res).toBeDefined();
+    expect(res.result.stopReason).toBe("end_turn");
+
+    server.dispose();
+  });
+
   it("translates tool step updates to ACP tool_call and tool_call_update", { timeout: 15000 }, async () => {
     const input = new PassThrough();
     const output = new PassThrough();

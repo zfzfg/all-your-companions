@@ -704,6 +704,8 @@ describe("rate-limit classification (#57 — a usage limit is not an auth proble
     expect(isRateLimitErrorText("subscription:free-usage-exhausted: no free usage left")).toBe(true);
     expect(isRateLimitErrorText("You\u{2019}ve hit your spending cap.")).toBe(true);
     expect(isRateLimitErrorText("HTTP 429 Too Many Requests")).toBe(true);
+    expect(isRateLimitErrorText("RESOURCE_EXHAUSTED: Quota exceeded for quota metric")).toBe(true);
+    expect(isRateLimitErrorText("Generative Language API quota limit reached")).toBe(true);
   });
 
   it("isRateLimitErrorText does NOT match auth faults or a context-window overflow", () => {

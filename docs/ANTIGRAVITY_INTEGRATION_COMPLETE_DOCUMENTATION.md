@@ -953,4 +953,36 @@ In Antigravity CLI (`agy.exe` v1.1.26), Gemini models (specifically `gemini-3.8-
 - **Workspace-Level Rules**:
   Dedicated `GEMINI.md` files are maintained in both the workspace root and project root for local adherence.
 
+### 9.6 Context Compaction & Session Limit Management: Background Auto-Compaction vs. Manual `/compact`
+
+#### Background & Cross-Provider Compaction Architecture
+A comprehensive audit across all four supported providers (`grok`, `codex`, `claude`, `gemini`) identified fundamental differences in context compaction models:
+- **Grok**: Uses an active compaction engine in native Rust (`compaction.rs`), emitting live `auto_compact_completed` and compaction status notifications.
+- **Codex**: Delegates to `@agentclientprotocol/codex-acp`, which provides `thread/compact/start` endpoints and tracks context reduction via `_meta.contextCompaction`.
+- **Claude**: Supported by `@agentclientprotocol/claude-agent-acp`, which handles compaction checkpoints via `compact_boundary` items and ACP status text chunks.
+- **Gemini (Google Antigravity)**: Antigravity handles context compaction silently and automatically on the backend/server side during turn evaluation. The headless CLI (`agy.exe`) has no standalone compaction subcommands or manual compaction RPC methods.
+
+#### The Problem
+1. **Manual `/compact` Leakage to LLM**: When a user invoked `/compact` in a Gemini session, the slash command was previously not intercepted for `gemini`, forwarding `/compact` as a raw text prompt to the LLM. This consumed billable prompt tokens, confused the model, and produced an uninformative response followed by a false positive "Compacted." note in the UI.
+2. **Context Limit Warning & Composer Locking**: In standard chat interfaces, reaching high or 100%+ token utilization often locks input fields or warns users to compact before proceeding. Because Antigravity auto-compacts in the background, locking the input or displaying broken manual compact buttons creates unnecessary friction and false alarm.
+
+#### Architectural Remediation
+1. **Non-Blocking Composer & Graceful Overflow**:
+   - The chat composer, input textarea, and submit buttons remain **100% unlocked and active** for Gemini even when context tokens reach or exceed 100% of the session window.
+2. **Context Popover Auto-Compaction Indicator (`media/chat.js` & `media/chat.css`)**:
+   - In `renderContextPopover()`, when `provider === "gemini"`, the popover replaces the manual compact button with an informative `.context-compact.auto-managed` indicator.
+   - **Exceeded / High Context (>= 100%)**: Displays `"Context probably compacted automatically by now"` with a tooltip explaining that Antigravity automatically manages session compaction in the background.
+   - **Normal Context**: Displays `"Context managed automatically by Antigravity"`.
+   - The donut chart title dynamically reflects this auto-compaction behavior at high usage.
+3. **Dual-Layer `/compact` Interception**:
+   - **Client-Side Interception (`src/sidebar.ts`)**: If the user submits `/compact` while in a Gemini session, the sidebar immediately returns early, rendering an informative system message:
+     ```text
+     Gemini manages context compaction automatically in the background. Manual compaction is not required.
+     ```
+     This completely avoids sending a prompt to the LLM and prevents false positive "Compacted." notifications.
+   - **Defense-in-Depth Adapter Interception (`src/agy-acp-adapter.ts`)**: If `/compact` is dispatched directly via JSON-RPC `session/prompt`, the adapter intercepts the prompt block before forwarding to `agy`, returning an informative text explanation and `{ stopReason: "end_turn" }` immediately.
+4. **Quota & Resource Exhaustion Error Recognition (`src/acp-dispatch.ts`)**:
+   - Extended `isRateLimitErrorText` to recognize Gemini/Google Cloud specific quota patterns (`resource_exhausted`, `quota\s*(?:exceeded|metric|limit)`), ensuring rate limits and quota errors are accurately categorized without misleading prompt retries.
+
+
 

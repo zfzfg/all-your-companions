@@ -1353,6 +1353,28 @@ export class AgyAcpAdapterServer {
           }
         }
 
+        if (promptText.trim() === "/compact") {
+          this.sendNotification("session/update", {
+            sessionId: this.sessionId,
+            update: {
+              sessionUpdate: "agent_message_chunk",
+              content: {
+                type: "text",
+                text: "Antigravity automatically manages and compacts context in the background. No manual compaction is needed.",
+              },
+            },
+          });
+          this.sendResponse(id, {
+            stopReason: "end_turn",
+            usage: {
+              inputTokens: 0,
+              outputTokens: 0,
+              totalTokens: 0,
+            },
+          });
+          break;
+        }
+
         if (this.pendingPrompt) {
           // Overwriting it would strand the first request id with no reply ever.
           this.sendError(id, -32603, "A turn is already running in this session");

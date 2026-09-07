@@ -3326,6 +3326,44 @@ describe("context popover (donut click, #39)", () => {
     click(window, act);
     expect(posted).toContainEqual({ type: "send", text: "/compact", bare: true });
   });
+
+  it("Gemini displays auto-managed context notice instead of manual compact button", () => {
+    const { window, doc, posted } = bootWebview();
+    dispatch(window, { type: "initialState", appPurpose: "coding", capabilities: {} } as never);
+    dispatch(window, { type: "session", sessionId: "gem-1", provider: "gemini", currentModelId: "gemini-3.8-flash" });
+    dispatch(window, { type: "contextUsage", used: 100000, window: 1048576 });
+    click(window, $(doc, "donut"));
+    const act = $(doc, "context-popover").querySelector(".context-compact") as HTMLElement;
+    expect(act.textContent).toContain("Context managed automatically by Antigravity");
+    click(window, act);
+    expect(posted).not.toContainEqual({ type: "send", text: "/compact", bare: true });
+  });
+
+  it("Gemini displays 'Context probably compacted automatically by now' on high usage and keeps composer usable", () => {
+    const { window, doc, posted } = bootWebview();
+    dispatch(window, { type: "initialState", appPurpose: "coding", capabilities: {} } as never);
+    dispatch(window, { type: "session", sessionId: "gem-2", provider: "gemini", currentModelId: "gemini-3.8-flash" });
+    dispatch(window, { type: "contextUsage", used: 950000, window: 1048576 });
+    click(window, $(doc, "donut"));
+    const act = $(doc, "context-popover").querySelector(".context-compact") as HTMLElement;
+    expect(act.textContent).toContain("Context probably compacted automatically by now");
+    click(window, act);
+    expect(posted).not.toContainEqual({ type: "send", text: "/compact", bare: true });
+
+    // Composer input remains active and not locked
+    const input = $(doc, "input") as HTMLTextAreaElement;
+    expect(input.disabled).toBe(false);
+  });
+
+  it("Gemini annotates donut title when context exceeds window without locking composer", () => {
+    const { window, doc } = bootWebview();
+    dispatch(window, { type: "initialState", appPurpose: "coding", capabilities: {} } as never);
+    dispatch(window, { type: "session", sessionId: "gem-3", provider: "gemini", currentModelId: "gemini-3.8-flash" });
+    dispatch(window, { type: "contextUsage", used: 1100000, window: 1048576 });
+    expect($(doc, "donut").title).toContain("automatically compressed in background by Antigravity");
+    const input = $(doc, "input") as HTMLTextAreaElement;
+    expect(input.disabled).toBe(false);
+  });
 });
 
 describe("context popover — usage breakdown (#53)", () => {

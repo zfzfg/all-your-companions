@@ -3595,6 +3595,15 @@ textarea#input {
 .popover-action { color: var(--vscode-textLink-foreground); }
 .popover-action.disabled { color: var(--vscode-descriptionForeground); opacity: 0.55; cursor: default; pointer-events: none; }
 .popover-action.disabled:hover { background: transparent; }
+.context-compact.auto-managed {
+  color: var(--vscode-descriptionForeground);
+  font-style: italic;
+  font-size: 12px;
+  cursor: default;
+  user-select: none;
+  opacity: 0.85;
+}
+.context-compact.auto-managed:hover { background: transparent; }
 /* Version & about panel: separators, tagline, repo link, trademark fine print. */
 .popover-sep { height: 0; border-top: 1px solid var(--vscode-editorWidget-border); margin: 4px 0; }
 .popover-muted { color: var(--vscode-descriptionForeground); }
