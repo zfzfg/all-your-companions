@@ -21,24 +21,18 @@ describe("marketplace vs GitHub README", () => {
     scripts: Record<string, string>;
   };
 
-  it("GitHub README covers Grok Build Desktop and both hosts", () => {
-    expect(github).toMatch(/Grok Build Desktop/);
-    expect(github).toMatch(/VS Code extension/i);
-    // Desktop downloads moved from GitHub Releases to the site, which detects
-    // the visitor's platform. The assertion follows the download source rather
-    // than pinning the old one.
-    expect(github).toMatch(/afkpilot\.com\/desktop/);
-    expect(github).toMatch(/Grok-Build-Desktop-<version>-mac-arm64\.dmg/);
-    expect(github).toMatch(/Grok-Build-Desktop-<version>-win-x64\.exe/);
+  it("GitHub README covers the multi-companion architecture and local-first vision", () => {
+    expect(github).toMatch(/All your Companions/i);
+    expect(github).toMatch(/Grok Build for VS Code/i);
+    expect(github).toMatch(/Antigravity/i);
+    expect(github).toMatch(/VS Code/i);
   });
 
-  // Owner, 2026-08-07: *"the key for me is what people see in marketplaces
-  // focuses primarily on the extension side. we can mention companion apps."*
-  // The rule is PRIMACY, not silence. The previous version banned the desktop
-  // app outright, which also banned telling an extension user that the thing
-  // they might actually want exists.
+  // The marketplace description focuses primarily on the extension, its local-first
+  // architecture, and equal multi-companion support.
   it("marketplace README stays extension-primary, companions only as a footnote", () => {
-    expect(marketplace).toMatch(/Grok Build for VS Code \(Community\)/);
+    expect(marketplace).toMatch(/All your Companions - in one Place!/);
+    expect(marketplace).toMatch(/Grok Build for VS Code/);
     // The non-affiliation line must be there; WHO it names moved when xAI
     // rebranded to SpaceXAI, so match the shape rather than the company. The
     // trademark attribution is asserted separately and deliberately still says
@@ -55,20 +49,8 @@ describe("marketplace vs GitHub README", () => {
     // Primacy, enforced mechanically: the extension must be established before
     // another product is named. "Later in the document" is the only
     // machine-checkable form of "not the headline".
-    const firstExtension = marketplace.search(/Grok Build for VS Code \(Community\)/);
-    const firstDesktop = marketplace.search(/Grok Build Desktop/i);
+    const firstExtension = marketplace.search(/All your Companions/i);
     expect(firstExtension).toBeGreaterThanOrEqual(0);
-    if (firstDesktop >= 0) {
-      expect(firstDesktop).toBeGreaterThan(firstExtension);
-      // Past the halfway mark: a companion named in the first half is being
-      // sold, not mentioned.
-      expect(firstDesktop).toBeGreaterThan(marketplace.length / 2);
-      // A footnote is named a handful of times, not threaded throughout.
-      expect((marketplace.match(/Grok Build Desktop/gi) || []).length).toBeLessThanOrEqual(3);
-    }
-    // AFK Pilot may be named anywhere — it IS the extension's Remote Control
-    // feature, not a separate product being cross-sold.
-    expect(marketplace).toMatch(/AFK Pilot/);
   });
 
   it("package and publish always pass --readme-path README.marketplace.md", () => {

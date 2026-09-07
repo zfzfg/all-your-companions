@@ -10,37 +10,36 @@
 > **Unified GUI for AI Coding Companions** — Google Antigravity, Grok Build, OpenAI Codex, and Anthropic Claude Code.
 >
 > **Maintainer:** Collin Lerche (zfzfg) | STERRA ([https://sterra.online](https://sterra.online))  
-> **Community Fork:** Derived from *Grok Build for VS Code* (upstream v4.1.8 by Paweł Huryn).
+> **Community Fork:** An independent community fork of *Grok Build for VS Code* (upstream v4.1.8 by Paweł Huryn), redesigned and expanded as a local-first multi-companion powerhouse.
 
 ---
 
 ## The Vision of All your Companions
 
-### *All your Companions — in one place!*
+### 1. 100% Local-First: Complete Purge of Remote Relay Bloat
+Earlier upstream versions were tethered to an external "AFK Pilot" remote-control relay architecture designed to mirror sessions to mobile devices via external cloud relays (`afkpilot.com`). This introduced network uplinks, external relay server dependencies, device-pairing ceremony, and sleep-prevention locks that compromised privacy and performance.
 
-### 1. Decoupling from Remote Control Bloat
-Earlier versions were tethered to an external "AFK Pilot" remote-control relay architecture designed to mirror sessions to mobile devices via external cloud relays (`afkpilot.com`). While ambitious, this introduced complex network uplinks, external relay server dependencies, device-pairing ceremony, and sleep-prevention locks that distracted from the core editor experience.
-
-**All your Companions consciously departs from remote relay control.**  
-By stripping away the remote-control overhead and dead relay pathways, we refocus 100% of our engineering energy directly where it matters most: **inside VS Code and Cursor**. This delivers:
-- **Zero external relay dependencies:** Fully local-first, blazing-fast startup, and zero outbound socket relay baggage.
+**All your Companions is an independent fork that completely purges remote relay bloat.**  
+By stripping away the remote-control overhead and dead relay pathways, we refocus 100% of our engineering energy directly where it belongs: **inside your local editor**. This delivers:
+- **Zero external relay dependencies:** Fully local-first, instantaneous startup, and zero outbound socket relay baggage.
 - **Maximum local privacy:** Your code, diffs, sessions, and credentials never touch a third-party relay infrastructure.
-- **Massive headroom for editor-native development:** Unlocks freedom to innovate on worktree isolation, multi-companion orchestration, deep editor integration, and real-time diff manipulation.
+- **Massive headroom for editor-native development:** Pure focus on worktree isolation, multi-companion orchestration, deep editor integration, and real-time diff manipulation.
 
-### 2. Equal Multi-Companion Focus
+### 2. Four AI Giants on Equal Footing
 No companion is treated as a second-class citizen. All leading AI coding command-line interfaces sit on equal footing within a single, elegant sidebar:
-- **Google Antigravity CLI (`agy`)**: Native ACP adapter integration bringing Gemini 2.5 Pro, Gemini 2.5 Flash, and Gemini 3 directly into your workflow with zero proxy friction and full reasoning traces.
-- **xAI Grok Build**: Full support for Grok 4.6, SuperGrok, and xAI API.
-- **OpenAI Codex**: High-speed ACP JSON-RPC bridge for Codex CLI.
-- **Anthropic Claude Code**: Deep ACP integration with Claude CLI.
+- **Google Antigravity CLI (`agy`)**: Full integration of Gemini 2.5 Pro, Flash, and Gemini 3. Features multimodal vision handling (pasted screenshots), server-side auto-compaction, Plan Mode review workflows, and zero-flicker background execution on Windows.
+- **xAI Grok Build (`grok`)**: Full support for Grok 4.6, SuperGrok, and xAI API with streaming reasoning traces.
+- **OpenAI Codex CLI (`codex`)**: Direct ACP JSON-RPC bridge with token counting and compaction.
+- **Anthropic Claude Code CLI (`claude`)**: Deep ACP integration with full terminal tooling, checkpointing, and permissions.
 
 Switch models or companion providers on the fly in any conversation — context carries forward seamlessly.
 
-### 3. Universal Diff Inspection & One-Click Revert
+### 3. Universal Diff Inspection & Single-Edit Revert
 Every AI provider proposes code edits differently, but **All your Companions** unifies them under one cohesive, safety-first review system:
+- **Universal Diff Synthesis:** Synthesizes authoritative whole-file diffs across **all four providers** (even Google Antigravity, which emits only raw parameters on the wire).
 - **Native VS Code Diff Preview:** When any companion proposes an edit, click **Open diff →** to inspect full-file changes directly in VS Code's native side-by-side diff editor before granting permission.
 - **Full Control:** Choose *Allow once*, *Always allow for this session*, or *Reject*. Changes hit your disk **only after your explicit approval**.
-- **Cross-Provider Rollback & Revert:** Revert changes per-file or roll back entire conversational turns with safety confirmation snapshots, regardless of whether Antigravity, Grok, Codex, or Claude performed the edits.
+- **One-Click Revert (`revert edit ↶`):** Revert any completed edit directly from the card in chat across Antigravity, Grok, Codex, and Claude.
 
 ---
 
@@ -55,16 +54,36 @@ _Click any feature to expand._
 <details>
 <summary><strong>Permission cards with diff preview & revert</strong> — see every edit in VS Code's native diff before you approve</summary>
 
-When any companion proposes an edit, hit **open diff →** to review the whole file in VS Code's native diff editor, focused on the first changed line, then *Allow once / always* or *Reject*. The file is written only **after** you approve. Completed edits provide an instant one-click **Revert** action.
+When any companion proposes an edit, hit **open diff →** to review the whole file in VS Code's native diff editor, focused on the first changed line, then *Allow once / always* or *Reject*. The file is written only **after** you approve. Completed edits provide an instant one-click **revert edit ↶** action synthesized across all four providers.
 
 ![Permission card with a native VS Code diff preview before approval](docs/screenshots/permission_diff.png)
 
 </details>
 
 <details>
-<summary><strong>Universal Multi-Companion Support</strong> — Antigravity, Grok, Codex & Claude</summary>
+<summary><strong>Universal Multi-Companion Support</strong> — Antigravity (Gemini), Grok, Codex & Claude</summary>
 
-Connect any leading AI companion in **Settings → Providers**. Antigravity CLI (`agy`) brings Gemini 2.5/3 Pro & Flash with full streaming reasoning; Grok Build brings Grok 4.6; Codex and Claude Code run over ACP stdio. Switch companions or models anytime mid-thread.
+Connect any leading AI companion in **Settings → Providers**. Antigravity CLI (`agy`) brings Gemini 2.5/3 Pro & Flash with full streaming reasoning; Grok Build brings Grok 4.6; Codex and Claude Code run over ACP stdio. Switch companions or models anytime mid-thread without losing context.
+
+</details>
+
+<details>
+<summary><strong>Google Antigravity & Gemini Powerhouse</strong> — vision, auto-compaction & plan reviews</summary>
+
+Tailored, battle-tested integration for Google Antigravity:
+- **Multimodal Vision & Screenshot Ingestion:** Paste or drop images directly into the composer. Images are auto-staged to `~/.gemini/staging` and provided to Gemini via native `view_file`, bypassing stream-JSON limits and search loops.
+- **Plan Mode Review Workflow:** Intercepts `implementation_plan.md` generation in Plan mode and surfaces the interactive "Approve & implement" review card (`x.ai/exit_plan_mode`).
+- **Silent Background Auto-Compaction:** Recognizes Antigravity's server-side auto-compaction; the chat composer stays 100% active and unblocked, and the context popover displays an informative auto-managed notice.
+- **Zero-Flicker Windows Execution:** Spawns with `windowsHide: true`, eliminating black console window flashes.
+
+</details>
+
+<details>
+<summary><strong>Context & cost monitoring with provider-aware compaction</strong> — tokens, cost, and auto-managed context</summary>
+
+Click the **context donut** for exact window usage, input/cache/output tokens, and cost tracking. The interface adapts intelligently to each provider: Grok/Codex/Claude trigger manual compaction, while Gemini automatically displays `"Context managed automatically by Antigravity"` or `"Context probably compacted automatically by now"`. The `/compact` slash command is gracefully intercepted for Gemini to prevent wasting prompt tokens.
+
+![The context popover — window usage, billed totals, and Compact](docs/screenshots/context.png)
 
 </details>
 
@@ -94,18 +113,18 @@ The **microphone button** dictates speech via Speech-to-Text — words appear li
 </details>
 
 <details>
-<summary><strong>File chips</strong> — your editor and selection as <code>@file</code> context</summary>
+<summary><strong>File chips & smart relative paths</strong> — your editor and selection as <code>@file</code> context</summary>
 
-The active editor rides along automatically; add more by **typing `@` in the composer**, dragging from the Explorer, right-click → **Companions: Send File**, **Alt+G**, or the **+** button.
+The active editor rides along automatically; add more by **typing `@` in the composer**, dragging from the Explorer, right-click → **Companions: Send File**, **Alt+G**, or the **+** button. Relative file links in chat automatically resolve across parent directories and nested subprojects (`findInSubtree`).
 
 ![Composer with an image, a file, and a selection chip attached](docs/screenshots/file_chips.png)
 
 </details>
 
 <details>
-<summary><strong>Session history</strong> — parallel sessions with status dots; resume, rename, search & clear</summary>
+<summary><strong>Session history & transcript replay</strong> — parallel sessions with status dots; resume, rename, search & clear</summary>
 
-Sessions run in **parallel**: start a new one with **+** while another is mid-turn and switch between them instantly. Each row's **status dot** reflects its state (🔵 Blue: working, 🟡 Yellow: waiting for approval, 🟢 Green: finished unread, 🔴 Red: error unread, ⚪ Gray: idle).
+Sessions run in **parallel**: start a new one with **+** while another is mid-turn and switch between them instantly. Each row's **status dot** reflects its state (🔵 Blue: working, 🟡 Yellow: waiting for approval, 🟢 Green: finished unread, 🔴 Red: error unread, ⚪ Gray: idle). Sessions persist across restarts, restoring conversation IDs and replaying transcripts.
 
 ![Session history dropdown with status dots](docs/screenshots/session_history.png)
 
@@ -135,15 +154,6 @@ LaTeX in answers — inline `\(…\)`, display `\[…\]`, matrices, integrals �
 ` ```mermaid ` blocks render as interactive diagrams matching your VS Code theme.
 
 ![Mermaid diagram rendered inline in the chat](docs/screenshots/v1.4.6%20Mermaid%20diagrams.png)
-
-</details>
-
-<details>
-<summary><strong>Context & cost</strong> — what's in the window, and what turns actually bill</summary>
-
-Click the **context donut** for exact window usage, input/cache/output tokens, and cost tracking.
-
-![The context popover — window usage, billed totals, and Compact](docs/screenshots/context.png)
 
 </details>
 
@@ -225,10 +235,6 @@ Open VS Code Settings and search for `companions` (legacy `grok.*` settings are 
 Building, testing, and contribution conventions live in **[docs/development.md](docs/development.md)**.
 Google Antigravity and Gemini integration architecture: **[docs/ANTIGRAVITY_INTEGRATION_COMPLETE_DOCUMENTATION.md](docs/ANTIGRAVITY_INTEGRATION_COMPLETE_DOCUMENTATION.md)**.
 
-### Grok Build Desktop (Legacy Standalone)
-
-The upstream project provided a standalone Grok Build Desktop client (`afkpilot.com/desktop`, packaged as `Grok-Build-Desktop-<version>-mac-arm64.dmg` or `Grok-Build-Desktop-<version>-win-x64.exe`). For All your Companions, all development focuses on the VS Code extension.
-
 ---
 
 ## Known limits
@@ -242,6 +248,7 @@ The upstream project provided a standalone Grok Build Desktop client (`afkpilot.
 
 **Privacy by design** — no message content, code, or file paths leave your machine through external relays.
 - All AI communication is conducted locally over standard I/O (`stdio`) directly to your locally installed CLIs.
+- Completely free of third-party remote relay servers or external device mirroring dependencies.
 - Anonymous, opt-out telemetry honors VS Code's global `telemetry.telemetryLevel` setting.
 - Voice transcription sends audio strictly to your chosen STT provider.
 
@@ -252,7 +259,8 @@ More details: **[docs/privacy.md](docs/privacy.md)**.
 ## License & attribution
 
 Licensed under the **Functional Source License, Version 1.1, MIT Future License (FSL-1.1-MIT)** — see [LICENSE](LICENSE).  
-Portions derived from *Grok Build for VS Code* (upstream v4.1.8) © Paweł Huryn.  
+This project is an independent community fork derived from *Grok Build for VS Code* (upstream v4.1.8) © Paweł Huryn.  
 Fork maintained and evolved by Collin Lerche (zfzfg) | STERRA ([https://sterra.online](https://sterra.online)).
 
 Not affiliated with or endorsed by SpaceXAI, xAI, Google, Anthropic, or OpenAI. Grok and xAI are trademarks of xAI.
+

@@ -17,7 +17,7 @@ const path = require("node:path");
 
 const root = path.resolve(__dirname, "..");
 
-const header = `# All your Companions - in one Place! (formerly Grok Build for VS Code (Community))
+const header = `# All your Companions - in one Place!
 
 ### *All your Companions — in one place!*
 
@@ -26,7 +26,7 @@ const header = `# All your Companions - in one Place! (formerly Grok Build for V
 > **Unified GUI for AI Coding Companions** — Google Antigravity, Grok Build, OpenAI Codex, and Anthropic Claude Code.
 >
 > **Maintainer:** Collin Lerche (zfzfg) | STERRA ([https://sterra.online](https://sterra.online))  
-> **Community Fork:** Derived from *Grok Build for VS Code* (upstream v4.1.8 by Paweł Huryn).
+> **Community Fork:** An independent community fork of *Grok Build for VS Code* (upstream v4.1.8 by Paweł Huryn), redesigned and expanded as a local-first multi-companion powerhouse.
 
 The unified, local-first GUI for your favorite AI coding companions: **Google Antigravity CLI** (Gemini 2.5/3), **Grok Build** (Grok 4.6), **OpenAI Codex**, and **Claude Code** — right inside your editor. Drop open files in as \`@\`-context, run **parallel sessions**, inspect **native diff previews** with **one-click revert**, keep **resumable chat history**, typeset **LaTeX & Mermaid diagrams**, and dictate by **voice**.
 
@@ -71,12 +71,12 @@ const companionBlock = `## Companion apps
 
 All your Companions is completely standalone and local-first — no external relay servers or third-party cloud brokers required. It natively coordinates:
 
-- **Google Antigravity CLI (\`agy\`)** — Gemini 2.5 Pro/Flash and Gemini 3 with massive context and streaming reasoning traces.
+- **Google Antigravity CLI (\`agy\`)** — Gemini 2.5 Pro/Flash and Gemini 3 with massive context, multimodal vision, and streaming reasoning traces.
 - **xAI Grok Build (\`grok\`)** — Grok 4.6, SuperGrok, and xAI API integration.
 - **OpenAI Codex CLI (\`codex\`)** — High-speed ACP JSON-RPC bridge.
 - **Anthropic Claude Code CLI (\`claude\`)** — Full ACP terminal and session integration.
 
-*(AFK Pilot remote control functions are legacy/deprecated in All your Companions in favor of local-first execution).*
+All companion communication runs 100% locally via stdio directly to your installed CLI binaries.
 
 ---
 
