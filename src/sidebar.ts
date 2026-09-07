@@ -1643,9 +1643,23 @@ export class GrokSidebar {
     ];
   }
 
-  private createProviderBackend(provider: AcpProvider): CodexBackend | ClaudeBackend | GeminiBackend | undefined {
+  private createProviderBackend(provider: AcpProvider, effort?: string): CodexBackend | ClaudeBackend | GeminiBackend | undefined {
     if (provider === "codex") return new CodexBackend();
-    if (provider === "claude") return new ClaudeBackend();
+    if (provider === "claude") {
+      const allowedTools = this.host.getConfiguration("companions").get<string[]>(
+        "claudeAllowedTools",
+        this.host.getConfiguration("grok").get<string[]>("claudeAllowedTools", []),
+      );
+      const customAgents = this.host.getConfiguration("companions").get<unknown>(
+        "claudeCustomAgents",
+        this.host.getConfiguration("grok").get<unknown>("claudeCustomAgents", undefined),
+      );
+      return new ClaudeBackend({
+        allowedTools: Array.isArray(allowedTools) && allowedTools.length > 0 ? allowedTools : undefined,
+        customAgents: customAgents ? customAgents : undefined,
+        effort: effort || undefined,
+      });
+    }
     if (provider === "gemini") return new GeminiBackend();
     return undefined;
   }
@@ -8952,8 +8966,12 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
   private async persistEffort(provider: AcpProvider, level: string): Promise<void> {
     const cfg = this.host.getConfiguration("grok");
     const next = withRememberedEffort(cfg.get<EffortPrefs>("defaultEffortByProvider", {}), provider, level);
-    await cfg.update("defaultEffortByProvider", next, "global");
-    if (provider === "grok") await cfg.update("defaultEffort", level, "global");
+    try {
+      await cfg.update("defaultEffortByProvider", next, "global");
+      if (provider === "grok") await cfg.update("defaultEffort", level, "global");
+    } catch {
+      // Best-effort persistence: a host settings write failure should not break the session effort switch
+    }
   }
 
   /** Confirm a restart for a setting that only applies on a fresh session
@@ -9429,7 +9447,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       mcpServers: () => this.hostMcpServersFor(session),
       ...(session.provider === "grok"
         ? { grokVersion: grokHandshakeVersion, grokVersionVerified }
-        : { backend: this.createProviderBackend(session.provider) }),
+        : { backend: this.createProviderBackend(session.provider, effort) }),
     });
     session.client = client;
     // A replacement process may have gained the capability after a CLI update.

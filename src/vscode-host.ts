@@ -115,8 +115,16 @@ function wrapDualConfiguration(
       }
       return primaryCfg.get<T>(section) ?? fallbackCfg.get<T>(section);
     },
-    update(section, value, target) {
-      return primaryCfg.update(section, value, toVsCodeTarget(target));
+    async update(section, value, target): Promise<void> {
+      try {
+        await primaryCfg.update(section, value, toVsCodeTarget(target));
+      } catch (err) {
+        try {
+          await fallbackCfg.update(section, value, toVsCodeTarget(target));
+        } catch {
+          throw err;
+        }
+      }
     },
     inspect<T>(section: string): ConfigInspect<T> | undefined {
       const rawPrimary = primaryCfg.inspect<T>(section);

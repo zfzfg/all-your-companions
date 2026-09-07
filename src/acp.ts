@@ -76,7 +76,7 @@ import {
   type ThumbsRating,
 } from "./feedback";
 
-export type EffortLevel = "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
+export type EffortLevel = "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultracode";
 
 export type PromptContentBlock =
   | { type: "text"; text: string }
@@ -151,6 +151,10 @@ export interface AcpClientOptions {
    * grok rejects session/new without it.
    */
   mcpServers?: AcpMcpStdioServer[] | (() => AcpMcpStdioServer[] | Promise<AcpMcpStdioServer[]>);
+  /**
+   * Optional custom session metadata passed as `_meta` on `session/new` and `session/load`.
+   */
+  sessionMeta?: Record<string, unknown> | (() => Record<string, unknown> | Promise<Record<string, unknown>>);
 }
 
 export interface ModelInfo {
@@ -481,10 +485,32 @@ export class AcpClient extends EventEmitter {
     return Array.isArray(value) ? value : [];
   }
 
+  private async resolveSessionMeta(): Promise<Record<string, unknown> | undefined> {
+    const backendMeta = this.backend.sessionNewMeta ? this.backend.sessionNewMeta(this.opts.cwd) : undefined;
+    const optMeta = typeof this.opts.sessionMeta === "function"
+      ? await this.opts.sessionMeta()
+      : this.opts.sessionMeta;
+    if (!backendMeta && !optMeta) return undefined;
+    const merged: Record<string, any> = { ...backendMeta, ...optMeta };
+    if (backendMeta && typeof (backendMeta as any).claudeCode === "object" && optMeta && typeof (optMeta as any).claudeCode === "object") {
+      merged.claudeCode = {
+        ...(backendMeta as any).claudeCode,
+        ...(optMeta as any).claudeCode,
+        options: {
+          ...((backendMeta as any).claudeCode?.options || {}),
+          ...((optMeta as any).claudeCode?.options || {}),
+        },
+      };
+    }
+    return merged;
+  }
+
   async newSession(modelId?: string): Promise<{ sessionId: string }> {
+    const meta = await this.resolveSessionMeta();
     const raw = await this.request("session/new", {
       cwd: this.opts.cwd,
       mcpServers: await this.mcpServersForSession(),
+      ...(meta ? { _meta: meta } : {}),
     });
     const res = this.backend.normalizeSessionResponse(raw);
     this.sessionId = res.sessionId;
@@ -531,10 +557,12 @@ export class AcpClient extends EventEmitter {
   }
 
   async loadSession(sessionId: string, modelId?: string): Promise<{ sessionId: string }> {
+    const meta = await this.resolveSessionMeta();
     const raw = await this.request("session/load", {
       sessionId,
       cwd: this.opts.cwd,
       mcpServers: await this.mcpServersForSession(),
+      ...(meta ? { _meta: meta } : {}),
     });
     const res = this.backend.normalizeSessionResponse(raw);
     this.sessionId = sessionId;

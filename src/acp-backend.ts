@@ -79,4 +79,5 @@ export interface AcpBackend {
     platform: NodeJS.Platform,
   ): Promise<BackendSessionListResult>;
   isCredentialError(error: unknown): boolean;
+  sessionNewMeta?(cwd: string): Record<string, unknown> | undefined;
 }

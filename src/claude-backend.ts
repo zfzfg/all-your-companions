@@ -62,6 +62,9 @@ export function contextWindowForClaudeModel(modelId?: string, name?: string, des
   return 1_000_000;
 }
 
+/** Canonical 6-level reasoning effort ladder for Claude Code. */
+export const CLAUDE_EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max", "ultracode"] as const;
+
 /** session/new returns configOptions, not the models envelope the host picker reads. */
 export function modelsFromClaudeConfigOptions(configOptions: any): { currentModelId?: string; availableModels: any[] } {
   const options = Array.isArray(configOptions) ? configOptions : [];
@@ -403,7 +406,10 @@ export interface ClaudeBackendOptions {
   adapterPath?: string;
   nodePath?: string;
   allowedTools?: string[];
+  disallowedTools?: string[];
   customAgents?: unknown;
+  extraArgs?: Record<string, string>;
+  effort?: string;
   home?: string;
 }
 
@@ -417,6 +423,50 @@ export class ClaudeBackend implements AcpBackend {
   private readonly toolDiffsById = new Map<string, AcpDiffBlock>();
 
   constructor(private readonly options: ClaudeBackendOptions = {}) {}
+
+  sessionNewMeta?(cwd: string): Record<string, unknown> | undefined {
+    const options: Record<string, unknown> = {};
+    if (this.options.allowedTools && this.options.allowedTools.length > 0) {
+      // Whitelist of tools: replaces the default tool preset in claudeCode completely
+      options.tools = [...this.options.allowedTools];
+    }
+    if (this.options.disallowedTools && this.options.disallowedTools.length > 0) {
+      options.disallowedTools = [...this.options.disallowedTools];
+    }
+    if (this.options.customAgents) {
+      if (typeof this.options.customAgents === "string") {
+        const trimmed = this.options.customAgents.trim();
+        if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+          try {
+            options.agents = JSON.parse(trimmed);
+          } catch {
+            options.agent = trimmed;
+          }
+        } else if (trimmed) {
+          options.agent = trimmed;
+        }
+      } else if (typeof this.options.customAgents === "object") {
+        options.agents = this.options.customAgents;
+      }
+    }
+    if (this.options.extraArgs && Object.keys(this.options.extraArgs).length > 0) {
+      options.extraArgs = { ...this.options.extraArgs };
+    }
+    if (this.options.effort) {
+      if (this.options.effort === "ultracode") {
+        options.effortLevel = "xhigh";
+        options.ultracode = true;
+      } else {
+        options.effortLevel = this.options.effort;
+      }
+    }
+    if (Object.keys(options).length === 0) return undefined;
+    return {
+      claudeCode: {
+        options,
+      },
+    };
+  }
 
   private adapterPath(): string {
     if (this.options.adapterPath) return this.options.adapterPath;
@@ -441,16 +491,6 @@ export class ClaudeBackend implements AcpBackend {
         // for the SDK's optional native package, which we do not ship.
         CLAUDE_CODE_EXECUTABLE: options.cliPath,
         ELECTRON_RUN_AS_NODE: "1",
-        ...(this.options.allowedTools && this.options.allowedTools.length > 0
-          ? { CLAUDE_ALLOWED_TOOLS: this.options.allowedTools.join(",") }
-          : {}),
-        ...(this.options.customAgents
-          ? {
-              CLAUDE_CUSTOM_AGENTS: typeof this.options.customAgents === "string"
-                ? this.options.customAgents
-                : JSON.stringify(this.options.customAgents),
-            }
-          : {}),
       },
       shell: grokCliNeedsShell(command),
     };

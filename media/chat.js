@@ -340,7 +340,9 @@
 
   // Canonical low→high ORDER for known effort ids, and the FALLBACK ladder when a
   // model advertises no menu (`max` is not a real grok level — see #3/#4).
-  const EFFORT_LEVELS = ["none", "minimal", "low", "medium", "high", "xhigh"];
+  const GROK_EFFORT_LEVELS = ["none", "minimal", "low", "medium", "high", "xhigh"];
+  const CLAUDE_EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max", "ultracode"];
+  const EFFORT_LEVELS = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultracode"];
   const GROK_ACTIVITY_VERB = "Grokking";
   const CODEX_ACTIVITY_VERB = "Opening AI";
   const CLAUDE_ACTIVITY_VERB = "Clauding";
@@ -358,6 +360,16 @@
     medium: "Medium — balanced",
     high: "High — deeper reasoning",
     xhigh: "XHigh — deepest reasoning, slowest",
+    max: "Max — maximum reasoning effort",
+    ultracode: "Ultracode — xHigh + workflows",
+  };
+  const CLAUDE_EFFORT_TOOLTIPS = {
+    low: "Low — fast, lightweight reasoning",
+    medium: "Medium — balanced",
+    high: "High — deeper reasoning",
+    xhigh: "Extra High — deepest reasoning, slowest",
+    max: "Max — maximum reasoning effort",
+    ultracode: "Ultracode — xHigh + workflows",
   };
 
   // The effort levels the gear picker OFFERS: the ACTIVE model's advertised menu
@@ -369,13 +381,21 @@
   // low/medium/high). The advertised list rides in state.availableModels, which
   // is our per-session cache; the picker is locked until that's loaded anyway.
   function effortLevelsForModel() {
+    if (state.activeProvider === "claude") {
+      const m = (state.availableModels || []).find((x) => x && x.modelId === state.currentModelId && (!x.provider || x.provider === state.activeProvider));
+      const adv = m && Array.isArray(m.reasoningEfforts)
+        ? m.reasoningEfforts.filter((v) => typeof v === "string" && v)
+        : [];
+      const extra = adv.filter((id) => !CLAUDE_EFFORT_LEVELS.includes(id));
+      return [...CLAUDE_EFFORT_LEVELS, ...extra];
+    }
     const m = (state.availableModels || []).find((x) => x && x.modelId === state.currentModelId && (!x.provider || x.provider === state.activeProvider));
     const adv = m && Array.isArray(m.reasoningEfforts)
       ? m.reasoningEfforts.filter((v) => typeof v === "string" && v)
       : [];
-    if (!adv.length) return EFFORT_LEVELS.slice();
-    const known = EFFORT_LEVELS.filter((id) => adv.includes(id));
-    const extra = adv.filter((id) => !EFFORT_LEVELS.includes(id)); // unknown advertised → keep as given
+    if (!adv.length) return GROK_EFFORT_LEVELS.slice();
+    const known = GROK_EFFORT_LEVELS.filter((id) => adv.includes(id));
+    const extra = adv.filter((id) => !GROK_EFFORT_LEVELS.includes(id)); // unknown advertised → keep as given
     return [...known, ...extra];
   }
 
@@ -3259,9 +3279,10 @@
         dot.className = "effort-dot" + (i <= currentIdx ? " active" : "") + (settingsLocked ? " disabled" : "");
         // Render the dot as a CSS-shaped span (see chat.css). Avoids the classic
         // ● vs ○ Unicode size mismatch where the empty glyph is visibly larger.
+        const tooltips = state.activeProvider === "claude" ? CLAUDE_EFFORT_TOOLTIPS : EFFORT_TOOLTIPS;
         dot.title = settingsLocked
           ? "Available once the session is ready"
-          : (EFFORT_TOOLTIPS[id] || capitalize(id));
+          : (tooltips[id] || capitalize(id));
         if (!settingsLocked) dot.onclick = (e) => {
           e.stopPropagation();
           state.effort = state.effort === id ? "" : id;

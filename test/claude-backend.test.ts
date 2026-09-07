@@ -18,6 +18,7 @@ import {
   readNativeClaudeProjectsSessions,
   resolveClaudeAgentAcpAdapter,
 } from "../src/claude-backend";
+import { AcpClient } from "../src/acp";
 
 describe("Claude adapter spawn", () => {
   it("runs Electron as Node and points the SDK at the user's Claude CLI", () => {
@@ -370,20 +371,36 @@ describe("Claude native sessions and options", () => {
     fs.rmSync(tempHome, { recursive: true, force: true });
   });
 
-  it("passes allowedTools and customAgents through to spawn env", () => {
+  it("generates _meta.claudeCode.options with tools, disallowedTools, and agents in sessionNewMeta", () => {
     const backend = new ClaudeBackend({
       adapterPath: "adapter.js",
       nodePath: "electron.exe",
       allowedTools: ["Read", "Grep", "Glob"],
+      disallowedTools: ["Bash"],
       customAgents: { custom: "agent" },
     });
-    const spec = backend.spawn({
-      cliPath: "claude.exe",
-      cwd: "C:\\repo",
-      env: {},
+    const meta = backend.sessionNewMeta?.("C:\\repo");
+    expect(meta).toEqual({
+      claudeCode: {
+        options: {
+          tools: ["Read", "Grep", "Glob"],
+          disallowedTools: ["Bash"],
+          agents: { custom: "agent" },
+        },
+      },
     });
-    expect(spec.env?.CLAUDE_ALLOWED_TOOLS).toBe("Read,Grep,Glob");
-    expect(spec.env?.CLAUDE_CUSTOM_AGENTS).toBe(JSON.stringify({ custom: "agent" }));
+
+    const backendNamedAgent = new ClaudeBackend({
+      customAgents: "my-custom-agent",
+    });
+    const namedMeta = backendNamedAgent.sessionNewMeta?.("C:\\repo");
+    expect(namedMeta).toEqual({
+      claudeCode: {
+        options: {
+          agent: "my-custom-agent",
+        },
+      },
+    });
   });
 
   it("falls back to native sessions when session/list fails", async () => {
@@ -419,6 +436,44 @@ describe("Claude native sessions and options", () => {
       process.env.USERPROFILE = prevUserProfile;
       fs.rmSync(tempHome, { recursive: true, force: true });
     }
+  });
+
+  it("AcpClient forwards _meta.claudeCode.options from ClaudeBackend on newSession", async () => {
+    const backend = new ClaudeBackend({
+      allowedTools: ["Read", "Edit"],
+      customAgents: "my-worker",
+    });
+
+    const recordedRequests: Array<{ method: string; params: any }> = [];
+    const client = new AcpClient({
+      cliPath: "claude.exe",
+      cwd: "C:\\repo",
+      backend,
+      env: {},
+    });
+
+    (client as any).request = async (method: string, params: any) => {
+      recordedRequests.push({ method, params });
+      if (method === "session/new") {
+        return {
+          sessionId: "sess_123",
+          models: { currentModelId: "claude-3-7-sonnet", availableModels: [] },
+        };
+      }
+      return {};
+    };
+
+    await client.newSession();
+    expect(recordedRequests).toHaveLength(1);
+    expect(recordedRequests[0].method).toBe("session/new");
+    expect(recordedRequests[0].params._meta).toEqual({
+      claudeCode: {
+        options: {
+          tools: ["Read", "Edit"],
+          agent: "my-worker",
+        },
+      },
+    });
   });
 });
 

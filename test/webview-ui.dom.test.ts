@@ -1469,6 +1469,24 @@ describe("effort picker uses the model's advertised levels (not a hardcoded set)
     expect(openEffortDots(h)).toHaveLength(6);
   });
 
+  it("shows the full 6-stage Claude ladder (Low -> Medium -> High -> Extra High -> Max -> Ultracode) for claude", () => {
+    const h = bootWebview();
+    dispatch(h.window, {
+      type: "session", sessionId: "s1", currentModelId: "claude-3-7-sonnet", provider: "claude",
+      models: [{ modelId: "claude-3-7-sonnet", name: "Claude 3.7 Sonnet", provider: "claude" }],
+    });
+    const dots = openEffortDots(h);
+    expect(dots).toHaveLength(6);
+    expect(dots.map((d) => d.title)).toEqual([
+      "Low — fast, lightweight reasoning",
+      "Medium — balanced",
+      "High — deeper reasoning",
+      "Extra High — deepest reasoning, slowest",
+      "Max — maximum reasoning effort",
+      "Ultracode — xHigh + workflows",
+    ]);
+  });
+
   it("shows a Loading… model + 5 neutral placeholder dots before the session's model info arrives", () => {
     const h = bootWebview();
     // no `session` message yet → no model / effort menu known

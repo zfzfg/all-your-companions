@@ -466,10 +466,20 @@
             "low",
             "medium",
             "high",
-            "xhigh"
+            "xhigh",
+            "max",
+            "ultracode"
           ],
           "default": "",
           "description": "Reasoning effort passed to companion stdio."
+        },
+        "companions.defaultEffortByProvider": {
+          "type": "object",
+          "default": {},
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Reasoning effort remembered per agent (grok, claude, codex, gemini). Updated automatically when you change the effort in a conversation. `companions.defaultEffort` is the fallback for agents with no entry here."
         },
         "companions.includeActiveFileByDefault": {
           "type": "boolean",
@@ -540,12 +550,12 @@
             "type": "string"
           },
           "default": [],
-          "description": "Allowed tools whitelist for Claude Code."
+          "description": "Explicit whitelist of tools for Claude Code. Replaces the default tool preset completely (sets _meta.claudeCode.options.tools). Leave empty to use Claude Code's full default preset."
         },
         "companions.claudeCustomAgents": {
           "type": "string",
           "default": "",
-          "description": "Optional custom agent configuration or path for Claude Code."
+          "description": "Optional custom agent configuration (JSON object) or agent name for Claude Code (sets _meta.claudeCode.options.agents or .agent)."
         },
         "grok.cliPath": {
           "type": "string",
@@ -625,7 +635,9 @@
             "low",
             "medium",
             "high",
-            "xhigh"
+            "xhigh",
+            "max",
+            "ultracode"
           ],
           "enumDescriptions": [
             "CLI default (no flag passed to grok agent stdio)",
@@ -634,7 +646,9 @@
             "Low — faster, lighter reasoning",
             "Medium",
             "High",
-            "XHigh — deepest reasoning, slowest"
+            "XHigh — deepest reasoning, slowest",
+            "Max — maximum reasoning effort",
+            "Ultracode — xHigh + workflows"
           ],
           "default": "",
           "description": "Reasoning effort passed as --reasoning-effort to grok agent stdio. Values match the grok CLI's accepted set (none, minimal, low, medium, high, xhigh). Applies live on recent CLIs (grok 0.2.101+); older CLIs, and resetting to the model default, restart the session."
@@ -771,12 +785,12 @@
             "type": "string"
           },
           "default": [],
-          "description": "Allowed tools whitelist for Claude Code."
+          "description": "Explicit whitelist of tools for Claude Code. Replaces the default tool preset completely (sets _meta.claudeCode.options.tools). Leave empty to use Claude Code's full default preset."
         },
         "grok.claudeCustomAgents": {
           "type": "string",
           "default": "",
-          "description": "Optional custom agent configuration or path for Claude Code."
+          "description": "Optional custom agent configuration (JSON object) or agent name for Claude Code (sets _meta.claudeCode.options.agents or .agent)."
         }
       }
     }
