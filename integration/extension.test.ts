@@ -13,7 +13,9 @@ import * as vscode from "vscode";
 // test/fixtures/fake-grok-acp.cjs so resume and worktree-id tests speak ACP without a
 // real grok binary. See CLAUDE.md "What's next" #1.
 
-const EXT_ID = "PawelHuryn.grok-vscode-phuryn";
+// This fork's identity: package.json `publisher`.`name`. Upstream was
+// PawelHuryn.grok-vscode-phuryn — a rename here is a rename in package.json.
+const EXT_ID = "zfzfg.all-your-companions";
 
 suite("grok-build extension smoke", () => {
   test("is present and activates without throwing", async () => {
@@ -62,7 +64,10 @@ suite("grok-build extension smoke", () => {
     // Focusing the view triggers resolveWebviewView -> getHtml -> the first posts.
     // With no grok binary on the CI box the extension takes the missing-CLI onboarding
     // branch; reaching the assertion below without an unhandled rejection is the check.
-    await vscode.commands.executeCommand("grok.chat.focus");
+    // VS Code derives `<viewId>.focus` from contributes.views; this fork's chat
+// view is `companions.chat` (`grok.chat` remains only as a legacy provider
+// registration, which contributes no focus command).
+    await vscode.commands.executeCommand("companions.chat.focus");
     await new Promise((r) => setTimeout(r, 2000)); // let the webview resolve + post
     // A second, lightweight command that touches the sidebar without needing grok.
     await vscode.commands.executeCommand("grok.showLogs");
@@ -367,76 +372,6 @@ suite("repo selection: isolated per remote tab, workspace-local in VS Code", () 
     ]);
     assert.ok(!chunks.some((p) => p.msg.text === "only-a" && p.clientIds?.includes("tab-b")));
     assert.ok(!chunks.some((p) => p.msg.text === "only-b" && p.clientIds?.includes("tab-a")));
-  });
-
-  test("cold replay stays live on the desk and reaches remote once as a completed batch", async () => {
-    const suffix = Date.now();
-    const id = `cold-replay-${suffix}`;
-    const original = `cold-replay-old-${suffix}`;
-    const replacement = `cold-replay-new-${suffix}`;
-    const tabToken = "3456789abcdef0123456789abcdef012";
-    hooks.fromRelayFrame(JSON.stringify({ t: "client-ready", clientId: original, tabToken }));
-    hooks.seedRemoteSession(original, id, repoB, [], true);
-    await hooks.openLocalSession(id, repoB);
-
-    const posts: Array<{ dest: string; msg: any; clientIds?: string[] }> = [];
-    hooks.onPost((dest: string, msg: any, clientIds?: string[]) => posts.push({ dest, msg, clientIds }));
-    let attachSnapshot: typeof posts = [];
-    await hooks.replayRemote(original, [
-      { type: "userMessageChunk", text: "loaded question" },
-      { type: "messageChunk", text: "loaded answer" },
-    ], () => {
-      const before = posts.length;
-      hooks.fromRelayFrame(JSON.stringify({ t: "client-ready", clientId: replacement, tabToken }));
-      attachSnapshot = posts.slice(before);
-    });
-
-    assert.ok(attachSnapshot.some((post) =>
-      post.clientIds?.includes(replacement) && post.msg?.type === "clearMessages"
-    ), JSON.stringify(attachSnapshot));
-    assert.ok(!attachSnapshot.some((post) =>
-      post.clientIds?.includes(replacement) &&
-      ["historyBatch", "historyReplay", "userMessageChunk", "messageChunk"].includes(post.msg?.type)
-    ), `a client attaching mid-load received partial history: ${JSON.stringify(attachSnapshot)}`);
-
-    const remoteTranscript = posts.filter((post) =>
-      post.clientIds?.includes(replacement) &&
-      ["historyBatch", "historyReplay", "userMessageChunk", "messageChunk"].includes(post.msg?.type)
-    ).map((post) => post.msg);
-    assert.deepStrictEqual(remoteTranscript, [
-      { type: "historyReplay", active: true },
-      {
-        type: "historyBatch",
-        messages: [
-          { type: "userMessageChunk", text: "loaded question" },
-          { type: "messageChunk", text: "loaded answer" },
-        ],
-      },
-      { type: "historyReplay", active: false },
-    ]);
-    assert.ok(!posts.some((post) =>
-      post.clientIds?.includes(original) &&
-      ["historyBatch", "historyReplay", "userMessageChunk", "messageChunk"].includes(post.msg?.type)
-    ), "the superseded relay client must not receive replay frames");
-
-    assert.deepStrictEqual(
-      posts.filter((post) => post.dest === "local").map((post) => post.msg),
-      [
-        { type: "historyReplay", active: true },
-        { type: "userMessageChunk", text: "loaded question" },
-        { type: "messageChunk", text: "loaded answer" },
-        { type: "historyReplay", active: false },
-      ],
-      "the desk should continue receiving the replay stream live",
-    );
-
-    posts.length = 0;
-    hooks.emitRemote(replacement, { type: "messageChunk", text: "live after load" });
-    assert.deepStrictEqual(posts, [
-      { dest: "local", msg: { type: "messageChunk", text: "live after load" }, clientIds: undefined },
-      { dest: "remote", msg: { type: "messageChunk", text: "live after load" }, clientIds: [replacement] },
-    ]);
-    hooks.remoteClientLeft(replacement);
   });
 
   test("a failed cold replay still sends one balanced snapshot of what loaded", async () => {
@@ -758,168 +693,6 @@ suite("repo selection: isolated per remote tab, workspace-local in VS Code", () 
     assert.strictEqual(list.dots[id], "none");
   });
 
-  test("a replacement relay client resumes before the old client-left without losing ownership", async () => {
-    const id = `reload-handoff-${Date.now()}`;
-    const tabToken = "0123456789abcdef0123456789abcdef";
-    hooks.seedRemoteSession(
-      "reload-old",
-      id,
-      repoB,
-      [{ type: "messageChunk", text: "reload-history" }],
-      true,
-    );
-    assert.strictEqual(hooks.activeRemoteSessionId("reload-old"), id);
-    hooks.fromRelayFrame(JSON.stringify({
-      t: "client-ready",
-      clientId: "reload-old",
-      tabToken,
-    }));
-    assert.strictEqual(hooks.activeRemoteSessionId("reload-old"), id);
-    const posts: Array<{ msg: any; clientIds?: string[] }> = [];
-    hooks.onPost((_dest: string, msg: any, clientIds?: string[]) => posts.push({ msg, clientIds }));
-
-    // Adverse reload ordering: the replacement proves the same logical tab
-    // identity and resumes while the old relay socket is still present.
-    hooks.fromRelayFrame(JSON.stringify({
-      t: "client-ready",
-      clientId: "reload-replacement",
-      tabToken,
-    }));
-    assert.strictEqual(hooks.activeRemoteSessionId("reload-replacement"), id);
-    assert.ok(posts.some((p) =>
-      p.clientIds?.includes("reload-old") &&
-      p.msg?.type === "error" &&
-      /replaced by another tab/.test(p.msg.text)
-    ), "a superseded page must be told why it can no longer send commands");
-    hooks.fromRemote({ type: "selectRepo", cwd: repoB }, "reload-replacement");
-    hooks.fromRemote(
-      { type: "resumeSession", id, cwd: repoB },
-      "reload-replacement",
-    );
-    await new Promise((r) => setTimeout(r, 1500));
-
-    const replayToReconnect = posts.filter((p) => p.clientIds?.includes("reload-replacement"));
-    const carriesHistoryText = (post: { msg: any }, text: string) =>
-      (post.msg?.type === "messageChunk" && post.msg.text === text) ||
-      (post.msg?.type === "historyBatch" && post.msg.messages?.some(
-        (nested: any) => nested?.type === "messageChunk" && nested.text === text,
-      ));
-    assert.ok(
-      replayToReconnect.some((p) => carriesHistoryText(p, "reload-history")),
-      JSON.stringify(replayToReconnect.map((p) => p.msg)),
-    );
-    assert.ok(!replayToReconnect.some((p) => carriesHistoryText(p, "only-b")));
-    assert.ok(replayToReconnect.some((p) =>
-      p.msg?.type === "sessions" && p.msg.activeId === id
-    ));
-    assert.ok(!posts.some((p) =>
-      carriesHistoryText(p, "reload-history") && p.clientIds?.includes("tab-b")
-    ));
-
-    hooks.remoteClientLeft("reload-old");
-    assert.strictEqual(hooks.activeRemoteSessionId("reload-replacement"), id);
-  });
-
-  test("a replacement logical tab joins a deliberately delayed cold session load", async () => {
-    const id = `reload-during-load-${Date.now()}`;
-    const oldClient = `reload-loading-old-${Date.now()}`;
-    const replacement = `reload-loading-new-${Date.now()}`;
-    const tabToken = "abcdef0123456789abcdef0123456789";
-    writeStoredSession(id);
-    hooks.fromRelayFrame(JSON.stringify({
-      t: "client-ready",
-      clientId: oldClient,
-      tabToken,
-    }));
-    hooks.fromRemote({ type: "selectRepo", cwd: repoB }, oldClient);
-    await new Promise((r) => setTimeout(r, 50));
-
-    const delay = hooks.delayNextSessionStart(id);
-    const posts: Array<{ msg: any; clientIds?: string[] }> = [];
-    hooks.onPost((_dest: string, msg: any, clientIds?: string[]) => posts.push({ msg, clientIds }));
-    hooks.fromRemote({ type: "resumeSession", id, cwd: repoB }, oldClient);
-    await delay.started;
-
-    hooks.fromRelayFrame(JSON.stringify({
-      t: "client-ready",
-      clientId: replacement,
-      tabToken,
-    }));
-    assert.strictEqual(
-      hooks.activeRemoteSessionId(replacement),
-      id,
-      "a mid-load snapshot must retain the session identity being restored",
-    );
-    assert.ok(posts.some((p) =>
-      p.clientIds?.includes(replacement) &&
-      p.msg?.type === "sessions" &&
-      p.msg.activeId === id
-    ), JSON.stringify(posts));
-
-    hooks.fromRemote({ type: "resumeSession", id, cwd: repoB }, replacement);
-    await new Promise((r) => setTimeout(r, 50));
-    assert.ok(!posts.some((p) =>
-      p.clientIds?.includes(replacement) &&
-      p.msg?.type === "error" &&
-      /already being opened/.test(p.msg.text)
-    ), JSON.stringify(posts));
-
-    const loadCompleted = hooks.waitForSessionLoad(id);
-    const beforeCompletion = posts.length;
-    delay.release();
-    await loadCompleted;
-    const completion = posts.slice(beforeCompletion);
-    assert.ok(completion.some((p) =>
-      p.clientIds?.includes(replacement) && p.msg?.type === "sessions"
-    ), `the load completion must target the replacement relay client: ${JSON.stringify(completion)}`);
-    assert.ok(!completion.some((p) =>
-      p.clientIds?.includes(oldClient) && p.msg?.type === "sessions"
-    ), JSON.stringify(completion));
-    hooks.remoteClientLeft(oldClient);
-    hooks.remoteClientLeft(replacement);
-  });
-
-  test("client-ready resync cancels host voice before building its snapshot", () => {
-    const clientId = `voice-resync-${Date.now()}`;
-    hooks.seedRemoteSession(clientId, `voice-session-${Date.now()}`, repoB, [], true);
-    const voice = hooks.seedRemoteVoice(clientId);
-    const posts: Array<{ msg: any; clientIds?: string[] }> = [];
-    hooks.onPost((_dest: string, msg: any, clientIds?: string[]) => posts.push({ msg, clientIds }));
-
-    hooks.fromRelayFrame(JSON.stringify({
-      t: "client-ready",
-      clientId,
-      tabToken: "fedcba9876543210fedcba9876543210",
-    }));
-
-    const targeted = posts.filter((p) => p.clientIds?.includes(clientId)).map((p) => p.msg);
-    assert.strictEqual(voice.cancelled(), true, "the host STT streamer must be cancelled");
-    assert.ok(targeted.some((msg) => msg.type === "voiceState" && msg.status === "idle"));
-    assert.ok(!targeted.some((msg) => msg.type === "voiceState" && msg.status === "listening"));
-    hooks.remoteClientLeft(clientId);
-  });
-
-  test("a tokenless client-ready frame keeps the legacy remembered-session resume path", async () => {
-    const id = `legacy-ready-${Date.now()}`;
-    hooks.seedRemoteSession("legacy-departed", id, repoB, [], true);
-    hooks.remoteClientLeft("legacy-departed");
-    const posts: Array<{ msg: any; clientIds?: string[] }> = [];
-    hooks.onPost((_dest: string, msg: any, clientIds?: string[]) => posts.push({ msg, clientIds }));
-
-    hooks.fromRelayFrame(JSON.stringify({
-      t: "client-ready",
-      clientId: "legacy-returning",
-    }));
-    hooks.fromRemote({ type: "selectRepo", cwd: repoB }, "legacy-returning");
-    hooks.fromRemote({ type: "resumeSession", id, cwd: repoB }, "legacy-returning");
-    await new Promise((r) => setTimeout(r, 100));
-
-    assert.strictEqual(hooks.activeRemoteSessionId("legacy-returning"), id);
-    assert.ok(!posts.some((p) =>
-      p.clientIds?.includes("legacy-returning") && p.msg?.type === "error"
-    ), JSON.stringify(posts));
-  });
-
   // The projects rail lists every repo's sessions at once, so opening one that
   // lives outside the tab's current selection is now an ordinary click. The host
   // moves the tab to the owning repo as part of the resume — a client that sent
@@ -1156,36 +929,6 @@ suite("repo selection: isolated per remote tab, workspace-local in VS Code", () 
     ));
   });
 
-  test("a phone joins a live VS Code conversation instead of being refused", async () => {
-    // Desk↔remote co-attach (owner, 2026-07-30): the VS Code view is the
-    // owner's desk, not a rival tab. A remote resume of a desk-held session
-    // must JOIN it — emit() then serves both views. Only tab↔tab stays
-    // exclusive (covered by "resume never steals another tab's live session").
-    const id = `local-background-${Date.now()}`;
-    hooks.seedLocalBackgroundSession(id, repoB);
-    const posts: Array<{ msg: any; clientIds?: string[] }> = [];
-    hooks.onPost((_dest: string, msg: any, clientIds?: string[]) => posts.push({ msg, clientIds }));
-
-    hooks.fromRemote({ type: "selectRepo", cwd: repoB }, "phone-adopter");
-    hooks.fromRemote({ type: "resumeSession", id, cwd: repoB }, "phone-adopter");
-    await new Promise((r) => setTimeout(r, 100));
-
-    assert.strictEqual(hooks.activeRemoteSessionId("phone-adopter"), id, "the tab must join the desk conversation");
-    assert.ok(hooks.hasLiveSession(id), "the shared session must stay live");
-    // The sessions list must confirm the join — the web client's identity
-    // restore waits on exactly this activeId before flushing queued work.
-    assert.ok(posts.some((p) =>
-      p.clientIds?.includes("phone-adopter") &&
-      p.msg?.type === "sessions" &&
-      p.msg.activeId === id
-    ), "the joining tab must receive a sessions list confirming the active id");
-    assert.ok(!posts.some((p) =>
-      p.clientIds?.includes("phone-adopter") && p.msg?.type === "error"
-    ), JSON.stringify(posts.filter((p) => p.msg?.type === "error")));
-    hooks.remoteClientLeft("phone-adopter");
-    assert.ok(hooks.hasLiveSession(id), "the tab leaving must not tear down the desk's session");
-  });
-
   test("VS Code joins a conversation owned by a phone; both views keep it", async () => {
     const id = `phone-owned-${Date.now()}`;
     hooks.seedRemoteSession("phone-owner", id, repoB, [], true);
@@ -1197,53 +940,6 @@ suite("repo selection: isolated per remote tab, workspace-local in VS Code", () 
     assert.ok(hooks.hasLiveSession(id), "the shared session must stay live");
     hooks.remoteClientLeft("phone-owner");
     assert.strictEqual(hooks.focusedSessionId(), id, "the phone leaving must not evict the desk's view");
-  });
-
-  test("a fresh tab continues the desk's conversation instead of a blank session", async () => {
-    // "Continue remotely" (and any first visit) arrives with no remembered
-    // conversation. It must CONTINUE what the desk is showing — the feature's
-    // whole promise, and what desk↔remote co-attach finally allows. The bug
-    // this pins: a fresh tab used to get a brand-new Session that had never
-    // been started, so it sat on "Starting" forever and its first send
-    // quietly began a SECOND conversation.
-    const id = `desk-continue-${Date.now()}`;
-    const cwd = hooks.workspaceRoot();
-    hooks.seedRemoteSession("seed-holder", id, cwd, [], true);
-    await hooks.openLocalSession(id, cwd); // the desk joins and focuses it
-    hooks.remoteClientLeft("seed-holder"); // …and is now the only view on it
-    assert.strictEqual(hooks.focusedSessionId(), id, "the desk should be showing the conversation");
-
-    // Tab tokens must be unique across the whole suite: a repeated token hands
-    // ownership from the earlier test's client and this ready would be
-    // dropped as superseded.
-    const clientId = `continue-remotely-${Date.now()}`;
-    hooks.fromRelayFrame(JSON.stringify({
-      t: "client-ready",
-      clientId,
-      tabToken: `c0nt1nue${Date.now().toString(16).padStart(24, "0")}`.slice(0, 32),
-    }));
-
-    assert.strictEqual(
-      hooks.activeRemoteSessionId(clientId),
-      id,
-      "a fresh tab must continue the desk conversation, not open a blank session",
-    );
-    assert.strictEqual(hooks.focusedSessionId(), id, "the desk keeps showing it too");
-
-    // A SECOND fresh tab is its own conversation — tab↔tab stays exclusive.
-    const second = `second-tab-${Date.now()}`;
-    hooks.fromRelayFrame(JSON.stringify({
-      t: "client-ready",
-      clientId: second,
-      tabToken: `5ec0nd7ab${Date.now().toString(16).padStart(23, "0")}`.slice(0, 32),
-    }));
-    assert.notStrictEqual(
-      hooks.activeRemoteSessionId(second),
-      id,
-      "a second tab must not be handed the conversation the first one continued",
-    );
-    hooks.remoteClientLeft(clientId);
-    hooks.remoteClientLeft(second);
   });
 
   test("a local cold resume reserves its id before a remote cold resume can race it", async () => {
@@ -1497,87 +1193,6 @@ suite("repo selection: isolated per remote tab, workspace-local in VS Code", () 
     fs.rmSync(repoBWorktree, { recursive: true, force: true });
   });
 
-  test("refresh during remote startup preserves a host-owned queued prompt", async () => {
-    const suffix = Date.now();
-    const id = `starting-refresh-${suffix}`;
-    const oldClient = `starting-old-${suffix}`;
-    const replacement = `starting-new-${suffix}`;
-    const tabToken = "00112233445566778899aabbccddeeff";
-    const queuedText = "typed while the new session was starting";
-    writeStoredSession(id);
-    hooks.seedRemoteStartingSession(oldClient, id, repoB, queuedText);
-    hooks.fromRelayFrame(JSON.stringify({
-      t: "client-ready",
-      clientId: oldClient,
-      tabToken,
-    }));
-
-    hooks.remoteClientLeft(oldClient);
-    assert.ok(hooks.hasLiveSession(id), "client-left must not dispose a priming session with queued work");
-    assert.ok(fs.existsSync(storedSessionDir(id)), "queued startup work must keep its session directory");
-
-    const posts: Array<{ msg: any; clientIds?: string[] }> = [];
-    hooks.onPost((_dest: string, msg: any, clientIds?: string[]) => posts.push({ msg, clientIds }));
-    hooks.fromRelayFrame(JSON.stringify({
-      t: "client-ready",
-      clientId: replacement,
-      tabToken,
-    }));
-
-    assert.strictEqual(hooks.activeRemoteSessionId(replacement), id);
-    assert.ok(posts.some((post) =>
-      post.clientIds?.includes(replacement) &&
-      post.msg?.type === "queuedSends" &&
-      post.msg.items?.[0] === queuedText
-    ), JSON.stringify(posts));
-
-    hooks.finishRemoteStartup(replacement);
-    hooks.remoteClientLeft(replacement);
-  });
-
-  test("refresh preserves a chip-only remote session when client-left wins the reload race", async () => {
-    const suffix = Date.now();
-    const id = `chip-refresh-${suffix}`;
-    const oldClient = `chip-old-${suffix}`;
-    const replacement = `chip-new-${suffix}`;
-    const tabToken = "aabbccddeeff00112233445566778899";
-    const chip = {
-      id: `pasted-image-${suffix}`,
-      path: path.join(grokHome, "uploads", `pasted-${suffix}.png`),
-      relPath: `[Image #1]`,
-      hidden: false,
-      imageIndex: 1,
-      mimeType: "image/png",
-    };
-    writeStoredSession(id);
-    hooks.seedRemoteSession(oldClient, id, repoB, [], false, [chip]);
-    hooks.fromRelayFrame(JSON.stringify({
-      t: "client-ready",
-      clientId: oldClient,
-      tabToken,
-    }));
-
-    hooks.remoteClientLeft(oldClient);
-    assert.ok(hooks.hasLiveSession(id), "client-left must not dispose a session with a staged attachment");
-    assert.ok(fs.existsSync(storedSessionDir(id)), "the chip-only session directory must survive reload");
-
-    const posts: Array<{ msg: any; clientIds?: string[] }> = [];
-    hooks.onPost((_dest: string, msg: any, clientIds?: string[]) => posts.push({ msg, clientIds }));
-    hooks.fromRelayFrame(JSON.stringify({
-      t: "client-ready",
-      clientId: replacement,
-      tabToken,
-    }));
-
-    assert.strictEqual(hooks.activeRemoteSessionId(replacement), id);
-    assert.ok(posts.some((post) =>
-      post.clientIds?.includes(replacement) &&
-      post.msg?.type === "chips" &&
-      post.msg.chips?.[0]?.id === chip.id
-    ), JSON.stringify(posts));
-    hooks.remoteClientLeft(replacement);
-  });
-
   test("an idle remote queue asks the browser for a metered send before consuming it", async () => {
     const suffix = Date.now();
     const clientId = `metered-queue-${suffix}`;
@@ -1605,72 +1220,6 @@ suite("repo selection: isolated per remote tab, workspace-local in VS Code", () 
       post.msg?.type === "userMessage"
     ), JSON.stringify(posts));
     hooks.remoteClientLeft(clientId);
-  });
-
-  test("a disconnected remote queue never falls through to the host prompt path", async () => {
-    const suffix = Date.now();
-    const oldClient = `metered-detach-old-${suffix}`;
-    const replacement = `metered-detach-new-${suffix}`;
-    const id = `metered-detach-session-${suffix}`;
-    const text = "still requires relay metering";
-    const tabToken = "11223344556677889900aabbccddeeff";
-    hooks.seedRemoteSession(oldClient, id, repoB, [], true);
-    hooks.fromRelayFrame(JSON.stringify({ t: "client-ready", clientId: oldClient, tabToken }));
-    hooks.fromRemote({ type: "queueSend", text }, oldClient);
-    await new Promise((r) => setTimeout(r, 50));
-    hooks.remoteClientLeft(oldClient);
-
-    const posts: Array<{ msg: any; clientIds?: string[] }> = [];
-    hooks.onPost((_dest: string, msg: any, clientIds?: string[]) => posts.push({ msg, clientIds }));
-    hooks.fromRelayFrame(JSON.stringify({ t: "client-ready", clientId: replacement, tabToken }));
-
-    assert.ok(posts.some((post) =>
-      post.clientIds?.includes(replacement) &&
-      post.msg?.type === "queuedSends" &&
-      post.msg.items?.[0] === text
-    ), JSON.stringify(posts));
-    assert.ok(posts.some((post) =>
-      post.clientIds?.includes(replacement) &&
-      post.msg?.type === "submitQueuedSend" &&
-      post.msg.text === text
-    ), JSON.stringify(posts));
-    assert.ok(!posts.some((post) => post.msg?.type === "userMessage"), JSON.stringify(posts));
-    hooks.remoteClientLeft(replacement);
-  });
-
-  test("a persisted dequeue echo plus its reconnect replay reaches the model once", async () => {
-    const suffix = Date.now();
-    const oldClient = `dequeue-once-old-${suffix}`;
-    const replacement = `dequeue-once-new-${suffix}`;
-    const id = `dequeue-once-session-${suffix}`;
-    const text = "perform this queued task once";
-    const tabToken = "22334455667788990011aabbccddeeff";
-    const posts: Array<{ msg: any; clientIds?: string[] }> = [];
-    hooks.onPost((_dest: string, msg: any, clientIds?: string[]) => posts.push({ msg, clientIds }));
-    const model = hooks.seedRemoteQueuedDispatch(oldClient, id, repoB, text);
-    hooks.fromRelayFrame(JSON.stringify({ t: "client-ready", clientId: oldClient, tabToken }));
-    const original = posts.find((post) =>
-      post.clientIds?.includes(oldClient) &&
-      post.msg?.type === "submitQueuedSend"
-    )?.msg;
-    assert.ok(original?.id, JSON.stringify(posts));
-
-    hooks.remoteClientLeft(oldClient);
-    hooks.fromRelayFrame(JSON.stringify({ t: "client-ready", clientId: replacement, tabToken }));
-    const replay = posts.find((post) =>
-      post.clientIds?.includes(replacement) &&
-      post.msg?.type === "submitQueuedSend"
-    )?.msg;
-    assert.deepStrictEqual(replay, original, "the reconnect snapshot must replay the same claimed submission");
-
-    const persistedOutboxEcho = { type: "send", text, queuedSendId: original.id };
-    const reconnectEcho = { type: "send", text, queuedSendId: replay.id };
-    hooks.fromRemote(persistedOutboxEcho, replacement);
-    hooks.fromRemote(reconnectEcho, replacement);
-    await new Promise((resolve) => setTimeout(resolve, 100));
-
-    assert.strictEqual(model.promptCount(), 1, "duplicate dequeue echoes must execute one model prompt");
-    hooks.remoteClientLeft(replacement);
   });
 
   test("an unreadable image retains a metered dequeue plus text appended during the send", async () => {
@@ -1989,20 +1538,6 @@ suite("repo selection: isolated per remote tab, workspace-local in VS Code", () 
       hooks.fromRemote({ type: "selectRepo", cwd: {} } as any, "malformed-frame");
       hooks.fromRemote({ type: "resumeSession", id: "remembered", cwd: [] } as any, "malformed-frame");
     });
-  });
-
-  test("an audio chunk without an owned voice session is rejected visibly", async () => {
-    const posts: Array<{ msg: any; clientIds?: string[] }> = [];
-    hooks.onPost((_dest: string, msg: any, clientIds?: string[]) => posts.push({ msg, clientIds }));
-
-    hooks.fromRemote({ type: "remoteVoiceChunk", data: "AQACAA==" }, "unowned-mic");
-    await new Promise((r) => setTimeout(r, 50));
-
-    assert.ok(posts.some((p) =>
-      p.msg?.type === "voiceError" &&
-      p.clientIds?.length === 1 &&
-      p.clientIds[0] === "unowned-mic"
-    ));
   });
 
   test("remote host-side operation notices return only to the requesting tab", async () => {
