@@ -1,7 +1,7 @@
 /**
- * AllYourCompanions — Remote Control & Device-Login Stub / Compatibility Layer
+ * All your Companions — Remote Control & Device-Login Stub / Compatibility Layer
  *
- * AllYourCompanions is strictly local-first and privacy-focused.
+ * All your Companions is strictly local-first and privacy-focused.
  * External relay connections (AFK Pilot / wss://relay.grok-build.com)
  * and remote headless device login flows have been removed.
  *

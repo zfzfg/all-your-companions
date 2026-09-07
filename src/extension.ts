@@ -161,7 +161,7 @@ export function activate(context: vscode.ExtensionContext): GrokExtensionApi {
   // view, nobody chose it — that is the entire licence the placement correction
   // has to move it, and it evaporates the moment any other subsystem writes.
   const firstEverRun = isFirstEverRun(context.globalState.keys());
-  const output = vscode.window.createOutputChannel("AllYourCompanions");
+  const output = vscode.window.createOutputChannel("All your Companions");
   const host = createVsCodeHost(output, context);
   const hostContext = createVsCodeHostContext(context);
   const sidebar = new GrokSidebar(hostContext, host);

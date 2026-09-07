@@ -1,4 +1,4 @@
-# CLAUDE.md — AllYourCompanions
+# CLAUDE.md — All your Companions
 
 ### *All your Companions — in one place!*
 

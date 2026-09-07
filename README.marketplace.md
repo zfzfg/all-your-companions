@@ -1,4 +1,4 @@
-# AllYourCompanions (formerly Grok Build for VS Code (Community))
+# All your Companions - in one Place! (formerly Grok Build for VS Code (Community))
 
 ### *All your Companions — in one place!*
 
@@ -132,7 +132,7 @@ Click the **context donut** for exact window usage, input/cache/output tokens, a
 
 ## Install
 
-**1. Install the extension.** In VS Code or Cursor, open **Extensions** (`Ctrl/Cmd+Shift+X`) and search **"AllYourCompanions"**.
+**1. Install the extension.** In VS Code or Cursor, open **Extensions** (`Ctrl/Cmd+Shift+X`) and search **"All your Companions"**.
 
 **2. Open Companions and sign in.** Press `Ctrl/Cmd+;`. The sidebar walks you through choosing your companion and getting started in one click.
 
@@ -177,7 +177,7 @@ Open VS Code Settings and search for `companions` (legacy `grok.*` settings are 
 
 | Command | What it does | Keybinding |
 |---|---|---|
-| `Companions: Open` | Open the AllYourCompanions sidebar | `Ctrl+;` / `Cmd+;` |
+| `Companions: Open` | Open the All your Companions sidebar | `Ctrl+;` / `Cmd+;` |
 | `Companions: New Session` | Start a fresh companion session | — |
 | `Companions: Pick Model` | Select active model / companion | — |
 | `Companions: Toggle Plan / Agent Mode` | Switch between Agent, Plan, and Auto accept | — |
@@ -200,14 +200,14 @@ Open VS Code Settings and search for `companions` (legacy `grok.*` settings are 
 
 ## Companion apps
 
-AllYourCompanions is completely standalone and local-first — no external relay servers or third-party cloud brokers required. It natively coordinates:
+All your Companions is completely standalone and local-first — no external relay servers or third-party cloud brokers required. It natively coordinates:
 
 - **Google Antigravity CLI (`agy`)** — Gemini 2.5 Pro/Flash and Gemini 3 with massive context and streaming reasoning traces.
 - **xAI Grok Build (`grok`)** — Grok 4.6, SuperGrok, and xAI API integration.
 - **OpenAI Codex CLI (`codex`)** — High-speed ACP JSON-RPC bridge.
 - **Anthropic Claude Code CLI (`claude`)** — Full ACP terminal and session integration.
 
-*(AFK Pilot remote control functions are legacy/deprecated in AllYourCompanions in favor of local-first execution).*
+*(AFK Pilot remote control functions are legacy/deprecated in All your Companions in favor of local-first execution).*
 
 ---
 

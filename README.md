@@ -1,4 +1,4 @@
-# AllYourCompanions
+# All your Companions - in one Place!
 
 ### *All your Companions — in one place!*
 
@@ -14,14 +14,14 @@
 
 ---
 
-## The Vision of AllYourCompanions
+## The Vision of All your Companions
 
 ### *All your Companions — in one place!*
 
 ### 1. Decoupling from Remote Control Bloat
 Earlier versions were tethered to an external "AFK Pilot" remote-control relay architecture designed to mirror sessions to mobile devices via external cloud relays (`afkpilot.com`). While ambitious, this introduced complex network uplinks, external relay server dependencies, device-pairing ceremony, and sleep-prevention locks that distracted from the core editor experience.
 
-**AllYourCompanions consciously departs from remote relay control.**  
+**All your Companions consciously departs from remote relay control.**  
 By stripping away the remote-control overhead and dead relay pathways, we refocus 100% of our engineering energy directly where it matters most: **inside VS Code and Cursor**. This delivers:
 - **Zero external relay dependencies:** Fully local-first, blazing-fast startup, and zero outbound socket relay baggage.
 - **Maximum local privacy:** Your code, diffs, sessions, and credentials never touch a third-party relay infrastructure.
@@ -37,7 +37,7 @@ No companion is treated as a second-class citizen. All leading AI coding command
 Switch models or companion providers on the fly in any conversation — context carries forward seamlessly.
 
 ### 3. Universal Diff Inspection & One-Click Revert
-Every AI provider proposes code edits differently, but **AllYourCompanions** unifies them under one cohesive, safety-first review system:
+Every AI provider proposes code edits differently, but **All your Companions** unifies them under one cohesive, safety-first review system:
 - **Native VS Code Diff Preview:** When any companion proposes an edit, click **Open diff →** to inspect full-file changes directly in VS Code's native side-by-side diff editor before granting permission.
 - **Full Control:** Choose *Allow once*, *Always allow for this session*, or *Reject*. Changes hit your disk **only after your explicit approval**.
 - **Cross-Provider Rollback & Revert:** Revert changes per-file or roll back entire conversational turns with safety confirmation snapshots, regardless of whether Antigravity, Grok, Codex, or Claude performed the edits.
@@ -163,7 +163,7 @@ Click the **context donut** for exact window usage, input/cache/output tokens, a
 
 ## Install
 
-**1. Install the extension.** In VS Code or Cursor, open **Extensions** (`Ctrl/Cmd+Shift+X`) and search **"AllYourCompanions"** (or install the `.vsix` package).
+**1. Install the extension.** In VS Code or Cursor, open **Extensions** (`Ctrl/Cmd+Shift+X`) and search **"All your Companions"** (or install the `.vsix` package).
 
 **2. Open Companions and sign in.** Press `Ctrl/Cmd+;`. The sidebar walks you through choosing your companion and getting started in one click.
 
@@ -206,7 +206,7 @@ Open VS Code Settings and search for `companions` (legacy `grok.*` settings are 
 
 | Command | What it does | Keybinding |
 |---|---|---|
-| `Companions: Open` | Open the AllYourCompanions sidebar | `Ctrl+;` / `Cmd+;` |
+| `Companions: Open` | Open the All your Companions sidebar | `Ctrl+;` / `Cmd+;` |
 | `Companions: New Session` | Start a fresh companion session | — |
 | `Companions: Pick Model` | Select active model / companion | — |
 | `Companions: Toggle Plan / Agent Mode` | Switch between Agent, Plan, and Auto accept | — |
@@ -227,7 +227,7 @@ Google Antigravity and Gemini integration architecture: **[docs/ANTIGRAVITY_INTE
 
 ### Grok Build Desktop (Legacy Standalone)
 
-The upstream project provided a standalone Grok Build Desktop client (`afkpilot.com/desktop`, packaged as `Grok-Build-Desktop-<version>-mac-arm64.dmg` or `Grok-Build-Desktop-<version>-win-x64.exe`). For AllYourCompanions, all development focuses on the VS Code extension.
+The upstream project provided a standalone Grok Build Desktop client (`afkpilot.com/desktop`, packaged as `Grok-Build-Desktop-<version>-mac-arm64.dmg` or `Grok-Build-Desktop-<version>-win-x64.exe`). For All your Companions, all development focuses on the VS Code extension.
 
 ---
 

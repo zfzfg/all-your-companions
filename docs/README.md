@@ -1,6 +1,6 @@
-# AllYourCompanions Documentation
+# All your Companions Documentation
 
-Documentation for **AllYourCompanions** (*All your Companions — in one place!*), the unified AI coding companion hub for VS Code and Cursor.
+Documentation for **All your Companions** (*All your Companions — in one place!*), the unified AI coding companion hub for VS Code and Cursor.
 
 ## Architecture & Integration
 

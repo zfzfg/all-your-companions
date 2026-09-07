@@ -1,6 +1,6 @@
 {
   "name": "all-your-companions",
-  "displayName": "AllYourCompanions",
+  "displayName": "All your Companions - in one Place!",
   "description": "Unified GUI for AI Coding Companions: Google Antigravity, Grok Build, OpenAI Codex, and Claude Code. Multi-session chat, voice control, rich media, and universal diff review. Fork of Grok Build for VS Code (v4.1.8) by Paweł Huryn.",
   "version": "0.1.0",
   "publisher": "zfzfg",
@@ -54,14 +54,14 @@
       "secondarySidebar": [
         {
           "id": "companionsSidebar",
-          "title": "AllYourCompanions",
+          "title": "All your Companions",
           "icon": "resources/grok-icon.svg"
         }
       ],
       "activitybar": [
         {
           "id": "companionsPrimary",
-          "title": "AllYourCompanions",
+          "title": "All your Companions",
           "icon": "resources/grok-icon.svg"
         },
         {
@@ -73,7 +73,7 @@
       "panel": [
         {
           "id": "companionsPanel",
-          "title": "AllYourCompanions",
+          "title": "All your Companions",
           "icon": "resources/grok-icon.svg"
         }
       ]
@@ -97,181 +97,181 @@
     "commands": [
       {
         "command": "companions.open",
-        "title": "AllYourCompanions: Open"
+        "title": "All your Companions: Open"
       },
       {
         "command": "companions.moveView",
-        "title": "AllYourCompanions: Move Chat View"
+        "title": "All your Companions: Move Chat View"
       },
       {
         "command": "companions.newSession",
-        "title": "AllYourCompanions: New Session"
+        "title": "All your Companions: New Session"
       },
       {
         "command": "companions.newWorktreeSession",
-        "title": "AllYourCompanions: New Worktree Session"
+        "title": "All your Companions: New Worktree Session"
       },
       {
         "command": "companions.applyWorktree",
-        "title": "AllYourCompanions: Apply Worktree"
+        "title": "All your Companions: Apply Worktree"
       },
       {
         "command": "companions.removeWorktree",
-        "title": "AllYourCompanions: Remove Worktree"
+        "title": "All your Companions: Remove Worktree"
       },
       {
         "command": "companions.rewind",
-        "title": "AllYourCompanions: Rewind Conversation"
+        "title": "All your Companions: Rewind Conversation"
       },
       {
         "command": "companions.compact",
-        "title": "AllYourCompanions: Compact Conversation"
+        "title": "All your Companions: Compact Conversation"
       },
       {
         "command": "companions.pickModel",
-        "title": "AllYourCompanions: Pick Model"
+        "title": "All your Companions: Pick Model"
       },
       {
         "command": "companions.toggleMode",
-        "title": "AllYourCompanions: Toggle Plan / Agent Mode"
+        "title": "All your Companions: Toggle Plan / Agent Mode"
       },
       {
         "command": "companions.sendSelection",
-        "title": "Add Selection to AllYourCompanions"
+        "title": "Add Selection to All your Companions"
       },
       {
         "command": "companions.sendFile",
-        "title": "AllYourCompanions: Send File"
+        "title": "All your Companions: Send File"
       },
       {
         "command": "companions.insertAtMention",
-        "title": "AllYourCompanions: Insert @-Mention"
+        "title": "All your Companions: Insert @-Mention"
       },
       {
         "command": "companions.showLogs",
-        "title": "AllYourCompanions: Show Logs"
+        "title": "All your Companions: Show Logs"
       },
       {
         "command": "companions.settings",
-        "title": "AllYourCompanions: Settings",
+        "title": "All your Companions: Settings",
         "icon": "$(gear)"
       },
       {
         "command": "companions.expandAllToolDetails",
-        "title": "AllYourCompanions: Expand All Tool Details (This Session)"
+        "title": "All your Companions: Expand All Tool Details (This Session)"
       },
       {
         "command": "companions.collapseAllToolDetails",
-        "title": "AllYourCompanions: Collapse All Tool Details (This Session)"
+        "title": "All your Companions: Collapse All Tool Details (This Session)"
       },
       {
         "command": "companions.findInSession",
-        "title": "AllYourCompanions: Find in Conversation"
+        "title": "All your Companions: Find in Conversation"
       },
       {
         "command": "companions.logout",
-        "title": "AllYourCompanions: Log Out"
+        "title": "All your Companions: Log Out"
       },
       {
         "command": "companions._debugDummyPlan",
-        "title": "AllYourCompanions: Debug — Show dummy plan card (for testing Approve/Reject/Cancel)"
+        "title": "All your Companions: Debug — Show dummy plan card (for testing Approve/Reject/Cancel)"
       },
       {
         "command": "companions.composerForward",
-        "title": "AllYourCompanions: Composer — Move Forward"
+        "title": "All your Companions: Composer — Move Forward"
       },
       {
         "command": "companions.composerPreviousLine",
-        "title": "AllYourCompanions: Composer — Move to Previous Line"
+        "title": "All your Companions: Composer — Move to Previous Line"
       },
       {
         "command": "grok.open",
-        "title": "AllYourCompanions: Open"
+        "title": "All your Companions: Open"
       },
       {
         "command": "grok.moveView",
-        "title": "AllYourCompanions: Move Chat View"
+        "title": "All your Companions: Move Chat View"
       },
       {
         "command": "grok.newSession",
-        "title": "AllYourCompanions: New Session"
+        "title": "All your Companions: New Session"
       },
       {
         "command": "grok.newWorktreeSession",
-        "title": "AllYourCompanions: New Worktree Session"
+        "title": "All your Companions: New Worktree Session"
       },
       {
         "command": "grok.applyWorktree",
-        "title": "AllYourCompanions: Apply Worktree"
+        "title": "All your Companions: Apply Worktree"
       },
       {
         "command": "grok.removeWorktree",
-        "title": "AllYourCompanions: Remove Worktree"
+        "title": "All your Companions: Remove Worktree"
       },
       {
         "command": "grok.rewind",
-        "title": "AllYourCompanions: Rewind Conversation"
+        "title": "All your Companions: Rewind Conversation"
       },
       {
         "command": "grok.compact",
-        "title": "AllYourCompanions: Compact Conversation"
+        "title": "All your Companions: Compact Conversation"
       },
       {
         "command": "grok.pickModel",
-        "title": "AllYourCompanions: Pick Model"
+        "title": "All your Companions: Pick Model"
       },
       {
         "command": "grok.toggleMode",
-        "title": "AllYourCompanions: Toggle Plan / Agent Mode"
+        "title": "All your Companions: Toggle Plan / Agent Mode"
       },
       {
         "command": "grok.sendSelection",
-        "title": "Add Selection to AllYourCompanions"
+        "title": "Add Selection to All your Companions"
       },
       {
         "command": "grok.sendFile",
-        "title": "AllYourCompanions: Send File"
+        "title": "All your Companions: Send File"
       },
       {
         "command": "grok.insertAtMention",
-        "title": "AllYourCompanions: Insert @-Mention"
+        "title": "All your Companions: Insert @-Mention"
       },
       {
         "command": "grok.showLogs",
-        "title": "AllYourCompanions: Show Logs"
+        "title": "All your Companions: Show Logs"
       },
       {
         "command": "grok.settings",
-        "title": "AllYourCompanions: Settings",
+        "title": "All your Companions: Settings",
         "icon": "$(gear)"
       },
       {
         "command": "grok.expandAllToolDetails",
-        "title": "AllYourCompanions: Expand All Tool Details (This Session)"
+        "title": "All your Companions: Expand All Tool Details (This Session)"
       },
       {
         "command": "grok.collapseAllToolDetails",
-        "title": "AllYourCompanions: Collapse All Tool Details (This Session)"
+        "title": "All your Companions: Collapse All Tool Details (This Session)"
       },
       {
         "command": "grok.findInSession",
-        "title": "AllYourCompanions: Find in Conversation"
+        "title": "All your Companions: Find in Conversation"
       },
       {
         "command": "grok.logout",
-        "title": "AllYourCompanions: Log Out"
+        "title": "All your Companions: Log Out"
       },
       {
         "command": "grok._debugDummyPlan",
-        "title": "AllYourCompanions: Debug — Show dummy plan card (for testing Approve/Reject/Cancel)"
+        "title": "All your Companions: Debug — Show dummy plan card (for testing Approve/Reject/Cancel)"
       },
       {
         "command": "grok.composerForward",
-        "title": "AllYourCompanions: Composer — Move Forward"
+        "title": "All your Companions: Composer — Move Forward"
       },
       {
         "command": "grok.composerPreviousLine",
-        "title": "AllYourCompanions: Composer — Move to Previous Line"
+        "title": "All your Companions: Composer — Move to Previous Line"
       }
     ],
     "keybindings": [
@@ -405,7 +405,7 @@
       ]
     },
     "configuration": {
-      "title": "AllYourCompanions",
+      "title": "All your Companions",
       "properties": {
         "companions.cliPath": {
           "type": "string",

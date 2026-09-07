@@ -1,4 +1,4 @@
-import { execFile, type ExecFileOptions } from "node:child_process";
+import { execFile, execFileSync, type ExecFileOptions } from "node:child_process";
 
 /** Windows command shims are scripts, not directly executable binaries. */
 export function grokCliNeedsShell(
@@ -56,7 +56,6 @@ export function probeCliVersion(
 ): string | undefined {
   if (!cliPath) return undefined;
   try {
-    const { execFileSync } = require("node:child_process");
     const out = execFileSync(cliPath, ["--version"], {
       encoding: "utf8",
       windowsHide: true,

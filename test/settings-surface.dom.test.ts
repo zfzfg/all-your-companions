@@ -133,15 +133,15 @@ describe("settings catalog", () => {
     });
     const local = api.visibleCategories(snapshot, api.defaultEnv(withMcpSettings()));
     expect(local.map((c) => c.id)).toEqual([
-      "general", "voice", "notifications", "providers", "routines", "connectors", "account", "advanced", "about",
+      "general", "voice", "notifications", "providers", "routines", "connectors", "advanced", "about",
     ]);
     const remoteRows = api.visibleRows(snapshot, api.defaultEnv(withMcpSettings({ isRemote: true })));
     expect(remoteRows.some((row) => row.hostLocal)).toBe(false);
     expect(remoteRows.some((row) => row.id === "openGlobalConfig")).toBe(false);
     expect(remoteRows.some((row) => row.id === "providerGrok")).toBe(false);
     expect(remoteRows.some((row) => row.id === "providerGrokStatus")).toBe(true);
-    expect(remoteRows.some((row) => row.id === "remoteAccountStatus")).toBe(true);
-    expect(remoteRows.some((row) => row.id === "remoteDeviceManager")).toBe(true);
+    expect(remoteRows.some((row) => row.id === "remoteAccountStatus")).toBe(false);
+    expect(remoteRows.some((row) => row.id === "remoteDeviceManager")).toBe(false);
     expect(remoteRows.some((row) => row.id === "showThinking")).toBe(true);
     expect(remoteRows.some((row) => row.id === "soundNotifications")).toBe(true);
     expect(remoteRows.some((row) => row.id === "voiceSendPhrase")).toBe(true);
@@ -159,7 +159,7 @@ describe("settings catalog", () => {
     expect(api.visibleCategories(snapshot, env).map((c) => c.id)).toEqual([
       // Routines stays — it is not gated on mcpSettings, and a host without
       // connectors still schedules perfectly well.
-      "general", "voice", "notifications", "providers", "routines", "account", "advanced", "about",
+      "general", "voice", "notifications", "providers", "routines", "advanced", "about",
     ]);
     const rows = api.visibleRows(snapshot, env);
     expect(rows.some((row) => row.id === "routinesList")).toBe(true);
@@ -172,7 +172,7 @@ describe("settings catalog", () => {
     const snapshot = api.defaultSnapshot({ appPurpose: "coding" });
     const env = api.defaultEnv(withMcpSettings());
     expect(api.visibleCategories(snapshot, env).map((c) => c.id)).toEqual([
-      "general", "voice", "notifications", "providers", "routines", "connectors", "account", "advanced", "about",
+      "general", "voice", "notifications", "providers", "routines", "connectors", "advanced", "about",
     ]);
     expect(api.CATEGORIES.some((c: { id: string }) => c.id === "mcp")).toBe(false);
     expect(api.NAV_ICONS.mcp).toBeUndefined();
@@ -285,7 +285,7 @@ describe("settings overlay (chat.js)", () => {
     expect(overlay).toBeTruthy();
     const nav = settingsNav(h).map((el) => (el.textContent || "").trim());
     expect(nav).toEqual([
-      "General", "Voice", "Notifications", "Providers", "Routines", "Remote control", "Advanced", "About",
+      "General", "Voice", "Notifications", "Providers", "Routines", "Advanced", "About",
     ]);
     expect(nav).not.toContain("Connectors");
     expect(nav).not.toContain("MCP servers");
@@ -330,7 +330,7 @@ describe("settings overlay (chat.js)", () => {
     openSettings(h);
     const nav = settingsNav(h).map((el) => (el.textContent || "").trim());
     expect(nav).toEqual([
-      "General", "Voice", "Notifications", "Providers", "Routines", "Connectors", "Remote control", "Advanced", "About",
+      "General", "Voice", "Notifications", "Providers", "Routines", "Connectors", "Advanced", "About",
     ]);
     expect(nav.filter((label) => label === "Connectors")).toHaveLength(1);
     expect(nav).not.toContain("MCP servers");
@@ -378,11 +378,9 @@ describe("settings overlay (chat.js)", () => {
     expect(nav).toContain("Providers");
     expect(nav).not.toContain("Connectors");
     expect(nav).not.toContain("MCP servers");
-    expect(nav).toContain("Remote control");
+    expect(nav).not.toContain("Remote control");
     clickSettingsNav(h, "Providers");
     expect(overlay.textContent).toMatch(/This account is connected on this machine/);
-    clickSettingsNav(h, "Remote control");
-    expect(overlay.textContent).toMatch(/Device manager/);
     clickSettingsNav(h, "Advanced");
     expect(overlay.textContent).toMatch(/Host config is managed on the machine running this workspace/);
   });
@@ -1642,7 +1640,7 @@ describe("settings restore skips disabled rows", () => {
 });
 
 describe("review lows (settings / telemetry / voice write scope)", () => {
-  it("closes Settings before opening How it works so the explainer owns focus", () => {
+  it.skip("closes Settings before opening How it works so the explainer owns focus (remote control tab removed)", () => {
     const h = bootWebview();
     seedChat(h);
     dispatch(h.window, { type: "remoteStatus", linked: false });
@@ -1730,7 +1728,7 @@ describe("settings About section", () => {
     expect(api.GITHUB_ISSUE_FEATURE_URL).toBe("https://github.com/phuryn/grok-build-vscode/issues/new?labels=enhancement");
     expect(api.ROWS.find((r: { id: string }) => r.id === "reportBug")?.href).toBe(api.GITHUB_ISSUE_BUG_URL);
     expect(api.ROWS.find((r: { id: string }) => r.id === "requestFeature")?.href).toBe(api.GITHUB_ISSUE_FEATURE_URL);
-    expect(api.SUPPORT_MAILTO).toBe("mailto:support@productcompass.pm");
+    expect(api.SUPPORT_MAILTO).toBe("mailto:collinlerche@gmail.com");
   });
 
   it("puts the non-affiliation disclaimer only at the bottom of the About page", () => {
@@ -1753,7 +1751,7 @@ describe("settings About section", () => {
     expect(body.lastElementChild).toBe(disclaimer);
     expect(root.textContent).toContain("Report a bug");
     expect(root.textContent).toContain("Request a feature");
-    expect(root.textContent).toContain("support@productcompass.pm");
+    expect(root.textContent).toContain("collinlerche@gmail.com");
 
     const general = doc.createElement("div");
     doc.body.appendChild(general);

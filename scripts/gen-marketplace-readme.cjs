@@ -17,7 +17,7 @@ const path = require("node:path");
 
 const root = path.resolve(__dirname, "..");
 
-const header = `# AllYourCompanions (formerly Grok Build for VS Code (Community))
+const header = `# All your Companions - in one Place! (formerly Grok Build for VS Code (Community))
 
 ### *All your Companions — in one place!*
 
@@ -44,7 +44,7 @@ If you live in your editor, this puts your AI companions right next to your code
 // Open VSX the way README.md does: this page IS the store page.
 const installBlock = `## Install
 
-**1. Install the extension.** In VS Code or Cursor, open **Extensions** (\`Ctrl/Cmd+Shift+X\`) and search **"AllYourCompanions"**.
+**1. Install the extension.** In VS Code or Cursor, open **Extensions** (\`Ctrl/Cmd+Shift+X\`) and search **"All your Companions"**.
 
 **2. Open Companions and sign in.** Press \`Ctrl/Cmd+;\`. The sidebar walks you through choosing your companion and getting started in one click.
 
@@ -69,14 +69,14 @@ Companions opens in the **Secondary Side Bar** (right side, next to other AI too
 // The companions the listing may mention.
 const companionBlock = `## Companion apps
 
-AllYourCompanions is completely standalone and local-first — no external relay servers or third-party cloud brokers required. It natively coordinates:
+All your Companions is completely standalone and local-first — no external relay servers or third-party cloud brokers required. It natively coordinates:
 
 - **Google Antigravity CLI (\`agy\`)** — Gemini 2.5 Pro/Flash and Gemini 3 with massive context and streaming reasoning traces.
 - **xAI Grok Build (\`grok\`)** — Grok 4.6, SuperGrok, and xAI API integration.
 - **OpenAI Codex CLI (\`codex\`)** — High-speed ACP JSON-RPC bridge.
 - **Anthropic Claude Code CLI (\`claude\`)** — Full ACP terminal and session integration.
 
-*(AFK Pilot remote control functions are legacy/deprecated in AllYourCompanions in favor of local-first execution).*
+*(AFK Pilot remote control functions are legacy/deprecated in All your Companions in favor of local-first execution).*
 
 ---
 

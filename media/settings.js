@@ -17,7 +17,6 @@
     // apart from General/Voice/Notifications, which are preferences.
     { id: "routines", title: "Routines", restore: false },
     { id: "connectors", title: "Connectors", restore: false },
-    { id: "account", title: "Remote control", restore: false },
     { id: "advanced", title: "Advanced", restore: false },
     { id: "about", title: "About", restore: false },
   ];
@@ -36,10 +35,6 @@
     // Lucide "refresh-cw" — a cycle, which is what a routine is. Deliberately
     // not a clock: the page is about repetition, not time of day.
     routines: '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>',
-    // The lucide phone the top bar uses for Continue remotely (chat.js ICON
-    // .smartphone). Same shape on both so the nav row and the button read as
-    // one feature — which is the point of calling this page Remote control.
-    account: '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/></svg>',
     advanced: '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>',
     about: '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>',
   };
@@ -118,9 +113,9 @@
   };
   const GITHUB_ISSUE_BUG_URL = GITHUB_REPO_URL + "/issues/new?labels=bug";
   const GITHUB_ISSUE_FEATURE_URL = GITHUB_REPO_URL + "/issues/new?labels=enhancement";
-  const SUPPORT_MAILTO = "mailto:support@productcompass.pm";
+  const SUPPORT_MAILTO = "mailto:collinlerche@gmail.com";
   const ABOUT_DISCLAIMER =
-    "AllYourCompanions v0.1.0 · Community-built · FSL-1.1-MIT | " +
+    "All your Companions v0.1.0 · Community-built · FSL-1.1-MIT | " +
     "Forked from Grok Build for VS Code (v4.1.8) by Paweł Huryn. " +
     "Maintained by Collin Lerche (zfzfg) | STERRA (https://sterra.online). " +
     "Unified multi-companion GUI for Google Antigravity, Grok Build, OpenAI Codex, and Claude Code. " +
@@ -980,74 +975,6 @@
       local: "githubToken",
     },
     {
-      id: "continueRemotely",
-      category: "account",
-      title: "Continue remotely",
-      description: "Open AFK Pilot so you can keep this session going from another device.",
-      kind: "action",
-      actionLabel: "Open",
-      visible: (s, env) => !!(env && !env.isRemote && env.remoteLinked === true),
-      message: () => ({ type: "openRemotePortal", withHint: true }),
-    },
-    {
-      id: "yourAccount",
-      category: "account",
-      title: "Your account",
-      description: "Open the AFK Pilot account page for this linked device.",
-      kind: "action",
-      actionLabel: "Open",
-      visible: (s, env) => !!(env && !env.isRemote && env.remoteLinked === true),
-      message: () => ({ type: "openRemotePortal" }),
-    },
-    {
-      id: "unlinkDevice",
-      category: "account",
-      title: "Unlink this device",
-      description: "Stop advertising this machine to AFK Pilot. Other devices lose this desk until you link it again.",
-      kind: "action",
-      actionLabel: "Unlink…",
-      visible: (s, env) => !!(env && !env.isRemote && env.isDesktop && env.remoteLinked === true),
-      message: () => ({ type: "unlinkRemoteDevice" }),
-    },
-    {
-      id: "remoteSignIn",
-      category: "account",
-      title: "Sign in",
-      description: "Link this device to an AFK Pilot account so you can continue remotely.",
-      kind: "action",
-      actionLabel: "Link this device",
-      visible: (s, env) => !!(env && !env.isRemote && env.remoteLinked === false),
-      message: () => ({ type: "remoteSignIn" }),
-    },
-    {
-      id: "remoteHowItWorks",
-      category: "account",
-      title: "How it works",
-      description: "AFK Pilot keeps this machine awake and lets you continue from a phone without storing prompts or code.",
-      kind: "action",
-      actionLabel: "Learn more",
-      visible: (s, env) => !!(env && !env.isRemote && env.remoteLinked === false && !env.standalone),
-      local: "explainRemote",
-    },
-    {
-      id: "remoteAccountStatus",
-      category: "account",
-      title: "AFK Pilot",
-      description: "This browser is signed in and talking to the linked desk.",
-      kind: "status",
-      visible: (s, env) => !!(env && env.isRemote),
-    },
-    {
-      id: "remoteDeviceManager",
-      category: "account",
-      title: "Device manager",
-      description: "Open the AFK Pilot device list for this account.",
-      kind: "action",
-      actionLabel: "Open",
-      visible: (s, env) => !!(env && env.isRemote),
-      local: "openDeviceManager",
-    },
-    {
       id: "openGlobalConfig",
       category: "advanced",
       title: "Open global config",
@@ -1317,7 +1244,7 @@
       category: "about",
       icon: "mail",
       title: "Contact",
-      description: "support@productcompass.pm",
+      description: "collinlerche@gmail.com",
       kind: "action",
       actionLabel: "Email",
       href: SUPPORT_MAILTO,
@@ -1326,7 +1253,7 @@
       id: "aboutRepo",
       category: "about",
       icon: "github",
-      title: "AllYourCompanions",
+      title: "All your Companions",
       description: "Community fork based on phuryn/grok-build-vscode (v4.1.8).",
       kind: "action",
       actionLabel: "Open",
