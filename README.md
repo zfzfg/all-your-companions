@@ -99,7 +99,7 @@ Switch from the bottom toolbar — even mid-turn, so you can flip to **Auto acce
 <details>
 <summary><strong>Worktree sessions</strong> — isolate code edits in a git worktree</summary>
 
-**Companions: New Worktree Session** creates an isolated git worktree under `~/.companions/worktrees/` and opens a fresh session whose cwd is that checkout — so agent edits don't touch your main tree until you **Apply worktree**.
+**Companions: New Worktree Session** creates an isolated git worktree under `~/.grok/worktrees/` and opens a fresh session whose cwd is that checkout — so agent edits don't touch your main tree until you **Apply worktree**.
 
 </details>
 
