@@ -17,6 +17,7 @@ import {
   ensureAntigravityToolRules,
   sanitizeAgyToolErrorMessage,
 } from "../src/agy-acp-adapter";
+import { turnStatusFromPromptResult } from "../src/acp-dispatch";
 
 // The conversation map is real state under ~/.gemini in production. A test must
 // never read or write the user's own resume state, so every server gets its own.
@@ -2753,5 +2754,65 @@ describe("AgyAcpAdapterServer", () => {
       expect(sanitizedObj.message).toContain("Missing required property 'Pattern'");
     });
   });
+
+  describe("Turn footer status and stopReason compatibility", () => {
+    it("interprets Antigravity stopReason correctly for the turn footer", () => {
+      // Completed turn with default end_turn stop reason
+      expect(turnStatusFromPromptResult({ stopReason: "end_turn" })).toBe("completed");
+
+      // Cancelled turn (e.g. from session/cancel)
+      expect(turnStatusFromPromptResult({ stopReason: "cancelled" })).toBe("cancelled");
+    });
+
+    it("resolves pending prompt with stopReason 'cancelled' when session/cancel is received", async () => {
+      const input = new PassThrough();
+      const output = new PassThrough();
+      const server = new AgyAcpAdapterServer({
+        conversationStorePath: nextStore(),
+        inputStream: input,
+        outputStream: output,
+      });
+      server.start();
+
+      const responses: any[] = [];
+      output.on("data", (chunk) => {
+        for (const line of chunk.toString().trim().split("\n")) {
+          if (line.trim()) responses.push(JSON.parse(line));
+        }
+      });
+
+      // Initialize session
+      input.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }) + "\n");
+      input.write(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "session/new", params: { cwd: scratchDir } }) + "\n");
+      await new Promise((r) => setTimeout(r, 20));
+
+      // Simulate a prompt being in flight by setting pendingPrompt
+      let promptResolved: any;
+      (server as any).pendingPrompt = {
+        id: 99,
+        resolve: (val: any) => {
+          promptResolved = val;
+          (server as any).sendResponse(99, val);
+        },
+        reject: () => {},
+        usage: { inputTokens: 50, outputTokens: 10, thoughtTokens: 5, totalTokens: 65 },
+      };
+
+      // Send session/cancel
+      input.write(JSON.stringify({ jsonrpc: "2.0", id: 3, method: "session/cancel", params: {} }) + "\n");
+      await new Promise((r) => setTimeout(r, 20));
+
+      expect(promptResolved).toBeDefined();
+      expect(promptResolved.stopReason).toBe("cancelled");
+      expect(turnStatusFromPromptResult(promptResolved)).toBe("cancelled");
+
+      const promptResponse = responses.find((r) => r.id === 99);
+      expect(promptResponse).toBeDefined();
+      expect(promptResponse.result.stopReason).toBe("cancelled");
+
+      server.dispose();
+    });
+  });
 });
+
 
