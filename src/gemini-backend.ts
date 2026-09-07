@@ -360,10 +360,15 @@ export function configStateFromGeminiOptions(response: any, fallback: BackendCon
   const model = byId.get("model");
   const effort = byId.get("reasoning_effort") ?? byId.get("effort") ?? byId.get("thinking");
   const mode = byId.get("mode") ?? response?.modes?.currentModeId;
+  const extraConfigOptions = options.filter((opt: any) => {
+    const id = optionId(opt);
+    return id && id !== "model" && id !== "reasoning_effort" && id !== "effort" && id !== "thinking" && id !== "mode";
+  });
   return {
     modelId: typeof model === "string" ? model : fallback.modelId,
     reasoningEffort: typeof effort === "string" && effort !== "default" ? effort : fallback.reasoningEffort,
     modeId: typeof mode === "string" ? mode : fallback.modeId,
+    extraConfigOptions: extraConfigOptions.length > 0 ? extraConfigOptions : fallback.extraConfigOptions,
   };
 }
 

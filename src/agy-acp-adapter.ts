@@ -1,4 +1,4 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -8,6 +8,7 @@ import { Readable, Writable } from "node:stream";
 import { DEFAULT_GEMINI_MODELS } from "./gemini-backend";
 import { MAX_DIFF_EXPAND_BYTES } from "./diff-view";
 import { mergeDiffIntoContent, synthesizeEditDiff, type AcpDiffBlock } from "./diff-synthesize";
+import { antigravitySettingsPaths } from "./gemini-cli-locator";
 
 /**
  * What `agy` actually does with `--effort`, measured against 1.1.26.
@@ -403,6 +404,7 @@ export interface AgyAdapterOptions {
   inputStream?: NodeJS.ReadableStream;
   outputStream?: NodeJS.WritableStream;
   spawnFn?: (command: string, args: string[], options: any) => ChildProcessWithoutNullStreams;
+  supportsInputFormat?: boolean;
   /** Overrides for `waitForDiskChangeText`'s retry loop. Production defaults
    *  to (50, 200) — a ~10s budget; tests inject a much smaller budget so the
    *  "the write never lands" cases don't each cost the full production wait. */
@@ -517,6 +519,55 @@ export class AgyAcpAdapterServer {
     this.spawnFn = options.spawnFn || ((cmd, args, opts) => spawn(cmd, args, opts));
     this.diskPollAttempts = options.diskPollAttempts ?? 50;
     this.diskPollDelayMs = options.diskPollDelayMs ?? 200;
+    this.supportsInputFormatStreamJson = options.supportsInputFormat;
+  }
+
+  private supportsInputFormatStreamJson?: boolean;
+  private readonly effortRequirementOverrides = new Map<string, boolean>();
+  private readonly lastStderrBuffer: string[] = [];
+  private lastUsage: PromptUsage = { inputTokens: 0, outputTokens: 0, thoughtTokens: 0, totalTokens: 0 };
+
+  probeSupportsInputFormat(): boolean {
+    if (this.supportsInputFormatStreamJson !== undefined) {
+      return this.supportsInputFormatStreamJson;
+    }
+    try {
+      const res = spawnSync(this.agyPath, ["--help"], {
+        encoding: "utf8",
+        windowsHide: true,
+        timeout: 5000,
+        shell: process.platform === "win32" && /\.(cmd|bat)$/i.test(this.agyPath),
+      });
+      const text = `${res.stdout || ""}\n${res.stderr || ""}`;
+      this.supportsInputFormatStreamJson = text.includes("--input-format");
+    } catch {
+      this.supportsInputFormatStreamJson = true;
+    }
+    return this.supportsInputFormatStreamJson;
+  }
+
+  effectiveModelRequiresEffort(modelId: string): boolean {
+    if (this.effortRequirementOverrides.has(modelId)) {
+      return this.effortRequirementOverrides.get(modelId)!;
+    }
+    return modelRequiresEffort(modelId);
+  }
+
+  getAvailableModels(): any[] {
+    const list = [...DEFAULT_GEMINI_MODELS];
+    if (this.currentModelId && !list.some((m) => m.modelId === this.currentModelId)) {
+      list.unshift({
+        modelId: this.currentModelId,
+        name: `${this.currentModelId} (Custom)`,
+        description: "Custom Antigravity model ID",
+        _meta: {
+          supportsReasoningEffort: this.effectiveModelRequiresEffort(this.currentModelId),
+          reasoningEfforts: [{ value: "low" }, { value: "medium" }, { value: "high" }],
+          totalContextTokens: 1048576,
+        },
+      });
+    }
+    return list;
   }
 
   start(): void {
@@ -933,21 +984,29 @@ export class AgyAcpAdapterServer {
   }
 
   getConfigOptions(): any[] {
+    const modelOptions = DEFAULT_GEMINI_MODELS.map((m) => ({
+      value: m.modelId,
+      name: m.name,
+      description: m.description,
+    }));
+    if (this.currentModelId && !modelOptions.some((m) => m.value === this.currentModelId)) {
+      modelOptions.unshift({
+        value: this.currentModelId,
+        name: `${this.currentModelId} (Custom)`,
+        description: "Custom Antigravity model ID",
+      });
+    }
     return [
       {
         id: "model",
         currentValue: this.currentModelId,
-        options: DEFAULT_GEMINI_MODELS.map((m) => ({
-          value: m.modelId,
-          name: m.name,
-          description: m.description,
-        })),
+        options: modelOptions,
       },
       {
         id: "reasoning_effort",
         // The effective level, never "default" — for the models this option is
         // shown on, an absent level is not a state the CLI will start in.
-        currentValue: modelRequiresEffort(this.currentModelId)
+        currentValue: this.effectiveModelRequiresEffort(this.currentModelId)
           ? this.currentEffort || DEFAULT_AGY_EFFORT
           : "default",
         options: [
@@ -1099,7 +1158,7 @@ export class AgyAcpAdapterServer {
           sessionId: this.sessionId,
           models: {
             currentModelId: this.currentModelId,
-            availableModels: DEFAULT_GEMINI_MODELS,
+            availableModels: this.getAvailableModels(),
           },
           configOptions: this.getConfigOptions(),
         });
@@ -1126,7 +1185,7 @@ export class AgyAcpAdapterServer {
           sessionId: this.sessionId,
           models: {
             currentModelId: this.currentModelId,
-            availableModels: DEFAULT_GEMINI_MODELS,
+            availableModels: this.getAvailableModels(),
           },
           configOptions: this.getConfigOptions(),
         });
@@ -1269,9 +1328,65 @@ export class AgyAcpAdapterServer {
         break;
       }
 
+      case "_x.ai/mcp/list":
+      case "x.ai/mcp/list": {
+        const servers: any[] = [];
+        const candidateFiles = [
+          path.join(this.geminiHome, "antigravity-cli", "settings.json"),
+          path.join(this.geminiHome, "settings.json"),
+          ...antigravitySettingsPaths(this.geminiHome, this.env),
+        ];
+        for (const file of candidateFiles) {
+          try {
+            if (fs.existsSync(file)) {
+              const raw = fs.readFileSync(file, "utf8");
+              const parsed = JSON.parse(raw);
+              const mcpServers = parsed?.mcpServers || parsed?.mcp_servers;
+              if (mcpServers && typeof mcpServers === "object") {
+                for (const [name, cfg] of Object.entries(mcpServers)) {
+                  const s = cfg as any;
+                  servers.push({
+                    name,
+                    displayName: s?.displayName || name,
+                    enabled: s?.enabled !== false,
+                    command: s?.command,
+                    args: s?.args,
+                    url: s?.url,
+                    type: s?.type || (s?.url ? "sse" : "stdio"),
+                    scope: "user",
+                    scopeName: "Antigravity CLI",
+                    configFile: path.basename(file),
+                  });
+                }
+                break;
+              }
+            }
+          } catch {}
+        }
+        this.sendResponse(id, { servers });
+        break;
+      }
+
+      case "_x.ai/session/info":
+      case "x.ai/session/info": {
+        const windowSize = 1048576;
+        const used = this.lastUsage.totalTokens || 0;
+        this.sendResponse(id, {
+          context: {
+            used,
+            total: windowSize,
+            systemPromptTokens: 0,
+            toolDefinitionsTokens: 0,
+            messageTokens: used,
+            freeTokens: Math.max(0, windowSize - used),
+          },
+        });
+        break;
+      }
+
       default: {
         if (id != null) {
-          this.sendResponse(id, {});
+          this.sendError(id, -32601, `Method not found: ${method}`);
         }
         break;
       }
@@ -1421,20 +1536,26 @@ export class AgyAcpAdapterServer {
     }
   }
 
-  private ensureAgyProc(): ChildProcessWithoutNullStreams {
-    if (this.respawnBeforeNextPrompt) {
+  private ensureAgyProc(overridePromptArgs?: string[]): ChildProcessWithoutNullStreams {
+    if (this.respawnBeforeNextPrompt || (overridePromptArgs && overridePromptArgs.length > 0)) {
       this.respawnBeforeNextPrompt = false;
       this.killAgyProc();
     }
-    if (this.agyProc && !this.agyProc.killed && this.agyProc.stdin.writable) {
+    if (this.agyProc && !this.agyProc.killed && this.agyProc.stdin.writable && !overridePromptArgs) {
       return this.agyProc;
     }
 
-    const args = [
-      "--input-format", "stream-json",
-      "--output-format", "stream-json",
-      "--print-timeout", this.printTimeout,
-    ];
+    const args: string[] = [];
+    if (overridePromptArgs && overridePromptArgs.length > 0) {
+      args.push(...overridePromptArgs);
+      args.push("--output-format", "stream-json");
+    } else {
+      args.push(
+        "--input-format", "stream-json",
+        "--output-format", "stream-json",
+      );
+    }
+    args.push("--print-timeout", this.printTimeout);
 
     if (this.cwd) {
       args.push("--add-dir", this.cwd);
@@ -1449,7 +1570,7 @@ export class AgyAcpAdapterServer {
     }
     // Exactly as many `--effort` flags as this model accepts: one, or none.
     // See modelRequiresEffort for what the CLI rejects.
-    if (modelRequiresEffort(this.currentModelId)) {
+    if (this.effectiveModelRequiresEffort(this.currentModelId)) {
       const chosen = this.currentEffort && this.currentEffort !== "default"
         ? this.currentEffort
         : DEFAULT_AGY_EFFORT;
@@ -1486,8 +1607,11 @@ export class AgyAcpAdapterServer {
     if (proc.stderr) {
       this.agyErrRl = createInterface({ input: proc.stderr });
       this.agyErrRl.on("line", (line) => {
-        if (line.trim()) process.stderr.write(`[agy] ${line}
-`);
+        if (line.trim()) {
+          this.lastStderrBuffer.push(line);
+          if (this.lastStderrBuffer.length > 50) this.lastStderrBuffer.shift();
+          process.stderr.write(`[agy] ${line}\n`);
+        }
       });
     }
 
@@ -1688,6 +1812,7 @@ export class AgyAcpAdapterServer {
 `,
               );
             }
+            this.lastUsage = { ...pending.usage };
             pending.resolve({
               stopReason: "end_turn",
               usage: pending.usage,
@@ -1698,9 +1823,16 @@ export class AgyAcpAdapterServer {
     }
   }
 
-  private executePrompt(id: number | string, promptText: string): Promise<void> {
+  private executePrompt(id: number | string, promptText: string, retryAllowed = true): Promise<void> {
     return new Promise((resolve, reject) => {
-      const proc = this.ensureAgyProc();
+      const useStdin = this.probeSupportsInputFormat();
+      if (!useStdin) {
+        process.stderr.write("[agy] Antigravity running in compatibility mode (per-turn CLI invocation)\n");
+      }
+      const proc = useStdin
+        ? this.ensureAgyProc()
+        : this.ensureAgyProc(["-p", promptText]);
+
       this.pendingPrompt = {
         id,
         resolve: (val) => {
@@ -1708,7 +1840,22 @@ export class AgyAcpAdapterServer {
           resolve();
         },
         reject: (err) => {
-          this.sendError(id, -32603, (err as Error).message || "Prompt error");
+          const errMsg = (err as Error).message || "";
+          const combinedErr = errMsg + "\n" + this.lastStderrBuffer.join("\n");
+          if (retryAllowed) {
+            if (/requires --effort/i.test(combinedErr)) {
+              this.effortRequirementOverrides.set(this.currentModelId, true);
+              this.killAgyProc();
+              this.executePrompt(id, promptText, false).then(resolve, reject);
+              return;
+            } else if (/conflicts with --effort/i.test(combinedErr)) {
+              this.effortRequirementOverrides.set(this.currentModelId, false);
+              this.killAgyProc();
+              this.executePrompt(id, promptText, false).then(resolve, reject);
+              return;
+            }
+          }
+          this.sendError(id, -32603, errMsg || "Prompt error");
           reject(err);
         },
         usage: {
@@ -1719,21 +1866,23 @@ export class AgyAcpAdapterServer {
         },
       };
 
-      const payload = JSON.stringify({
-        event: "user",
-        message: {
-          role: "user",
-          content: promptText,
-        },
-      }) + "\n";
+      if (useStdin) {
+        const payload = JSON.stringify({
+          event: "user",
+          message: {
+            role: "user",
+            content: promptText,
+          },
+        }) + "\n";
 
-      proc.stdin.write(payload, (err) => {
-        if (err) {
-          this.pendingPrompt = undefined;
-          this.sendError(id, -32603, `Failed to write prompt to Antigravity stdin: ${err.message}`);
-          reject(err);
-        }
-      });
+        proc.stdin.write(payload, (err) => {
+          if (err) {
+            this.pendingPrompt = undefined;
+            this.sendError(id, -32603, `Failed to write prompt to Antigravity stdin: ${err.message}`);
+            reject(err);
+          }
+        });
+      }
     });
   }
 }

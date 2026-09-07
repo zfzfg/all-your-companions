@@ -524,6 +524,29 @@
           "default": true,
           "description": "Enable anonymous, privacy-first usage telemetry."
         },
+        "companions.antigravityRequestPermissions": {
+          "type": "boolean",
+          "default": false,
+          "description": "Request interactive confirmation before Antigravity executes tool calls (experimental)."
+        },
+        "companions.sensitiveFilesWarn": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a warning when starting a session in a workspace containing sensitive files (.env, keys)."
+        },
+        "companions.claudeAllowedTools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Allowed tools whitelist for Claude Code."
+        },
+        "companions.claudeCustomAgents": {
+          "type": "string",
+          "default": "",
+          "description": "Optional custom agent configuration or path for Claude Code."
+        },
         "grok.cliPath": {
           "type": "string",
           "default": "",
@@ -731,6 +754,29 @@
           "type": "boolean",
           "default": true,
           "description": "Stream voice transcription live as you speak (words appear in the composer in real time, and \"grok send\" can submit without a second click). Disable to use one-shot batch mode (click to start, click to stop, then transcribe). Streaming costs $0.20/hr of audio vs $0.10/hr batch."
+        },
+        "grok.antigravityRequestPermissions": {
+          "type": "boolean",
+          "default": false,
+          "description": "Request interactive confirmation before Antigravity executes tool calls (experimental)."
+        },
+        "grok.sensitiveFilesWarn": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a warning when starting a session in a workspace containing sensitive files (.env, keys)."
+        },
+        "grok.claudeAllowedTools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Allowed tools whitelist for Claude Code."
+        },
+        "grok.claudeCustomAgents": {
+          "type": "string",
+          "default": "",
+          "description": "Optional custom agent configuration or path for Claude Code."
         }
       }
     }

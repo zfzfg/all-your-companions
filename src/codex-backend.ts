@@ -232,10 +232,15 @@ export function configStateFromCodexOptions(response: any, fallback: BackendConf
   }
   const model = byId.get("model");
   const effort = byId.get("reasoning_effort");
+  const extraConfigOptions = options.filter((opt: any) => {
+    const id = optionId(opt);
+    return id && id !== "model" && id !== "reasoning_effort" && id !== "collaboration_mode" && id !== "mode";
+  });
   return {
     modelId: typeof model === "string" ? model : fallback.modelId,
     reasoningEffort: typeof effort === "string" ? effort : fallback.reasoningEffort,
     modeId: codexEffectiveModeId(byId.get("collaboration_mode"), byId.get("mode"), fallback.modeId),
+    extraConfigOptions: extraConfigOptions.length > 0 ? extraConfigOptions : fallback.extraConfigOptions,
   };
 }
 

@@ -38,7 +38,7 @@ import { resolveGrokHome } from "./sessions";
 import { resolveCodexHome } from "./codex-cli-locator";
 import { inferCodexGeneratedImagePath } from "./media-serve";
 import { filterAdvertisedCommands } from "./slash-filter";
-import { grokCliNeedsShell } from "./cli-process";
+import { grokCliNeedsShell, probeCliVersion } from "./cli-process";
 import { compareVersionTuple, parseGrokVersion } from "./cli-locator";
 import { resolvedTerminalShellDialect } from "./terminal-manager";
 import type { AcpBackend, AcpProvider, BackendSessionListResult } from "./acp-backend";
@@ -399,6 +399,15 @@ export class AcpClient extends EventEmitter {
       ? grokCliNeedsShell(this.opts.cliPath)
       : spawnSpec.shell;
 
+    if (this.opts.cliPath) {
+      try {
+        const ver = probeCliVersion(this.opts.cliPath);
+        if (ver) {
+          this.opts.log(`[${this.backend.provider}] CLI version: ${ver}`);
+        }
+      } catch {}
+    }
+
     this.opts.log(`spawning ${spawnSpec.command} ${args.join(" ")} (cwd=${this.opts.cwd})`);
     // Node 18+ refuses to spawn .cmd/.bat without `shell: true` on Windows
     // (CVE-2024-27980). Enable shell mode for those so installs that resolve to
@@ -421,9 +430,13 @@ export class AcpClient extends EventEmitter {
       this.opts.log(`[acp] stdin error: ${(err as Error).message}`);
     });
 
+    const earlyStderr: string[] = [];
+    let isInitialized = false;
+
     this.proc.stderr.on("data", (d) => {
       const text = d.toString();
       this.opts.log(`[stderr] ${text}`);
+      if (!isInitialized) earlyStderr.push(text);
       this.emit("stderr", text);
     });
     this.proc.on("exit", (code) => {
@@ -437,10 +450,11 @@ export class AcpClient extends EventEmitter {
     // a final successful interject response must be parsed before exit recovery
     // decides whether its user text still needs to be reclaimed.
     this.proc.on("close", (code) => {
+      const stderrSummary = !isInitialized && earlyStderr.length > 0 ? `: ${earlyStderr.join("").trim()}` : "";
       for (const [id, p] of this.pending) {
         this.pending.delete(id);
         if (p.timer) clearTimeout(p.timer);
-        p.reject(new Error(`${this.backend.processName} exited (code ${code})`));
+        p.reject(new Error(`${this.backend.processName} exited (code ${code})${stderrSummary}`));
       }
       this.emit("exit", code);
     });
@@ -457,6 +471,7 @@ export class AcpClient extends EventEmitter {
         this.opts.grokVersionVerified === true,
       ),
     });
+    isInitialized = true;
     this.emit("initialized", init);
   }
 
@@ -671,6 +686,26 @@ export class AcpClient extends EventEmitter {
     }
   }
 
+  async setConfigOption(configId: string, value: unknown): Promise<void> {
+    if (!this.sessionId) throw new Error("no session");
+    const res = await this.request("session/set_config_option", {
+      sessionId: this.sessionId,
+      configId,
+      value,
+    });
+    const state = this.backend.configState(res, {
+      modelId: this.currentModelId,
+      reasoningEffort: this.currentReasoningEffort,
+      modeId: this.currentModeId,
+    });
+    this.currentModelId = state.modelId ?? this.currentModelId;
+    this.currentReasoningEffort = state.reasoningEffort ?? this.currentReasoningEffort;
+    this.currentModeId = state.modeId ?? this.currentModeId;
+    if (res?.configOptions) {
+      this.emit("configOptionsChanged", res.configOptions);
+    }
+  }
+
   async prompt(textOrBlocks: string | PromptContentBlock[]): Promise<PromptResultMeta> {
     if (!this.sessionId) throw new Error("no session");
     const prompt: PromptContentBlock[] =
@@ -699,9 +734,8 @@ export class AcpClient extends EventEmitter {
     };
   }
 
-  /** Read Grok's MCP inventory from the same ACP session as the conversation. */
   async listMcpServers(): Promise<unknown[] | { servers?: unknown[]; result?: unknown } | "unsupported"> {
-    if (this.provider !== "grok") return "unsupported";
+    if (this.provider !== "grok" && this.provider !== "gemini") return "unsupported";
     if (!this.sessionId) throw new Error("no session");
     try {
       // The method is scoped to the active ACP session; unlike ordinary ACP
@@ -927,7 +961,7 @@ export class AcpClient extends EventEmitter {
    */
   async getSessionInfo(): Promise<SessionInfoContext | "unsupported"> {
     if (!this.sessionId) throw new Error("no session");
-    if (this.provider !== "grok") return "unsupported";
+    if (this.provider !== "grok" && this.provider !== "gemini") return "unsupported";
     try {
       const r = await this.request("_x.ai/session/info", { sessionId: this.sessionId });
       const parsed = parseSessionInfoRpcResult(r);

@@ -2471,5 +2471,172 @@ describe("AgyAcpAdapterServer", () => {
 
       server.dispose();
     });
+
+    it("returns -32601 for unknown RPC methods with an id", async () => {
+      const input = new PassThrough();
+      const output = new PassThrough();
+      const server = new AgyAcpAdapterServer({
+        conversationStorePath: nextStore(),
+        inputStream: input,
+        outputStream: output,
+      });
+      server.start();
+
+      const responses: any[] = [];
+      output.on("data", (chunk) => {
+        for (const line of chunk.toString().trim().split("\n")) {
+          if (line.trim()) responses.push(JSON.parse(line));
+        }
+      });
+
+      input.write(JSON.stringify({ jsonrpc: "2.0", id: 999, method: "unknown/method", params: {} }) + "\n");
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(responses).toHaveLength(1);
+      expect(responses[0]).toEqual({
+        jsonrpc: "2.0",
+        id: 999,
+        error: {
+          code: -32601,
+          message: "Method not found: unknown/method",
+        },
+      });
+
+      server.dispose();
+    });
+
+    it("dynamically exposes custom model in availableModels and configOptions", async () => {
+      const input = new PassThrough();
+      const output = new PassThrough();
+      const server = new AgyAcpAdapterServer({
+        conversationStorePath: nextStore(),
+        inputStream: input,
+        outputStream: output,
+        defaultModelId: "gemini-custom-future",
+      });
+      server.start();
+
+      const responses: any[] = [];
+      output.on("data", (chunk) => {
+        for (const line of chunk.toString().trim().split("\n")) {
+          if (line.trim()) responses.push(JSON.parse(line));
+        }
+      });
+
+      input.write(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "session/new", params: {} }) + "\n");
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(responses).toHaveLength(1);
+      expect(responses[0].result.models.currentModelId).toBe("gemini-custom-future");
+      expect(responses[0].result.models.availableModels[0].modelId).toBe("gemini-custom-future");
+      const modelConfig = responses[0].result.configOptions.find((c: any) => c.id === "model");
+      expect(modelConfig.options.some((o: any) => o.value === "gemini-custom-future")).toBe(true);
+
+      server.dispose();
+    });
+
+    it("falls back to one-shot -p when supportsInputFormat is false", async () => {
+      const input = new PassThrough();
+      const output = new PassThrough();
+      let capturedArgs: string[] = [];
+
+      const server = new AgyAcpAdapterServer({
+        conversationStorePath: nextStore(),
+        inputStream: input,
+        outputStream: output,
+        supportsInputFormat: false,
+        spawnFn: (_cmd, args) => {
+          capturedArgs = args;
+          return new FakeProcess() as any;
+        },
+      });
+      server.start();
+
+      input.write(JSON.stringify({
+        jsonrpc: "2.0",
+        id: 102,
+        method: "session/prompt",
+        params: { sessionId: "one-shot-test", prompt: [{ type: "text", text: "Hello one-shot" }] },
+      }) + "\n");
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(capturedArgs).not.toContain("--input-format");
+      const pIdx = capturedArgs.indexOf("-p");
+      expect(pIdx).toBeGreaterThanOrEqual(0);
+      expect(capturedArgs[pIdx + 1]).toBe("Hello one-shot");
+      expect(capturedArgs).toContain("--output-format");
+      expect(capturedArgs[capturedArgs.indexOf("--output-format") + 1]).toBe("stream-json");
+
+      server.dispose();
+    });
+
+    it("answers _x.ai/mcp/list by reading Antigravity settings", async () => {
+      const input = new PassThrough();
+      const output = new PassThrough();
+      const customGeminiHome = fs.mkdtempSync(path.join(os.tmpdir(), "agy-mcp-test-"));
+      const settingsDir = path.join(customGeminiHome, "antigravity-cli");
+      fs.mkdirSync(settingsDir, { recursive: true });
+      fs.writeFileSync(path.join(settingsDir, "settings.json"), JSON.stringify({
+        mcpServers: {
+          myServer: {
+            command: "node",
+            args: ["server.js"],
+          },
+        },
+      }));
+
+      const server = new AgyAcpAdapterServer({
+        conversationStorePath: nextStore(),
+        geminiHome: customGeminiHome,
+        inputStream: input,
+        outputStream: output,
+      });
+      server.start();
+
+      const responses: any[] = [];
+      output.on("data", (chunk) => {
+        for (const line of chunk.toString().trim().split("\n")) {
+          if (line.trim()) responses.push(JSON.parse(line));
+        }
+      });
+
+      input.write(JSON.stringify({ jsonrpc: "2.0", id: 200, method: "_x.ai/mcp/list", params: {} }) + "\n");
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(responses).toHaveLength(1);
+      expect(responses[0].result.servers).toHaveLength(1);
+      expect(responses[0].result.servers[0].name).toBe("myServer");
+      expect(responses[0].result.servers[0].scopeName).toBe("Antigravity CLI");
+
+      server.dispose();
+      fs.rmSync(customGeminiHome, { recursive: true, force: true });
+    });
+
+    it("answers _x.ai/session/info with context window and token usage", async () => {
+      const input = new PassThrough();
+      const output = new PassThrough();
+      const server = new AgyAcpAdapterServer({
+        conversationStorePath: nextStore(),
+        inputStream: input,
+        outputStream: output,
+      });
+      server.start();
+
+      const responses: any[] = [];
+      output.on("data", (chunk) => {
+        for (const line of chunk.toString().trim().split("\n")) {
+          if (line.trim()) responses.push(JSON.parse(line));
+        }
+      });
+
+      input.write(JSON.stringify({ jsonrpc: "2.0", id: 201, method: "_x.ai/session/info", params: {} }) + "\n");
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(responses).toHaveLength(1);
+      expect(responses[0].result.context.total).toBe(1048576);
+      expect(responses[0].result.context.used).toBe(0);
+
+      server.dispose();
+    });
   });
 });

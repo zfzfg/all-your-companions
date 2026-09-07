@@ -37,7 +37,7 @@
     "remoteStatus",
   ];
   const WEBVIEW_MESSAGE_TYPES = [
-    "ready", "remotePreferences", "send", "newSession", "cancel", "pickModel", "setMode", "removeChip",
+    "ready", "remotePreferences", "send", "newSession", "cancel", "pickModel", "setMode", "setConfigOption", "removeChip",
     "toggleChip", "openFile", "showInFolder", "openUrl", "openText", "openDiff", "revertToolEdit", "exportExpr", "setEffort",
     "addProjectFolder", "removeProjectFolder", "createProject", "cloneProject", "setupGithubCli", "listGithubRepos", "githubSignOut", "githubLoginWithToken",
     "openGlobalConfig", "openProjectConfig", "listMcpServers", "connectMcpConnector", "disconnectMcpConnector", "completeMcpConnectorOAuth", "showLogs", "toggleDevTools", "openSettings", "openSettingsSurface", "closeSettingsSurface", "dismissWelcomeTip", "welcomeTipShown", "moveView",

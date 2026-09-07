@@ -432,6 +432,7 @@ import {
   historyEventCount,
   anyFilesAfter,
   bubbleMapIsConsistent,
+  checkWorkspaceGitStatus,
   editRewindConfirmMessage,
   resolveEditRewindTarget,
   resolveUserBubbleRewind,
@@ -732,7 +733,32 @@ function guessMediaMime(p: string): string {
   }
 }
 
+/** Find sensitive credential/key/env files in a workspace root */
+export function findWorkspaceSensitiveFiles(workspaceRoot?: string): string[] {
+  if (!workspaceRoot) return [];
+  try {
+    const entries = fs.readdirSync(workspaceRoot);
+    const found: string[] = [];
+    for (const file of entries) {
+      const lower = file.toLowerCase();
+      if (
+        lower.startsWith(".env") ||
+        lower.endsWith(".pem") ||
+        lower.startsWith("id_rsa") ||
+        lower.startsWith("id_ed25519") ||
+        lower.endsWith(".key")
+      ) {
+        found.push(file);
+      }
+    }
+    return found;
+  } catch {
+    return [];
+  }
+}
+
 export class GrokSidebar {
+  private warnedSensitiveFiles = false;
   public static readonly viewId = "companions.chat";
   public static readonly legacyViewId = "grok.chat";
   /** Primary side bar projects rail — separate webview, not a second chat client. */
@@ -1852,6 +1878,7 @@ export class GrokSidebar {
     try {
       await client.start();
       await client.newSession();
+      this.cacheProviderModels("grok", client.availableModels, client.currentModelId);
       this.setProviderNeedsLogin("grok", false);
       return true;
     } catch (error) {
@@ -2918,10 +2945,30 @@ export class GrokSidebar {
       modelId: m.modelId,
       provider: m.provider,
     }));
+    if (this.focused.provider === "gemini") {
+      items.push({
+        label: "$(edit) Custom Gemini model ID...",
+        description: "",
+        detail: "Enter a custom Antigravity/Gemini model name (e.g. gemini-3.9-pro)",
+        modelId: "__custom__",
+        provider: "gemini",
+      });
+    }
     const picked = await this.host.showQuickPick(items, {
       placeHolder: this.focused.hasHistory ? "Pick a model" : "Pick an agent and model",
     });
-    if (picked) await this.switchModel(picked.modelId, this.focused, undefined, picked.provider);
+    if (picked) {
+      let targetModelId = picked.modelId;
+      if (targetModelId === "__custom__") {
+        const input = await this.host.showInputBox({
+          prompt: "Enter custom model ID (e.g. gemini-3.9-pro)",
+          placeHolder: "gemini-3.9-pro",
+        });
+        if (!input || !input.trim()) return;
+        targetModelId = input.trim();
+      }
+      await this.switchModel(targetModelId, this.focused, undefined, picked.provider);
+    }
   }
 
   /**
@@ -4432,9 +4479,10 @@ Only continue if you trust this code.`,
       // to the composer), so a modal there is pure friction. Reverting code is
       // not reversible, so that one still asks.
       if (anyFilesAfter(points, target)) {
+        const gitStatus = await checkWorkspaceGitStatus(session.cwd || this.workspaceRoot());
         const ok = await this.confirmInChat(session, {
           title: "Edit this message?",
-          body: editRewindConfirmMessage(target, true),
+          body: editRewindConfirmMessage(target, true, gitStatus),
           confirmLabel: "Edit",
           danger: true,
         });
@@ -4665,9 +4713,10 @@ Only continue if you trust this code.`,
       // there is nothing unrecoverable to warn about.
       const revertsFiles = anyFilesAfter(points, target);
       if (revertsFiles) {
+        const gitStatus = await checkWorkspaceGitStatus(session.cwd || this.workspaceRoot());
         const ok = await this.confirmInChat(session, {
           title: "Rewind past this message?",
-          body: rewindConfirmMessage(target, "all"),
+          body: rewindConfirmMessage(target, "all", gitStatus),
           confirmLabel: "Rewind",
           danger: true,
         });
@@ -10099,6 +10148,26 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
           void cfg.update("defaultModel", client.currentModelId, target);
         }
       }
+      if (session.provider === "grok") {
+        const warnEnabled = this.host.getConfiguration("companions").get<boolean>(
+          "sensitiveFilesWarn",
+          this.host.getConfiguration("grok").get<boolean>("sensitiveFilesWarn", true),
+        );
+        if (warnEnabled && !this.warnedSensitiveFiles) {
+          const sensitive = findWorkspaceSensitiveFiles(session.cwd || this.workspaceRoot());
+          if (sensitive.length > 0) {
+            this.warnedSensitiveFiles = true;
+            this.host.appendLine(
+              `[security] Sensitive file(s) detected in workspace (${sensitive.slice(0, 3).join(", ")}). Note: Grok CLI ignores are configured in ~/.grok/config.toml.`,
+            );
+            this.postLocal({
+              type: "hostNotice",
+              level: "warning",
+              text: `Sensitive file(s) detected in workspace (${sensitive.slice(0, 3).join(", ")}). Configure exclusions in ~/.grok/config.toml.`,
+            });
+          }
+        }
+      }
 
       // A spontaneous death during startup detaches the pipe (see the exit
       // handler) without failing any awaited step — the best-effort setMode
@@ -10781,6 +10850,16 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
             ? msg.provider
             : this.providerForRequestedModel(msg.modelId, session.provider),
         );
+        break;
+      case "setConfigOption":
+        if (session.client && typeof (msg as any).configId === "string" && typeof session.client.setConfigOption === "function") {
+          try {
+            await session.client.setConfigOption((msg as any).configId, (msg as any).value);
+            this.host.appendLine(`[acp] setConfigOption ${(msg as any).configId}=${JSON.stringify((msg as any).value)} succeeded`);
+          } catch (e) {
+            this.reportRequester(requester, "error", `Failed to set ${(msg as any).configId}: ${(e as Error).message}`);
+          }
+        }
         break;
       case "listRoutines":
         this.routineError = undefined;

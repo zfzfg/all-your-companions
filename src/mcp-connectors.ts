@@ -845,7 +845,13 @@ export function mcpConfigPaths(opts: {
     paths.push(`${opts.userHome}/.codex/config.toml`);
   }
   if (opts.provider === "gemini") {
-    paths.push(`${opts.userHome}/.gemini/settings.json`);
+    const geminiBase = process.env.GEMINI_HOME
+      ? process.env.GEMINI_HOME.replace(/[\\/]+$/, "")
+      : `${opts.userHome}/.gemini`;
+    paths.push(
+      `${geminiBase}/antigravity-cli/settings.json`,
+      `${geminiBase}/settings.json`,
+    );
   }
   return paths;
 }

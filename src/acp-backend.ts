@@ -30,6 +30,7 @@ export interface BackendConfigState {
   modelId?: string;
   reasoningEffort?: string;
   modeId?: string;
+  extraConfigOptions?: any[];
 }
 
 export interface BackendUpdate {

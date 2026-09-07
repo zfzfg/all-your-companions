@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import * as path from "node:path";
+import * as fs from "node:fs";
+import * as os from "node:os";
 import {
   ClaudeBackend,
   claudeModeId,
+  claudeProjectSlug,
   configStateFromClaudeOptions,
   contextWindowForClaudeModel,
   isClaudeCredentialError,
@@ -12,6 +15,7 @@ import {
   normalizeClaudePromptResult,
   normalizeClaudeSessionResponse,
   normalizeClaudeUpdate,
+  readNativeClaudeProjectsSessions,
   resolveClaudeAgentAcpAdapter,
 } from "../src/claude-backend";
 
@@ -330,3 +334,91 @@ describe("Claude auth classification", () => {
     expect(new ClaudeBackend().isCredentialError({ message: "authentication required" })).toBe(true);
   });
 });
+
+describe("Claude native sessions and options", () => {
+  it("sanitizes cwd into a project slug matching Claude CLI conventions", () => {
+    const slug = claudeProjectSlug("/Users/test/my-repo");
+    expect(slug).not.toContain("/");
+    expect(slug).toContain("my-repo");
+  });
+
+  it("reads native Claude sessions from ~/.claude/projects/", () => {
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "claude-test-home-"));
+    const cwd = path.join(tempHome, "workspace");
+    fs.mkdirSync(cwd, { recursive: true });
+
+    const slug = claudeProjectSlug(cwd);
+    const projectDir = path.join(tempHome, ".claude", "projects", slug);
+    fs.mkdirSync(projectDir, { recursive: true });
+
+    const sessionFile = path.join(projectDir, "sess-123.jsonl");
+    const lines = [
+      JSON.stringify({ type: "queue-operation", sessionId: "sess-123" }),
+      JSON.stringify({
+        type: "user",
+        message: { role: "user", content: "Implement feature X in workspace" },
+      }),
+    ].join("\n");
+    fs.writeFileSync(sessionFile, lines, "utf8");
+
+    const sessions = readNativeClaudeProjectsSessions(cwd, tempHome);
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].sessionId).toBe("sess-123");
+    expect(sessions[0].title).toBe("Implement feature X in workspace");
+    expect(sessions[0].cwd).toBe(cwd);
+
+    fs.rmSync(tempHome, { recursive: true, force: true });
+  });
+
+  it("passes allowedTools and customAgents through to spawn env", () => {
+    const backend = new ClaudeBackend({
+      adapterPath: "adapter.js",
+      nodePath: "electron.exe",
+      allowedTools: ["Read", "Grep", "Glob"],
+      customAgents: { custom: "agent" },
+    });
+    const spec = backend.spawn({
+      cliPath: "claude.exe",
+      cwd: "C:\\repo",
+      env: {},
+    });
+    expect(spec.env?.CLAUDE_ALLOWED_TOOLS).toBe("Read,Grep,Glob");
+    expect(spec.env?.CLAUDE_CUSTOM_AGENTS).toBe(JSON.stringify({ custom: "agent" }));
+  });
+
+  it("falls back to native sessions when session/list fails", async () => {
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "claude-test-fallback-"));
+    const cwd = path.join(tempHome, "repo");
+    fs.mkdirSync(cwd, { recursive: true });
+
+    const slug = claudeProjectSlug(cwd);
+    const projectDir = path.join(tempHome, ".claude", "projects", slug);
+    fs.mkdirSync(projectDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(projectDir, "fallback-sess.jsonl"),
+      JSON.stringify({ type: "user", message: { content: "Offline prompt" } }),
+      "utf8",
+    );
+
+    const prevHome = process.env.HOME;
+    const prevUserProfile = process.env.USERPROFILE;
+    process.env.HOME = tempHome;
+    process.env.USERPROFILE = tempHome;
+
+    try {
+      const backend = new ClaudeBackend({ adapterPath: "adapter.js", home: tempHome });
+      const failingRequest = async () => {
+        throw new Error("RPC timeout");
+      };
+      const res = await backend.listSessions(failingRequest, cwd, process.platform);
+      expect(res.sessions).toHaveLength(1);
+      expect(res.sessions[0].sessionId).toBe("fallback-sess");
+      expect(res.sessions[0].title).toBe("Offline prompt");
+    } finally {
+      process.env.HOME = prevHome;
+      process.env.USERPROFILE = prevUserProfile;
+      fs.rmSync(tempHome, { recursive: true, force: true });
+    }
+  });
+});
+

@@ -1,4 +1,4 @@
-import { existsSync, statSync } from "node:fs";
+import { existsSync, statSync, readFileSync } from "node:fs";
 import { execFileSync, execSync } from "node:child_process";
 import { homedir } from "node:os";
 import * as path from "node:path";
@@ -6,6 +6,7 @@ import * as path from "node:path";
 export interface GeminiLocatorFs {
   exists(path: string): boolean;
   isFile(path: string): boolean;
+  readText?(path: string): string | undefined;
 }
 
 export interface GeminiLocatorOptions {
@@ -24,6 +25,13 @@ const defaultFs: GeminiLocatorFs = {
       return statSync(file).isFile();
     } catch {
       return false;
+    }
+  },
+  readText: (file) => {
+    try {
+      return readFileSync(file, "utf8");
+    } catch {
+      return undefined;
     }
   },
 };
@@ -92,11 +100,40 @@ export function antigravityCredentialPaths(
   ];
 }
 
+export function antigravitySettingsPaths(
+  home: string,
+  env: NodeJS.ProcessEnv,
+): string[] {
+  const isDirectGeminiHome =
+    home.endsWith(".gemini") ||
+    path.basename(home) === ".gemini" ||
+    existsSync(path.join(home, "antigravity-cli")) ||
+    existsSync(path.join(home, "settings.json"));
+  const base = env.GEMINI_HOME || (isDirectGeminiHome ? home : path.join(home, ".gemini"));
+  return [
+    path.join(base, "antigravity-cli", "settings.json"),
+    path.join(base, "settings.json"),
+  ];
+}
+
 export function hasAntigravityCredentials(options: GeminiLocatorOptions = {}): boolean {
   const fsImpl = options.fs ?? defaultFs;
   const home = options.home ?? homedir();
   const env = options.env ?? process.env;
-  return antigravityCredentialPaths(home, env).some((file) => fsImpl.isFile(file));
+
+  if (antigravityCredentialPaths(home, env).some((file) => fsImpl.isFile(file))) {
+    return true;
+  }
+
+  if (!env.GEMINI_API_KEY?.trim()) return false;
+  for (const file of antigravitySettingsPaths(home, env)) {
+    const raw = fsImpl.readText?.(file);
+    if (!raw) continue;
+    try {
+      if (JSON.parse(raw)?.modelProvider === "gemini") return true;
+    } catch {}
+  }
+  return false;
 }
 
 /** Known Antigravity CLI binary locations (modern official standard) */

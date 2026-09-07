@@ -20,6 +20,8 @@ import {
   bubbleMapIsConsistent,
   editRewindConfirmMessage,
   REWIND_MODES,
+  checkWorkspaceGitStatus,
+  gitStatusWarning,
 } from "../src/rewind";
 
 function deferred<T>() {
@@ -316,6 +318,47 @@ describe("selectableRewindPoints / labels", () => {
     expect(msg).toMatch(/Rewind to this message/i);
     expect(msg).toContain("beta");
     expect(msg).toMatch(/discarded|restored/i);
+  });
+
+  it("incorporates gitStatus into rewindConfirmMessage", () => {
+    const noGitMsg = rewindConfirmMessage(pts[1], "all", "no_git");
+    expect(noGitMsg).toContain("Warning: This workspace is not a git repository");
+
+    const dirtyMsg = rewindConfirmMessage(pts[1], "all", "dirty");
+    expect(dirtyMsg).toContain("Warning: You have uncommitted changes in git");
+
+    const cleanMsg = rewindConfirmMessage(pts[1], "all", "clean");
+    expect(cleanMsg).toContain("This cannot be undone (unless you have the changes in git).");
+  });
+
+  it("incorporates gitStatus into editRewindConfirmMessage", () => {
+    const noGitMsg = editRewindConfirmMessage(pts[1], true, "no_git");
+    expect(noGitMsg).toContain("Warning: This workspace is not a git repository");
+
+    const dirtyMsg = editRewindConfirmMessage(pts[1], true, "dirty");
+    expect(dirtyMsg).toContain("Warning: You have uncommitted changes in git");
+
+    const cleanMsg = editRewindConfirmMessage(pts[1], true, "clean");
+    expect(cleanMsg).toContain("This cannot be undone (unless you have the changes in git).");
+  });
+
+  it("checks workspace git status via checkWorkspaceGitStatus", async () => {
+    expect(await checkWorkspaceGitStatus(undefined)).toBe("no_git");
+
+    const fakeExecError = ((cmd: string, args: string[], opts: any, cb: any) => {
+      cb(new Error("fatal: not a git repository"), "");
+    }) as any;
+    expect(await checkWorkspaceGitStatus("/fake/dir", fakeExecError)).toBe("no_git");
+
+    const fakeExecDirty = ((cmd: string, args: string[], opts: any, cb: any) => {
+      cb(null, " M file.ts\n?? new.ts\n");
+    }) as any;
+    expect(await checkWorkspaceGitStatus("/fake/dir", fakeExecDirty)).toBe("dirty");
+
+    const fakeExecClean = ((cmd: string, args: string[], opts: any, cb: any) => {
+      cb(null, "");
+    }) as any;
+    expect(await checkWorkspaceGitStatus("/fake/dir", fakeExecClean)).toBe("clean");
   });
 });
 

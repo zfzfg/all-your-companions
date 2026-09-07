@@ -544,6 +544,13 @@ FOO = "bar"
     expect(mcpConfigPaths({
       cwd: "/proj", provider: "codex", grokHome: "/home/.grok", userHome: "/home",
     })).toEqual(["/home/.codex/config.toml"]);
+    expect(mcpConfigPaths({
+      cwd: "/proj", provider: "gemini", grokHome: "/home/.grok", userHome: "/home",
+    })).toEqual([
+      "/proj/.mcp.json",
+      "/home/.gemini/antigravity-cli/settings.json",
+      "/home/.gemini/settings.json",
+    ]);
   });
 
   it("classifies project files vs user files from the same path list", () => {

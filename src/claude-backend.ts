@@ -1,4 +1,5 @@
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import packageManifest from "../package.json";
 import { grokCliNeedsShell } from "./cli-process";
@@ -238,10 +239,15 @@ export function configStateFromClaudeOptions(response: any, fallback: BackendCon
   const model = byId.get("model");
   const effort = byId.get("effort");
   const mode = byId.get("mode") ?? response?.modes?.currentModeId;
+  const extraConfigOptions = options.filter((opt: any) => {
+    const id = optionId(opt);
+    return id && id !== "model" && id !== "effort" && id !== "mode";
+  });
   return {
     modelId: typeof model === "string" ? model : fallback.modelId,
     reasoningEffort: typeof effort === "string" && effort !== "default" ? effort : fallback.reasoningEffort,
     modeId: typeof mode === "string" ? mode : fallback.modeId,
+    extraConfigOptions: extraConfigOptions.length > 0 ? extraConfigOptions : fallback.extraConfigOptions,
   };
 }
 
@@ -285,6 +291,107 @@ export async function listClaudeSessions(
   return { sessions, nextCursor: null };
 }
 
+export function claudeProjectSlug(targetCwd: string): string {
+  const resolved = path.resolve(targetCwd);
+  return resolved.replace(/[^a-zA-Z0-9_-]/g, "-");
+}
+
+export function readNativeClaudeProjectsSessions(
+  cwd: string,
+  home = os.homedir(),
+  platform: NodeJS.Platform = process.platform,
+): BackendSessionListEntry[] {
+  const projectsDir = path.join(home, ".claude", "projects");
+  if (!fs.existsSync(projectsDir)) return [];
+
+  const targetSlug = claudeProjectSlug(cwd);
+
+  let candidateDir: string | undefined;
+  try {
+    const entries = fs.readdirSync(projectsDir);
+    const lowerSlug = targetSlug.toLowerCase();
+    for (const entry of entries) {
+      if (entry.toLowerCase() === lowerSlug) {
+        candidateDir = path.join(projectsDir, entry);
+        break;
+      }
+    }
+  } catch {
+    return [];
+  }
+
+  if (!candidateDir || !fs.existsSync(candidateDir)) return [];
+
+  const sessions: BackendSessionListEntry[] = [];
+  try {
+    const files = fs.readdirSync(candidateDir);
+    for (const file of files) {
+      if (!file.endsWith(".jsonl")) continue;
+      const filePath = path.join(candidateDir, file);
+      try {
+        const stat = fs.statSync(filePath);
+        const sessionId = path.basename(file, ".jsonl");
+        const fd = fs.openSync(filePath, "r");
+        const buf = Buffer.alloc(16384);
+        const bytesRead = fs.readSync(fd, buf, 0, 16384, 0);
+        fs.closeSync(fd);
+        const chunk = buf.toString("utf8", 0, bytesRead);
+        const lines = chunk.split(/\r?\n/);
+        let title: string | undefined;
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const entry = JSON.parse(line);
+            if (entry.type === "user" && entry.message?.content) {
+              const content = entry.message.content;
+              let text = "";
+              if (typeof content === "string") {
+                text = content;
+              } else if (Array.isArray(content)) {
+                for (const b of content) {
+                  if (typeof b === "string") text += (text ? " " : "") + b;
+                  else if (b && typeof b.text === "string") text += (text ? " " : "") + b.text;
+                }
+              }
+              if (text) {
+                const cleaned = text
+                  .replace(/<[^>]+>[\s\S]*?<\/[^>]+>/g, "")
+                  .replace(/<[^>]+>/g, "")
+                  .trim();
+                if (cleaned) {
+                  const firstLine = cleaned.split(/\r?\n/).find((l: string) => l.trim().length > 0);
+                  if (firstLine) {
+                    title = firstLine.length > 80 ? `${firstLine.slice(0, 77)}…` : firstLine;
+                    break;
+                  }
+                }
+              }
+            }
+          } catch {}
+        }
+
+        sessions.push({
+          sessionId,
+          cwd,
+          title: title || "Claude Session",
+          updatedAt: stat.mtimeMs,
+        });
+      } catch {}
+    }
+  } catch {
+    return [];
+  }
+
+  sessions.sort((a, b) => {
+    const aTime = typeof a.updatedAt === "number" ? a.updatedAt : 0;
+    const bTime = typeof b.updatedAt === "number" ? b.updatedAt : 0;
+    return bTime - aTime;
+  });
+
+  return sessions;
+}
+
 export function isClaudeCredentialError(error: unknown): boolean {
   const value = error as any;
   const message = String(value?.message ?? value?.data?.message ?? value ?? "");
@@ -295,6 +402,9 @@ export function isClaudeCredentialError(error: unknown): boolean {
 export interface ClaudeBackendOptions {
   adapterPath?: string;
   nodePath?: string;
+  allowedTools?: string[];
+  customAgents?: unknown;
+  home?: string;
 }
 
 export class ClaudeBackend implements AcpBackend {
@@ -331,6 +441,16 @@ export class ClaudeBackend implements AcpBackend {
         // for the SDK's optional native package, which we do not ship.
         CLAUDE_CODE_EXECUTABLE: options.cliPath,
         ELECTRON_RUN_AS_NODE: "1",
+        ...(this.options.allowedTools && this.options.allowedTools.length > 0
+          ? { CLAUDE_ALLOWED_TOOLS: this.options.allowedTools.join(",") }
+          : {}),
+        ...(this.options.customAgents
+          ? {
+              CLAUDE_CUSTOM_AGENTS: typeof this.options.customAgents === "string"
+                ? this.options.customAgents
+                : JSON.stringify(this.options.customAgents),
+            }
+          : {}),
       },
       shell: grokCliNeedsShell(command),
     };
@@ -371,16 +491,23 @@ export class ClaudeBackend implements AcpBackend {
 
   modelSetSucceeded(_response: any): boolean { return true; }
 
-  listSessions(
+  async listSessions(
     request: (method: string, params: any) => Promise<any>,
     cwd: string,
     platform: NodeJS.Platform,
   ): Promise<BackendSessionListResult> {
-    return listClaudeSessions(
-      (cursor) => request("session/list", cursor ? { cwd, cursor } : { cwd }),
-      cwd,
-      platform,
-    );
+    try {
+      const res = await listClaudeSessions(
+        (cursor) => request("session/list", cursor ? { cwd, cursor } : { cwd }),
+        cwd,
+        platform,
+      );
+      if (res.sessions && res.sessions.length > 0) {
+        return res;
+      }
+    } catch {}
+    const nativeSessions = readNativeClaudeProjectsSessions(cwd, this.options.home, platform);
+    return { sessions: nativeSessions, nextCursor: null };
   }
 
   isCredentialError(error: unknown): boolean { return isClaudeCredentialError(error); }

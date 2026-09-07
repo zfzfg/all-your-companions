@@ -44,3 +44,28 @@ export function execGrokCli(
     );
   });
 }
+
+/**
+ * Run a fast, synchronous `--version` probe against a CLI executable to record
+ * its version stamp in logs alongside adapter pins.
+ */
+export function probeCliVersion(
+  cliPath: string,
+  platform: NodeJS.Platform = process.platform,
+  timeoutMs = 3000,
+): string | undefined {
+  if (!cliPath) return undefined;
+  try {
+    const { execFileSync } = require("node:child_process");
+    const out = execFileSync(cliPath, ["--version"], {
+      encoding: "utf8",
+      windowsHide: true,
+      timeout: timeoutMs,
+      shell: grokCliNeedsShell(cliPath, platform),
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    return out.trim().split(/\r?\n/)[0]?.trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}

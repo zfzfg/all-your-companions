@@ -894,6 +894,7 @@ export type WebviewMsg =
   | { type: "cancel" }
   | { type: "pickModel" }
   | { type: "setMode"; modeId: "agent" | "plan" | "yolo" }
+  | { type: "setConfigOption"; configId: string; value: unknown }
   | { type: "removeChip"; id: string }
   | { type: "toggleChip"; id: string }
   | { type: "openFile"; path: string }
@@ -1287,7 +1288,7 @@ const HOST_MESSAGE_TYPE_MAP: Record<HostMsg["type"], true> = {
 
 const WEBVIEW_MESSAGE_TYPE_MAP: Record<WebviewMsg["type"], true> = {
   ready: true, remotePreferences: true, send: true, newSession: true, cancel: true, pickModel: true,
-  setMode: true, removeChip: true, toggleChip: true, openFile: true, showInFolder: true, openUrl: true,
+  setMode: true, setConfigOption: true, removeChip: true, toggleChip: true, openFile: true, showInFolder: true, openUrl: true,
   openText: true, openDiff: true, revertToolEdit: true, exportExpr: true, setEffort: true, openGlobalConfig: true,
   addProjectFolder: true, removeProjectFolder: true, createProject: true, cloneProject: true, setupGithubCli: true, listGithubRepos: true, githubSignOut: true, githubLoginWithToken: true,
   openProjectConfig: true, listMcpServers: true, connectMcpConnector: true, disconnectMcpConnector: true, completeMcpConnectorOAuth: true,

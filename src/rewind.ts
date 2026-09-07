@@ -16,6 +16,7 @@
  * the Nth visible user bubble aligns with the Nth user-facing point.
  */
 
+import { execFile } from "node:child_process";
 import { isPrimerText } from "./grok-primer";
 import type { HostMsg } from "./protocol";
 import { unwrapExtResult } from "./worktree";
@@ -356,21 +357,70 @@ export function anyFilesAfter(allPoints: RewindPoint[], target: RewindPoint): bo
   return allPoints.some((p) => p.promptIndex >= target.promptIndex && p.hasFileChanges);
 }
 
+export type WorkspaceGitStatus = "clean" | "dirty" | "no_git";
+
+export function checkWorkspaceGitStatus(
+  workspaceRoot?: string,
+  execFn: typeof execFile = execFile,
+): Promise<WorkspaceGitStatus> {
+  if (!workspaceRoot) return Promise.resolve("no_git");
+  return new Promise((resolve) => {
+    execFn(
+      "git",
+      ["status", "--porcelain"],
+      {
+        cwd: workspaceRoot,
+        windowsHide: true,
+        timeout: 5000,
+      },
+      (err, stdout) => {
+        if (err) {
+          resolve("no_git");
+          return;
+        }
+        if (typeof stdout === "string" && stdout.trim().length > 0) {
+          resolve("dirty");
+        } else {
+          resolve("clean");
+        }
+      },
+    );
+  });
+}
+
+export function gitStatusWarning(gitStatus?: WorkspaceGitStatus): string {
+  if (gitStatus === "no_git") {
+    return "This cannot be undone. Warning: This workspace is not a git repository — discarded file changes cannot be recovered!";
+  }
+  if (gitStatus === "dirty") {
+    return "This cannot be undone. Warning: You have uncommitted changes in git — overwritten modifications cannot be recovered!";
+  }
+  return "This cannot be undone (unless you have the changes in git).";
+}
+
 /** Confirm for the Edit flow — different stakes from a plain rewind, so it says
  *  what comes back rather than only what is lost. */
-export function editRewindConfirmMessage(target: RewindPoint, hasFileChanges: boolean): string {
+export function editRewindConfirmMessage(
+  target: RewindPoint,
+  hasFileChanges: boolean,
+  gitStatus?: WorkspaceGitStatus,
+): string {
   return (
     `Edit your last message?\n\n` +
     `It will be removed from the conversation and put back in the composer so you can change it and send again.\n\n` +
     (hasFileChanges
       ? "Grok's reply to it will be discarded and any files it changed in that turn will be restored.\n"
       : "Grok's reply to it will be discarded. Earlier messages are untouched.\n") +
-    `This cannot be undone (unless you have the changes in git).`
+    gitStatusWarning(gitStatus)
   );
 }
 
 /** Confirm dialog body for a chosen target. */
-export function rewindConfirmMessage(p: RewindPoint, mode: RewindMode = "all"): string {
+export function rewindConfirmMessage(
+  p: RewindPoint,
+  mode: RewindMode = "all",
+  gitStatus?: WorkspaceGitStatus,
+): string {
   const preview = (p.promptPreview || "(empty)").replace(/\s+/g, " ").trim();
   const clipped = preview.length > 120 ? preview.slice(0, 117) + "…" : preview;
   // Execute DISCARDS the target turn as well as everything after it — the old
@@ -386,6 +436,6 @@ export function rewindConfirmMessage(p: RewindPoint, mode: RewindMode = "all"): 
     `Rewind to this message?\n\n` +
     `"${clipped}"\n\n` +
     `${scope}\n` +
-    `This cannot be undone (unless you have the changes in git).`
+    gitStatusWarning(gitStatus)
   );
 }

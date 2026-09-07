@@ -1,6 +1,7 @@
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  antigravitySettingsPaths,
   hasAntigravityCredentials,
   isAntigravityCli,
   locateGeminiCli,
@@ -9,11 +10,14 @@ import {
   type GeminiLocatorFs,
 } from "../src/gemini-cli-locator";
 
-function fakeFs(files: string[]): GeminiLocatorFs {
-  const set = new Set(files);
+function fakeFs(files: string[] | Record<string, string>): GeminiLocatorFs {
+  const fileMap = Array.isArray(files)
+    ? new Map(files.map((f) => [f, ""]))
+    : new Map(Object.entries(files));
   return {
-    exists: (value) => set.has(value),
-    isFile: (value) => set.has(value),
+    exists: (value) => fileMap.has(value),
+    isFile: (value) => fileMap.has(value),
+    readText: (value) => fileMap.get(value),
   };
 }
 
@@ -189,5 +193,77 @@ describe("hasAntigravityCredentials", () => {
       env: { GEMINI_HOME: custom },
       fs: fakeFs([path.join(custom, "oauth_creds.json")]),
     })).toBe(true);
+  });
+
+  it("authenticates via GEMINI_API_KEY with valid antigravity-cli/settings.json", () => {
+    const settingsPath = path.join(gemini, "antigravity-cli", "settings.json");
+    expect(hasAntigravityCredentials({
+      home,
+      env: { GEMINI_API_KEY: "test-key-123" },
+      fs: fakeFs({ [settingsPath]: JSON.stringify({ modelProvider: "gemini" }) }),
+    })).toBe(true);
+  });
+
+  it("authenticates via GEMINI_API_KEY with legacy settings.json", () => {
+    const settingsPath = path.join(gemini, "settings.json");
+    expect(hasAntigravityCredentials({
+      home,
+      env: { GEMINI_API_KEY: "test-key-123" },
+      fs: fakeFs({ [settingsPath]: JSON.stringify({ modelProvider: "gemini" }) }),
+    })).toBe(true);
+  });
+
+  it("rejects GEMINI_API_KEY if settings.json has non-gemini modelProvider", () => {
+    const settingsPath = path.join(gemini, "antigravity-cli", "settings.json");
+    expect(hasAntigravityCredentials({
+      home,
+      env: { GEMINI_API_KEY: "test-key-123" },
+      fs: fakeFs({ [settingsPath]: JSON.stringify({ modelProvider: "other" }) }),
+    })).toBe(false);
+  });
+
+  it("rejects GEMINI_API_KEY if settings.json is corrupted or missing", () => {
+    const settingsPath = path.join(gemini, "antigravity-cli", "settings.json");
+    expect(hasAntigravityCredentials({
+      home,
+      env: { GEMINI_API_KEY: "test-key-123" },
+      fs: fakeFs({ [settingsPath]: "invalid json {" }),
+    })).toBe(false);
+
+    expect(hasAntigravityCredentials({
+      home,
+      env: { GEMINI_API_KEY: "test-key-123" },
+      fs: fakeFs({}),
+    })).toBe(false);
+  });
+
+  it("rejects GEMINI_API_KEY if key is only whitespace", () => {
+    const settingsPath = path.join(gemini, "antigravity-cli", "settings.json");
+    expect(hasAntigravityCredentials({
+      home,
+      env: { GEMINI_API_KEY: "   " },
+      fs: fakeFs({ [settingsPath]: JSON.stringify({ modelProvider: "gemini" }) }),
+    })).toBe(false);
+  });
+});
+
+describe("antigravitySettingsPaths", () => {
+  const home = path.join("C:", "Users", "dev");
+
+  it("returns default settings paths under ~/.gemini", () => {
+    const paths = antigravitySettingsPaths(home, {});
+    expect(paths).toEqual([
+      path.join(home, ".gemini", "antigravity-cli", "settings.json"),
+      path.join(home, ".gemini", "settings.json"),
+    ]);
+  });
+
+  it("honours GEMINI_HOME env var", () => {
+    const custom = path.join("D:", "custom-gemini");
+    const paths = antigravitySettingsPaths(home, { GEMINI_HOME: custom });
+    expect(paths).toEqual([
+      path.join(custom, "antigravity-cli", "settings.json"),
+      path.join(custom, "settings.json"),
+    ]);
   });
 });
