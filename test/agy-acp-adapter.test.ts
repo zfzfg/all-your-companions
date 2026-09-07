@@ -227,11 +227,18 @@ describe("AgyAcpAdapterServer", () => {
 
     await new Promise((r) => setTimeout(r, 20));
 
-    // Check updates: should have 2 session/update notifications and 1 response for id: 6
-    const notifications = messages.filter((m) => m.method === "session/update");
-    expect(notifications).toHaveLength(2);
-    expect(notifications[0].params.update.content.text).toBe("Hi there! ");
-    expect(notifications[1].params.update.content.text).toBe("Ready to assist.\n");
+    // Check updates: should have text chunks and live usage_update notifications
+    const textNotifications = messages.filter((m) => m.method === "session/update" && m.params?.update?.sessionUpdate === "agent_message_chunk");
+    expect(textNotifications).toHaveLength(2);
+    expect(textNotifications[0].params.update.content.text).toBe("Hi there! ");
+    expect(textNotifications[1].params.update.content.text).toBe("Ready to assist.\n");
+
+    const usageNotifications = messages.filter((m) => m.method === "session/update" && m.params?.update?.sessionUpdate === "usage_update");
+    expect(usageNotifications.length).toBeGreaterThanOrEqual(2);
+    expect(usageNotifications[0].params.update.used).toBe(110);
+    expect(usageNotifications[0].params.update.size).toBe(1048576);
+    expect(usageNotifications[1].params.update.used).toBe(125);
+    expect(usageNotifications[1].params.update.size).toBe(1048576);
 
     const promptRes = messages.find((m) => m.id === 6);
     expect(promptRes).toBeDefined();
@@ -2635,6 +2642,22 @@ describe("AgyAcpAdapterServer", () => {
       expect(responses).toHaveLength(1);
       expect(responses[0].result.context.total).toBe(1048576);
       expect(responses[0].result.context.used).toBe(0);
+
+      // Verify that switching to a model with a 200k window (e.g. claude-sonnet-4-6) dynamically updates total
+      input.write(JSON.stringify({
+        jsonrpc: "2.0",
+        id: 202,
+        method: "session/set_config_option",
+        params: { configId: "model", value: "claude-sonnet-4-6" },
+      }) + "\n");
+      await new Promise((r) => setTimeout(r, 10));
+
+      input.write(JSON.stringify({ jsonrpc: "2.0", id: 203, method: "_x.ai/session/info", params: {} }) + "\n");
+      await new Promise((r) => setTimeout(r, 10));
+
+      const info203 = responses.find((r) => r.id === 203);
+      expect(info203).toBeDefined();
+      expect(info203.result.context.total).toBe(200000);
 
       server.dispose();
     });

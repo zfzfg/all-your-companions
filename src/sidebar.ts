@@ -10111,7 +10111,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         // after loadSession so it lands after the donut-resetting `session`
         // event in the replay buffer.
         this.emitContextUsage(session);
-        if (session.provider === "grok") void this.refreshContextFromSessionInfo(session, gen, { force: true });
+        if (session.provider === "grok" || session.provider === "gemini") void this.refreshContextFromSessionInfo(session, gen, { force: true });
         // Same reason, for the billing breakdown (#53) — but from OUR store, as
         // grok persists no per-turn usage anywhere.
         this.restoreUsage(session);
@@ -10650,7 +10650,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         await this.controlWorkflow(msg.action, msg.displayName, session);
         break;
       case "refreshContextDetails":
-        if (session.provider === "grok") {
+        if (session.provider === "grok" || session.provider === "gemini") {
           void this.refreshContextFromSessionInfo(session, session.gen, {
             force: session.sessionInfoStale,
           });
@@ -17959,7 +17959,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     gen: number,
     opts: { force?: boolean } = {},
   ): Promise<boolean> {
-    if (session.provider !== "grok" || gen !== session.gen || session.sessionInfoUnsupported) return false;
+    if ((session.provider !== "grok" && session.provider !== "gemini") || gen !== session.gen || session.sessionInfoUnsupported) return false;
     const client = session.client;
     if (!client?.sessionId) return false;
     if (!opts.force && !session.sessionInfoStale && sessionInfoCacheFresh(session.lastSessionInfoAt, Date.now())) {

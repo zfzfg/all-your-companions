@@ -5,7 +5,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { createInterface, type Interface } from "node:readline";
 import { Readable, Writable } from "node:stream";
-import { DEFAULT_GEMINI_MODELS } from "./gemini-backend";
+import { DEFAULT_GEMINI_MODELS, contextWindowForModel } from "./gemini-backend";
 import { MAX_DIFF_EXPAND_BYTES } from "./diff-view";
 import { mergeDiffIntoContent, synthesizeEditDiff, type AcpDiffBlock } from "./diff-synthesize";
 import { antigravitySettingsPaths } from "./gemini-cli-locator";
@@ -1369,7 +1369,7 @@ export class AgyAcpAdapterServer {
 
       case "_x.ai/session/info":
       case "x.ai/session/info": {
-        const windowSize = 1048576;
+        const windowSize = contextWindowForModel(this.currentModelId);
         const used = this.lastUsage.totalTokens || 0;
         this.sendResponse(id, {
           context: {
@@ -1770,6 +1770,20 @@ export class AgyAcpAdapterServer {
         this.pendingPrompt.usage.outputTokens = u.output_tokens ?? this.pendingPrompt.usage.outputTokens;
         this.pendingPrompt.usage.thoughtTokens = u.thinking_tokens ?? this.pendingPrompt.usage.thoughtTokens;
         this.pendingPrompt.usage.totalTokens = u.total_tokens ?? this.pendingPrompt.usage.totalTokens;
+        this.lastUsage = { ...this.pendingPrompt.usage };
+
+        const usedTokens = u.total_tokens ?? ((u.input_tokens ?? 0) + (u.output_tokens ?? 0));
+        if (typeof usedTokens === "number" && usedTokens > 0) {
+          const windowSize = contextWindowForModel(this.currentModelId);
+          this.sendNotification("session/update", {
+            sessionId: this.sessionId,
+            update: {
+              sessionUpdate: "usage_update",
+              used: usedTokens,
+              size: windowSize,
+            },
+          });
+        }
       }
       return;
     }
@@ -1797,6 +1811,20 @@ export class AgyAcpAdapterServer {
             pending.usage.outputTokens = res.usage.output_tokens ?? pending.usage.outputTokens;
             pending.usage.thoughtTokens = res.usage.thinking_tokens ?? pending.usage.thoughtTokens;
             pending.usage.totalTokens = res.usage.total_tokens ?? pending.usage.totalTokens;
+            this.lastUsage = { ...pending.usage };
+
+            const usedTokens = res.usage.total_tokens ?? ((res.usage.input_tokens ?? 0) + (res.usage.output_tokens ?? 0));
+            if (typeof usedTokens === "number" && usedTokens > 0) {
+              const windowSize = contextWindowForModel(this.currentModelId);
+              this.sendNotification("session/update", {
+                sessionId: this.sessionId,
+                update: {
+                  sessionUpdate: "usage_update",
+                  used: usedTokens,
+                  size: windowSize,
+                },
+              });
+            }
           }
 
           if (res?.status === "ERROR") {
