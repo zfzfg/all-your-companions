@@ -936,3 +936,21 @@ This gives all four providers seamless single-edit revert capability.
   the transcript and the tab reloads, that edit's revert affordance is gone
   until the underlying `tool_call`/`tool_call_update` replays again.
 
+### 9.5 Tool Calling Robustness: Cortex Artifact Protection & Pattern Validation
+
+**Problem Statement:**
+In Antigravity CLI (`agy.exe` v1.1.26), Gemini models (specifically `gemini-3.8-flash`) occasionally encountered two hard tool-call validation errors:
+1. **Cortex Artifact Permission Rejection (`write_to_file`)**:
+   When writing regular workspace files, the model mistakenly included `ArtifactMetadata: { RequestFeedback: false, Summary: "...", UserFacing: true }`. Cortex strictly validates that any tool call carrying `ArtifactMetadata` must target files inside the agent's internal brain directory (`<geminiHome>\antigravity-cli\brain\<conversation-id>/`). Workspace paths were rejected with `cortex tool write_to_file: convert tool call for permissions: model output error: invalid tool call error (invalid_args) ... is not a valid artifact path`.
+2. **Missing Property 'Pattern' (`find_by_name`)**:
+   When filtering workspace files by extension (e.g. `Extensions: ["mp3", "wav"]`), Gemini omitted the mandatory `Pattern` argument, causing Cortex schema validation failure `missing property 'Pattern'`.
+
+**Remediation:**
+- **Automatic Rule Seeding (`ensureAntigravityToolRules`)**:
+  In `src/agy-acp-adapter.ts`, the adapter checks and automatically seeds global guidelines into `~/.gemini/config/rules/antigravity_tool_rules.md` and `~/.gemini/GEMINI.md` on adapter initialization and on `session/new`. Because Antigravity CLI hierarchically injects `always_on` rules from `~/.gemini/config/rules/` into all sessions on the machine, Gemini receives strict instructions never to pass `ArtifactMetadata` for workspace files and to always include `Pattern` for file searches.
+- **Error Normalization (`sanitizeAgyToolErrorMessage`)**:
+  Raw internal Cortex engine exceptions are intercepted and rewritten into clear, informative status messages (`Artifact Path Error: ... Retrying without ArtifactMetadata...`) in `session/update`.
+- **Workspace-Level Rules**:
+  Dedicated `GEMINI.md` files are maintained in both the workspace root and project root for local adherence.
+
+

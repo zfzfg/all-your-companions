@@ -151,6 +151,87 @@ export function normalizeBaselineKey(file: string, cwd: string): string {
 }
 
 /**
+ * Automatically seeds Antigravity tool guidelines into ~/.gemini/config/rules/
+ * and ~/.gemini/GEMINI.md if missing or empty.
+ *
+ * This prevents Gemini models from:
+ * 1. Attaching ArtifactMetadata to normal workspace files (causing Cortex permission error).
+ * 2. Calling find_by_name without the mandatory Pattern argument.
+ * 3. Calling file tools with relative paths instead of absolute paths.
+ */
+export function ensureAntigravityToolRules(geminiHome: string): boolean {
+  try {
+    const rulesDir = path.join(geminiHome, "config", "rules");
+    const ruleFile = path.join(rulesDir, "antigravity_tool_rules.md");
+    const geminiMd = path.join(geminiHome, "GEMINI.md");
+
+    const content = `---
+description: Critical guidelines for Antigravity and Cortex tool usage
+always_on: true
+---
+
+# Antigravity & Cortex Tool Calling Guidelines
+
+Follow these strict rules when invoking tools:
+
+## 1. File Writing (write_to_file)
+- NEVER provide ArtifactMetadata when creating or modifying files in the workspace or project directory.
+- ArtifactMetadata is STRICTLY reserved for internal session artifacts inside <geminiHome>/brain/<conversation-id>/ (e.g. implementation_plan.md, walkthrough.md).
+- Passing ArtifactMetadata for any workspace file causes an immediate fatal Cortex permission rejection ("is not a valid artifact path"). All regular workspace files must ALWAYS be written without ArtifactMetadata.
+
+## 2. File Finding (find_by_name)
+- The Pattern parameter is MANDATORY in find_by_name.
+- Even when filtering by Extensions (e.g. ["mp3", "wav"]) or specifying SearchDirectory, you MUST ALWAYS provide Pattern: "*" (or a specific glob pattern).
+- Omitting Pattern triggers an immediate schema validation error: "missing property 'Pattern'".
+
+## 3. File Viewing and Searching (view_file, grep_search, list_dir)
+- Always use absolute paths for AbsolutePath, SearchPath, DirectoryPath, and TargetFile.
+- When searching with grep_search, always supply both SearchPath and Query.
+`;
+
+    let modified = false;
+    if (!fs.existsSync(ruleFile)) {
+      fs.mkdirSync(rulesDir, { recursive: true });
+      fs.writeFileSync(ruleFile, content, "utf8");
+      modified = true;
+    }
+
+    if (!fs.existsSync(geminiMd) || fs.statSync(geminiMd).size === 0) {
+      fs.writeFileSync(geminiMd, content, "utf8");
+      modified = true;
+    }
+    return modified;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Normalizes and clarifies internal Cortex engine errors for user display.
+ */
+export function sanitizeAgyToolErrorMessage(rawMessage: any): any {
+  if (typeof rawMessage === "string") {
+    if (/not a valid artifact path/i.test(rawMessage)) {
+      return "Artifact Path Error: TargetFile is in workspace, but model included ArtifactMetadata (only valid for internal brain artifacts). Retrying without ArtifactMetadata...";
+    }
+    if (/missing property ['"]Pattern['"]/i.test(rawMessage)) {
+      return "Invalid Tool Call: Missing required property 'Pattern' (must specify glob pattern like '*'). Retrying...";
+    }
+    return rawMessage;
+  }
+  if (rawMessage && typeof rawMessage === "object") {
+    if (typeof rawMessage.message === "string") {
+      return { ...rawMessage, message: sanitizeAgyToolErrorMessage(rawMessage.message) };
+    }
+    if (typeof rawMessage.error === "string") {
+      return { ...rawMessage, error: sanitizeAgyToolErrorMessage(rawMessage.error) };
+    }
+  }
+  return rawMessage;
+}
+
+
+/**
  * Find the most authoritative transcript file for an Antigravity conversation.
  * Checks for untruncated `transcript_full.jsonl` first, then falls back to `transcript.jsonl`.
  * Checks candidate directories across all possible Gemini homes (~/.gemini/antigravity-cli,
@@ -520,6 +601,7 @@ export class AgyAcpAdapterServer {
     this.diskPollAttempts = options.diskPollAttempts ?? 50;
     this.diskPollDelayMs = options.diskPollDelayMs ?? 200;
     this.supportsInputFormatStreamJson = options.supportsInputFormat;
+    ensureAntigravityToolRules(this.geminiHome);
   }
 
   private supportsInputFormatStreamJson?: boolean;
@@ -1146,6 +1228,7 @@ export class AgyAcpAdapterServer {
 
       case "session/new": {
         this.pendingExitPlanId = undefined;
+        ensureAntigravityToolRules(this.geminiHome);
         if (typeof params?.cwd === "string" && params.cwd) {
           this.cwd = params.cwd;
         }
@@ -1711,7 +1794,8 @@ export class AgyAcpAdapterServer {
           });
         } else {
           const isError = step.state === "ERROR";
-          const output = step.tool_info?.output ?? step.tool_info?.error?.message ?? (isError ? "Tool execution failed" : "completed");
+          const rawOutput = step.tool_info?.output ?? step.tool_info?.error?.message ?? (isError ? "Tool execution failed" : "completed");
+          const output = isError ? sanitizeAgyToolErrorMessage(rawOutput) : rawOutput;
           // For an edit tool this polls disk for the write to actually land
           // (see waitForDiskChangeText) — up to ~3s before this update is
           // sent, which can reorder it after a later tool's own updates.

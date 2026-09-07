@@ -14,6 +14,8 @@ import {
   findRecentTranscriptToolCall,
   unwrapTranscriptStrings,
   synthesizeAgyToolDiff,
+  ensureAntigravityToolRules,
+  sanitizeAgyToolErrorMessage,
 } from "../src/agy-acp-adapter";
 
 // The conversation map is real state under ~/.gemini in production. A test must
@@ -2662,4 +2664,52 @@ describe("AgyAcpAdapterServer", () => {
       server.dispose();
     });
   });
+
+  describe("Antigravity tool rule seeding and error sanitization", () => {
+    it("seeds antigravity_tool_rules.md and GEMINI.md in a fresh geminiHome", () => {
+      const testGeminiHome = fs.mkdtempSync(path.join(os.tmpdir(), "agy-rules-test-"));
+      const seeded = ensureAntigravityToolRules(testGeminiHome);
+      expect(seeded).toBe(true);
+
+      const ruleFile = path.join(testGeminiHome, "config", "rules", "antigravity_tool_rules.md");
+      const geminiMd = path.join(testGeminiHome, "GEMINI.md");
+      expect(fs.existsSync(ruleFile)).toBe(true);
+      expect(fs.existsSync(geminiMd)).toBe(true);
+
+      const ruleContent = fs.readFileSync(ruleFile, "utf8");
+      expect(ruleContent).toContain("write_to_file");
+      expect(ruleContent).toContain("ArtifactMetadata");
+      expect(ruleContent).toContain("find_by_name");
+      expect(ruleContent).toContain("Pattern");
+
+      // Running again does not modify already existing files
+      const secondRun = ensureAntigravityToolRules(testGeminiHome);
+      expect(secondRun).toBe(false);
+
+      fs.rmSync(testGeminiHome, { recursive: true, force: true });
+    });
+
+    it("sanitizes Cortex artifact path errors to be user-friendly", () => {
+      const rawCortexError = "declaring permissions: cortex tool write_to_file: convert tool call for permissions: model output error: invalid tool call error (invalid_args)\nc:\\test\\sound-tester.html is not a valid artifact path; artifacts must be in C:\\.gemini\\brain\\12345/";
+      const sanitized = sanitizeAgyToolErrorMessage(rawCortexError);
+      expect(sanitized).toContain("Artifact Path Error");
+      expect(sanitized).toContain("ArtifactMetadata");
+
+      // Also sanitizes object error envelopes
+      const objError = { error: rawCortexError };
+      const sanitizedObj = sanitizeAgyToolErrorMessage(objError);
+      expect(sanitizedObj.error).toContain("Artifact Path Error");
+    });
+
+    it("sanitizes find_by_name missing Pattern errors", () => {
+      const rawMissingPattern = "invalid arguments:\n- missing property 'Pattern'";
+      const sanitized = sanitizeAgyToolErrorMessage(rawMissingPattern);
+      expect(sanitized).toContain("Missing required property 'Pattern'");
+
+      const objMsg = { message: rawMissingPattern };
+      const sanitizedObj = sanitizeAgyToolErrorMessage(objMsg);
+      expect(sanitizedObj.message).toContain("Missing required property 'Pattern'");
+    });
+  });
 });
+
