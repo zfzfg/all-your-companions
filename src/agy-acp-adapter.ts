@@ -1,4 +1,4 @@
-import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -600,7 +600,12 @@ export class AgyAcpAdapterServer {
     this.spawnFn = options.spawnFn || ((cmd, args, opts) => spawn(cmd, args, opts));
     this.diskPollAttempts = options.diskPollAttempts ?? 50;
     this.diskPollDelayMs = options.diskPollDelayMs ?? 200;
-    this.supportsInputFormatStreamJson = options.supportsInputFormat;
+    // A caller-supplied spawnFn means a test harness stands in for the real
+    // CLI (production never overrides this) — skip the real `--help` probe
+    // and assume the modern stream-json flag rather than spawning a real
+    // `agy` process (or the test's own fake, which expects exactly one
+    // spawn call: the actual prompt) behind the test's back.
+    this.supportsInputFormatStreamJson = options.supportsInputFormat ?? (options.spawnFn ? true : undefined);
     ensureAntigravityToolRules(this.geminiHome);
   }
 
@@ -609,19 +614,45 @@ export class AgyAcpAdapterServer {
   private readonly lastStderrBuffer: string[] = [];
   private lastUsage: PromptUsage = { inputTokens: 0, outputTokens: 0, thoughtTokens: 0, totalTokens: 0 };
 
-  probeSupportsInputFormat(): boolean {
+  /**
+   * Async on purpose: a synchronous `spawnSync` here (even with `windowsHide:
+   * true`) can still flash a console window on Windows when `agyPath` is a
+   * `.cmd` shim, because `shell: true` + `spawnSync` races the hidden-window
+   * flag in a way plain async `spawn` (used for the long-lived agy process
+   * below) does not. Cached after the first call, so this only ever runs
+   * once per adapter instance. Uses the real `spawn` rather than the
+   * injectable `this.spawnFn` seam so it stays independent of whatever fake
+   * process a test wires up for the long-lived agy process.
+   */
+  async probeSupportsInputFormat(): Promise<boolean> {
     if (this.supportsInputFormatStreamJson !== undefined) {
       return this.supportsInputFormatStreamJson;
     }
     try {
-      const res = spawnSync(this.agyPath, ["--help"], {
-        encoding: "utf8",
+      const proc = spawn(this.agyPath, ["--help"], {
         windowsHide: true,
-        timeout: 5000,
         shell: process.platform === "win32" && /\.(cmd|bat)$/i.test(this.agyPath),
       });
-      const text = `${res.stdout || ""}\n${res.stderr || ""}`;
-      this.supportsInputFormatStreamJson = text.includes("--input-format");
+      const supportsFlag = await new Promise<boolean>((resolve) => {
+        let out = "";
+        // Matches the old spawnSync catch-all: an unreadable probe assumes
+        // the newer, stream-json-capable CLI rather than falling back.
+        const timer = setTimeout(() => {
+          proc.kill();
+          resolve(true);
+        }, 5000);
+        proc.stdout?.on("data", (chunk) => { out += chunk; });
+        proc.stderr?.on("data", (chunk) => { out += chunk; });
+        proc.on("error", () => {
+          clearTimeout(timer);
+          resolve(true);
+        });
+        proc.on("close", () => {
+          clearTimeout(timer);
+          resolve(out.includes("--input-format"));
+        });
+      });
+      this.supportsInputFormatStreamJson = supportsFlag;
     } catch {
       this.supportsInputFormatStreamJson = true;
     }
@@ -1959,7 +1990,8 @@ export class AgyAcpAdapterServer {
 
   private executePrompt(id: number | string, promptText: string, retryAllowed = true): Promise<void> {
     return new Promise((resolve, reject) => {
-      const useStdin = this.probeSupportsInputFormat();
+      void (async () => {
+      const useStdin = await this.probeSupportsInputFormat();
       if (!useStdin) {
         process.stderr.write("[agy] Antigravity running in compatibility mode (per-turn CLI invocation)\n");
       }
@@ -2017,6 +2049,7 @@ export class AgyAcpAdapterServer {
           }
         });
       }
+      })();
     });
   }
 }

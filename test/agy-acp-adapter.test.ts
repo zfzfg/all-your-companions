@@ -2622,6 +2622,25 @@ describe("AgyAcpAdapterServer", () => {
       server.dispose();
     });
 
+    it("probes --input-format capability asynchronously, never via a blocking spawnSync", async () => {
+      // Windows flashes a console window for a synchronous spawnSync+shell
+      // probe even with windowsHide: true; only the async spawn() path is
+      // reliably silent (research: agy-acp-adapter.ts probeSupportsInputFormat
+      // doc comment). This guards against a regression back to spawnSync.
+      const server = new AgyAcpAdapterServer({
+        conversationStorePath: nextStore(),
+        agyPath: path.join(scratchDir, "definitely-not-a-real-agy-binary"),
+      });
+
+      const result = server.probeSupportsInputFormat();
+      expect(result).toBeInstanceOf(Promise);
+      // A nonexistent binary must not hang for the full 5s timeout fallback —
+      // the async spawn's "error" event should settle this quickly.
+      await expect(result).resolves.toBe(true);
+
+      server.dispose();
+    });
+
     it("answers _x.ai/mcp/list by reading Antigravity settings", async () => {
       const input = new PassThrough();
       const output = new PassThrough();
