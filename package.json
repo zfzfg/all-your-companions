@@ -9,13 +9,13 @@
     "url": "https://sterra.online"
   },
   "license": "FSL-1.1-MIT",
-  "homepage": "https://github.com/phuryn/grok-build-vscode",
+  "homepage": "https://github.com/zfzfg/all-your-companions",
   "bugs": {
-    "url": "https://github.com/phuryn/grok-build-vscode/issues"
+    "url": "https://github.com/zfzfg/all-your-companions/issues"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/phuryn/grok-build-vscode"
+    "url": "https://github.com/zfzfg/all-your-companions"
   },
   "engines": {
     "vscode": "^1.106.0"
