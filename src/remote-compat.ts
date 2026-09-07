@@ -8,7 +8,6 @@
  * This module provides clean, no-op stub implementations for internal
  * compatibility with the UI event loop without any external network dependencies.
  */
-import { spawn as nodeSpawn } from "node:child_process";
 import type { Session } from "./session";
 
 export const CLOUD_ENVIRONMENT_ENV = "GROK_CLOUD_ENVIRONMENT";
@@ -17,6 +16,11 @@ export const RELAY_DEVICE_TOKEN_SECRET = "grok.remote.deviceToken";
 export type MsgOrigin = "local" | "remote";
 
 export * from "./remote-policy";
+// Device login moved to its own modules (pure / runtime / GitHub). Re-exported
+// here so the remote-* facades that forward this module keep resolving them.
+export * from "./device-login";
+export * from "./device-login-run";
+export * from "./github-device-login";
 
 export interface MediaInlineDeps {
   registerFullImage: (p: string) => string | undefined;
@@ -509,108 +513,4 @@ export function parseRelayFrame(_raw: any): any {
 
 export function resolveRelayUrl(..._args: any[]): string {
   return "";
-}
-
-export interface DeviceLoginHandle {
-  cancel(): void;
-  submitCode(code: string): void;
-}
-
-export interface DeviceLoginPrompt {
-  url?: string;
-  code?: string;
-  userCode?: string;
-  verificationUri?: string;
-  expiresIn?: number;
-  interval?: number;
-  needsCode?: boolean;
-}
-
-export interface DeviceLoginResult {
-  ok: boolean;
-  cancelled?: boolean;
-  failure?: any;
-  output: string;
-  setupGit?: boolean;
-}
-
-export interface DeviceLoginCallbacks {
-  onPrompt?: (prompt: DeviceLoginPrompt) => void;
-  onDone?: (result: DeviceLoginResult) => void;
-}
-
-export function deviceLoginFailureText(..._args: any[]): string {
-  return "Device login is disabled in standalone mode.";
-}
-
-export function deviceLoginPlan(..._args: any[]): any {
-  return undefined;
-}
-
-export function deviceLoginPreflight(..._args: any[]): any {
-  return undefined;
-}
-
-export function deviceLoginCodeNote(..._args: any[]): string {
-  return "";
-}
-
-export function noRemoteSignInMessage(..._args: any[]): string {
-  return "Remote sign-in disabled in this standalone build.";
-}
-
-export function deviceLoginUnavailable(..._args: any[]): string | undefined {
-  return "Device login is disabled in standalone mode.";
-}
-
-export function runDeviceLogin(
-  _cliPath?: string,
-  _args?: string[],
-  _callbacks?: DeviceLoginCallbacks,
-  ..._rest: any[]
-): DeviceLoginHandle {
-  return {
-    cancel() {},
-    submitCode(_code: string) {},
-  };
-}
-
-export function githubDeviceLoginFailureText(..._args: any[]): string {
-  return "GitHub device login is disabled in standalone mode.";
-}
-
-export function runGithubDeviceLogin(
-  _target?: any,
-  _callbacks?: DeviceLoginCallbacks,
-  ..._args: any[]
-): DeviceLoginHandle {
-  return {
-    cancel() {},
-    submitCode(_code: string) {},
-  };
-}
-
-export async function probeClaudeAuthStatus(cliPath: string): Promise<boolean | undefined> {
-  return new Promise((resolve) => {
-    try {
-      const child = nodeSpawn(cliPath, ["auth", "status"], {
-        stdio: ["ignore", "pipe", "pipe"],
-        windowsHide: true,
-      });
-      let out = "";
-      child.stdout?.on("data", (c) => {
-        out += String(c);
-      });
-      child.on("error", () => resolve(undefined));
-      child.on("close", () => resolve(/"loggedIn":\s*true/.test(out)));
-      setTimeout(() => {
-        try {
-          child.kill();
-        } catch {}
-        resolve(false);
-      }, 3000).unref?.();
-    } catch {
-      resolve(undefined);
-    }
-  });
 }

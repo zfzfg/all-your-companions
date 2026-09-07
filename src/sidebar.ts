@@ -122,12 +122,10 @@ import {
   deviceLoginCodeNote,
   noRemoteSignInMessage,
   deviceLoginUnavailable,
-  probeClaudeAuthStatus,
-  runDeviceLogin,
   type DeviceLoginHandle,
-  githubDeviceLoginFailureText,
-  runGithubDeviceLogin,
-} from "./remote-compat";
+} from "./device-login";
+import { probeClaudeAuthStatus, runDeviceLogin } from "./device-login-run";
+import { githubDeviceLoginFailureText, runGithubDeviceLogin } from "./github-device-login";
 import {
   GITHUB_CLI_BIN,
   isGithubCliMissing,
