@@ -449,6 +449,12 @@ export const INBOUND_DISPOSITION: Record<WebviewMsg["type"], InboundDisposition>
   listRuleFiles: "host-local",
   openRuleFile: "host-local",
   appendRuleFile: "host-local",
+  // AP-07: listing is observation of a security surface the remote already
+  // shares (permission cards, Auto accept). Delete/adopt change what is
+  // auto-granted, same class as permissionAnswer.
+  listPermissionRules: "view",
+  deletePermissionRule: "full",
+  adoptPermissionRules: "full",
   // Read-only inventory query through the live Grok ACP session. Same class as
   // refreshContextDetails: no turn, no mutation, no desk-local picker.
   // Mirroring the last fetch is not enough if
@@ -629,6 +635,9 @@ export const REMOTE_REQUIRES_BOUND_SESSION: Record<WebviewMsg["type"], boolean> 
   listRuleFiles: false,
   openRuleFile: false,
   appendRuleFile: false,
+  listPermissionRules: true,
+  deletePermissionRule: true,
+  adoptPermissionRules: true,
   listMcpServers: false,
   listRoutines: false,
   saveRoutine: false,
@@ -910,6 +919,9 @@ export const OUTBOUND_DISPOSITION: Record<HostMsg["type"], OutboundDisposition> 
   // are meaningless off the machine running the host — same reasoning as
   // codexInstallProgress/moveViewHint just above.
   ruleFiles: "host-local",
+  // AP-07: the list is the security surface — invisible rules are the
+  // failure mode. No home-path leakage (workspace paths are project-scoped).
+  permissionRules: "mirror",
   // Placement is a property of the machine running the extension, and `moveView`
   // is host-local anyway — a remote could neither act on the hint nor need it.
   moveViewHint: "host-local",
@@ -1084,6 +1096,7 @@ export const OUTBOUND_PROJECT_AUTH: Record<HostMsg["type"], OutboundProjectAuth>
   // Suppressed before crossing (host-local, see OUTBOUND_DISPOSITION) — no
   // project auth question ever applies to it.
   ruleFiles: "none",
+  permissionRules: "none",
   routines: "entries",
   codexInstallProgress: "none",
   expandCommandOutputs: "none",

@@ -89,6 +89,13 @@ export const DISK_KEYS: Readonly<Record<string, string>> = {
   // Companion to the above: id -> the local day that tip last appeared, so the
   // same line does not come round twice in one day. Pruned to today on write.
   "grok.welcomeTipsShown": "welcome-tips-shown.json",
+  // AP-07 global permission rules. Record of id -> PermissionRule, never an
+  // array (validValue). Workspace rules live in `.grok/permissions.json` and
+  // are adopted via grok.permissionRulesAdopted below.
+  "grok.permissionRules": "permission-rules.json",
+  // Workspace-root key -> { hash, status, at }. A checked-in rules file is
+  // inert until the hash is adopted; a later byte change re-asks.
+  "grok.permissionRulesAdopted": "permission-rules-adopted.json",
 };
 
 export class PersistedState {

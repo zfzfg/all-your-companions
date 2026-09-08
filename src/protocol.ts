@@ -40,6 +40,12 @@ import type { RuleFile } from "./rules-files";
 export type { RuleFile };
 import type { LimitOfferAction, LimitOfferRecommended, LimitOfferTarget } from "./limit-errors";
 export type { LimitOfferAction };
+import type {
+  PermissionRuleMatch,
+  PermissionRuleSuggestion,
+  PermissionRuleView,
+} from "./permission-rules";
+export type { PermissionRuleMatch, PermissionRuleSuggestion, PermissionRuleView };
 
 /** grok's tool-call payload as it comes off the wire (acp emits it untyped). The
  *  webview reads a handful of fields; the index signature keeps assignment from
@@ -513,6 +519,20 @@ export type HostMsg =
    *  names the local home directory, so it never crosses to a remote client
    *  (see OUTBOUND_DISPOSITION). Always the FULL candidate list, never a delta. */
   | { type: "ruleFiles"; files: RuleFile[] }
+  /**
+   * AP-07 permission-rule list (Settings → Advanced). Always the FULL list,
+   * never a delta. `pendingAdoption` is set when a checked-in
+   * `.grok/permissions.json` has not been explicitly adopted — those rules
+   * are listed here so they are visible, but they are not active.
+   * `orderCopy` is the evaluation-order sentence; painting it is part of
+   * the security surface, not decoration.
+   */
+  | {
+      type: "permissionRules";
+      rules: PermissionRuleView[];
+      orderCopy: string;
+      pendingAdoption?: { path: string; ruleCount: number; hash: string };
+    }
   /** Plan picker gate. `recheckable` means the version probe failed (not a
    *  verified-old CLI) — the row stays clickable so a later pick re-probes. */
   | { type: "planModeAvailability"; available: boolean; reason?: string; recheckable?: boolean }
@@ -670,7 +690,12 @@ export type HostMsg =
   | { type: "planHistoryQueue"; plans: PlanHistoryItem[] }
   | { type: "toolCall"; call: ToolCallPayload }
   | { type: "toolCallUpdate"; call: ToolCallPayload }
-  | { type: "permissionRequest"; req: PermissionRequest }
+  /**
+   * `ruleSuggestions` is additive (AP-07): derived from THIS request, never a
+   * generic allow-everything menu. Older webviews ignore the field and the
+   * card stays the two-button prompt it is today.
+   */
+  | { type: "permissionRequest"; req: PermissionRequest; ruleSuggestions?: PermissionRuleSuggestion[] }
   | { type: "permissionOptions"; requestId: number | string; options: PermissionRequest["options"] }
   | { type: "permissionResolved"; requestId: number | string; optionId: string }
   // The host spreads the plan-review snapshot (planPath/planName) into the bare
@@ -1185,7 +1210,19 @@ export type WebviewMsg =
    * `handle` (see file-selection-registry) — a renderer-invented path is refused.
    */
   | { type: "dropFile"; path?: string; handle?: string; shift: boolean }
-  | { type: "permissionAnswer"; requestId: number | string; optionId: string }
+  /**
+   * `rule` is additive (AP-07): persist an allow-rule derived from a
+   * suggestion, then answer this card. The host sanitizes the match
+   * (concrete commandPrefix or pathGlob required) and ignores a crafted
+   * allow-everything payload. Older hosts ignore the field and just answer.
+   */
+  | { type: "permissionAnswer"; requestId: number | string; optionId: string; rule?: PermissionRuleMatch }
+  /** AP-07: (re-)list active + pending permission rules. */
+  | { type: "listPermissionRules" }
+  /** AP-07: drop one user rule. Floor rows are not addressable. */
+  | { type: "deletePermissionRule"; id: string }
+  /** AP-07: adopt or decline a checked-in `.grok/permissions.json`. */
+  | { type: "adoptPermissionRules"; adopt: boolean }
   | { type: "exitPlanAnswer"; requestId: number | string; verdict: "approved" | "abandoned" | "rejected"; comment?: string }
   | { type: "questionAnswer"; requestId: number | string; answers?: Record<string, string>; annotations?: Record<string, { notes?: string; preview?: string }> }
   | { type: "questionCancel"; requestId: number | string }
@@ -1422,7 +1459,7 @@ const HOST_MESSAGE_TYPE_MAP: Record<HostMsg["type"], true> = {
   soundNotifications: true, processingSound: true, readRepliesAloud: true, summarizeRepliesAloud: true, speechSummary: true, imageFull: true, moveComposerCaret: true, remoteStatus: true,
   setAllToolDetails: true, focusInput: true, findInSession: true, restoreComposer: true, truncateMessages: true, uiConfirmRequest: true,
   sessions: true, sessionRemoved: true, repoSessions: true, pinnedSessions: true, repos: true, sessionDot: true, queuedSends: true, submitQueuedSend: true,
-  steerUnavailable: true, feedbackAvailability: true, turnFeedbackAck: true, usage: true, providerCapabilities: true, planEntries: true, ruleFiles: true,
+  steerUnavailable: true, feedbackAvailability: true, turnFeedbackAck: true, usage: true, providerCapabilities: true, planEntries: true, ruleFiles: true, permissionRules: true,
 };
 
 const WEBVIEW_MESSAGE_TYPE_MAP: Record<WebviewMsg["type"], true> = {
@@ -1434,7 +1471,7 @@ const WEBVIEW_MESSAGE_TYPE_MAP: Record<WebviewMsg["type"], true> = {
   listRoutines: true, saveRoutine: true, deleteRoutine: true, setRoutinePaused: true, runRoutineNow: true, showLogs: true, toggleDevTools: true, openSettings: true, openSettingsSurface: true, closeSettingsSurface: true, dismissWelcomeTip: true, welcomeTipShown: true, moveView: true,
   setShowThinking: true, setAppPurpose: true, setExpandCommandOutputs: true, setSteerByDefault: true,
   setSoundNotifications: true, setProcessingSound: true, setReadRepliesAloud: true, setSummarizeRepliesAloud: true, setVoiceSendPhrase: true, setVoiceKeyterms: true, setTelemetryEnabled: true, setThumbsFeedback: true, summarizeSpeech: true, requestImageFull: true, composerFocus: true,
-  dropFile: true, permissionAnswer: true, exitPlanAnswer: true, questionAnswer: true, limitOfferAnswer: true,
+  dropFile: true, permissionAnswer: true, listPermissionRules: true, deletePermissionRule: true, adoptPermissionRules: true, exitPlanAnswer: true, questionAnswer: true, limitOfferAnswer: true,
   questionCancel: true, questionDraft: true, setModel: true, installCodex: true, cancelCodexInstall: true, runInstallCmd: true, runGrokLogin: true,
   cancelDeviceLogin: true, submitDeviceLoginCode: true,
   logout: true, checkGrokUpdate: true, updateGrok: true, recheckConnection: true, refreshProviders: true, retryProviderSession: true,

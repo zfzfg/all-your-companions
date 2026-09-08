@@ -28,6 +28,32 @@ import {
   type RuleFile,
   type RuleFileFs,
 } from "./rules-files";
+import {
+  PERMISSION_RULES_ADOPTED_KEY,
+  PERMISSION_RULES_KEY,
+  PERMISSION_RULES_ORDER_COPY,
+  SOCKET_RULE_VIEWS,
+  activeRulesFrom,
+  adoptionKeyFor,
+  createRule,
+  decidePermission,
+  extractPermissionFacts,
+  globalRulesToMap,
+  loadWorkspaceRulesFile,
+  parseAdoptionMap,
+  parseGlobalRulesMap,
+  pendingWorkspaceAdoption,
+  permissionRulesNotice,
+  pickAllowOnceOption,
+  sanitizeWebviewAllowMatch,
+  suggestRules,
+  toRuleView,
+  writeWorkspaceRulesFile,
+  type AdoptionRecord,
+  type PermissionRule,
+  type PermissionRulesFs,
+  type PermissionRuleView,
+} from "./permission-rules";
 import { CODEX_ACP_ADAPTER_VERSION, CodexBackend, isCodexCredentialError } from "./codex-backend";
 import { locateCodexCli, resolveCodexHome } from "./codex-cli-locator";
 import { CODEX_MANAGED_VERSION, installManagedCodex } from "./codex-managed-installer";
@@ -794,6 +820,8 @@ export function findWorkspaceSensitiveFiles(workspaceRoot?: string): string[] {
 
 export class GrokSidebar {
   private warnedSensitiveFiles = false;
+  /** Workspace roots whose unadopted `.grok/permissions.json` we already asked about this run. */
+  private readonly permissionAdoptionPrompted = new Set<string>();
   public static readonly viewId = "companions.chat";
   public static readonly legacyViewId = "grok.chat";
   /** Primary side bar projects rail — separate webview, not a second chat client. */
@@ -3891,6 +3919,12 @@ Only continue if you trust this code.`,
       });
       return;
     }
+    // AP-07: after the plan gate, before the card. Pure decision; we only apply.
+    // Plan-review cards are a verdict, not a tool grant — rules never auto-decide them.
+    if (!isPlanReviewPermission(req.toolCall?.kind) &&
+        this.applyPermissionRules(session, client, req, cwd)) {
+      return;
+    }
     // Auto accept is not a verdict on a plan-review card. Same rule as
     // autoApprovePendingPermissions, including after a failed mode RPC
     // that already cleared the Plan bit.
@@ -3931,6 +3965,9 @@ Only continue if you trust this code.`,
         name: o.name,
       })),
     }));
+    const ruleSuggestions = isPlanReviewPermission(req.toolCall?.kind)
+      ? undefined
+      : suggestRules(extractPermissionFacts(req.toolCall), cwd);
     this.emit(session, {
       type: "permissionRequest",
       req: {
@@ -3938,8 +3975,229 @@ Only continue if you trust this code.`,
         options: visibleOptions,
         ...(plan !== undefined ? { plan } : {}),
       },
+      ...(ruleSuggestions && ruleSuggestions.length ? { ruleSuggestions } : {}),
     });
     this.setStatus(session, "needs-you");
+  }
+
+  /**
+   * Apply the AP-07 engine to a live permission request. Returns true when
+   * the request was answered (allow/deny) and must not emit a card.
+   *
+   * Empty user rules and no floor hit → false, which is today's fall-through.
+   */
+  private applyPermissionRules(
+    session: Session,
+    client: AcpClient,
+    req: PermissionRequest,
+    cwd: string,
+  ): boolean {
+    const facts = extractPermissionFacts(req.toolCall);
+    const loaded = this.loadPermissionRuleState(cwd);
+    this.maybePromptWorkspaceRulesAdoption(session, cwd, loaded);
+    const decision = decidePermission(loaded.active, facts, cwd);
+    if (decision.action === "ask") return false;
+    if (decision.action === "deny") {
+      const rejectId = pickRejectOption(req.options ?? []);
+      if (rejectId) client.respondPermission(req.id, rejectId);
+      else client.respondPermissionCancelled(req.id);
+      this.emit(session, {
+        type: "hostNotice",
+        level: "warning",
+        text: permissionRulesNotice(decision),
+      });
+      return true;
+    }
+    const allowId = pickAllowOnceOption(req.options ?? []);
+    if (!allowId) return false;
+    client.respondPermission(req.id, allowId);
+    this.emit(session, {
+      type: "hostNotice",
+      level: "info",
+      text: permissionRulesNotice(decision),
+    });
+    return true;
+  }
+
+  private permissionRulesFs(): PermissionRulesFs {
+    return {
+      existsSync: (p) => fs.existsSync(p),
+      readFileSync: (p, encoding) => fs.readFileSync(p, encoding),
+      mkdirSync: (p, opts) => { fs.mkdirSync(p, opts); },
+      writeFileSync: (p, data) => { fs.writeFileSync(p, data); },
+    };
+  }
+
+  private loadPermissionRuleState(cwd: string): {
+    active: PermissionRule[];
+    global: PermissionRule[];
+    workspace?: { path: string; raw: string; hash: string; rules: PermissionRule[] };
+    adoption?: AdoptionRecord;
+    shouldPromptAdoption: boolean;
+  } {
+    const global = parseGlobalRulesMap(this.state.get(PERMISSION_RULES_KEY, {}));
+    const workspace = cwd ? loadWorkspaceRulesFile(cwd, this.permissionRulesFs()) : undefined;
+    const adoptionMap = parseAdoptionMap(this.state.get(PERMISSION_RULES_ADOPTED_KEY, {}));
+    const adoption = cwd ? adoptionMap[adoptionKeyFor(cwd)] : undefined;
+    const shouldPromptAdoption = !!workspace && workspace.rules.length > 0 &&
+      (!adoption || adoption.hash !== workspace.hash);
+    return {
+      active: activeRulesFrom(global, workspace, adoption),
+      global,
+      workspace,
+      adoption,
+      shouldPromptAdoption,
+    };
+  }
+
+  private maybePromptWorkspaceRulesAdoption(
+    session: Session,
+    cwd: string,
+    loaded: ReturnType<GrokSidebar["loadPermissionRuleState"]>,
+  ): void {
+    if (!loaded.shouldPromptAdoption || !cwd) return;
+    const prompted = this.permissionAdoptionPrompted;
+    if (!prompted) return;
+    const key = adoptionKeyFor(cwd);
+    if (prompted.has(key)) return;
+    prompted.add(key);
+    void this.offerWorkspaceRulesAdoption(session, cwd, loaded);
+  }
+
+  private async offerWorkspaceRulesAdoption(
+    session: Session,
+    cwd: string,
+    loaded: ReturnType<GrokSidebar["loadPermissionRuleState"]>,
+  ): Promise<void> {
+    const count = loaded.workspace?.rules.length ?? 0;
+    this.emit(session, {
+      type: "hostNotice",
+      level: "warning",
+      text: `This project includes ${count} permission rule${count === 1 ? "" : "s"} that are not active yet. They apply only after you adopt them.`,
+    });
+    if (!this.pendingConfirms) return;
+    const ok = await this.confirmInChat(session, {
+      title: "Adopt this project's permission rules?",
+      body: `${path.basename(cwd)} ships .grok/permissions.json (${count} rule${count === 1 ? "" : "s"}). Checked-in rules stay inert until you adopt them — they can auto-allow or auto-deny tool calls.\n\nOnly continue if you trust this repository.`,
+      confirmLabel: "Adopt rules",
+      danger: true,
+    });
+    await this.adoptPermissionRules(session, !!ok, cwd);
+  }
+
+  private postPermissionRules(session: Session = this.focused): void {
+    const cwd = this.sessionCwd(session);
+    const loaded = this.loadPermissionRuleState(cwd);
+    const userViews: PermissionRuleView[] = [
+      ...loaded.global.map(toRuleView),
+      ...(loaded.adoption?.status === "adopted" && loaded.workspace &&
+        loaded.adoption.hash === loaded.workspace.hash
+        ? loaded.workspace.rules.map(toRuleView)
+        : []),
+    ];
+    const pending = pendingWorkspaceAdoption(loaded.workspace, loaded.adoption)
+      && loaded.workspace
+      ? { path: loaded.workspace.path, ruleCount: loaded.workspace.rules.length, hash: loaded.workspace.hash }
+      : undefined;
+    const pendingViews: PermissionRuleView[] = pending && loaded.workspace
+      ? loaded.workspace.rules.map((r) => {
+          const view = toRuleView(r);
+          return {
+            ...view,
+            deletable: false,
+            detail: `Not active until adopted. ${view.detail}`,
+          };
+        })
+      : [];
+    const message: Extract<HostMsg, { type: "permissionRules" }> = {
+      type: "permissionRules",
+      rules: [...SOCKET_RULE_VIEWS, ...userViews, ...pendingViews],
+      orderCopy: PERMISSION_RULES_ORDER_COPY,
+      ...(pending ? { pendingAdoption: pending } : {}),
+    };
+    this.post(message);
+    void this.settingsEditor?.webview.postMessage(message);
+  }
+
+  private async persistAllowRuleFromCard(
+    session: Session,
+    matchRaw: unknown,
+  ): Promise<void> {
+    const match = sanitizeWebviewAllowMatch(matchRaw);
+    if (!match) return;
+    const created = createRule({
+      id: `pr-${randomUUID()}`,
+      createdAt: Date.now(),
+      action: "allow",
+      scope: "workspace",
+      match,
+      note: `from card on ${new Date().toISOString().slice(0, 10)}`,
+    });
+    await this.addPermissionRule(session, created);
+  }
+
+  private async addPermissionRule(session: Session, created: PermissionRule): Promise<void> {
+    const cwd = this.sessionCwd(session);
+    const loaded = this.loadPermissionRuleState(cwd);
+    // An unadopted checked-in file must not be merged with a new rule — that
+    // would adopt hostile allow-rules as a side effect of "always allow npm test".
+    const workspaceWritable = !!cwd &&
+      (!loaded.workspace || (loaded.adoption?.status === "adopted" &&
+        loaded.adoption.hash === loaded.workspace.hash));
+    if (created.scope === "workspace" && workspaceWritable && cwd) {
+      const next = [...(loaded.workspace?.rules ?? []), created];
+      const written = writeWorkspaceRulesFile(cwd, next, this.permissionRulesFs());
+      await this.rememberAdoption(cwd, written.hash, "adopted");
+    } else {
+      const global = [...loaded.global, { ...created, scope: "global" as const }];
+      await this.state.update(PERMISSION_RULES_KEY, globalRulesToMap(global));
+    }
+    this.postPermissionRules(session);
+  }
+
+  private async rememberAdoption(
+    cwd: string,
+    hash: string,
+    status: AdoptionRecord["status"],
+  ): Promise<void> {
+    const map = parseAdoptionMap(this.state.get(PERMISSION_RULES_ADOPTED_KEY, {}));
+    map[adoptionKeyFor(cwd)] = { hash, status, at: Date.now() };
+    await this.state.update(PERMISSION_RULES_ADOPTED_KEY, map);
+  }
+
+  private async deletePermissionRule(session: Session, id: string): Promise<void> {
+    if (!id || id.startsWith("socket-")) return;
+    const cwd = this.sessionCwd(session);
+    const loaded = this.loadPermissionRuleState(cwd);
+    const inGlobal = loaded.global.some((r) => r.id === id);
+    if (inGlobal) {
+      const next = loaded.global.filter((r) => r.id !== id);
+      await this.state.update(PERMISSION_RULES_KEY, globalRulesToMap(next));
+    } else if (cwd && loaded.workspace && loaded.adoption?.status === "adopted") {
+      const next = loaded.workspace.rules.filter((r) => r.id !== id);
+      const written = writeWorkspaceRulesFile(cwd, next, this.permissionRulesFs());
+      await this.rememberAdoption(cwd, written.hash, "adopted");
+    }
+    this.postPermissionRules(session);
+  }
+
+  private async adoptPermissionRules(
+    session: Session,
+    adopt: boolean,
+    cwd: string = this.sessionCwd(session),
+  ): Promise<void> {
+    if (!cwd) return;
+    const loaded = this.loadPermissionRuleState(cwd);
+    if (!loaded.workspace) return;
+    await this.rememberAdoption(cwd, loaded.workspace.hash, adopt ? "adopted" : "declined");
+    this.postPermissionRules(session);
+    this.emit(session, {
+      type: "hostNotice",
+      level: "info",
+      text: adopt
+        ? `Adopted ${loaded.workspace.rules.length} permission rule${loaded.workspace.rules.length === 1 ? "" : "s"} from this project.`
+        : "Left this project's permission rules inactive. They stay visible in Settings until adopted.",
+    });
   }
 
   /** Auto-approve routine permission cards currently awaiting the user (#64).
@@ -10919,6 +11177,9 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
             pending.toolKind,
           )) break;
           if (!session.client?.respondPermission(msg.requestId, msg.optionId)) break;
+          if (msg.rule && !isPlanReviewPermission(pending.toolKind)) {
+            void this.persistAllowRuleFromCard(session, msg.rule);
+          }
           // Record the resolution in the session buffer so re-focusing this session
           // replays the card collapsed instead of active (the live collapse is a
           // webview-only DOM mutation that the buffer never captured).
@@ -11209,6 +11470,18 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       }
       case "listRuleFiles": {
         await this.refreshRuleFiles(session);
+        break;
+      }
+      case "listPermissionRules": {
+        this.postPermissionRules(session);
+        break;
+      }
+      case "deletePermissionRule": {
+        await this.deletePermissionRule(session, msg.id);
+        break;
+      }
+      case "adoptPermissionRules": {
+        await this.adoptPermissionRules(session, msg.adopt === true);
         break;
       }
       case "openRuleFile": {

@@ -786,6 +786,12 @@
     // NULL, not [] — "no rule file locations" and "haven't asked yet" render
     // differently in Settings → Advanced (renderRuleFiles).
     ruleFiles: null,
+    // AP-07: null until the host answers listPermissionRules. The answered
+    // list always includes the two safety-floor rows, so [] is not a loading
+    // state.
+    permissionRules: null,
+    permissionRulesOrderCopy: "",
+    permissionRulesPending: null,
     // While replaying an older session, suppress a legacy primer user turn and
     // grok's response until the next user message starts.
     suppressReplayTurn: false,
@@ -2902,6 +2908,9 @@
       mcpError: state.mcpError,
       mcpWarning: state.mcpWarning,
       ruleFiles: state.ruleFiles,
+      permissionRules: state.permissionRules,
+      permissionRulesOrderCopy: state.permissionRulesOrderCopy,
+      permissionRulesPending: state.permissionRulesPending,
       mcpConnectors: state.mcpConnectors,
       mcpRemoteConnect: state.mcpRemoteConnect === true,
       mcpConnectorAuthorization: state.mcpConnectorAuthorization,
@@ -13517,6 +13526,46 @@
     return { buttons, defaultIndex };
   }
 
+  function preferredAllowOnce(options) {
+    const list = options || [];
+    return list.find((o) => o.kind === "allow_once") || list.find((o) => o.kind === "allow_always");
+  }
+
+  function renderPermissionRuleSuggestions(el, requestId, cardTitle, suggestions) {
+    const old = el.querySelector(".perm-rule-suggestions");
+    if (old) old.remove();
+    if (!Array.isArray(suggestions) || !suggestions.length) return;
+    const wrap = document.createElement("div");
+    wrap.className = "perm-rule-suggestions";
+    const label = document.createElement("div");
+    label.className = "perm-rule-suggestions-label";
+    label.textContent = "Always allow for…";
+    wrap.appendChild(label);
+    suggestions.forEach((sug) => {
+      if (!sug || !sug.match) return;
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "perm-rule-suggestion";
+      btn.textContent = sug.label || "this request";
+      btn.onclick = () => {
+        if (state.sessionSuperseded) return;
+        const opt = preferredAllowOnce(el._permOptions);
+        if (!opt) return;
+        vscode.postMessage({
+          type: "permissionAnswer",
+          requestId,
+          optionId: opt.optionId,
+          rule: sug.match,
+        });
+        resolvePermissionCardEl(el, opt, cardTitle);
+        showGrokking();
+        input.focus();
+      };
+      wrap.appendChild(btn);
+    });
+    el.appendChild(wrap);
+  }
+
   // A single replay-stable coordinate shared by plan cards, permission cards,
   // and usage records. Drain before advancing so a verdict that released the
   // agent appears immediately before the first implementation update.
@@ -13605,7 +13654,7 @@
     }
   }
 
-  function addPermissionCard(req) {
+  function addPermissionCard(req, ruleSuggestions) {
     clearWelcome();
     hideGrokking();
     // Mirror the plan card: finalize any in-flight agent/thinking/tool turn so
@@ -13665,6 +13714,7 @@
 
     const { buttons, defaultIndex } =
       renderPermissionActions(el, req.id, cardTitle, req.options);
+    renderPermissionRuleSuggestions(el, req.id, cardTitle, ruleSuggestions);
     appendTranscriptChild(el);
     el.querySelectorAll("pre").forEach((pre) => pre._syncOverflowAffordance?.());
     forceScrollToBottom(); // a pending permission must be visible (#16)
@@ -16452,7 +16502,7 @@
     "initialState", "showThinking", "appPurpose", "expandCommandOutputs",
     "steerByDefault", "steerUnavailable", "soundNotifications", "processingSound",
     "readRepliesAloud", "summarizeRepliesAloud", "fontScale", "voiceConfigured",
-    "providerState", "githubState", "mcpServers", "mcpConnectors", "remoteStatus", "telemetryEnabled", "thumbsFeedback", "grokUpdateStatus", "initialized", "ruleFiles",
+    "providerState", "githubState", "mcpServers", "mcpConnectors", "remoteStatus", "telemetryEnabled", "thumbsFeedback", "grokUpdateStatus", "initialized", "ruleFiles", "permissionRules",
   ]);
 
   function handleHostMessage(msg) {
@@ -16643,6 +16693,14 @@
       case "ruleFiles":
         // Always the full candidate list (never a delta) — see protocol.ts.
         state.ruleFiles = Array.isArray(msg.files) ? msg.files : [];
+        refreshSettingsOverlay();
+        break;
+      case "permissionRules":
+        state.permissionRules = Array.isArray(msg.rules) ? msg.rules : [];
+        state.permissionRulesOrderCopy = typeof msg.orderCopy === "string" ? msg.orderCopy : "";
+        state.permissionRulesPending = msg.pendingAdoption && typeof msg.pendingAdoption === "object"
+          ? msg.pendingAdoption
+          : null;
         refreshSettingsOverlay();
         break;
       case "mcpConnectorAuthorization":
@@ -17547,7 +17605,7 @@
         applyRunProgress(msg.update);
         break;
       case "permissionRequest":
-        addPermissionCard(msg.req);
+        addPermissionCard(msg.req, msg.ruleSuggestions);
         if (!state.replaying) {
           // Tool titles can expose commands or file operations. The accessibility
           // cue says what the user must do without reading tool details aloud.

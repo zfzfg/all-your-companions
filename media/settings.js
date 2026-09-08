@@ -995,6 +995,13 @@
       message: () => ({ type: "openProjectConfig" }),
     },
     {
+      id: "permissionRules",
+      category: "advanced",
+      title: "Permission rules",
+      description: "Allow, ask, or deny tool calls by command prefix and path. The safety floor cannot be turned off. Invisible rules are a security problem — this list is the whole set that is in force.",
+      kind: "permissionRules",
+    },
+    {
       id: "ruleFiles",
       category: "advanced",
       title: "Rule files",
@@ -1517,6 +1524,9 @@
       // list ("no rule file locations to check") and "the host has not
       // answered yet" render differently (see renderRuleFiles).
       ruleFiles: null,
+      permissionRules: null,
+      permissionRulesOrderCopy: "",
+      permissionRulesPending: null,
       ...(partial || {}),
     };
   }
@@ -2908,10 +2918,113 @@
     return el;
   }
 
+  function renderPermissionRules(snapshot, env) {
+    const el = document.createElement("div");
+    el.className = "settings-perm-rules";
+    el.dataset.id = "permissionRules";
+    const rules = snapshot.permissionRules;
+    const order = document.createElement("p");
+    order.className = "settings-perm-order";
+    order.textContent = snapshot.permissionRulesOrderCopy ||
+      "The built-in safety floor runs first and cannot be overridden. Then any matching Deny wins. Among remaining matches, the last rule decides (last-match-wins).";
+    el.appendChild(order);
+
+    const pending = snapshot.permissionRulesPending;
+    if (pending && pending.path) {
+      const banner = document.createElement("div");
+      banner.className = "settings-perm-pending";
+      const copy = document.createElement("div");
+      copy.className = "settings-row-desc";
+      copy.textContent = "This project ships " + pending.path + " (" +
+        (pending.ruleCount || 0) + " rule" + (pending.ruleCount === 1 ? "" : "s") +
+        "). Those rules are visible here but not active until you adopt them.";
+      banner.appendChild(copy);
+      if (!(env && env.isRemote)) {
+        const adopt = document.createElement("button");
+        adopt.type = "button";
+        adopt.className = "settings-action settings-perm-adopt";
+        adopt.textContent = "Adopt";
+        const decline = document.createElement("button");
+        decline.type = "button";
+        decline.className = "settings-action settings-perm-decline";
+        decline.textContent = "Leave inactive";
+        banner.append(adopt, decline);
+      }
+      el.appendChild(banner);
+    }
+
+    if (rules === null || rules === undefined) {
+      const loading = document.createElement("div");
+      loading.className = "settings-perm-state";
+      loading.setAttribute("aria-live", "polite");
+      loading.textContent = "Loading permission rules…";
+      el.appendChild(loading);
+      return el;
+    }
+
+    const list = document.createElement("div");
+    list.className = "settings-perm-list";
+    const floor = [];
+    const user = [];
+    (Array.isArray(rules) ? rules : []).forEach((rule) => {
+      if (!rule) return;
+      if (rule.source === "socket" || rule.action === "floor") floor.push(rule);
+      else user.push(rule);
+    });
+
+    const addSection = (title, rows, emptyText) => {
+      const head = document.createElement("div");
+      head.className = "settings-perm-section";
+      head.textContent = title;
+      list.appendChild(head);
+      if (!rows.length) {
+        const empty = document.createElement("div");
+        empty.className = "settings-perm-empty";
+        empty.textContent = emptyText;
+        list.appendChild(empty);
+        return;
+      }
+      rows.forEach((rule) => {
+        const row = document.createElement("div");
+        row.className = "settings-perm-row" + (rule.deletable ? "" : " is-floor");
+        row.dataset.ruleId = rule.id || "";
+        const copy = document.createElement("div");
+        copy.className = "settings-rules-copy";
+        const name = document.createElement("div");
+        name.className = "settings-rules-name settings-row-title";
+        name.textContent = rule.summary || rule.id || "rule";
+        const badge = document.createElement("span");
+        badge.className = "settings-rules-badge" + (rule.deletable ? "" : " is-floor");
+        badge.textContent = rule.deletable ? (rule.scope || "rule") : "safety floor";
+        name.appendChild(badge);
+        const detail = document.createElement("div");
+        detail.className = "settings-row-desc";
+        detail.textContent = rule.detail || "";
+        copy.append(name, detail);
+        row.appendChild(copy);
+        if (rule.deletable) {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "settings-action settings-perm-delete";
+          btn.dataset.ruleId = rule.id;
+          btn.textContent = "Delete";
+          row.appendChild(btn);
+        }
+        list.appendChild(row);
+      });
+    };
+
+    addSection("Safety floor (cannot be overridden)", floor, "Safety floor unavailable.");
+    addSection("Your rules (last-match-wins among remaining)", user, "No user rules yet. Allow a tool from its permission card to add one.");
+    el.appendChild(list);
+    return el;
+  }
+
   function renderRow(row, snapshot, env, keyForm, githubTokenForm, githubCliStarted) {
     if (row.kind === "mcp") return renderMcpCatalog(snapshot, env);
     if (row.kind === "connectors") return renderConnectorsCatalog(snapshot, env, keyForm);
     if (row.kind === "routines") return renderRoutines(snapshot, env);
+    if (row.kind === "permissionRules") return renderPermissionRules(snapshot, env);
     if (row.kind === "ruleFiles") return renderRuleFiles(snapshot, env);
     const el = document.createElement("div");
     el.className = "settings-row";
@@ -3105,6 +3218,7 @@
     let mcpChecked = false;
     let routinesChecked = false;
     let ruleFilesChecked = false;
+    let permissionRulesChecked = false;
     let lastPaintedCategory = "";
     let lastPaintedQuery = "";
     const post = typeof opts.post === "function" ? opts.post : () => {};
@@ -3250,6 +3364,12 @@
       post({ type: "listRuleFiles" });
     }
 
+    function maybeRefreshPermissionRules() {
+      if (permissionRulesChecked || categoryId !== "advanced" || query.trim()) return;
+      permissionRulesChecked = true;
+      post({ type: "listPermissionRules" });
+    }
+
     function runAction(row) {
       // `local` may be a plain name (a purely client-side action) or a
       // function of the current state, and it no longer swallows the row's
@@ -3336,6 +3456,7 @@
       maybeRefreshMcp();
       maybeRefreshRoutines();
       maybeRefreshRuleFiles();
+      maybeRefreshPermissionRules();
       const key = paintKey();
       if (key === lastPaintedKey && container.firstChild) {
         paintDeferred = false;
@@ -4011,6 +4132,26 @@
           const path = btn.dataset.path;
           if (!path) return;
           post({ type: "openRuleFile", path });
+        });
+      });
+      body.querySelectorAll(".settings-perm-delete").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const id = btn.dataset.ruleId;
+          if (!id || id.indexOf("socket-") === 0) return;
+          post({ type: "deletePermissionRule", id });
+        });
+      });
+      body.querySelectorAll(".settings-perm-adopt").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          post({ type: "adoptPermissionRules", adopt: true });
+        });
+      });
+      body.querySelectorAll(".settings-perm-decline").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          post({ type: "adoptPermissionRules", adopt: false });
         });
       });
       applyFocus(container, focus);

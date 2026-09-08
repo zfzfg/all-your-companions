@@ -206,6 +206,8 @@ describe("PersistedState", () => {
   it("maps grok.repoColors onto a client-state file like pins/archives", () => {
     expect(DISK_KEYS["grok.repoColors"]).toBe("repo-colors.json");
     expect(DISK_KEYS["grok.mcpConnectors"]).toBe("mcp-connectors.json");
+    expect(DISK_KEYS["grok.permissionRules"]).toBe("permission-rules.json");
+    expect(DISK_KEYS["grok.permissionRulesAdopted"]).toBe("permission-rules-adopted.json");
   });
 
   it("serializes grok.mcpConnectors as ids and endpoints, never a key", async () => {

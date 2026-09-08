@@ -596,6 +596,73 @@ body.settings-page .settings-surface {
   font-style: italic;
 }
 
+/* AP-07 permission-rule engine. The evaluation-order sentence is the
+   security surface — it must stay readable, not collapsed into a tooltip. */
+.settings-perm-order {
+  margin: 0 0 10px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.settings-perm-pending {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px 10px;
+  align-items: center;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px dashed var(--vscode-inputValidation-warningBorder, rgba(200, 160, 0, .6));
+  border-radius: 8px;
+}
+
+.settings-perm-list {
+  overflow: hidden;
+  border: 1px solid var(--vscode-widget-border, rgba(127, 127, 127, .25));
+  border-radius: 8px;
+}
+
+.settings-perm-section {
+  padding: 8px 14px 4px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.settings-perm-section + .settings-perm-row,
+.settings-perm-section + .settings-perm-empty {
+  border-top: 1px solid var(--vscode-widget-border, rgba(127, 127, 127, .2));
+}
+
+.settings-perm-empty {
+  padding: 10px 14px 12px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 12px;
+}
+
+.settings-perm-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 12px;
+  align-items: center;
+  min-height: 46px;
+  padding: 12px 14px;
+}
+
+.settings-perm-row + .settings-perm-row {
+  border-top: 1px solid var(--vscode-widget-border, rgba(127, 127, 127, .2));
+}
+
+.settings-perm-row.is-floor {
+  color: var(--vscode-descriptionForeground);
+}
+
+.settings-rules-badge.is-floor {
+  border-style: solid;
+}
+
 .settings-connector:has(.settings-connector-key) {
   align-items: start;
 }

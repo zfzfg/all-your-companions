@@ -4218,6 +4218,35 @@ body.dragging { outline: 2px dashed var(--vscode-focusBorder); outline-offset: -
   border-top: 1px solid var(--vscode-editorWidget-border);
 }
 .card-actions button.danger.arming { pointer-events: none; }
+
+/* AP-07: "Always allow for…" sits outside .card-actions so existing
+   permission-card tests that query those buttons stay byte-identical. */
+.perm-rule-suggestions {
+  display: flex;
+  flex-direction: column;
+  margin: 8px -10px -10px;
+  border-top: 1px dashed var(--vscode-editorWidget-border);
+}
+.perm-rule-suggestions-label {
+  padding: 6px 10px 2px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+}
+.perm-rule-suggestion {
+  background: transparent;
+  color: var(--vscode-foreground);
+  border: none;
+  border-bottom: 1px solid var(--vscode-editorWidget-border);
+  border-radius: 0;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: var(--vscode-font-size, 13px);
+  text-align: left;
+  width: 100%;
+}
+.perm-rule-suggestion:last-child { border-bottom: none; }
+.perm-rule-suggestion:hover { background: var(--vscode-list-hoverBackground); }
 .card-actions button:disabled { opacity: 0.4; cursor: default; }
 .card.resolved { opacity: 0.5; border-left-color: var(--vscode-editorWidget-border); }
 
