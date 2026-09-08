@@ -38,6 +38,8 @@ import type { PlanEntry } from "./plan-entries";
 export type { PlanEntry };
 import type { RuleFile } from "./rules-files";
 export type { RuleFile };
+import type { LimitOfferAction, LimitOfferRecommended, LimitOfferTarget } from "./limit-errors";
+export type { LimitOfferAction };
 
 /** grok's tool-call payload as it comes off the wire (acp emits it untyped). The
  *  webview reads a handful of fields; the index signature keeps assignment from
@@ -718,6 +720,41 @@ export type HostMsg =
   // how long it ran ("Worked for 12.4s" / "Cancelled after 4.1s" / "Failed
   // after 8.7s"). Older hosts omit them; the client then shows neither.
   | { type: "agentError"; text: string; status?: TurnEndStatus; durationMs?: number }
+  /**
+   * Quota / rate-limit failover card (AP-06). Replaces the generic agentError
+   * line for a classified limit: three actions (continue with another
+   * companion, wait and retry, dismiss). `targets` is empty when no other
+   * provider is connected — the continue buttons are then omitted, never
+   * pointed at another model of the exhausted provider.
+   *
+   * Buffered (a transcript event). `status`/`durationMs` are the same additive
+   * turn-footer fields as `agentError`.
+   */
+  | {
+      type: "limitOffer";
+      id: string;
+      kind: "rate" | "quota";
+      source: AcpProvider;
+      targets: LimitOfferTarget[];
+      title: string;
+      text: string;
+      recommended: LimitOfferRecommended;
+      status?: TurnEndStatus;
+      durationMs?: number;
+    }
+  /**
+   * The limit card settled (AP-06). Collapses a card left on screen after a
+   * click on this or another client, and is what makes a switch reconstructable
+   * on replay together with the hostNotice line.
+   */
+  | {
+      type: "limitOfferResolved";
+      id: string;
+      action: LimitOfferAction;
+      target?: AcpProvider;
+      /** Display name of `target`, so the collapsed card does not need a lookup. */
+      targetName?: string;
+    }
   | { type: "agentEnd"; meta?: PromptResultMeta; status?: TurnEndStatus; durationMs?: number }
   // status/durationMs are present only when a turn was IN FLIGHT when the
   // process died — a clean exit between turns ends no turn.
@@ -1152,6 +1189,16 @@ export type WebviewMsg =
   | { type: "exitPlanAnswer"; requestId: number | string; verdict: "approved" | "abandoned" | "rejected"; comment?: string }
   | { type: "questionAnswer"; requestId: number | string; answers?: Record<string, string>; annotations?: Record<string, { notes?: string; preview?: string }> }
   | { type: "questionCancel"; requestId: number | string }
+  /**
+   * Reply to `limitOffer` (AP-06). `target` is required for `continue` and is
+   * ignored otherwise. Propose: it starts a turn, same class as `send`.
+   */
+  | {
+      type: "limitOfferAnswer";
+      id: string;
+      action: LimitOfferAction;
+      target?: AcpProvider;
+    }
   /** In-progress selection on an open question card (AP-05). Renders nothing;
    *  it exists so the host's auto-continue timeout can send what the user
    *  already marked instead of discarding it. `complete` means every question
@@ -1369,7 +1416,7 @@ const HOST_MESSAGE_TYPE_MAP: Record<HostMsg["type"], true> = {
   toolCall: true, toolCallUpdate: true, permissionRequest: true, permissionOptions: true,
   permissionResolved: true, exitPlanRequest: true, planResolved: true, questionRequest: true, questionResolved: true, toolEditReverted: true,
   planNotice: true, autoCompactNotice: true, planBlocked: true, promptComplete: true, contextUsage: true, agentReset: true,
-  agentError: true, agentEnd: true, exit: true, setBusy: true, summarizing: true,
+  agentError: true, limitOffer: true, limitOfferResolved: true, agentEnd: true, exit: true, setBusy: true, summarizing: true,
   sessionContext: true, clearMessages: true, onboarding: true, error: true, hostNotice: true,
   xaiNotification: true, subagentUpdate: true, childStream: true, runProgress: true, commandOutput: true, expandCommandOutputs: true, steerByDefault: true,
   soundNotifications: true, processingSound: true, readRepliesAloud: true, summarizeRepliesAloud: true, speechSummary: true, imageFull: true, moveComposerCaret: true, remoteStatus: true,
@@ -1387,7 +1434,7 @@ const WEBVIEW_MESSAGE_TYPE_MAP: Record<WebviewMsg["type"], true> = {
   listRoutines: true, saveRoutine: true, deleteRoutine: true, setRoutinePaused: true, runRoutineNow: true, showLogs: true, toggleDevTools: true, openSettings: true, openSettingsSurface: true, closeSettingsSurface: true, dismissWelcomeTip: true, welcomeTipShown: true, moveView: true,
   setShowThinking: true, setAppPurpose: true, setExpandCommandOutputs: true, setSteerByDefault: true,
   setSoundNotifications: true, setProcessingSound: true, setReadRepliesAloud: true, setSummarizeRepliesAloud: true, setVoiceSendPhrase: true, setVoiceKeyterms: true, setTelemetryEnabled: true, setThumbsFeedback: true, summarizeSpeech: true, requestImageFull: true, composerFocus: true,
-  dropFile: true, permissionAnswer: true, exitPlanAnswer: true, questionAnswer: true,
+  dropFile: true, permissionAnswer: true, exitPlanAnswer: true, questionAnswer: true, limitOfferAnswer: true,
   questionCancel: true, questionDraft: true, setModel: true, installCodex: true, cancelCodexInstall: true, runInstallCmd: true, runGrokLogin: true,
   cancelDeviceLogin: true, submitDeviceLoginCode: true,
   logout: true, checkGrokUpdate: true, updateGrok: true, recheckConnection: true, refreshProviders: true, retryProviderSession: true,

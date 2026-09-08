@@ -124,7 +124,8 @@ export function preferredPermissionAllowOption(
  * singletons it replaces 1:1).
  */
 export class Session {
-  /** Provider is fixed once the first user turn enters history. */
+  /** Provider is fixed once the first user turn enters history, except an
+   *  explicit limit-failover switch (AP-06) that the user confirmed. */
   provider: AcpProvider = "grok";
   /** Host-owned composer attachments for this session/view. */
   chips: ContextChip[] = [];
@@ -222,6 +223,26 @@ export class Session {
    * recovery for a later token expiry.
    */
   authRecoveryTried = false;
+
+  /**
+   * Outstanding quota/rate-limit card (AP-06). Holds the failed prompt so
+   * Continue / Wait can resend it. Cleared when the card settles. Continue
+   * always goes to a *different* provider — never back to this one.
+   */
+  pendingLimitOffer?: {
+    id: string;
+    kind: "rate" | "quota";
+    source: AcpProvider;
+    text: string;
+    chips: ContextChip[];
+  };
+
+  /**
+   * One-shot: the next `startSession` keeps the transcript buffer (AP-06
+   * failover). Ordinary starts clear it. Consumed as soon as startSessionBody
+   * reads it, so a later restart cannot inherit the flag.
+   */
+  keepTranscriptOnStart = false;
 
   /** Live permission requests awaiting an answer, by request id. Set when the
    *  card is shown, read when the user answers so we can persist the resolved

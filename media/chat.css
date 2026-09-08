@@ -4259,6 +4259,8 @@ body.dragging { outline: 2px dashed var(--vscode-focusBorder); outline-offset: -
 
 /* ---------- question card (ask_user_question) ---------- */
 .card.question { border-left-color: var(--vscode-charts-purple, #b180d7); }
+.card.limit { border-left-color: var(--vscode-charts-orange, #d7ba7d); }
+.card.limit.resolved { opacity: 1; }
 /* "Grok is asking" / "You answered" reads as a small label so the question
    itself is the prominent line. */
 .card.question .card-title {

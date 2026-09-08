@@ -286,6 +286,9 @@ export const INBOUND_DISPOSITION: Record<WebviewMsg["type"], InboundDisposition>
   // the host ignores one for a card that is no longer outstanding.
   questionDraft: "propose",
   questionCancel: "propose",
+  // AP-06: starts a turn on a partner companion or retries the last prompt —
+  // same class as send. Never auto-fires; the person clicked.
+  limitOfferAnswer: "propose",
   queueSend: "propose",
   dequeueSend: "propose",
   clearQueuedSends: "propose",
@@ -574,6 +577,7 @@ export const REMOTE_REQUIRES_BOUND_SESSION: Record<WebviewMsg["type"], boolean> 
   questionAnswer: true,
   questionCancel: true,
   questionDraft: true,
+  limitOfferAnswer: true,
   queueSend: true,
   dequeueSend: true,
   clearQueuedSends: true,
@@ -981,6 +985,8 @@ export const OUTBOUND_DISPOSITION: Record<HostMsg["type"], OutboundDisposition> 
   contextUsage: "mirror",
   agentReset: "mirror",
   agentError: "mirror",
+  limitOffer: "mirror",
+  limitOfferResolved: "mirror",
   agentEnd: "mirror",
   exit: "mirror",
   setBusy: "mirror",
@@ -1163,6 +1169,8 @@ export const OUTBOUND_PROJECT_AUTH: Record<HostMsg["type"], OutboundProjectAuth>
   contextUsage: "scope",
   agentReset: "scope",
   agentError: "scope",
+  limitOffer: "scope",
+  limitOfferResolved: "scope",
   agentEnd: "scope",
   exit: "scope",
   setBusy: "scope",

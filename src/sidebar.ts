@@ -103,10 +103,18 @@ import { VoiceRecorder, transcribeAudio, resolveWindowsAudioDevice } from "./voi
 import { PcmVoiceStreamer, VoiceStreamer } from "./voice-streamer";
 import { summarizeForSpeech } from "./speech-summary";
 import type { PromptResultMeta, PromptUsage, SessionInfoContext } from "./acp-dispatch";
-import { MediaRef, adapterCompactSignal, adapterContextOccupancy, agentTimestampMsFromMeta, autoCompactStartedNote, childStreamFromRoute, commandOutputForToolCall, commandOutputFromLiveTerminal, contextUsedFromCompactNotification, enforceCompleteSessionCost, errorDetail, gateZeroTokenMeta, isAuthErrorText, isCredentialError, isIncompatibleAgentError, isResumeNotFound, isRateLimitError, isSubagentLifecycleUpdate, occupancyFromAdapterTurn, parseSessionInfoContext, permissionOutcomeFor, promptErrorText, rateLimitNoticeText, replayedTurnDuration, sessionInfoCacheFresh, sumUsage, summarizeBackgroundCommand, turnStatusFromPromptResult, usageIsRealMeasurement, type TurnEndStatus, type UpdateRoute } from "./acp-dispatch";
+import { MediaRef, adapterCompactSignal, adapterContextOccupancy, agentTimestampMsFromMeta, autoCompactStartedNote, childStreamFromRoute, commandOutputForToolCall, commandOutputFromLiveTerminal, contextUsedFromCompactNotification, enforceCompleteSessionCost, errorDetail, gateZeroTokenMeta, isAuthErrorText, isCredentialError, isIncompatibleAgentError, isResumeNotFound, isSubagentLifecycleUpdate, occupancyFromAdapterTurn, parseSessionInfoContext, permissionOutcomeFor, promptErrorText, rateLimitNoticeText, replayedTurnDuration, sessionInfoCacheFresh, sumUsage, summarizeBackgroundCommand, turnStatusFromPromptResult, usageIsRealMeasurement, type TurnEndStatus, type UpdateRoute } from "./acp-dispatch";
 import { createMcpPrepareState, prepareMcpToolCall } from "./mcp-tool";
 import { modeToRemember, rememberedEffort, startsInYolo, withRememberedEffort, type EffortPrefs } from "./mode-prefs";
 import { beginAuthRecovery, oauthShadowsXaiApiKey } from "./auth-recovery";
+import {
+  classifyLimitError,
+  limitOfferHint,
+  limitOfferTargets,
+  limitOfferTitle,
+  recommendedLimitAction,
+  switchTranscriptLine,
+} from "./limit-errors";
 import {
   WELCOME_TIPS_KEY,
   WELCOME_TIPS_SHOWN_KEY,
@@ -9319,7 +9327,9 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       await testDelay.wait;
       if (gen !== session.gen) return undefined;
     }
-    session.buffer = [];
+    const keepTranscript = session.keepTranscriptOnStart === true;
+    session.keepTranscriptOnStart = false;
+    if (!keepTranscript) session.buffer = [];
     session.status = "idle";
     // The replacement session has no turn, whatever the old one was doing. This
     // matters most in the case the token exists for: a `prompt()` that never
@@ -10955,6 +10965,9 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         break;
       case "questionCancel":
         if (this.cancelQuestion(session, msg.requestId)) this.noteAnswered(session);
+        break;
+      case "limitOfferAnswer":
+        await this.answerLimitOffer(session, msg);
         break;
       case "questionDraft": {
         // Nothing renders from this — it exists so the auto-continue timeout can
@@ -16022,16 +16035,12 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       // Checked BEFORE the auth resend, which starts a turn of its own.
       if (!endTurn(session, turn)) return;
       const e = err as any;
-      // A rate/usage-limit failure (ACP -32003, or limit phrasing) is not a
-      // credential problem: skip the auth recovery — its retry would end on
-      // the login screen, which can't fix a limit — and show a clear limit
-      // notice instead (#57).
-      if (isRateLimitError(e)) {
-        this.emit(session, { type: "agentError", text: rateLimitNoticeText(e), ...this.turnEndFields(session, "failed") });
-        this.noteLiveTurnEnded(session);
-        this.setStatus(session, "error");
-        return;
-      }
+      // A rate/usage-limit failure is not a credential problem: skip auth
+      // recovery (its retry would end on the login screen) and offer the
+      // failover card instead of a generic error (#57 / AP-06). The card
+      // is posted first so a limit never also rebuilds the session against
+      // the same ceiling.
+      if (this.surfaceLimitError(session, e, text, sentChips)) return;
       // An expired-token error wedges only THIS long-lived process (the CLI shares
       // ~/.grok/auth.json across the pool + sibling `grok login`); transparently
       // reload the process and resend before surfacing the error (see method doc).
@@ -16067,6 +16076,91 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         void this.maybeFlushQueuedSends(session);
       }
     }
+  }
+
+  /**
+   * If this turn failure is a rate or quota limit, post the failover card and
+   * stash the prompt so Continue / Wait can resend it. Returns true when it
+   * handled the error (caller must not also show it, and must not resend).
+   */
+  private surfaceLimitError(
+    session: Session,
+    err: unknown,
+    displayText: string,
+    chips: ContextChip[],
+  ): boolean {
+    const code = typeof (err as { code?: unknown })?.code === "number" ? (err as { code: number }).code : undefined;
+    const kind = classifyLimitError(session.provider, errorDetail(err), code);
+    if (kind !== "rate" && kind !== "quota") return false;
+    const id = randomUUID();
+    const source = session.provider;
+    const targets = limitOfferTargets(source, this.usableProviders());
+    const recommended = recommendedLimitAction(kind, targets);
+    session.pendingLimitOffer = { id, kind, source, text: displayText, chips: chips.slice() };
+    this.emit(session, {
+      type: "limitOffer",
+      id,
+      kind,
+      source,
+      targets,
+      title: limitOfferTitle(kind, source),
+      text: `${rateLimitNoticeText(err)} ${limitOfferHint(kind, targets.length > 0)}`,
+      recommended,
+      ...this.turnEndFields(session, "failed"),
+    });
+    this.noteLiveTurnEnded(session);
+    this.setStatus(session, "error");
+    return true;
+  }
+
+  /**
+   * User picked an action on the limit card. Continue rebinds this session to
+   * a *different* provider (same-account models are not targets) and resends
+   * the failed prompt there. Wait resends to the current provider only because
+   * the person asked — never automatically. Every switch is a transcript line.
+   */
+  private async answerLimitOffer(
+    session: Session,
+    msg: { id: string; action: "continue" | "retry" | "dismiss"; target?: AcpProvider },
+  ): Promise<void> {
+    const offer = session.pendingLimitOffer;
+    if (!offer || offer.id !== msg.id) return;
+    session.pendingLimitOffer = undefined;
+
+    if (msg.action === "continue") {
+      const allowed = limitOfferTargets(offer.source, this.usableProviders());
+      const chosen = allowed.find((t) => t.id === msg.target);
+      if (!chosen) {
+        session.pendingLimitOffer = offer;
+        return;
+      }
+      this.emit(session, {
+        type: "limitOfferResolved",
+        id: offer.id,
+        action: "continue",
+        target: chosen.id,
+        targetName: chosen.name,
+      });
+      this.host.appendLine(`[limit] switching ${offer.source} → ${chosen.id} (${offer.kind})`);
+      this.emit(session, {
+        type: "hostNotice",
+        level: "info",
+        text: switchTranscriptLine(offer.source, chosen.id),
+      });
+      session.provider = chosen.id;
+      session.keepTranscriptOnStart = true;
+      await this.rememberProjectProvider(this.sessionCwd(session), chosen.id);
+      const client = await this.startSession(undefined, session);
+      if (!client) return;
+      session.chips = [...offer.chips, ...session.chips];
+      await this.handleSend(offer.text, false, session);
+      return;
+    }
+
+    this.emit(session, { type: "limitOfferResolved", id: offer.id, action: msg.action });
+    if (msg.action !== "retry") return;
+    session.chips = [...offer.chips, ...session.chips];
+    await this.handleSend(offer.text, false, session);
   }
 
   /**
@@ -16150,13 +16244,9 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       if (!endTurn(session, turn)) return true;
       const e2 = err2 as any;
       // The resend ran into a usage limit — that's the real story, not auth
-      // (#57): a fresh process with a fresh token hit the same wall.
-      if (isRateLimitError(e2)) {
-        this.emit(session, { type: "agentError", text: rateLimitNoticeText(e2), ...this.turnEndFields(session, "failed") });
-        this.noteLiveTurnEnded(session);
-        this.setStatus(session, "error");
-        return true;
-      }
+      // (#57): a fresh process with a fresh token hit the same wall. Offer the
+      // failover card; do not send a second prompt at the exhausted provider.
+      if (this.surfaceLimitError(session, e2, displayText, chips)) return true;
       if (client.isCredentialError(e2) || isCredentialError(e2)) {
         // A fresh process still can't authenticate → auth.json genuinely dead →
         // the honest ask is a re-login. The agentError FIRST: its webview

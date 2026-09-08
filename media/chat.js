@@ -8593,7 +8593,7 @@
     "permissionRequest", "permissionOptions", "permissionResolved",
     "exitPlanRequest", "planResolved", "questionRequest", "questionResolved", "planNotice",
     "autoCompactNotice", "planBlocked", "promptComplete", "commandOutput",
-    "agentReset", "agentError", "agentEnd", "exit", "sessionContext",
+    "agentReset", "agentError", "limitOffer", "limitOfferResolved", "agentEnd", "exit", "sessionContext",
     "xaiNotification", "subagentUpdate", "childStream", "runProgress",
     "summarizing",
   ]);
@@ -11741,6 +11741,78 @@
     el.className = "msg error";
     el.textContent = text;
     if (typeof code === "string" && code) el.setAttribute("data-error-code", code);
+    appendTranscriptChild(el);
+    scrollToBottom();
+  }
+
+  function resolveLimitOfferCardEl(el, action, targetName) {
+    el.classList.add("resolved");
+    const title = el.querySelector(".card-title");
+    if (title) {
+      title.textContent = action === "continue" && targetName
+        ? "Continued with " + targetName
+        : action === "retry" ? "Retrying"
+        : "Dismissed";
+    }
+    const actions = el.querySelector(".card-actions");
+    if (actions) actions.remove();
+  }
+
+  function addLimitOfferCard(msg) {
+    clearWelcome();
+    hideGrokking();
+    hideThinkingIndicator();
+    stopProcessingCue();
+    revealTurnFooter(undefined, (msg.status || msg.durationMs != null)
+      ? { status: msg.status || "failed", durationMs: msg.durationMs }
+      : undefined);
+    if (state.busy) markLiveTurnFeedback();
+    state.busy = false;
+    state.busyLocked = false;
+    updateSendButton();
+    if (!state.replaying) maybeNotifySound("error");
+
+    const el = document.createElement("div");
+    el.className = "card limit";
+    el.dataset.limitOfferId = String(msg.id);
+    const title = document.createElement("div");
+    title.className = "card-title";
+    title.textContent = msg.title || "Usage limit reached";
+    el.appendChild(title);
+    if (msg.text) {
+      const body = document.createElement("div");
+      body.className = "card-subtitle";
+      body.textContent = msg.text;
+      el.appendChild(body);
+    }
+    const actions = document.createElement("div");
+    actions.className = "card-actions";
+    const settle = (action, target) => {
+      if (el.classList.contains("resolved")) return;
+      const payload = { type: "limitOfferAnswer", id: msg.id, action };
+      if (target) payload.target = target.id;
+      vscode.postMessage(payload);
+      resolveLimitOfferCardEl(el, action, target && target.name);
+    };
+    const targets = Array.isArray(msg.targets) ? msg.targets : [];
+    targets.forEach((target, i) => {
+      if (!target || !target.id) return;
+      const btn = document.createElement("button");
+      btn.textContent = "Continue with " + (target.name || target.id);
+      if (msg.recommended === "continue" && i === 0) btn.classList.add("primary");
+      btn.onclick = () => settle("continue", target);
+      actions.appendChild(btn);
+    });
+    const retry = document.createElement("button");
+    retry.textContent = "Wait and try again";
+    if (msg.recommended === "retry") retry.classList.add("primary");
+    retry.onclick = () => settle("retry");
+    actions.appendChild(retry);
+    const dismiss = document.createElement("button");
+    dismiss.textContent = "Dismiss";
+    dismiss.onclick = () => settle("dismiss");
+    actions.appendChild(dismiss);
+    el.appendChild(actions);
     appendTranscriptChild(el);
     scrollToBottom();
   }
@@ -17688,6 +17760,19 @@
         if (!state.replaying) maybeNotifySound("error"); // #59 — live turns only, and only when away
         state.ttsTurnText = "";
         break;
+      case "limitOffer":
+        addLimitOfferCard(msg);
+        state.ttsTurnText = "";
+        break;
+      case "limitOfferResolved": {
+        const card = [...document.querySelectorAll(".card.limit")].find(
+          (el) => el.dataset.limitOfferId === String(msg.id),
+        );
+        if (card && !card.classList.contains("resolved")) {
+          resolveLimitOfferCardEl(card, msg.action, msg.targetName);
+        }
+        break;
+      }
       case "agentEnd":
         stopProcessingCue();
         hideGrokking(); // turn ended (defensive — content normally clears it first)
