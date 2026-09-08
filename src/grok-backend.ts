@@ -3,6 +3,8 @@ import type { AcpBackend, BackendConfigState, BackendSessionListResult, BackendS
 import type { EffortLevel } from "./acp";
 import { grokCliNeedsShell } from "./cli-process";
 
+import { providerCapability } from "./provider-capabilities";
+
 export function buildGrokAgentArgs(effort?: EffortLevel): string[] {
   return effort ? ["agent", "--reasoning-effort", effort, "stdio"] : ["agent", "stdio"];
 }
@@ -10,7 +12,7 @@ export function buildGrokAgentArgs(effort?: EffortLevel): string[] {
 export const grokBackend: AcpBackend = {
   provider: "grok",
   processName: "Grok process",
-  usesClientPlanGate: true,
+  usesClientPlanGate: providerCapability("grok", "clientPlanGate").state === "yes",
   spawn(options: BackendSpawnOptions) {
     return {
       command: options.cliPath,

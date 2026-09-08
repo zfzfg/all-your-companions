@@ -428,10 +428,12 @@ export function resolveAgyAcpAdapterPath(): string {
   return candidateOut;
 }
 
+import { providerCapability } from "./provider-capabilities";
+
 export class GeminiBackend implements AcpBackend {
   readonly provider = "gemini" as const;
   readonly processName = "Gemini ACP";
-  readonly usesClientPlanGate = false;
+  readonly usesClientPlanGate = providerCapability("gemini", "clientPlanGate").state === "yes";
 
   constructor(private readonly options: GeminiBackendOptions = {}) {}
 

@@ -24,6 +24,7 @@
 // clear it, clearMessages resets it).
 import { describe, it, expect } from "vitest";
 import { bootWebview, dispatch, click, press, Posted } from "./webview-harness";
+import { allProviderCapabilities } from "../src/provider-capabilities";
 
 const $ = (doc: Document, id: string) => doc.getElementById(id) as HTMLElement;
 const types = (posted: Posted[]) => posted.map((p) => p.type);
@@ -742,3 +743,25 @@ describe("Steer by default — skip the queue (#52)", () => {
     expect(types(posted)).toContain("steerSend");
   });
 });
+
+describe("Steer on unsupported providers (AP-01)", () => {
+  it("renders Steer disabled with explanatory tooltip when unsupported by provider", () => {
+    const { window, posted, doc } = bootWebview();
+    dispatch(window, {
+      type: "providerCapabilities",
+      provider: "claude",
+      capabilities: allProviderCapabilities("claude"),
+    });
+    dispatch(window, { type: "setBusy", value: true });
+    seedQueue(window, ["steer me"]);
+
+    const steer = doc.querySelector(".queued-steer") as HTMLButtonElement;
+    expect(steer).not.toBeNull();
+    expect(steer.disabled).toBe(true);
+    expect(steer.title).toBe("Steer is not supported by Claude — your message will be sent after the turn.");
+
+    press(window, steer);
+    expect(types(posted)).not.toContain("steerSend");
+  });
+});
+

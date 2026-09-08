@@ -1962,7 +1962,12 @@ a.onb-action.onb-secondary:hover {
   background: var(--vscode-toolbar-hoverBackground);
   color: var(--vscode-foreground);
 }
-/* Steer (#52): only meaningful while a turn is running ÔÇö `turn-busy` is stamped
+.queued-action:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  pointer-events: auto;
+}
+/* Steer (#52): only meaningful while a turn is running — `turn-busy` is stamped
    on <body> by updateSendButton. Carries a label because, unlike Edit/Remove, it
    sends: an unlabeled icon here would be a scary thing to click blind. */
 .queued-steer { display: none; }
@@ -1977,6 +1982,14 @@ body.turn-busy .queued-steer {
 }
 body.turn-busy .queued-steer:hover {
   background: var(--vscode-button-secondaryBackground, var(--vscode-toolbar-hoverBackground));
+}
+body.turn-busy .queued-steer:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  pointer-events: auto;
+}
+body.turn-busy .queued-steer:disabled:hover {
+  background: transparent;
 }
 .queued-text {
   font-style: italic;
@@ -2058,6 +2071,14 @@ body.turn-busy .queued-steer:hover {
    the copy icon read as darker than the time next to it. One colour per row. */
 .msg-action-btn:hover {
   background: var(--vscode-toolbar-hoverBackground);
+}
+.msg-action-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  pointer-events: auto;
+}
+.msg-action-btn:disabled:hover {
+  background: transparent;
 }
 .msg-action-btn:focus-visible {
   color: var(--vscode-foreground);

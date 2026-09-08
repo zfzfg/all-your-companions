@@ -31,6 +31,8 @@ import type { RunProgressUpdate } from "./run-progress";
 import type { McpServerView } from "./mcp";
 import type { ConnectorView } from "./mcp-connectors";
 import type { RoutineDraft, RoutineModelOption, RoutineProjectOption, RoutineView } from "./routines";
+import type { AcpProvider } from "./acp-backend";
+import type { CapabilitySupport, ProviderCapability } from "./provider-capabilities";
 
 /** grok's tool-call payload as it comes off the wire (acp emits it untyped). The
  *  webview reads a handful of fields; the index signature keeps assignment from
@@ -447,6 +449,16 @@ export type HostMsg =
    * is the ONLY source of that spinner: a client must never latch it locally,
    * or an older host that ignores `refreshProviders` would spin forever. */
   | { type: "providerState"; providers: { id: "grok" | "codex" | "claude" | "gemini"; connected: boolean; needsLogin?: boolean; cliVersion?: string; adapterVersion?: string; latestCliVersion?: string; updateAvailable?: boolean }[]; checking?: boolean }
+  /**
+   * Complete capability matrix for the session's active provider (AP-01).
+   * Informs the webview whether each capability is supported, unsupported
+   * with a user-facing explanation, or probe-dependent.
+   */
+  | {
+      type: "providerCapabilities";
+      provider: AcpProvider;
+      capabilities: Record<ProviderCapability, CapabilitySupport>;
+    }
   /** Grok's grok.com + user-level MCP inventory (`_x.ai/mcp/list`; project-file
    *  servers omitted). The desk keeps launch recipes and `configFile`; remotes
    *  receive `projectMcpServerForRemote` (page fields only — no `tag`).
@@ -1294,7 +1306,7 @@ const HOST_MESSAGE_TYPE_MAP: Record<HostMsg["type"], true> = {
   soundNotifications: true, processingSound: true, readRepliesAloud: true, summarizeRepliesAloud: true, speechSummary: true, imageFull: true, moveComposerCaret: true, remoteStatus: true,
   setAllToolDetails: true, focusInput: true, findInSession: true, restoreComposer: true, truncateMessages: true, uiConfirmRequest: true,
   sessions: true, sessionRemoved: true, repoSessions: true, pinnedSessions: true, repos: true, sessionDot: true, queuedSends: true, submitQueuedSend: true,
-  steerUnavailable: true, feedbackAvailability: true, turnFeedbackAck: true, usage: true,
+  steerUnavailable: true, feedbackAvailability: true, turnFeedbackAck: true, usage: true, providerCapabilities: true,
 };
 
 const WEBVIEW_MESSAGE_TYPE_MAP: Record<WebviewMsg["type"], true> = {

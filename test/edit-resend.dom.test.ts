@@ -5,6 +5,7 @@
 // Between them every user message has a way back.
 import { describe, it, expect } from "vitest";
 import { bootWebview, dispatch, click } from "./webview-harness";
+import { allProviderCapabilities } from "../src/provider-capabilities";
 
 const send = (window: any, text: string) =>
   dispatch(window, { type: "userMessage", text, chips: [] });
@@ -438,3 +439,85 @@ describe("Rewind and Edit are capability-gated for remotes (4.1.0)", () => {
     expect(users.map((el) => editBtn(el).hidden)).toEqual([true, false]);
   });
 });
+
+describe("Rewind and Edit on unsupported providers (AP-01)", () => {
+  it("renders Rewind and Edit disabled with explanatory tooltip for unsupported provider (e.g. Claude)", () => {
+    const { window, posted, doc } = bootWebview();
+    dispatch(window, {
+      type: "providerCapabilities",
+      provider: "claude",
+      capabilities: allProviderCapabilities("claude"),
+    });
+    send(window, "first");
+    send(window, "second");
+
+    const users = userBubbles(doc);
+    expect(users).toHaveLength(2);
+
+    // Bubble 0 (older message): Rewind slot is active.
+    const rewind0 = rewindBtn(users[0]);
+    expect(rewind0.hidden).toBe(false);
+    expect(rewind0.disabled).toBe(true);
+    expect(rewind0.title).toBe("Rewind is not supported by Claude.");
+
+    // Bubble 1 (tip): Edit slot is active.
+    const edit1 = editBtn(users[1]);
+    expect(edit1.hidden).toBe(false);
+    expect(edit1.disabled).toBe(true);
+    expect(edit1.title).toBe("Rewind is not supported by Claude.");
+
+    // Non-slot buttons remain hidden.
+    expect(editBtn(users[0]).hidden).toBe(true);
+    expect(rewindBtn(users[1]).hidden).toBe(true);
+
+    // Clicking disabled buttons does not post any wire messages.
+    click(window, rewind0);
+    expect(posted.filter((m: any) => m.type === "rewindSession")).toHaveLength(0);
+
+    click(window, edit1);
+    expect(posted.filter((m: any) => m.type === "editLastMessage")).toHaveLength(0);
+  });
+
+  it("restores active buttons when switching back to a supported provider (Grok)", () => {
+    const { window, posted, doc } = bootWebview();
+    dispatch(window, {
+      type: "providerCapabilities",
+      provider: "claude",
+      capabilities: allProviderCapabilities("claude"),
+    });
+    send(window, "first");
+    send(window, "second");
+
+    let users = userBubbles(doc);
+    expect(rewindBtn(users[0]).disabled).toBe(true);
+    expect(editBtn(users[1]).disabled).toBe(true);
+
+    // Switch provider to Grok.
+    dispatch(window, {
+      type: "providerCapabilities",
+      provider: "grok",
+      capabilities: allProviderCapabilities("grok"),
+    });
+
+    users = userBubbles(doc);
+    const rewind0 = rewindBtn(users[0]);
+    expect(rewind0.hidden).toBe(false);
+    expect(rewind0.disabled).toBe(false);
+    expect(rewind0.title).toBe("Rewind conversation to this point");
+
+    const edit1 = editBtn(users[1]);
+    expect(edit1.hidden).toBe(false);
+    expect(edit1.disabled).toBe(false);
+    expect(edit1.title).toBe("Edit message and resend");
+
+    // Click enabled edit button posts editLastMessage.
+    click(window, edit1);
+    expect(posted.find((m: any) => m.type === "editLastMessage")).toEqual({
+      type: "editLastMessage",
+      userBubbleIndex: 1,
+      text: "second",
+      totalUserBubbles: 2,
+    });
+  });
+});
+

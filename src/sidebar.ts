@@ -17,6 +17,7 @@ import { spawn } from "node:child_process";
 import { AcpClient, EffortLevel, ExitPlanRequest, PermissionRequest, QuestionRequest } from "./acp";
 import type { AcpProvider, BackendSessionListEntry } from "./acp-backend";
 import { isAdapterProvider, isAcpProvider, ACP_PROVIDERS } from "./acp-backend";
+import { allProviderCapabilities, providerCapability } from "./provider-capabilities";
 import { CODEX_ACP_ADAPTER_VERSION, CodexBackend, isCodexCredentialError } from "./codex-backend";
 import { locateCodexCli, resolveCodexHome } from "./codex-cli-locator";
 import { CODEX_MANAGED_VERSION, installManagedCodex } from "./codex-managed-installer";
@@ -8771,6 +8772,15 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       reason: compatibility.planModeUnavailableReason,
       recheckable: !compatibility.planModeAvailable && !compatibility.planModeVersionVerified,
     });
+    this.emit(session, {
+      type: "providerCapabilities",
+      provider: session.provider,
+      capabilities: allProviderCapabilities(session.provider, {
+        planModeAvailable: compatibility.planModeAvailable,
+        cliVerified: compatibility.planModeVersionVerified,
+        planModeUnavailableReason: compatibility.planModeUnavailableReason,
+      }),
+    });
   }
 
   /**
@@ -9414,6 +9424,14 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       session.planModeAvailable = true;
       session.planModeVersionVerified = true;
       session.planModeUnavailableReason = undefined;
+      this.emit(session, {
+        type: "providerCapabilities",
+        provider: session.provider,
+        capabilities: allProviderCapabilities(session.provider, {
+          planModeAvailable: true,
+          cliVerified: true,
+        }),
+      });
     }
     clock.record("version", clock.elapsed(versionAt), versionNote);
     const afterVersionAt = clock.now();
@@ -16174,6 +16192,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     // Replayed mid-buffer it would stamp the then-current footer, not the live
     // one. `sessionUiSnapshot` restores eligibility after historyReplay ends.
     "turnFeedbackAck",
+    "providerCapabilities",
   ]);
   /**
    * Host→rail catalog surface. Everything else stays chat-only so a user who

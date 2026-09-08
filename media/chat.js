@@ -407,6 +407,7 @@
     welcomeVisible: true,
     currentModelId: null,
     activeProvider: "grok",
+    providerCapabilities: null,
     providersKnown: false,
     providers: [],
     // Settings → Providers re-observation in flight. Host-owned; see the
@@ -4155,7 +4156,21 @@
    * An absent provider means an older host that only ever ran Grok.
    */
   function steerableProvider() {
+    if (state.providerCapabilities && state.providerCapabilities.steer) {
+      return state.providerCapabilities.steer.state === "yes";
+    }
     return state.activeProvider !== "claude" && state.activeProvider !== "codex" && state.activeProvider !== "gemini";
+  }
+
+  function steerCapability() {
+    if (state.providerCapabilities && state.providerCapabilities.steer) {
+      return state.providerCapabilities.steer;
+    }
+    if (state.activeProvider === "claude" || state.activeProvider === "codex" || state.activeProvider === "gemini") {
+      const p = providerDisplayName(state.activeProvider);
+      return { state: "no", reason: `Steer is not supported by ${p} — your message will be sent after the turn.` };
+    }
+    return { state: "yes" };
   }
 
   /**
@@ -4166,13 +4181,28 @@
    * nobody is at the screen to read it. Same shape as steerableProvider().
    */
   function rewindCapableProvider() {
-    if (state.activeProvider === "claude" || state.activeProvider === "codex" || state.activeProvider === "gemini") return false;
+    if (state.providerCapabilities && state.providerCapabilities.rewind) {
+      if (state.providerCapabilities.rewind.state !== "yes") return false;
+    } else if (state.activeProvider === "claude" || state.activeProvider === "codex" || state.activeProvider === "gemini") {
+      return false;
+    }
     // A host older than 4.1.0 classifies rewindSession / editLastMessage as
     // host-local and drops them without a reply, so the buttons would be dead
     // for every remote user who has not updated — and the relay always ships
     // first. Field presence, never a version check; the desk is never gated.
     if (IS_REMOTE && !(state.hostCaps && state.hostCaps.remoteRewind)) return false;
     return true;
+  }
+
+  function rewindCapability() {
+    if (state.providerCapabilities && state.providerCapabilities.rewind) {
+      return state.providerCapabilities.rewind;
+    }
+    if (state.activeProvider === "claude" || state.activeProvider === "codex" || state.activeProvider === "gemini") {
+      const p = providerDisplayName(state.activeProvider);
+      return { state: "no", reason: `Rewind is not supported by ${p}.` };
+    }
+    return { state: "yes" };
   }
 
   function providerDisplayName(provider) {
@@ -9787,9 +9817,11 @@
     }
     const prefixCount = state.historyPrefixUserCount || 0;
     // One provider gate for both buttons: the RPC underneath either exists on
-    // this session's CLI or it does not, and a control that always fails is
-    // worse than an absent one.
-    const capable = rewindCapableProvider();
+    // this session's CLI or it does not. If unsupported by the provider, buttons
+    // remain visible but disabled with an explanatory tooltip.
+    const remoteBlocked = IS_REMOTE && !(state.hostCaps && state.hostCaps.remoteRewind);
+    const rewindCap = rewindCapability();
+    const providerSupported = rewindCap.state === "yes";
     // A conversation another tab has taken is frozen: these act on it, so they
     // are disabled rather than merely dimmed. Visible, so the transcript still
     // reads normally, but genuinely unclickable.
@@ -9799,17 +9831,43 @@
       const isLast = i === users.length - 1;
       const btn = el.querySelector(".msg-rewind-btn");
       if (btn) {
-        // Hide on the tip: that message is Edit's, which does the same rewind
-        // and returns the text. Not a wire limitation — execute accepts the tip.
-        btn.hidden = !capable || users.length <= 1 || isLast;
-        btn.disabled = frozen;
+        if (remoteBlocked) {
+          btn.hidden = true;
+        } else {
+          // Hide on the tip: that message is Edit's, which does the same rewind
+          // and returns the text. Not a wire limitation — execute accepts the tip.
+          const slotVisible = users.length > 1 && !isLast;
+          btn.hidden = !slotVisible;
+          if (slotVisible) {
+            if (!providerSupported) {
+              btn.disabled = true;
+              btn.title = rewindCap.reason || "Rewind is not supported by this provider.";
+            } else {
+              btn.disabled = frozen;
+              btn.title = "Rewind conversation to this point";
+            }
+          }
+        }
       }
       // Edit is the exact complement: only the tip, which is the message a
       // rewind can't remove and the one you most often want to retype (#56).
       const edit = el.querySelector(".msg-edit-btn");
       if (edit) {
-        edit.hidden = !capable || !isLast;
-        edit.disabled = frozen;
+        if (remoteBlocked) {
+          edit.hidden = true;
+        } else {
+          const slotVisible = isLast;
+          edit.hidden = !slotVisible;
+          if (slotVisible) {
+            if (!providerSupported) {
+              edit.disabled = true;
+              edit.title = rewindCap.reason || "Rewind is not supported by this provider.";
+            } else {
+              edit.disabled = frozen;
+              edit.title = "Edit message and resend";
+            }
+          }
+        }
       }
     });
   }
@@ -9862,6 +9920,10 @@
   }
 
   function feedbackOffered() {
+    const cap = state.providerCapabilities && state.providerCapabilities.feedback;
+    if (cap) {
+      return state.feedbackAvailable === true && cap.state === "yes";
+    }
     return state.feedbackAvailable === true && state.activeProvider !== "codex" && state.activeProvider !== "claude" && state.activeProvider !== "gemini";
   }
 
@@ -15132,34 +15194,39 @@
     // Rendered whenever the CLI supports it; `body.turn-busy` (updateSendButton)
     // does the show/hide, so a replay that delivers queuedSends before agentStart
     // still ends up with the button once busy lands.
-    // Not for Claude Code: it has no mid-turn interject, so the button would
-    // offer to do something the agent cannot do. Its messages stay scheduled.
     // Attachments ride `_x.ai/interject` `content` — the host encodes them the
     // same way as a send. An older CLI that ignores `content` gets the whole
     // item queued rather than a silent drop.
-    if (state.steerSupported && steerableProvider()) {
+    const steerCap = steerCapability();
+    if (state.steerSupported) {
       const steerBtn = document.createElement("button");
       steerBtn.className = "queued-action queued-steer";
-      steerBtn.title = "Steer — submit now without interrupting Grok";
-      steerBtn.innerHTML = `${ICON.cornerDownRight}<span>Steer</span>`;
-      // pointerdown, NOT click: the queued block is pinned to the end of the
-      // chat and every streamed chunk runs scrollToBottom, so while the agent is
-      // writing prose the button shifts under the cursor between mousedown and
-      // mouseup — and a `click` only fires when both land on the SAME element.
-      // That's why steering was a coin-flip mid-stream but fine during a tool
-      // call (nothing reflows then). pointerdown fires on press, before the
-      // reflow can move anything.
-      steerBtn.onpointerdown = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (state.sessionSuperseded) return;
-        // steerSend first so the host can snapshot the queue before this
-        // clear races (webview handlers are not serialized across awaits).
-        const msg = { type: "steerSend", text, fromQueue: true };
-        if (chips.length) msg.chips = chips;
-        vscode.postMessage(msg);
-        vscode.postMessage({ type: "clearQueuedSends" });
-      };
+      if (steerCap.state === "yes") {
+        steerBtn.title = "Steer — submit now without interrupting Grok";
+        steerBtn.innerHTML = `${ICON.cornerDownRight}<span>Steer</span>`;
+        // pointerdown, NOT click: the queued block is pinned to the end of the
+        // chat and every streamed chunk runs scrollToBottom, so while the agent is
+        // writing prose the button shifts under the cursor between mousedown and
+        // mouseup — and a `click` only fires when both land on the SAME element.
+        // That's why steering was a coin-flip mid-stream but fine during a tool
+        // call (nothing reflows then). pointerdown fires on press, before the
+        // reflow can move anything.
+        steerBtn.onpointerdown = (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (state.sessionSuperseded) return;
+          // steerSend first so the host can snapshot the queue before this
+          // clear races (webview handlers are not serialized across awaits).
+          const msg = { type: "steerSend", text, fromQueue: true };
+          if (chips.length) msg.chips = chips;
+          vscode.postMessage(msg);
+          vscode.postMessage({ type: "clearQueuedSends" });
+        };
+      } else {
+        steerBtn.disabled = true;
+        steerBtn.title = steerCap.reason || "Steer is not supported by this provider.";
+        steerBtn.innerHTML = `${ICON.cornerDownRight}<span>Steer</span>`;
+      }
       actions.appendChild(steerBtn);
     }
     actions.appendChild(editBtn);
@@ -16272,6 +16339,12 @@
           : String(msg.reason || "Plan mode is unavailable.");
         // Only an unverified probe is recheckable; a verified-old CLI stays latched.
         state.planModeRecheckable = !state.planModeAvailable && msg.recheckable === true;
+        updateSendButton();
+        break;
+      case "providerCapabilities":
+        state.activeProvider = msg.provider;
+        state.providerCapabilities = msg.capabilities;
+        refreshUserRewindButtons();
         updateSendButton();
         break;
       case "remoteStatus":
@@ -18403,7 +18476,7 @@
     if (msgRewindBtn) {
       e.preventDefault();
       e.stopPropagation();
-      if (msgRewindBtn.hidden) return;
+      if (msgRewindBtn.hidden || msgRewindBtn.disabled) return;
       const msgEl = msgRewindBtn.closest(".msg.user");
       if (isPendingClearNode(msgEl)) return;
       const idx = msgEl ? Number(msgEl.dataset.userBubbleIndex) : NaN;
@@ -18422,7 +18495,7 @@
     if (msgEditBtn) {
       e.preventDefault();
       e.stopPropagation();
-      if (msgEditBtn.hidden) return;
+      if (msgEditBtn.hidden || msgEditBtn.disabled) return;
       // Blocked mid-turn: the rewind underneath needs a settled session, and the
       // host would only refuse. Say so here rather than round-trip for a warning.
       if (state.busy) return;

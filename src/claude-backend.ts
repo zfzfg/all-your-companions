@@ -413,13 +413,15 @@ export interface ClaudeBackendOptions {
   home?: string;
 }
 
+import { providerCapability } from "./provider-capabilities";
+
 export class ClaudeBackend implements AcpBackend {
   readonly provider = "claude" as const;
   readonly processName = "Claude ACP adapter";
   // Claude's Plan mode is a native SDK permission mode ("no actual tool
   // execution"). The client gate exists because grok's Plan still lets shell
   // through; do not port that workaround here.
-  readonly usesClientPlanGate = false;
+  readonly usesClientPlanGate = providerCapability("claude", "clientPlanGate").state === "yes";
   private readonly toolDiffsById = new Map<string, AcpDiffBlock>();
 
   constructor(private readonly options: ClaudeBackendOptions = {}) {}

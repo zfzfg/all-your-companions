@@ -3,6 +3,7 @@ import type { HostMsg } from "./protocol";
 import type { FileChip } from "./chips";
 import { permissionOptionsForPlan } from "./plan-gate";
 import type { AcpProvider } from "./acp-backend";
+import { allProviderCapabilities } from "./provider-capabilities";
 import {
   queuedSendsMessage,
   takeQueuedSendsPrefix,
@@ -660,6 +661,15 @@ export function sessionUiSnapshot(
     reason: session.planModeUnavailableReason,
     // Unverified probes stay clickable so the user can re-check without restart.
     recheckable: !session.planModeAvailable && !session.planModeVersionVerified,
+  });
+  messages.push({
+    type: "providerCapabilities",
+    provider: session.provider,
+    capabilities: allProviderCapabilities(session.provider, {
+      planModeAvailable: session.planModeAvailable,
+      cliVerified: session.planModeVersionVerified,
+      planModeUnavailableReason: session.planModeUnavailableReason,
+    }),
   });
   messages.push({ type: "feedbackAvailability", available: session.feedbackAvailable });
   if (session.liveFeedbackEligible) {

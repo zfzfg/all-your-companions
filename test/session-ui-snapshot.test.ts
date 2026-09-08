@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Session, sessionUiSnapshot } from "../src/session";
+import { allProviderCapabilities } from "../src/provider-capabilities";
 
 describe("sessionUiSnapshot", () => {
   it("restores the focused session's own chips and queued composer state", () => {
@@ -15,6 +16,15 @@ describe("sessionUiSnapshot", () => {
     expect(sessionUiSnapshot(session, "plan")).toEqual([
       { type: "modeChanged", modeId: "plan" },
       { type: "planModeAvailability", available: true, reason: undefined, recheckable: false },
+      {
+        type: "providerCapabilities",
+        provider: "grok",
+        capabilities: allProviderCapabilities("grok", {
+          planModeAvailable: true,
+          cliVerified: true,
+          planModeUnavailableReason: undefined,
+        }),
+      },
       { type: "feedbackAvailability", available: false },
       { type: "chips", chips: session.chips },
       { type: "queuedSends", items: ["queued for B"], queued: [{ text: "queued for B" }] },

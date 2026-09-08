@@ -42,6 +42,7 @@ import { grokCliNeedsShell, probeCliVersion } from "./cli-process";
 import { compareVersionTuple, parseGrokVersion } from "./cli-locator";
 import { resolvedTerminalShellDialect } from "./terminal-manager";
 import type { AcpBackend, AcpProvider, BackendSessionListResult } from "./acp-backend";
+import { providerCapability } from "./provider-capabilities";
 import { buildGrokAgentArgs, grokBackend } from "./grok-backend";
 import {
   parseWorktreeApply,
@@ -809,6 +810,10 @@ export class AcpClient extends EventEmitter {
     onQueued?: () => void,
     content?: readonly PromptContentBlock[],
   ): Promise<"ok" | "unsupported"> {
+    if (providerCapability(this.provider, "steer").state === "no") {
+      this.opts.log(`[interject] Provider ${this.provider} does not support steer; falling back to queue`);
+      return "unsupported";
+    }
     if (!this.sessionId) throw new Error("no session");
     try {
       await this.request(
@@ -843,7 +848,7 @@ export class AcpClient extends EventEmitter {
     clientType: FeedbackClientType;
     clientVersion?: string;
   }): Promise<"ok" | "unsupported"> {
-    if (this.provider !== "grok") return "unsupported";
+    if (providerCapability(this.provider, "feedback").state === "no") return "unsupported";
     if (!this.sessionId) throw new Error("no session");
     try {
       await this.request(FEEDBACK_RPC_METHOD, buildClientFeedbackParams({

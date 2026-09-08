@@ -912,6 +912,7 @@ export const OUTBOUND_DISPOSITION: Record<HostMsg["type"], OutboundDisposition> 
   modelChanged: "mirror",
   modeChanged: "mirror",
   planModeAvailability: "mirror",
+  providerCapabilities: "mirror",
   openModePopover: "mirror",
   chips: "mirror",
   commandsUpdate: "mirror",
@@ -1087,6 +1088,7 @@ export const OUTBOUND_PROJECT_AUTH: Record<HostMsg["type"], OutboundProjectAuth>
   modelChanged: "scope",
   modeChanged: "scope",
   planModeAvailability: "scope",
+  providerCapabilities: "scope",
   commandsUpdate: "scope",
   mentionResults: "scope",
   // Carry the scoped repo cwd; authorize against that field (message-cwd) so a

@@ -290,10 +290,12 @@ export interface CodexBackendOptions {
   nodePath?: string;
 }
 
+import { providerCapability } from "./provider-capabilities";
+
 export class CodexBackend implements AcpBackend {
   readonly provider = "codex" as const;
   readonly processName = "Codex ACP adapter";
-  readonly usesClientPlanGate = false;
+  readonly usesClientPlanGate = providerCapability("codex", "clientPlanGate").state === "yes";
 
   constructor(private readonly options: CodexBackendOptions = {}) {}
 
