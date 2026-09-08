@@ -54,6 +54,21 @@ export const BODY = `
       </button>
       <ol id="todo-rail-list" class="todo-rail-list"></ol>
     </div>
+    <div id="review-center" class="review-center" hidden>
+      <div class="review-center-head">
+        <button id="review-center-toggle" class="review-center-toggle" type="button" aria-expanded="true" aria-controls="review-center-list">
+          <span id="review-center-caret" class="review-center-caret"></span>
+          <span class="review-center-title">Review</span>
+          <span id="review-center-count" class="review-center-count"></span>
+        </button>
+        <div class="review-center-scope" role="tablist">
+          <button id="review-scope-turn" class="review-scope-btn" type="button" aria-pressed="true">This turn</button>
+          <button id="review-scope-session" class="review-scope-btn" type="button" aria-pressed="false">Session</button>
+        </div>
+        <button id="review-revert-all" class="review-revert-all" type="button">Discard all</button>
+      </div>
+      <ul id="review-center-list" class="review-center-list"></ul>
+    </div>
     <div class="composer-card">
       <div id="attachments"></div>
       <div class="composer-input-wrap">

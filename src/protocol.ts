@@ -36,6 +36,8 @@ import type { AcpProvider } from "./acp-backend";
 import type { CapabilitySupport, ProviderCapability } from "./provider-capabilities";
 import type { PlanEntry } from "./plan-entries";
 export type { PlanEntry };
+import type { ReviewCenterFileView, ReviewScope } from "./review-center";
+export type { ReviewCenterFileView, ReviewScope };
 import type { RuleFile } from "./rules-files";
 export type { RuleFile };
 import type { LimitOfferAction, LimitOfferRecommended, LimitOfferTarget } from "./limit-errors";
@@ -486,6 +488,16 @@ export type HostMsg =
    * text heuristic behind it (see src/plan-entries.ts).
    */
   | { type: "planEntries"; entries: PlanEntry[] }
+  /**
+   * Multi-file change overview for the focused session (AP-09).
+   *
+   * REPLACING state — the host sends the whole path-deduped list, and the
+   * webview swaps rather than appends. Transient (never buffered); re-sent
+   * by `sessionUiSnapshot`. An empty `files` list hides the panel rather
+   * than painting a blank card. Per-file `+N −M` is the SUM of the inline
+   * diffs for that path, including a file edited more than once.
+   */
+  | { type: "reviewCenter"; currentTurnId: string; files: ReviewCenterFileView[] }
   /** Grok's grok.com + user-level MCP inventory (`_x.ai/mcp/list`; project-file
    *  servers omitted). The desk keeps launch recipes and `configFile`; remotes
    *  receive `projectMcpServerForRemote` (page fields only — no `tag`).
@@ -1064,6 +1076,18 @@ export type WebviewMsg =
       replaceAll?: boolean;
       sites?: { oldText: string; newText: string; oldLine?: number; newLine?: number }[];
     }
+  /**
+   * Discard every completed edit of one path in the current turn or the
+   * whole session (AP-09). The host looks the blocks up itself and runs
+   * `planFileRevert` — one write, not N sequential `planEditRevert`s.
+   */
+  | { type: "reviewRevertFile"; path: string; scope: ReviewScope }
+  /**
+   * Discard every file in the current turn or the whole session (AP-09).
+   * The host restores the AP-08 checkpoint; it must not walk the file list
+   * with N individual reverts (conflicts would leave a half-state).
+   */
+  | { type: "reviewRevertAll"; scope: ReviewScope }
   | { type: "exportExpr"; action: string; kind: string; current?: string; svg?: string; png?: string; svgDark?: string; svgLight?: string }
   | { type: "setEffort"; level: string }
   | { type: "addProjectFolder" }
@@ -1459,13 +1483,13 @@ const HOST_MESSAGE_TYPE_MAP: Record<HostMsg["type"], true> = {
   soundNotifications: true, processingSound: true, readRepliesAloud: true, summarizeRepliesAloud: true, speechSummary: true, imageFull: true, moveComposerCaret: true, remoteStatus: true,
   setAllToolDetails: true, focusInput: true, findInSession: true, restoreComposer: true, truncateMessages: true, uiConfirmRequest: true,
   sessions: true, sessionRemoved: true, repoSessions: true, pinnedSessions: true, repos: true, sessionDot: true, queuedSends: true, submitQueuedSend: true,
-  steerUnavailable: true, feedbackAvailability: true, turnFeedbackAck: true, usage: true, providerCapabilities: true, planEntries: true, ruleFiles: true, permissionRules: true,
+  steerUnavailable: true, feedbackAvailability: true, turnFeedbackAck: true, usage: true, providerCapabilities: true, planEntries: true, reviewCenter: true, ruleFiles: true, permissionRules: true,
 };
 
 const WEBVIEW_MESSAGE_TYPE_MAP: Record<WebviewMsg["type"], true> = {
   ready: true, remotePreferences: true, send: true, newSession: true, cancel: true, pickModel: true,
   setMode: true, setConfigOption: true, removeChip: true, toggleChip: true, openFile: true, showInFolder: true, openUrl: true,
-  openText: true, openDiff: true, revertToolEdit: true, exportExpr: true, setEffort: true, openGlobalConfig: true,
+  openText: true, openDiff: true, revertToolEdit: true, reviewRevertFile: true, reviewRevertAll: true, exportExpr: true, setEffort: true, openGlobalConfig: true,
   addProjectFolder: true, removeProjectFolder: true, createProject: true, cloneProject: true, setupGithubCli: true, listGithubRepos: true, githubSignOut: true, githubLoginWithToken: true,
   openProjectConfig: true, listRuleFiles: true, openRuleFile: true, appendRuleFile: true, listMcpServers: true, connectMcpConnector: true, disconnectMcpConnector: true, completeMcpConnectorOAuth: true,
   listRoutines: true, saveRoutine: true, deleteRoutine: true, setRoutinePaused: true, runRoutineNow: true, showLogs: true, toggleDevTools: true, openSettings: true, openSettingsSurface: true, closeSettingsSurface: true, dismissWelcomeTip: true, welcomeTipShown: true, moveView: true,

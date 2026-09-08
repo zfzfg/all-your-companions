@@ -5,6 +5,8 @@ import { permissionOptionsForPlan } from "./plan-gate";
 import type { AcpProvider } from "./acp-backend";
 import { allProviderCapabilities } from "./provider-capabilities";
 import type { PlanEntry } from "./plan-entries";
+import type { ReviewDiffBlock } from "./review-center";
+import { reviewCenterSnapshot } from "./review-center";
 import type { CheckpointFile, CheckpointSkippedFile } from "./checkpoints";
 import {
   queuedSendsMessage,
@@ -281,6 +283,15 @@ export class Session {
    * a rewind, not by the turn that filled it ending.
    */
   planEntries: PlanEntry[] = [];
+
+  /**
+   * Completed (and in-flight) edit diffs for the review-center panel (AP-09).
+   *
+   * One record per toolCallId+path. Echo then completed update replaces in
+   * place so counts are not doubled. Cleared on session start and trimmed
+   * on rewind; not persisted — history replay rebuilds it from tool calls.
+   */
+  reviewBlocks: ReviewDiffBlock[] = [];
 
   /** Live exit_plan_mode requests awaiting one answer, keyed by ACP request id. */
   pendingExitPlans = new Map<number | string, PendingExitPlan>();
@@ -796,6 +807,17 @@ export function sessionUiSnapshot(
   // is always preceded by a `clearMessages` that has already emptied the rail.
   if (session.planEntries.length) {
     messages.push({ type: "planEntries", entries: session.planEntries });
+  }
+  // Same replacing-state discipline as the checklist: only send when there
+  // IS a list, so an empty turn never paints a blank card after a focus
+  // switch (`clearMessages` already hid it).
+  if (session.reviewBlocks.length) {
+    const currentTurnId = String(session.userMessageCount);
+    messages.push({
+      type: "reviewCenter",
+      currentTurnId,
+      files: reviewCenterSnapshot(session.reviewBlocks, currentTurnId),
+    });
   }
   messages.push({ type: "feedbackAvailability", available: session.feedbackAvailable });
   if (session.liveFeedbackEligible) {

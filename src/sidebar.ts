@@ -21,6 +21,17 @@ import { isAdapterProvider, isAcpProvider, ACP_PROVIDERS } from "./acp-backend";
 import { allProviderCapabilities, providerCapability } from "./provider-capabilities";
 import { parsePlanEntries } from "./plan-entries";
 import {
+  completedBlocksForPath,
+  dropReviewPath,
+  dropReviewTurnsAfter,
+  ingestReviewToolCall,
+  normalizeReviewPath,
+  planDiscardAll,
+  planFileRevert,
+  reviewCenterSnapshot,
+  type ReviewScope,
+} from "./review-center";
+import {
   appendRuleEntry,
   ensureRuleFile,
   resolveRuleFileStates,
@@ -9688,8 +9699,10 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     session.lastPlanText = "";
     // A new, resumed or restarted conversation starts with no checklist. The
     // paired `clearMessages` below empties the rail on the webview side, so
-    // this needs no message of its own.
+    // this needs no message of its own. Review-center rows rebuild from
+    // replayed tool calls the same way.
     session.planEntries = [];
+    session.reviewBlocks = [];
     session.pendingExitPlans.clear();
     this.dropPendingQuestions(session);
     // The old process's MCP children hold a token that must stop working the
@@ -10066,6 +10079,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       if (payload.event === "toolCall" || payload.event === "toolCallUpdate") {
         const prepared = prepareMcpToolCall(payload.call, mcpState);
         this.emit(session, { type: "childStream", ...payload, call: prepared.call });
+        this.noteReviewToolCall(session, prepared.call);
         return;
       }
       this.emit(session, { type: "childStream", ...payload });
@@ -10119,6 +10133,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       session.historyEventCount += 1;
       if (!session.replaying) this.snapshotPendingEditToolCall(session, prepared.call);
       this.emit(session, { type, call: prepared.call });
+      this.noteReviewToolCall(session, prepared.call);
       this.noteAdapterCompactSignal(session, prepared.call);
       if (prepared.commandOutput) {
         this.emit(session, { type: "commandOutput", ...prepared.commandOutput });
@@ -11181,6 +11196,12 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         break;
       case "revertToolEdit":
         await this.revertToolEdit(session, msg);
+        break;
+      case "reviewRevertFile":
+        await this.reviewRevertFile(session, msg.path, msg.scope);
+        break;
+      case "reviewRevertAll":
+        await this.reviewRevertAll(session, msg.scope, requester);
         break;
       case "exportExpr":
         await this.exportExpr(msg, session);
@@ -15323,6 +15344,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       case "delete":
         try {
           await this.host.fs.delete(Uri.file(abs), { useTrash: true });
+          this.forgetReviewPath(session, msg.path, { toolCallId: msg.toolCallId });
           respond(true);
         } catch {
           respond(false, "Could not delete the file.");
@@ -15331,12 +15353,316 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       case "write":
         try {
           await this.host.fs.writeFile(Uri.file(abs), Buffer.from(plan.text, "utf8"));
+          this.forgetReviewPath(session, msg.path, { toolCallId: msg.toolCallId });
           respond(true);
         } catch {
           respond(false, "Could not write the file.");
         }
         return;
     }
+  }
+
+  /**
+   * Fold a tool call's diff blocks into the review-center list (AP-09).
+   *
+   * Ingest always (including replay, so the snapshot after historyReplay has
+   * the rows). Emit only live — replay would paint the panel N times before
+   * `sessionUiSnapshot` sends the finished list.
+   */
+  private noteReviewToolCall(session: Session, call: unknown): void {
+    const turnId = String(session.userMessageCount || 0);
+    const next = ingestReviewToolCall(session.reviewBlocks, call, turnId);
+    if (next === session.reviewBlocks) return;
+    if (next.length === session.reviewBlocks.length
+      && next.every((b, i) => b === session.reviewBlocks[i])) return;
+    const had = session.reviewBlocks.length > 0;
+    session.reviewBlocks = next;
+    if (!had && !next.length) return;
+    if (!session.replaying) this.emitReviewCenter(session);
+  }
+
+  private emitReviewCenter(session: Session): void {
+    const currentTurnId = String(session.userMessageCount);
+    this.emit(session, {
+      type: "reviewCenter",
+      currentTurnId,
+      files: reviewCenterSnapshot(session.reviewBlocks, currentTurnId),
+    });
+  }
+
+  private forgetReviewPath(
+    session: Session,
+    filePath: string,
+    opts?: { turnId?: string; toolCallId?: string },
+  ): void {
+    const next = dropReviewPath(session.reviewBlocks, filePath, opts);
+    if (next.length === session.reviewBlocks.length) return;
+    session.reviewBlocks = next;
+    this.emitReviewCenter(session);
+  }
+
+  private ackReviewReverted(session: Session, blocks: { toolCallId: string; path: string }[]): void {
+    const seen = new Set<string>();
+    for (const b of blocks) {
+      const key = `${b.toolCallId}|${b.path}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      this.emit(session, {
+        type: "toolEditReverted",
+        toolCallId: b.toolCallId,
+        path: b.path,
+        ok: true,
+      });
+    }
+  }
+
+  /**
+   * Discard one file's completed edits in the selected scope. Chains
+   * `planEditRevert` in memory ({@link planFileRevert}) and performs one
+   * write/delete — never N disk reverts that could stop mid-list.
+   */
+  private async reviewRevertFile(session: Session, filePath: string, scope: ReviewScope): Promise<void> {
+    const currentTurnId = String(session.userMessageCount);
+    const blocks = completedBlocksForPath(session.reviewBlocks, filePath, scope, currentTurnId);
+    const fail = (reason: string) => {
+      const first = blocks[0];
+      if (first) {
+        this.emit(session, {
+          type: "toolEditReverted",
+          toolCallId: first.toolCallId,
+          path: first.path,
+          ok: false,
+          reason,
+        });
+      }
+    };
+    if (!blocks.length) {
+      fail("Nothing to discard for this file.");
+      return;
+    }
+    const pathForDisk = blocks[blocks.length - 1].path;
+    const abs = this.resolveDiffFilePath(session, pathForDisk);
+    if (!abs) {
+      fail("File could not be located.");
+      return;
+    }
+    let currentText: string | undefined;
+    try {
+      const stat = fs.statSync(abs);
+      if (stat.isFile() && stat.size <= MAX_DIFF_EXPAND_BYTES) currentText = fs.readFileSync(abs, "utf8");
+    } catch {
+      currentText = undefined;
+    }
+    const plan = planFileRevert(blocks, currentText);
+    switch (plan.action) {
+      case "unreadable":
+        fail("File could not be read.");
+        return;
+      case "conflict":
+        fail("The file has changed since this edit and can't be safely reverted.");
+        return;
+      case "delete-confirm": {
+        const choice = await this.host.showWarningMessage(
+          `${path.basename(abs)} has changed since this edit. Delete it anyway?`,
+          "Delete",
+          "Cancel",
+        );
+        if (choice !== "Delete") {
+          fail("Cancelled.");
+          return;
+        }
+      }
+      // eslint-disable-next-line no-fallthrough
+      case "delete":
+        try {
+          await this.host.fs.delete(Uri.file(abs), { useTrash: true });
+        } catch {
+          fail("Could not delete the file.");
+          return;
+        }
+        break;
+      case "write":
+        try {
+          await this.host.fs.writeFile(Uri.file(abs), Buffer.from(plan.text, "utf8"));
+        } catch {
+          fail("Could not write the file.");
+          return;
+        }
+        break;
+    }
+    session.reviewBlocks = dropReviewPath(
+      session.reviewBlocks,
+      pathForDisk,
+      scope === "turn" ? { turnId: currentTurnId } : undefined,
+    );
+    this.emitReviewCenter(session);
+    this.ackReviewReverted(session, blocks);
+  }
+
+  /**
+   * Discard every file in the selected scope by restoring the AP-08
+   * checkpoint. Not N `planEditRevert`s — a conflict would otherwise leave
+   * earlier files reverted and later ones untouched.
+   */
+  private async reviewRevertAll(
+    session: Session,
+    scope: ReviewScope,
+    requester?: { clientId: string } | undefined,
+  ): Promise<void> {
+    const currentTurnId = String(session.userMessageCount);
+    const plan = planDiscardAll(scope, currentTurnId);
+    if (plan.kind === "unavailable") {
+      this.emit(session, { type: "hostNotice", level: "warning", text: "Can't discard all — there is no checkpoint for this turn." });
+      return;
+    }
+    const sid = session.activeSessionId ?? session.client?.sessionId;
+    if (!sid || !this.checkpointStore) {
+      this.emit(session, { type: "hostNotice", level: "warning", text: "Can't discard all — there is no checkpoint for this turn." });
+      return;
+    }
+
+    let merged: Checkpoint;
+    if (plan.mode === "turn") {
+      const cp = this.checkpointStore.load(sid, plan.turnId);
+      if (!cp || cp.disabled || (!cp.files.length && !cp.skipped.length)) {
+        this.emit(session, {
+          type: "hostNotice",
+          level: "warning",
+          text: cp?.disabled
+            ? `Can't discard all — the checkpoint for this turn is unavailable (${cp.disableReason || "disabled"}).`
+            : "Can't discard all — there is no checkpoint for this turn.",
+        });
+        return;
+      }
+      merged = cp;
+    } else {
+      const later = this.checkpointStore.loadFrom(sid, 0);
+      if (!later.length) {
+        this.emit(session, { type: "hostNotice", level: "warning", text: "Can't discard all — there is no checkpoint for this conversation." });
+        return;
+      }
+      merged = mergeCheckpoints(later);
+    }
+
+    const cwd = this.sessionCwd(session);
+    const current = new Map<string, string | null>();
+    for (const file of merged.files) {
+      const abs = path.join(cwd, file.relPath);
+      try {
+        current.set(file.relPath, fs.readFileSync(abs, "utf8"));
+      } catch {
+        current.set(file.relPath, null);
+      }
+    }
+    const restore = planRestoreDetailed(merged, current);
+    const skippedNote = restore.skipped.length
+      ? `\n\nNot restorable:\n${restore.skipped.map((s) => `• ${s.relPath} (${s.reason === "too-large" ? "too large" : "binary"}, ${s.bytes} bytes)`).join("\n")}`
+      : "";
+    const wouldTouch = restore.writes.length + restore.deletes.length + restore.conflicts.length;
+    if (wouldTouch === 0 && !restore.skipped.length) {
+      this.emit(session, { type: "hostNotice", level: "info", text: "Nothing to discard — files already match the checkpoint." });
+      return;
+    }
+    if (wouldTouch > 0) {
+      const ok = await this.confirmInChat(session, {
+        title: "Discard all changes?",
+        body: `This will restore ${wouldTouch} file(s) to how they were before ${scope === "turn" ? "this turn" : "this conversation"}.${skippedNote}`,
+        confirmLabel: "Discard all",
+        danger: true,
+      });
+      if (!ok) return;
+    }
+    let overwrite = false;
+    if (restore.conflicts.length) {
+      const listed = restore.conflicts.map((f) => `• ${f}`).join("\n");
+      if (requester) {
+        const ok = await this.confirmInChat(session, {
+          title: "Files changed since this snapshot",
+          body: `These files were modified after the checkpoint. Overwrite them?\n${listed}`,
+          confirmLabel: "Overwrite",
+          danger: true,
+        });
+        if (!ok) return;
+        overwrite = true;
+      } else {
+        const items = [
+          { label: "Overwrite all conflicting files", description: `${restore.conflicts.length} file(s) changed since the snapshot`, action: "overwrite" as const },
+          { label: "Cancel", action: "cancel" as const },
+        ];
+        const pick = await this.host.showQuickPick(items, {
+          placeHolder: "Restore anyway? Foreign changes will be overwritten.",
+          ignoreFocusOut: true,
+        });
+        if (!pick || pick.action === "cancel") return;
+        overwrite = true;
+      }
+    }
+
+    const toAck = (scope === "turn"
+      ? session.reviewBlocks.filter((b) => b.turnId === currentTurnId)
+      : session.reviewBlocks.slice());
+    const actions = restoreActions(restore, overwrite, merged);
+    const restored: string[] = [];
+    const failed: string[] = [];
+    for (const w of actions.writes) {
+      const abs = path.join(cwd, w.relPath);
+      try {
+        fs.mkdirSync(path.dirname(abs), { recursive: true });
+        fs.writeFileSync(abs, Buffer.from(w.blob, "utf8"));
+        restored.push(w.relPath);
+      } catch (e) {
+        failed.push(`${w.relPath}: ${(e as Error).message}`);
+      }
+    }
+    for (const rel of actions.deletes) {
+      const abs = path.join(cwd, rel);
+      try {
+        fs.unlinkSync(abs);
+        restored.push(rel);
+      } catch (e) {
+        const code = (e as NodeJS.ErrnoException).code;
+        if (code !== "ENOENT") failed.push(`${rel}: ${(e as Error).message}`);
+      }
+    }
+
+    // I/O failed mid-list: keep the remaining review rows so the user can
+    // retry. Success (even with skipped unrestorable files) drops the scope.
+    if (failed.length) {
+      this.emit(session, {
+        type: "hostNotice",
+        level: "warning",
+        text: `Discarded some files, but ${failed.length} could not be restored:\n${failed.join("\n")}`,
+      });
+      for (const rel of restored) {
+        session.reviewBlocks = dropReviewPath(
+          session.reviewBlocks,
+          rel,
+          scope === "turn" ? { turnId: currentTurnId } : undefined,
+        );
+      }
+    } else {
+      if (scope === "turn") {
+        session.reviewBlocks = session.reviewBlocks.filter((b) => b.turnId !== currentTurnId);
+      } else {
+        session.reviewBlocks = [];
+      }
+      const skip = restore.skipped.length
+        ? ` Not restorable: ${restore.skipped.map((s) => s.relPath).join(", ")}.`
+        : "";
+      this.emit(session, {
+        type: "hostNotice",
+        level: "info",
+        text: restored.length
+          ? `Discarded ${restored.length} file(s).${skip}`
+          : `Discarded.${skip}`,
+      });
+    }
+    this.emitReviewCenter(session);
+    const restoredSet = new Set(restored.map((rel) => normalizeReviewPath(rel)));
+    const ackBlocks = failed.length
+      ? toAck.filter((b) => restoredSet.has(normalizeReviewPath(b.path)))
+      : toAck;
+    this.ackReviewReverted(session, ackBlocks);
   }
 
   /** Close the diff tab opened for a pending permission request and free its
@@ -15836,6 +16162,8 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     // The checklist described the turns that just went away. Keeping it would
     // claim steps against a conversation that no longer contains them.
     this.clearPlanEntries(session);
+    session.reviewBlocks = dropReviewTurnsAfter(session.reviewBlocks, surviving);
+    this.emitReviewCenter(session);
     session.liveFeedbackEligible = false;
     session.turnRating = 0;
     session.historyEventCount = historyEventCount(session.buffer);
@@ -17334,6 +17662,9 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     // would replay ten stale checklists on every focus switch; `sessionUiSnapshot`
     // re-sends the current one instead.
     "planEntries",
+    // Same replacing-state as the checklist: N diffs would replay N stale
+    // panels on every focus switch. sessionUiSnapshot re-sends the current one.
+    "reviewCenter",
   ]);
   /**
    * Host→rail catalog surface. Everything else stays chat-only so a user who
@@ -21240,6 +21571,23 @@ ${fileShellOpen}
         <span id="todo-rail-count" class="todo-rail-count"></span>
       </button>
       <ol id="todo-rail-list" class="todo-rail-list"></ol>
+    </div>
+    <!-- Multi-file change overview (AP-09). Hidden until a turn produces
+         diffs; empty list hides it rather than painting a blank card. -->
+    <div id="review-center" class="review-center" hidden>
+      <div class="review-center-head">
+        <button id="review-center-toggle" class="review-center-toggle" type="button" aria-expanded="true" aria-controls="review-center-list">
+          <span id="review-center-caret" class="review-center-caret" aria-hidden="true"></span>
+          <span class="review-center-title">Review</span>
+          <span id="review-center-count" class="review-center-count"></span>
+        </button>
+        <div class="review-center-scope" role="tablist" aria-label="Review scope">
+          <button id="review-scope-turn" class="review-scope-btn" type="button" aria-pressed="true">This turn</button>
+          <button id="review-scope-session" class="review-scope-btn" type="button" aria-pressed="false">Session</button>
+        </div>
+        <button id="review-revert-all" class="review-revert-all" type="button">Discard all</button>
+      </div>
+      <ul id="review-center-list" class="review-center-list"></ul>
     </div>
     <div class="composer-card">
       <div id="attachments" class="attachments"></div>

@@ -114,4 +114,22 @@ describe("sessionUiSnapshot", () => {
       chips: [localChip],
     });
   });
+
+  it("restores the review-center list after a focus switch, and omits it when empty", () => {
+    const session = new Session();
+    expect(sessionUiSnapshot(session, "agent").some((m) => m.type === "reviewCenter")).toBe(false);
+    session.userMessageCount = 2;
+    session.reviewBlocks = [{
+      path: "src/a.ts",
+      oldText: "a",
+      newText: "b",
+      sites: [{ oldText: "a", newText: "b" }],
+      toolCallId: "t1",
+      turnId: "2",
+      status: "completed",
+    }];
+    expect(sessionUiSnapshot(session, "agent")).toContainEqual(
+      expect.objectContaining({ type: "reviewCenter", currentTurnId: "2" }),
+    );
+  });
 });

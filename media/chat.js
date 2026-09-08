@@ -344,6 +344,16 @@
   const todoRailCaret = $("todo-rail-caret");
   const todoRailCount = $("todo-rail-count");
   const todoRailList = $("todo-rail-list");
+  // Multi-file change overview (AP-09). Null-guarded like the todo rail so
+  // an older shell that didn't ship the mount just never shows it.
+  const reviewCenter = $("review-center");
+  const reviewCenterToggle = $("review-center-toggle");
+  const reviewCenterCaret = $("review-center-caret");
+  const reviewCenterCount = $("review-center-count");
+  const reviewCenterList = $("review-center-list");
+  const reviewScopeTurn = $("review-scope-turn");
+  const reviewScopeSession = $("review-scope-session");
+  const reviewRevertAll = $("review-revert-all");
 
   // Canonical low→high ORDER for known effort ids, and the FALLBACK ladder when a
   // model advertises no menu (`max` is not a real grok level — see #3/#4).
@@ -418,6 +428,10 @@
     /** The agent's step checklist, whole, as last sent by the host (AP-02).
      *  Empty for providers that send plan TEXT instead of entries. */
     planEntries: [],
+    /** Path-deduped change list from the host (AP-09). Empty → panel hidden. */
+    reviewFiles: [],
+    reviewTurnId: "",
+    reviewScope: "turn",
     providersKnown: false,
     providers: [],
     // Settings → Providers re-observation in flight. Host-owned; see the
@@ -1218,7 +1232,7 @@
 
   // ---------- markdown ----------
 
-  const { formatWaitElapsed, planEntriesProgress, looksLikeFileRef, formatRelativeTime, modelPickerLabel, modelDisplayName, nextMicState, trailingSendPhrase, versionedSiblingUrl, buildQuestionAnswers, isFreeTextOptionLabel, isSubagentToolCall, subagentLabel, cleanSubagentOutput, parseSubagentTaskResult, shouldStickToBottom, stickThresholdPx, splitMath, stripUnsupportedTex, toolFailureText, isMediaGenToolCall, mediaGenZeroRetentionHint, TOOL_LABEL_MAX, middleElide, isAdvertisedSkill, getSlashQuery, applySlashPick, filterCommands, appendHighlightedText, commandProgramLabel, commandTextPreview, extractToolResultOutput, commandOutputWasCancelled, commandOutputTruncationNote, computeLineDiff, parseAttachmentContext, parseSelectionBlocks, parseImageTags, parseContextBlocks, contextChipLabel, contextChipTitle, isKnownHostMessage, composerHasSendIntent, explicitVisibleChips, normalizeQueuedSends, queuedSendsText, queuedSendsChips, contextOverheadTokens, nextContextBreakdown, contextBreakdownIsCurrent, createPendingOverlay, getMentionQuery, applyMentionPick, orderPermissionOptions, defaultPermissionIndex, shouldFocusPermissionCard, isTypeThroughKey, isInterjectionText, stripInterjectionEnvelope, spokenTextFromMarkdown, isRelaySendRejection, wireFullscreenSafeReclamp, distributeSidePanelWidths, chatZoomFactor, unzoomClientPx, exportSessionMarkdown, exportSessionFilename, isExportableSessionEvent, replayedUserBubbleVerdict, truncateExportEvents, flattenHistoryMessages, splitHistoryWindow, countHistoryReplayCounters, partitionHistoryCards } = globalThis.GrokWebviewHelpers;
+  const { formatWaitElapsed, planEntriesProgress, formatReviewHeadline, looksLikeFileRef, formatRelativeTime, modelPickerLabel, modelDisplayName, nextMicState, trailingSendPhrase, versionedSiblingUrl, buildQuestionAnswers, isFreeTextOptionLabel, isSubagentToolCall, subagentLabel, cleanSubagentOutput, parseSubagentTaskResult, shouldStickToBottom, stickThresholdPx, splitMath, stripUnsupportedTex, toolFailureText, isMediaGenToolCall, mediaGenZeroRetentionHint, TOOL_LABEL_MAX, middleElide, isAdvertisedSkill, getSlashQuery, applySlashPick, filterCommands, appendHighlightedText, commandProgramLabel, commandTextPreview, extractToolResultOutput, commandOutputWasCancelled, commandOutputTruncationNote, computeLineDiff, parseAttachmentContext, parseSelectionBlocks, parseImageTags, parseContextBlocks, contextChipLabel, contextChipTitle, isKnownHostMessage, composerHasSendIntent, explicitVisibleChips, normalizeQueuedSends, queuedSendsText, queuedSendsChips, contextOverheadTokens, nextContextBreakdown, contextBreakdownIsCurrent, createPendingOverlay, getMentionQuery, applyMentionPick, orderPermissionOptions, defaultPermissionIndex, shouldFocusPermissionCard, isTypeThroughKey, isInterjectionText, stripInterjectionEnvelope, spokenTextFromMarkdown, isRelaySendRejection, wireFullscreenSafeReclamp, distributeSidePanelWidths, chatZoomFactor, unzoomClientPx, exportSessionMarkdown, exportSessionFilename, isExportableSessionEvent, replayedUserBubbleVerdict, truncateExportEvents, flattenHistoryMessages, splitHistoryWindow, countHistoryReplayCounters, partitionHistoryCards } = globalThis.GrokWebviewHelpers;
 
   function escapeAttr(s) {
     return String(s == null ? "" : s)
@@ -8900,6 +8914,169 @@
     };
   }
 
+  /**
+   * All changes of this turn or session, grouped by file (AP-09).
+   *
+   * Fed only by the host's `reviewCenter` snapshot. An empty list hides the
+   * panel rather than leaving an empty bordered strip — the same discipline
+   * as the todo rail. Scope ("this turn" / "session") is client-local; the
+   * host always sends both columns.
+   */
+  function reviewCenterCollapseKey() {
+    return "grok.reviewCenter.collapsed:" + (state.activeSessionId || "none");
+  }
+
+  function reviewCenterCollapsed() {
+    return storedBool(reviewCenterCollapseKey(), false);
+  }
+
+  function reviewRowsForScope() {
+    const files = Array.isArray(state.reviewFiles) ? state.reviewFiles : [];
+    if (state.reviewScope === "session") return files;
+    return files.filter((f) => (f.turnAdded || 0) !== 0 || (f.turnRemoved || 0) !== 0);
+  }
+
+  function reviewFileDiff(file) {
+    if (state.reviewScope === "turn" && file.turnDiff) return file.turnDiff;
+    return file.diff;
+  }
+
+  function renderReviewCenter() {
+    if (!reviewCenter) return;
+    const all = Array.isArray(state.reviewFiles) ? state.reviewFiles : [];
+    // Hidden when the SESSION has nothing — a turn with no diffs still
+    // leaves the panel off rather than painting an empty card. Session
+    // files from earlier turns keep it available so the switcher works.
+    if (!all.length) {
+      reviewCenter.hidden = true;
+      if (reviewCenterList) reviewCenterList.textContent = "";
+      return;
+    }
+    const rows = reviewRowsForScope();
+    let added = 0;
+    let removed = 0;
+    for (const f of rows) {
+      added += state.reviewScope === "turn" ? (f.turnAdded || 0) : (f.added || 0);
+      removed += state.reviewScope === "turn" ? (f.turnRemoved || 0) : (f.removed || 0);
+    }
+    const collapsed = reviewCenterCollapsed();
+    reviewCenter.hidden = false;
+    reviewCenter.classList.toggle("collapsed", collapsed);
+    if (reviewCenterCaret) reviewCenterCaret.innerHTML = collapsed ? ICON.chevronRight : ICON.chevronDown;
+    if (reviewCenterToggle) {
+      reviewCenterToggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+      reviewCenterToggle.title = collapsed ? "Show changes" : "Hide changes";
+    }
+    if (reviewCenterCount) {
+      reviewCenterCount.textContent = formatReviewHeadline
+        ? formatReviewHeadline(rows.length, added, removed)
+        : (rows.length + " files · +" + added + " −" + removed);
+    }
+    if (reviewScopeTurn) reviewScopeTurn.setAttribute("aria-pressed", state.reviewScope === "turn" ? "true" : "false");
+    if (reviewScopeSession) reviewScopeSession.setAttribute("aria-pressed", state.reviewScope === "session" ? "true" : "false");
+    const canDiscardAll = rows.some((f) => state.reviewScope === "turn" ? f.turnCompleted : f.completed);
+    if (reviewRevertAll) {
+      reviewRevertAll.disabled = !canDiscardAll;
+      reviewRevertAll.title = canDiscardAll
+        ? (state.reviewScope === "turn" ? "Restore this turn's checkpoint" : "Restore this conversation's checkpoints")
+        : "Nothing to discard";
+    }
+    if (!reviewCenterList) return;
+    reviewCenterList.hidden = collapsed;
+    reviewCenterList.textContent = "";
+    for (const file of rows) {
+      const li = document.createElement("li");
+      li.className = "review-file";
+      li.dataset.reviewPath = file.path || "";
+      const name = document.createElement("span");
+      name.className = "review-file-name";
+      const path = file.path || "";
+      const base = path.split("/").pop() || path;
+      name.textContent = base;
+      name.title = path;
+      const stat = document.createElement("span");
+      stat.className = "review-file-stat";
+      const a = state.reviewScope === "turn" ? (file.turnAdded || 0) : (file.added || 0);
+      const r = state.reviewScope === "turn" ? (file.turnRemoved || 0) : (file.removed || 0);
+      const addEl = document.createElement("span");
+      addEl.className = "diff-stat-add";
+      addEl.textContent = "+" + a;
+      const delEl = document.createElement("span");
+      delEl.className = "diff-stat-del";
+      delEl.textContent = "−" + r;
+      stat.appendChild(addEl);
+      stat.appendChild(document.createTextNode(" "));
+      stat.appendChild(delEl);
+      const actions = document.createElement("div");
+      actions.className = "review-file-actions";
+      const open = document.createElement("button");
+      open.className = "preview-link";
+      open.type = "button";
+      open.textContent = "open diff →";
+      open.onclick = (e) => {
+        e.stopPropagation();
+        const diff = reviewFileDiff(file);
+        if (!diff) return;
+        requestDiffPreview({
+          path: file.path,
+          oldText: diff.oldText || "",
+          newText: diff.newText || "",
+          sites: Array.isArray(diff.sites) ? diff.sites : [],
+          replaceAll: !!diff.replaceAll,
+        });
+      };
+      const discard = document.createElement("button");
+      discard.className = "preview-link revert-link";
+      discard.type = "button";
+      const done = state.reviewScope === "turn" ? file.turnCompleted : file.completed;
+      discard.textContent = "discard file";
+      discard.disabled = !done;
+      if (done) {
+        discard.onclick = (e) => {
+          e.stopPropagation();
+          discard.disabled = true;
+          discard.textContent = "discarding…";
+          vscode.postMessage({ type: "reviewRevertFile", path: file.path, scope: state.reviewScope });
+        };
+      }
+      actions.appendChild(open);
+      actions.appendChild(discard);
+      li.appendChild(name);
+      li.appendChild(stat);
+      li.appendChild(actions);
+      reviewCenterList.appendChild(li);
+    }
+  }
+
+  if (reviewCenterToggle) {
+    reviewCenterToggle.onclick = () => {
+      const next = !reviewCenterCollapsed();
+      try { window.localStorage.setItem(reviewCenterCollapseKey(), String(next)); } catch { /* unavailable */ }
+      renderReviewCenter();
+    };
+  }
+  if (reviewScopeTurn) {
+    reviewScopeTurn.onclick = (e) => {
+      e.stopPropagation();
+      state.reviewScope = "turn";
+      renderReviewCenter();
+    };
+  }
+  if (reviewScopeSession) {
+    reviewScopeSession.onclick = (e) => {
+      e.stopPropagation();
+      state.reviewScope = "session";
+      renderReviewCenter();
+    };
+  }
+  if (reviewRevertAll) {
+    reviewRevertAll.onclick = (e) => {
+      e.stopPropagation();
+      if (reviewRevertAll.disabled) return;
+      vscode.postMessage({ type: "reviewRevertAll", scope: state.reviewScope });
+    };
+  }
+
   function resetForNewSession() {
     clearSessionSuperseded();
     stopProcessingCue();
@@ -8950,6 +9127,10 @@
     // has a plan of its own.
     state.planEntries = [];
     renderTodoRail();
+    state.reviewFiles = [];
+    state.reviewTurnId = "";
+    state.reviewScope = "turn";
+    renderReviewCenter();
     state.pendingDiffByToolCallId.clear();
     state.revertedEdits.clear();
     state.toolItemsByToolCallId.clear();
@@ -11404,6 +11585,9 @@
         button.title = msg.reason || "";
       }
     }
+    // A review-center "discard file" is the same revert; rebuild the panel
+    // so a failed attempt restores the button instead of leaving "discarding…".
+    renderReviewCenter();
   }
 
   function attachDiffPreviewToToolItem(toolCallId, diffs, status) {
@@ -16760,6 +16944,13 @@
         // The open conversation's history row carries the same counter; repaint
         // it only while that list is actually on screen.
         if (historyPopover && !historyPopover.hidden) renderSessionRows();
+        break;
+      case "reviewCenter":
+        // REPLACING state — the host sends the whole path-deduped list.
+        // Empty hides the panel rather than painting a blank card.
+        state.reviewTurnId = typeof msg.currentTurnId === "string" ? msg.currentTurnId : "";
+        state.reviewFiles = Array.isArray(msg.files) ? msg.files : [];
+        renderReviewCenter();
         break;
       case "remoteStatus":
         state.remoteLinked = !!msg.linked;

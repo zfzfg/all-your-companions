@@ -432,6 +432,11 @@ export const INBOUND_DISPOSITION: Record<WebviewMsg["type"], InboundDisposition>
   // Writes/deletes an actual project file — the same destructive class as a
   // permission approval, not a local-window action like openDiff/openFile.
   revertToolEdit: "full",
+  // Same class: writes/deletes project files. Discard-all restores a
+  // checkpoint rather than N sequential reverts, but the effect is the
+  // same destructive write.
+  reviewRevertFile: "full",
+  reviewRevertAll: "full",
   exportExpr: "host-local",
   // Opens a native directory picker on the machine running the host. A remote
   // could neither see nor answer that dialog, so it would hang a phone on a
@@ -627,6 +632,8 @@ export const REMOTE_REQUIRES_BOUND_SESSION: Record<WebviewMsg["type"], boolean> 
   openText: false,
   openDiff: false,
   revertToolEdit: true,
+  reviewRevertFile: true,
+  reviewRevertAll: true,
   exportExpr: false,
   addProjectFolder: false,
   removeProjectFolder: false,
@@ -962,6 +969,8 @@ export const OUTBOUND_DISPOSITION: Record<HostMsg["type"], OutboundDisposition> 
   // Display-only checklist of the agent's own steps; carries no path, no
   // command, and no affordance. Same sensitivity as the mode badge beside it.
   planEntries: "mirror",
+  // Display-only file list with counts; the revert actions travel inbound.
+  reviewCenter: "mirror",
   openModePopover: "mirror",
   chips: "mirror",
   commandsUpdate: "mirror",
@@ -1146,6 +1155,7 @@ export const OUTBOUND_PROJECT_AUTH: Record<HostMsg["type"], OutboundProjectAuth>
   planModeAvailability: "scope",
   providerCapabilities: "scope",
   planEntries: "scope",
+  reviewCenter: "scope",
   commandsUpdate: "scope",
   mentionResults: "scope",
   // Carry the scoped repo cwd; authorize against that field (message-cwd) so a

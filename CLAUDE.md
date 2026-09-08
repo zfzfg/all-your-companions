@@ -77,6 +77,8 @@ Persistent permission rules (`decidePermission` in `src/permission-rules.ts`) si
 
 Rewind works for all four companions. Grok uses `_x.ai/rewind/*` when the CLI supports it; otherwise — and for Codex, Claude, and Gemini — the host restores files from client checkpoints (`src/checkpoints.ts`, stored under `globalStorage/checkpoints`). Snapshots are the exact bytes of each workspace file taken before the first write of a turn. A hash mismatch against both the before-image and the recorded after-image is a foreign change and always asks before overwriting. A failed snapshot disables that turn's checkpoint (`hostNotice`) and never aborts the turn.
 
+The Review panel above the composer lists every file this turn or the whole session changed, grouped by path, with `+N −M` matching the sum of the inline diffs. Discard file runs `planEditRevert` (chained in memory for a file edited more than once). Discard all restores the AP-08 checkpoint — never N sequential reverts, which would leave a half-state on conflict. An empty turn keeps the panel off.
+
 Codex image generation is recognized only on a Codex-provider
 `kind:"other"` / `title:"Image generation"` call. Completion maps to
 `<codexHome>/generated_images/<sessionId>/<toolCallId>.png` only after UUID /

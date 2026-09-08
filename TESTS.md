@@ -143,6 +143,26 @@ The wire format is the highest-value test surface: ACP changes break everything 
 - Fault injection on mkdir, blob write, meta write, read, readdir, and cleanup rm — `save`/`load`/`list` never throw
 - Retention prunes on write; `disable` wipes blobs so the turn cannot be restored
 
+### `test/review-center.test.ts` — review-center aggregation, pure (AP-09)
+
+- Path-deduped `+N −M` is the sum of every inline site (`computeLineDiff`), including a `replace_all` `details[]` list — not the token-sized block
+- Empty input is zero files, not a phantom row; this-turn counts split from the session total
+- `planFileRevert` chains `planEditRevert` in memory (one write, conflict fails the whole file)
+- `planDiscardAll` names a checkpoint restore, never a list of per-file reverts
+
+### `test/review-center.dom.test.ts` — review panel (AP-09)
+
+- Hidden until a `reviewCenter` list arrives; empty list hides it rather than painting a blank card
+- Headline matches the inline sums; turn/session switcher filters without a host round-trip
+- Open diff posts `openDiff`; discard file / discard all post `reviewRevertFile` / `reviewRevertAll` (never N `revertToolEdit`s)
+- `clearMessages` + snapshot replay restores the panel after a focus switch
+
+### `test/review-center-host.test.ts` — ingest + atomic discard-all (AP-09)
+
+- `noteReviewToolCall` emits a path-deduped snapshot; a call with no useful diff emits nothing
+- Discard all restores the AP-08 checkpoint without truncating the conversation
+- A cancelled conflict leaves every file untouched (no half-state); no checkpoint → notice, no writes
+
 ### `test/checkpoint-host.test.ts` — snapshot-before-grant per provider (AP-08)
 
 - One permission-allow path each for grok, claude (`file_path`), codex, gemini — snapshot runs before `respondPermission`
