@@ -4221,11 +4221,9 @@
   }
 
   /**
-   * Rewind and edit-and-resend ride grok's `_x.ai/rewind/*` extension. Codex
-   * and Claude answer `unsupported`, and until 2026-09-01 the buttons rendered
-   * for them anyway — clicking one produced a host-side warning, which is a
-   * poor answer at a desk and NO answer at all on a cloud machine, where
-   * nobody is at the screen to read it. Same shape as steerableProvider().
+   * Rewind and edit-and-resend: Grok uses `_x.ai/rewind/*` (client snapshots
+   * as fallback); Codex/Claude/Gemini use client-side checkpoints (AP-08).
+   * The capability matrix is the gate — no per-provider branch in this UI.
    */
   function rewindCapableProvider() {
     if (state.providerCapabilities && state.providerCapabilities.rewind) {

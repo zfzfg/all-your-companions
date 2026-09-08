@@ -52,7 +52,7 @@ export const PROVIDER_CAPABILITIES: Record<
   grok: {
     // Steer via _x.ai/interject (acp.ts:807, media/chat.js:4149, #52)
     steer: { state: "yes" },
-    // Rewind via _x.ai/rewind/* (rewind.ts, docs/architecture.md:994, media/chat.js:4168)
+    // Native `_x.ai/rewind/*` first; client checkpoints (AP-08) are the fallback.
     rewind: { state: "yes" },
     // Fork via _x.ai/session/fork (docs/architecture.md:56, file-upload.ts)
     fork: { state: "yes" },
@@ -79,11 +79,8 @@ export const PROVIDER_CAPABILITIES: Record<
       state: "no",
       reason: "Steer is not supported by Codex — your message will be sent after the turn.",
     },
-    // Rewind not supported by Codex ACP adapter (media/chat.js:4169, docs/architecture.md:994)
-    rewind: {
-      state: "no",
-      reason: "Rewind is not supported by Codex.",
-    },
+    // Client-side file checkpoints + transcript truncate (AP-08). No native RPC.
+    rewind: { state: "yes" },
     // Session fork not supported on Codex adapter (docs/architecture.md:56)
     fork: {
       state: "no",
@@ -127,11 +124,8 @@ export const PROVIDER_CAPABILITIES: Record<
       state: "no",
       reason: "Steer is not supported by Claude — your message will be sent after the turn.",
     },
-    // Rewind not supported by Claude ACP adapter (media/chat.js:4169, docs/architecture.md:994)
-    rewind: {
-      state: "no",
-      reason: "Rewind is not supported by Claude.",
-    },
+    // Client-side file checkpoints + transcript truncate (AP-08). No native RPC.
+    rewind: { state: "yes" },
     // Session fork not supported by Claude adapter (docs/architecture.md:56)
     fork: {
       state: "no",
@@ -175,11 +169,8 @@ export const PROVIDER_CAPABILITIES: Record<
       state: "no",
       reason: "Steer is not supported by Gemini — your message will be sent after the turn.",
     },
-    // Rewind not supported by Gemini / Antigravity (media/chat.js:4169, docs/architecture.md:994)
-    rewind: {
-      state: "no",
-      reason: "Rewind is not supported by Gemini.",
-    },
+    // Client-side file checkpoints + transcript truncate (AP-08). No native RPC.
+    rewind: { state: "yes" },
     // Session fork not supported by Gemini adapter (docs/architecture.md:56)
     fork: {
       state: "no",

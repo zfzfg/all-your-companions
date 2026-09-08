@@ -38,6 +38,7 @@ import {
   createRule,
   decidePermission,
   extractPermissionFacts,
+  normalizePermissionKind,
   globalRulesToMap,
   loadWorkspaceRulesFile,
   parseAdoptionMap,
@@ -99,6 +100,20 @@ import {
   type RoutineRun,
 } from "./routines";
 import { RoutineRunStore } from "./routine-store";
+import {
+  CHECKPOINT_MAX_FILE_BYTES,
+  checkpointId,
+  checkpointRelPath,
+  mergeCheckpoints,
+  planRestoreDetailed,
+  previewUserMessage,
+  restoreActions,
+  sha256Bytes,
+  snapshotFromBytes,
+  survivingAfterClientRewind,
+  type Checkpoint,
+} from "./checkpoints";
+import { CheckpointStore, nodeCheckpointFs } from "./checkpoint-store";
 import { routinesMessageForRemote } from "./remote-compat";
 import { PersistedState } from "./persisted-state";
 import {
@@ -1220,6 +1235,9 @@ export class GrokSidebar {
   /** Run records, and the exclusive-create claim that makes a due run happen
    *  exactly once across every host sharing this `~/.grok`. */
   private readonly routineRuns: RoutineRunStore;
+
+  /** Client-side file snapshots per user turn (AP-08). Lives under globalStorage. */
+  private readonly checkpointStore: CheckpointStore;
   private routineTimer?: ReturnType<typeof setInterval>;
   /** Last wake time the relay accepted. `undefined` = never published, which is
    *  distinct from `null` = published "nothing scheduled". */
@@ -1260,6 +1278,11 @@ export class GrokSidebar {
     this.routineRuns = new RoutineRunStore({
       dir: `${path.join(resolveGrokHome(process.env), "client-state").replace(/\\/g, "/")}/routine-runs`,
       fs,
+      log: (line) => this.host.appendLine(line),
+    });
+    this.checkpointStore = new CheckpointStore({
+      root: path.join(this.context.globalStorageUri.fsPath, "checkpoints"),
+      fs: nodeCheckpointFs(fs),
       log: (line) => this.host.appendLine(line),
     });
     void this.sweepImageStaging();
@@ -3931,7 +3954,11 @@ Only continue if you trust this code.`,
     if (session.autoApprove && !planActive && !isPlanReviewPermission(req.toolCall?.kind)) {
       const opt = req.options.find((o) => o.kind === "allow_always") ??
                   req.options.find((o) => o.kind === "allow_once");
-      if (opt) { client.respondPermission(req.id, opt.optionId); return; }
+      if (opt) {
+        this.snapshotToolCallWrites(session, req.toolCall, cwd);
+        client.respondPermission(req.id, opt.optionId);
+        return;
+      }
     }
     // Remember it so the answer can be persisted for replay on resume.
     const visibleOptions = permissionOptionsForPlan(
@@ -3958,6 +3985,7 @@ Only continue if you trust this code.`,
       title: req.toolCall?.title || `permission: ${req.toolCall?.kind || "tool"}`,
       toolCallId: req.toolCall?.toolCallId,
       toolKind: req.toolCall?.kind,
+      paths: extractPermissionFacts(req.toolCall).paths.slice(),
       plan,
       options: (req.options ?? []).map((o) => ({
         optionId: o.optionId,
@@ -4010,6 +4038,7 @@ Only continue if you trust this code.`,
     }
     const allowId = pickAllowOnceOption(req.options ?? []);
     if (!allowId) return false;
+    this.snapshotToolCallWrites(session, req.toolCall, cwd);
     client.respondPermission(req.id, allowId);
     this.emit(session, {
       type: "hostNotice",
@@ -4760,14 +4789,19 @@ Only continue if you trust this code.`,
       );
     }
     const { client, gen, activeSessionId, userMessageCount } = session;
+    if (session.provider !== "grok") {
+      await this.rewindFromClientCheckpoints(session, {
+        userBubbleIndex, bubbleText: text, totalUserBubbles, requester, edit: true,
+      });
+      return;
+    }
     try {
       const points = await client.listRewindPoints();
       if (points === "unsupported") {
-        return void this.reportRequester(
-          requester,
-          "warning",
-          "Editing a sent message needs a newer Grok Build CLI. Update via Settings → About.",
-        );
+        await this.rewindFromClientCheckpoints(session, {
+          userBubbleIndex, bubbleText: text, totalUserBubbles, requester, edit: true,
+        });
+        return;
       }
       // If the wire's user-facing list no longer matches what the user sees, the
       // bubble->point map can't be trusted — refuse instead of reverting a turn
@@ -4828,11 +4862,10 @@ Only continue if you trust this code.`,
         mode: "all",
       });
       if (result === "unsupported") {
-        return void this.reportRequester(
-          requester,
-          "warning",
-          "Editing a sent message needs a newer Grok Build CLI. Update via Settings → About.",
-        );
+        await this.rewindFromClientCheckpoints(session, {
+          userBubbleIndex, bubbleText: text, totalUserBubbles, requester, edit: true,
+        });
+        return;
       }
       if (!result.success) {
         // Surface the CLI's own words — e.g. rewinding past a compaction point.
@@ -4847,6 +4880,7 @@ Only continue if you trust this code.`,
       const surviving = survivingUserMessagesAfterRewind(points, target);
       await this.truncateSessionCardsAfterRewind(resumeId, surviving);
       this.applyRewindToView(session, surviving);
+      if (resumeId) this.checkpointStore?.pruneAfter(resumeId, surviving);
       this.restoreComposerFor(session, requester, text);
       if (reportedFiles > 0) {
         this.reportRequester(
@@ -4949,14 +4983,19 @@ Only continue if you trust this code.`,
       return void this.reportRequester(requester, "info", "Nothing to rewind yet — this session has no conversation.");
     }
     const { client, gen, activeSessionId, userMessageCount } = session;
+    if (session.provider !== "grok") {
+      await this.rewindFromClientCheckpoints(session, {
+        userBubbleIndex, bubbleText, totalUserBubbles, requester, edit: false,
+      });
+      return;
+    }
     try {
       const points = await client.listRewindPoints();
       if (points === "unsupported") {
-        return void this.reportRequester(
-          requester,
-          "warning",
-          "Rewind needs a newer Grok Build CLI. Update via Settings → About.",
-        );
+        await this.rewindFromClientCheckpoints(session, {
+          userBubbleIndex, bubbleText, totalUserBubbles, requester, edit: false,
+        });
+        return;
       }
 
       // If the wire's user-facing list no longer matches what the user sees, the
@@ -5059,11 +5098,10 @@ Only continue if you trust this code.`,
         mode: "all",
       });
       if (result === "unsupported") {
-        return void this.reportRequester(
-          requester,
-          "warning",
-          "Rewind needs a newer Grok Build CLI. Update via Settings → About.",
-        );
+        await this.rewindFromClientCheckpoints(session, {
+          userBubbleIndex, bubbleText, totalUserBubbles, requester, edit: false,
+        });
+        return;
       }
       if (!result.success) {
         const err = result.error || "Rewind did not apply (no changes).";
@@ -5082,6 +5120,7 @@ Only continue if you trust this code.`,
       const surviving = survivingUserMessagesAfterRewind(points, target);
       await this.truncateSessionCardsAfterRewind(resumeId, surviving);
       this.applyRewindToView(session, surviving);
+      if (resumeId) this.checkpointStore?.pruneAfter(resumeId, surviving);
       // Rewind DISCARDS the message it targets, so hand its text back exactly
       // as Edit does — otherwise the button silently destroys what the user
       // wrote. After startSession, or the replay would clear it.
@@ -9813,6 +9852,8 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       }
     };
     client.fsWrite = async (p: string, content: string) => {
+      this.snapshotAbsPaths(session, [p]);
+      this.noteCheckpointAfterContent(session, p, content);
       try {
         await this.host.fs.createDirectory(Uri.file(path.dirname(p)));
         await this.host.fs.writeFile(Uri.file(p), Buffer.from(content, "utf8"));
@@ -10076,6 +10117,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       const prepared = prepareMcpToolCall(u, mcpState);
       session.inUserMessage = false;
       session.historyEventCount += 1;
+      if (!session.replaying) this.snapshotPendingEditToolCall(session, prepared.call);
       this.emit(session, { type, call: prepared.call });
       this.noteAdapterCompactSignal(session, prepared.call);
       if (prepared.commandOutput) {
@@ -10122,6 +10164,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       // user turn. Do not add its zero-inference response to the billing ledger.
       if (session.captureAgentText === undefined) void this.accumulateUsage(session, meta);
       session.adapterTurnCallUsed = [];
+      if (!session.replaying) this.finishCheckpointTurn(session);
       // A zero report (stripped above) is /compact or /session-info; neither
       // warrants a donut update here. /session-info leaves the context
       // untouched, and after /compact the fresh count comes from the live
@@ -11176,6 +11219,10 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
             session.planActive,
             pending.toolKind,
           )) break;
+          const chosenKind = pending.options.find((option) => option.optionId === msg.optionId)?.kind;
+          if (chosenKind === "allow_once" || chosenKind === "allow_always") {
+            this.snapshotRelOrAbsPaths(session, pending.paths ?? [], this.sessionCwd(session));
+          }
           if (!session.client?.respondPermission(msg.requestId, msg.optionId)) break;
           if (msg.rule && !isPlanReviewPermission(pending.toolKind)) {
             void this.persistAllowRuleFromCard(session, msg.rule);
@@ -13853,6 +13900,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     if (live) live.deleted = true;
     this.sessionCache.delete(id);
     this.removePlanReviews(id); // snapshots live outside grok's session dir
+    this.removeCheckpoints(id);
     const overrides = this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
     await this.removeUploadsForSessions([id], overrides);
     if (overrides[id]) {
@@ -14107,6 +14155,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       for (const id of removed) {
         this.sessionCache.delete(id);
         this.removePlanReviews(id);
+        this.removeCheckpoints(id);
         if (next[id]) {
           delete next[id];
           changed = true;
@@ -15381,6 +15430,378 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     return out;
   }
 
+  /** Drop client checkpoints for a deleted session. Best-effort, like plan-reviews. */
+  private removeCheckpoints(sessionId: string): void {
+    try {
+      this.checkpointStore?.removeSession(sessionId);
+    } catch {
+      /* never fail a delete over leftover snapshots */
+    }
+  }
+
+  private beginCheckpointTurn(session: Session, text: string): void {
+    if (session.replaying) return;
+    session.checkpointTurn = {
+      turnId: String(session.userMessageCount),
+      preview: previewUserMessage(text),
+      disabled: false,
+      files: [],
+      skipped: [],
+    };
+  }
+
+  private ensureCheckpointTurn(session: Session): Session["checkpointTurn"] | undefined {
+    if (session.replaying) return undefined;
+    if (session.userMessageCount < 1) return undefined;
+    if (!session.checkpointTurn || session.checkpointTurn.turnId !== String(session.userMessageCount)) {
+      session.checkpointTurn = {
+        turnId: String(session.userMessageCount),
+        preview: session.checkpointTurn?.preview ?? "",
+        disabled: false,
+        files: [],
+        skipped: [],
+      };
+    }
+    return session.checkpointTurn;
+  }
+
+  /**
+   * Snapshot workspace files BEFORE the agent is allowed to write them.
+   * Failures disable this turn's checkpoint and never throw — the turn continues.
+   */
+  private snapshotToolCallWrites(
+    session: Session,
+    toolCall: { kind?: string; rawInput?: unknown; content?: unknown } | undefined,
+    cwd: string,
+  ): void {
+    if (normalizePermissionKind(toolCall?.kind) !== "edit") return;
+    this.snapshotRelOrAbsPaths(session, extractPermissionFacts(toolCall).paths, cwd);
+  }
+
+  private snapshotPendingEditToolCall(session: Session, call: { kind?: string; status?: string; rawInput?: unknown; content?: unknown }): void {
+    const status = String(call.status || "").toLowerCase();
+    if (status === "completed" || status === "failed") return;
+    this.snapshotToolCallWrites(session, call, this.sessionCwd(session));
+  }
+
+  private snapshotRelOrAbsPaths(session: Session, paths: readonly string[], cwd: string): void {
+    const abs = paths.map((p) => path.isAbsolute(p) ? p : path.join(cwd, p));
+    this.snapshotAbsPaths(session, abs);
+  }
+
+  private snapshotAbsPaths(session: Session, absPaths: readonly string[]): void {
+    try {
+      if (!this.checkpointStore || session.replaying) return;
+      const turn = this.ensureCheckpointTurn(session);
+      if (!turn || turn.disabled) return;
+      const cwd = this.sessionCwd(session);
+      let changed = false;
+      for (const abs of absPaths) {
+        if (!abs) continue;
+        const rel = checkpointRelPath(abs, cwd);
+        if (!rel) continue;
+        if (turn.files.some((f) => f.relPath === rel) || turn.skipped.some((s) => s.relPath === rel)) continue;
+        let bytes: Uint8Array | null = null;
+        let reportedBytes: number | undefined;
+        try {
+          const st = fs.statSync(abs);
+          if (!st.isFile()) continue;
+          reportedBytes = st.size;
+          if (st.size > CHECKPOINT_MAX_FILE_BYTES) {
+            const cap = snapshotFromBytes(rel, null, { reportedBytes: st.size });
+            if (cap.kind === "skipped") turn.skipped.push(cap.skipped);
+            changed = true;
+            continue;
+          }
+          bytes = fs.readFileSync(abs);
+        } catch (e) {
+          const code = (e as NodeJS.ErrnoException).code;
+          if (code === "ENOENT") bytes = null;
+          else {
+            this.disableCheckpointTurn(session, `read ${rel}: ${(e as Error).message}`);
+            return;
+          }
+        }
+        const cap = snapshotFromBytes(rel, bytes, { reportedBytes });
+        if (cap.kind === "skipped") turn.skipped.push(cap.skipped);
+        else turn.files.push(cap.file);
+        changed = true;
+      }
+      if (changed) this.persistCheckpointTurn(session);
+    } catch (e) {
+      this.disableCheckpointTurn(session, (e as Error).message);
+    }
+  }
+
+  private noteCheckpointAfterContent(session: Session, absPath: string, content: string): void {
+    const turn = session.checkpointTurn;
+    if (!turn || turn.disabled) return;
+    const rel = checkpointRelPath(absPath, this.sessionCwd(session));
+    if (!rel) return;
+    const file = turn.files.find((f) => f.relPath === rel);
+    if (file) file.afterSha256 = sha256Bytes(Buffer.from(content, "utf8"));
+  }
+
+  private persistCheckpointTurn(session: Session): void {
+    const store = this.checkpointStore;
+    const turn = session.checkpointTurn;
+    const sid = session.activeSessionId;
+    if (!store || !turn || !sid || turn.disabled) return;
+    if (!turn.files.length && !turn.skipped.length) return;
+    const result = store.save({
+      id: checkpointId(sid, turn.turnId),
+      sessionId: sid,
+      turnId: turn.turnId,
+      createdAt: Date.now(),
+      userMessagePreview: turn.preview,
+      files: turn.files,
+      skipped: turn.skipped,
+      bytes: turn.files.reduce((n, f) => n + Buffer.byteLength(f.blob, "utf8"), 0),
+    });
+    if (!result.ok) this.disableCheckpointTurn(session, result.reason);
+  }
+
+  private disableCheckpointTurn(session: Session, reason: string): void {
+    try {
+      const turn = session.checkpointTurn;
+      if (turn) {
+        turn.disabled = true;
+        turn.disableReason = reason;
+        turn.files = [];
+      }
+      const sid = session.activeSessionId;
+      try {
+        if (sid && turn) this.checkpointStore?.disable(sid, turn.turnId, reason);
+      } catch {
+        /* store failure must not skip the notice */
+      }
+      this.emit(session, {
+        type: "hostNotice",
+        level: "warning",
+        text: `Checkpoint for this turn is off: ${reason}. Rewind will not restore these files.`,
+      });
+    } catch {
+      /* never abort the turn */
+    }
+  }
+
+  private finishCheckpointTurn(session: Session): void {
+    try {
+      const turn = session.checkpointTurn;
+      if (!turn || turn.disabled) return;
+      const cwd = this.sessionCwd(session);
+      for (const file of turn.files) {
+        if (file.afterSha256) continue;
+        const abs = path.join(cwd, file.relPath);
+        try {
+          file.afterSha256 = sha256Bytes(fs.readFileSync(abs));
+        } catch {
+          /* leave unset — restore treats unknown after-hash as a conflict */
+        }
+      }
+      this.persistCheckpointTurn(session);
+    } catch (e) {
+      this.disableCheckpointTurn(session, (e as Error).message);
+    }
+  }
+
+  /**
+   * Provider-neutral rewind: restore files from client snapshots, then truncate
+   * the transcript. Grok's native path is preferred when it exists; this is
+   * the path for Codex/Claude/Gemini and Grok's fallback.
+   */
+  private async rewindFromClientCheckpoints(
+    session: Session,
+    opts: {
+      userBubbleIndex?: number;
+      bubbleText?: string;
+      totalUserBubbles?: number;
+      requester?: RemoteRequester;
+      edit: boolean;
+    },
+  ): Promise<void> {
+    const { requester } = opts;
+    const sid = session.activeSessionId;
+    if (!sid) {
+      return void this.reportRequester(requester, "warning", "Start a session before rewinding it.");
+    }
+    if (typeof opts.totalUserBubbles === "number" && opts.totalUserBubbles !== session.userMessageCount) {
+      return void this.reportRequester(
+        requester,
+        "warning",
+        "Restore points no longer line up with this conversation, so rewinding could remove the wrong turn. Reload the window and try again.",
+      );
+    }
+
+    let surviving: number;
+    if (typeof opts.userBubbleIndex === "number") {
+      if (opts.userBubbleIndex < 0 || opts.userBubbleIndex >= session.userMessageCount) {
+        return void this.reportRequester(
+          requester,
+          "info",
+          opts.edit
+            ? "Can't edit this message — the checkpoint is unavailable."
+            : "Can't rewind to this message — it's the latest turn, or the checkpoint is unavailable.",
+        );
+      }
+      if (!opts.edit && opts.userBubbleIndex === session.userMessageCount - 1) {
+        return void this.reportRequester(
+          requester,
+          "info",
+          "Can't rewind to this message — it's the latest turn, or the checkpoint is unavailable.",
+        );
+      }
+      surviving = survivingAfterClientRewind(opts.userBubbleIndex);
+    } else if (opts.requester) {
+      return void this.reportRequester(
+        requester,
+        "info",
+        "Pick the message to rewind to using the Rewind button on that message.",
+      );
+    } else {
+      const users = session.buffer.filter((m) => m.type === "userMessage" && !m.steer);
+      const selectable = opts.edit ? users : users.slice(0, Math.max(0, users.length - 1));
+      if (selectable.length === 0) {
+        return void this.host.showInformationMessage(
+          users.length <= 1
+            ? "Only one message so far — hover an earlier user message and click Rewind."
+            : "No rewind points available.",
+        );
+      }
+      const items = selectable.map((m, i) => {
+        const text = m.type === "userMessage" ? m.text : "";
+        return {
+          label: `#${i + 1}  ${previewUserMessage(text || "", 60)}`,
+          description: undefined as string | undefined,
+          index: i,
+        };
+      }).reverse();
+      const pick = await this.host.showQuickPick(items, {
+        placeHolder: "Rewind past which message? (it and everything after it are discarded)",
+        ignoreFocusOut: true,
+      });
+      if (!pick) return;
+      surviving = survivingAfterClientRewind(pick.index);
+    }
+
+    const later = this.checkpointStore?.loadFrom(sid, surviving) ?? [];
+    const merged: Checkpoint = later.length ? mergeCheckpoints(later) : {
+      id: checkpointId(sid, String(surviving + 1)),
+      sessionId: sid,
+      turnId: String(surviving + 1),
+      createdAt: 0,
+      userMessagePreview: "",
+      files: [],
+      skipped: later.flatMap((c) => c.skipped),
+      bytes: 0,
+    };
+    const cwd = this.sessionCwd(session);
+    const current = new Map<string, string | null>();
+    for (const file of merged.files) {
+      const abs = path.join(cwd, file.relPath);
+      try {
+        current.set(file.relPath, fs.readFileSync(abs, "utf8"));
+      } catch {
+        current.set(file.relPath, null);
+      }
+    }
+    const plan = planRestoreDetailed(merged, current);
+    const skippedNote = plan.skipped.length
+      ? `\n\nNot restorable:\n${plan.skipped.map((s) => `• ${s.relPath} (${s.reason === "too-large" ? "too large" : "binary"}, ${s.bytes} bytes)`).join("\n")}`
+      : "";
+    const wouldTouch = plan.writes.length + plan.deletes.length + plan.conflicts.length;
+    if (wouldTouch > 0) {
+      const ok = await this.confirmInChat(session, {
+        title: opts.edit ? "Edit this message?" : "Rewind past this message?",
+        body: `This will restore ${wouldTouch} file(s) on disk to how they were before that message.${skippedNote}`,
+        confirmLabel: opts.edit ? "Edit" : "Rewind",
+        danger: true,
+      });
+      if (!ok) return;
+    }
+    let overwrite = false;
+    if (plan.conflicts.length) {
+      const listed = plan.conflicts.map((f) => `• ${f}`).join("\n");
+      if (opts.requester) {
+        const ok = await this.confirmInChat(session, {
+          title: "Files changed since this snapshot",
+          body: `These files were modified after the checkpoint. Overwrite them?\n${listed}`,
+          confirmLabel: "Overwrite",
+          danger: true,
+        });
+        if (!ok) return;
+        overwrite = true;
+      } else {
+        const items = [
+          { label: "Overwrite all conflicting files", description: `${plan.conflicts.length} file(s) changed since the snapshot`, action: "overwrite" as const },
+          { label: "Cancel", action: "cancel" as const },
+          ...plan.conflicts.map((f) => ({ label: f, description: "changed since snapshot", action: "overwrite" as const })),
+        ];
+        const pick = await this.host.showQuickPick(items, {
+          placeHolder: "Restore anyway? Foreign changes will be overwritten.",
+          ignoreFocusOut: true,
+        });
+        if (!pick || pick.action === "cancel") return;
+        overwrite = true;
+      }
+    }
+
+    if (
+      ["working", "needs-you"].includes(session.status) ||
+      session.activeSessionId !== sid
+    ) {
+      return void this.reportRequester(
+        requester, "warning",
+        `${opts.edit ? "Edit" : "Rewind"} cancelled because the conversation changed or another turn started. Nothing was rewound. Try ${opts.edit ? "Edit" : "Rewind"} again when the conversation is idle.`,
+      );
+    }
+
+    const actions = restoreActions(plan, overwrite, merged);
+    const restored: string[] = [];
+    const failed: string[] = [];
+    for (const w of actions.writes) {
+      const abs = path.join(cwd, w.relPath);
+      try {
+        fs.mkdirSync(path.dirname(abs), { recursive: true });
+        fs.writeFileSync(abs, Buffer.from(w.blob, "utf8"));
+        restored.push(w.relPath);
+      } catch (e) {
+        failed.push(`${w.relPath}: ${(e as Error).message}`);
+      }
+    }
+    for (const rel of actions.deletes) {
+      const abs = path.join(cwd, rel);
+      try {
+        fs.unlinkSync(abs);
+        restored.push(rel);
+      } catch (e) {
+        const code = (e as NodeJS.ErrnoException).code;
+        if (code !== "ENOENT") failed.push(`${rel}: ${(e as Error).message}`);
+      }
+    }
+
+    await this.truncateSessionCardsAfterRewind(sid, surviving);
+    this.applyRewindToView(session, surviving);
+    this.checkpointStore?.pruneAfter(sid, surviving);
+    const restoredText = (opts.bubbleText ?? "").trim();
+    if (restoredText) this.restoreComposerFor(session, requester, restoredText);
+
+    if (failed.length) {
+      this.reportRequester(requester, "error", `Rewound the conversation, but some files could not be restored:\n${failed.join("\n")}`);
+    } else if (restored.length || plan.skipped.length) {
+      const skip = plan.skipped.length
+        ? ` Not restorable: ${plan.skipped.map((s) => s.relPath).join(", ")}.`
+        : "";
+      this.reportRequester(
+        requester,
+        "info",
+        restored.length
+          ? `Rewound. Restored ${restored.length} file(s).${skip}`
+          : `Rewound.${skip}`,
+      );
+    }
+  }
+
   /** Delete a session's plan-review snapshots. They live under globalStorage,
    *  outside grok's session dir, so `deleteSessionDir` never touched them and
    *  every deleted session left its plan Markdown behind forever. Best-effort:
@@ -16209,6 +16630,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     }
     const sentChips = chips.filter((c) => !c.hidden);
     session.userMessageCount += 1;
+    this.beginCheckpointTurn(session, text);
     session.inUserMessage = false; // live send isn't part of the streamed-chunk count path
     this.emit(session, { type: "userMessage", text, chips: sentChips, submissionId });
     this.emit(session, { type: "agentStart" });

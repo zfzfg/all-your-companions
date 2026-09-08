@@ -130,6 +130,26 @@ The wire format is the highest-value test surface: ACP changes break everything 
 - `parseRewindPoints` / `parseRewindExecute` pull the selectable restore targets + execute result out of the `_x.ai/rewind/*` payload shapes (tolerating the unsupported/malformed forms)
 - Target selection, confirm-prompt and label formatters produce the QuickPick text the gate shows before reverting files
 
+### `test/checkpoints.test.ts` — client checkpoints, pure (AP-08)
+
+- `planRestore` / `planRestoreDetailed` cover unchanged / this-turn's write / foreign edit / created / deleted files
+- CRLF and LF of the same letters hash differently; a CRLF snapshot will not restore against LF bytes
+- Large and NUL-containing buffers are skipped as unrestorable; retention drops oldest-first at 20 turns or 200 MB
+- `mergeCheckpoints` keeps the oldest before-image and the newest after-hash
+
+### `test/checkpoint-store.test.ts` — on-disk store + fault injection (AP-08)
+
+- Save/load round-trip of exact contents (including CRLF); meta is written last so a half-written turn is not loadable
+- Fault injection on mkdir, blob write, meta write, read, readdir, and cleanup rm — `save`/`load`/`list` never throw
+- Retention prunes on write; `disable` wipes blobs so the turn cannot be restored
+
+### `test/checkpoint-host.test.ts` — snapshot-before-grant per provider (AP-08)
+
+- One permission-allow path each for grok, claude (`file_path`), codex, gemini — snapshot runs before `respondPermission`
+- Grok `fsWrite` snapshots then records the after-hash and still writes
+- Restore for claude/codex/gemini writes the snapshotted bytes back; a cancelled conflict QuickPick leaves a foreign edit untouched
+- Grok with `listRewindPoints === "unsupported"` falls through to the client store
+
 ### `test/run-progress.test.ts` — Deep Research / Workflow / Goal progress, pure (P2-10)
 
 - `isRunProgressUpdate` / `parseRunProgressUpdate` recognize + normalize `workflow_updated` / `goal_updated` off the live `_x.ai/session_notification` rail into the progress-card shape

@@ -75,7 +75,7 @@ describe("provider-capabilities (AP-01)", () => {
     expect(providerCapability("gemini", "planMode")).toEqual({ state: "yes" });
   });
 
-  it("pins user-facing reason texts for unsupported steer, rewind, fork, worktree", () => {
+  it("pins user-facing reason texts for unsupported steer, fork, worktree", () => {
     for (const provider of ["codex", "claude", "gemini"] as const) {
       const pName = provider === "codex" ? "Codex" : provider === "claude" ? "Claude" : "Gemini";
 
@@ -84,10 +84,7 @@ describe("provider-capabilities (AP-01)", () => {
         reason: `Steer is not supported by ${pName} — your message will be sent after the turn.`,
       });
 
-      expect(providerCapability(provider, "rewind")).toEqual({
-        state: "no",
-        reason: `Rewind is not supported by ${pName}.`,
-      });
+      expect(providerCapability(provider, "rewind")).toEqual({ state: "yes" });
 
       expect(providerCapability(provider, "fork")).toEqual({
         state: "no",

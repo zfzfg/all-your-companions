@@ -5,6 +5,7 @@ import { permissionOptionsForPlan } from "./plan-gate";
 import type { AcpProvider } from "./acp-backend";
 import { allProviderCapabilities } from "./provider-capabilities";
 import type { PlanEntry } from "./plan-entries";
+import type { CheckpointFile, CheckpointSkippedFile } from "./checkpoints";
 import {
   queuedSendsMessage,
   takeQueuedSendsPrefix,
@@ -31,6 +32,8 @@ export interface PendingPermission {
   options: PendingPermissionOption[];
   /** Subset safe to expose while the client-side Plan gate remains active. */
   planOptions: PendingPermissionOption[];
+  /** Workspace paths this request would write — snapshotted before grant (AP-08). */
+  paths?: string[];
 }
 
 export interface PendingExitPlan {
@@ -251,6 +254,22 @@ export class Session {
 
   /** Most recent plan text seen for this session (exit_plan_mode fallback). */
   lastPlanText = "";
+
+  /**
+   * In-flight client checkpoint for the current user turn (AP-08).
+   *
+   * Filled before the first write of each workspace file this turn. `disabled`
+   * means a snapshot step failed: the turn continues, rewind will not restore
+   * these files. Cleared when the next turn begins.
+   */
+  checkpointTurn?: {
+    turnId: string;
+    preview: string;
+    disabled: boolean;
+    disableReason?: string;
+    files: CheckpointFile[];
+    skipped: CheckpointSkippedFile[];
+  };
 
   /**
    * The agent's step checklist from the structured ACP `plan` update (AP-02).
