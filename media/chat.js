@@ -8591,7 +8591,7 @@
     "userMessage", "agentStart", "thoughtChunk", "messageChunk", "media",
     "userMessageChunk", "historyBatch", "toolCall", "toolCallUpdate",
     "permissionRequest", "permissionOptions", "permissionResolved",
-    "exitPlanRequest", "planResolved", "questionRequest", "planNotice",
+    "exitPlanRequest", "planResolved", "questionRequest", "questionResolved", "planNotice",
     "autoCompactNotice", "planBlocked", "promptComplete", "commandOutput",
     "agentReset", "agentError", "agentEnd", "exit", "sessionContext",
     "xaiNotification", "subagentUpdate", "childStream", "runProgress",
@@ -13704,7 +13704,28 @@
   // text — which unblocks grok's tool mid-turn. On answer the card COLLAPSES to
   // the question + a clear green "✓ <chosen>" so it's obvious grok received it
   // (the bare grey-out gave no such signal).
-  function addQuestionCard(req) {
+  // Collapse a question card the host settled on its own — no closure state, so
+  // it works on a card rendered by an earlier boot and replayed from the buffer.
+  // The per-question answer is read back out of the DOM (`.question-text`),
+  // which is the same key the answers map uses on the wire.
+  function resolveQuestionCardEl(el, answers, auto) {
+    el.classList.add("resolved");
+    const title = el.querySelector(".card-title");
+    if (title) title.textContent = auto ? "Continued automatically" : "No longer waiting";
+    const actions = el.querySelector(".card-actions");
+    if (actions) actions.remove();
+    const skip = el.querySelector(".question-skip");
+    if (skip) skip.remove();
+    for (const block of el.querySelectorAll(".question-block")) {
+      const opts = block.querySelector(".question-options");
+      if (opts) opts.remove();
+      const text = block.querySelector(".question-text");
+      const key = text ? text.textContent : "";
+      block.appendChild(answerLineEl((answers && answers[key]) || ""));
+    }
+  }
+
+  function addQuestionCard(req, autoContinueMs) {
     clearWelcome();
     hideGrokking();
     const questions = (Array.isArray(req.questions) ? req.questions : []).map((q) => {
@@ -13721,6 +13742,9 @@
     });
     const el = document.createElement("div");
     el.className = "card question";
+    // The host addresses this card by id when it settles one without a click —
+    // an auto-continue timeout, or an asking process that withdrew the call.
+    el.dataset.questionReqId = String(req.id);
 
     const title = buildQuestionHead(el, "Grok is asking");
 
@@ -13739,9 +13763,21 @@
     let submitBtn;
     let skip;
     const updateSubmit = () => {
-      if (!submitBtn) return;
       const built = buildQuestionAnswers(questions, effectiveSelections());
       const otherComplete = otherSelected.every((selected, qi) => !selected || !!otherText[qi].trim());
+      // Mirror the in-progress selection to the host, but ONLY while a timer is
+      // armed for this card: it is what lets `companions.askTimeout` continue
+      // with what the user already marked instead of throwing the half-made
+      // choice away, and with no timer nothing could ever read it. Only a
+      // COMPLETE draft is acted on, which is why `complete` travels with it.
+      if (autoContinueMs) vscode.postMessage({
+        type: "questionDraft",
+        requestId: req.id,
+        answers: built.answers,
+        annotations: {},
+        complete: built.allAnswered && otherComplete,
+      });
+      if (!submitBtn) return;
       submitBtn.disabled = !built.allAnswered || !otherComplete;
     };
     // Collapse the card to its answered/skipped representation: drop the option
@@ -17480,8 +17516,19 @@
         if (el) resolvePlanCardEl(el, msg.verdict);
         break;
       }
+      case "questionResolved": {
+        // The host settled this card without a click here — the auto-continue
+        // timeout fired, or the asking process withdrew the call. Collapse it
+        // so it stops offering buttons that would now do nothing. Idempotent:
+        // a card this client already answered is skipped by the class check.
+        const cards = liveTranscriptQueryAll(".card.question");
+        const el = cards.find((c) => c.dataset.questionReqId === String(msg.requestId)
+          && !c.classList.contains("resolved"));
+        if (el) resolveQuestionCardEl(el, msg.answers, msg.auto);
+        break;
+      }
       case "questionRequest":
-        addQuestionCard(msg.req);
+        addQuestionCard(msg.req, msg.autoContinueMs);
         if (!state.replaying) {
           const questions = (msg.req?.questions || [])
             .map((question) => questionText(question))

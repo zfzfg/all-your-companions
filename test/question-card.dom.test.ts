@@ -413,3 +413,145 @@ describe("question card: the Other field takes more than one line (#144)", () =>
     });
   });
 });
+
+// AP-05: the same card, raised by the host's own MCP server instead of grok's
+// RPC. There is deliberately no second render path — these tests exist to prove
+// that, and to cover the two things the MCP path added: the draft mirror and
+// the host settling a card nobody clicked.
+describe("question card for a host-MCP question (AP-05)", () => {
+  // What sidebar.ts posts for an `ask_user` tool call: a string request id from
+  // the pipe rather than grok's numeric JSON-RPC id, and an option list with no
+  // free-text entry of its own.
+  const MCP = {
+    id: "mcp:a1b2c3d4:1",
+    sessionId: "s-1",
+    questions: [{
+      question: "Which database?",
+      options: [{ label: "Postgres", description: "relational" }, { label: "SQLite" }],
+      multiSelect: false,
+    }],
+  };
+
+  it("renders identically to an RPC question, including the added 'Other'", () => {
+    const { window, doc } = bootWebview();
+    dispatch(window, { type: "questionRequest", req: MCP });
+
+    const card = doc.querySelector(".card.question")!;
+    expect(card.querySelector(".card-title")!.textContent).toBe("Grok is asking");
+    expect(card.querySelector(".question-text")!.textContent).toBe("Which database?");
+    expect([...card.querySelectorAll(".question-option .question-option-label")].map((b) => b.textContent))
+      .toEqual(["Postgres", "SQLite", "Other"]);
+  });
+
+  it("answers a string request id without coercing it", () => {
+    // The id is the host's pipe-scoped key; a number would address nothing.
+    const { window, posted, doc } = bootWebview();
+    dispatch(window, { type: "questionRequest", req: MCP });
+    const option = [...doc.querySelectorAll(".card.question .question-option")]
+      .find((b) => b.textContent!.includes("Postgres")) as HTMLButtonElement;
+    click(window, option);
+
+    expect(posted).toEqual([{
+      type: "questionAnswer",
+      requestId: "mcp:a1b2c3d4:1",
+      answers: { "Which database?": "Postgres" },
+      annotations: {},
+    }]);
+  });
+
+  it("sends no draft when no auto-continue timer is armed", () => {
+    // The default. A draft nothing could read is a message per click for nothing.
+    const { window, posted, doc } = bootWebview();
+    dispatch(window, {
+      type: "questionRequest",
+      req: { id: 40, questions: [{ question: "Which?", options: [{ label: "A" }, { label: "B" }], multiSelect: true }] },
+    });
+    click(window, doc.querySelectorAll(".card.question .question-option")[0] as HTMLButtonElement);
+    expect(posted.filter((m) => m.type === "questionDraft")).toEqual([]);
+  });
+
+  it("mirrors the in-progress selection when a timer IS armed", () => {
+    const { window, posted, doc } = bootWebview();
+    dispatch(window, {
+      type: "questionRequest",
+      autoContinueMs: 60000,
+      req: { id: 41, questions: [{ question: "Which?", options: [{ label: "A" }, { label: "B" }], multiSelect: true }] },
+    });
+    const opts = [...doc.querySelectorAll(".card.question .question-option")] as HTMLButtonElement[];
+    click(window, opts[0]);
+
+    const drafts = posted.filter((m) => m.type === "questionDraft");
+    expect(drafts.at(-1)).toEqual({
+      type: "questionDraft",
+      requestId: 41,
+      answers: { "Which?": "A" },
+      annotations: {},
+      complete: true,
+    });
+  });
+
+  it("marks the draft incomplete while any question is unanswered", () => {
+    // The host sends a draft on only when it is complete: a half-filled map
+    // would read to the model as a confident answer to questions nobody made.
+    const { window, posted, doc } = bootWebview();
+    dispatch(window, {
+      type: "questionRequest",
+      autoContinueMs: 60000,
+      req: {
+        id: 42,
+        questions: [
+          { question: "Q1", options: [{ label: "1a" }, { label: "1b" }] },
+          { question: "Q2", options: [{ label: "2a" }, { label: "2b" }] },
+        ],
+      },
+    });
+    const blocks = [...doc.querySelectorAll(".card.question .question-block")];
+    click(window, blocks[0].querySelector(".question-option") as HTMLButtonElement);
+    expect(posted.filter((m) => m.type === "questionDraft").at(-1)!.complete).toBe(false);
+    click(window, blocks[1].querySelector(".question-option") as HTMLButtonElement);
+    expect(posted.filter((m) => m.type === "questionDraft").at(-1)!.complete).toBe(true);
+  });
+
+  it("collapses a card the host continued automatically, and says so", () => {
+    const { window, doc } = bootWebview();
+    dispatch(window, { type: "questionRequest", autoContinueMs: 60000, req: MCP });
+    dispatch(window, {
+      type: "questionResolved",
+      requestId: MCP.id,
+      auto: true,
+      answers: { "Which database?": "Postgres" },
+    });
+
+    const card = doc.querySelector(".card.question")!;
+    expect(card.classList.contains("resolved")).toBe(true);
+    // Never "You answered" — nobody did.
+    expect(card.querySelector(".card-title")!.textContent).toBe("Continued automatically");
+    expect(card.querySelector(".question-answer")!.textContent).toBe("✓ Postgres");
+    expect(card.querySelectorAll(".question-option")).toHaveLength(0);
+    expect(card.querySelector(".question-skip")).toBeNull();
+  });
+
+  it("collapses a card whose asking process went away, with no answer", () => {
+    const { window, doc } = bootWebview();
+    dispatch(window, { type: "questionRequest", req: MCP });
+    dispatch(window, { type: "questionResolved", requestId: MCP.id });
+
+    const card = doc.querySelector(".card.question")!;
+    expect(card.querySelector(".card-title")!.textContent).toBe("No longer waiting");
+    expect(card.querySelector(".question-answer")!.textContent).toBe("(skipped)");
+  });
+
+  it("leaves a card this client already answered alone", () => {
+    // Idempotent for the same reason planResolved is: the message also arrives
+    // on replay, right behind the buffered questionRequest.
+    const { window, doc } = bootWebview();
+    dispatch(window, { type: "questionRequest", req: MCP });
+    click(window, [...doc.querySelectorAll(".card.question .question-option")]
+      .find((b) => b.textContent!.includes("SQLite")) as HTMLButtonElement);
+    dispatch(window, { type: "questionResolved", requestId: MCP.id, auto: true });
+
+    const card = doc.querySelector(".card.question")!;
+    expect(card.querySelector(".card-title")!.textContent).toBe("You answered");
+    expect(card.querySelector(".question-answer")!.textContent).toBe("✓ SQLite");
+  });
+});

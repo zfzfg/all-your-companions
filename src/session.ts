@@ -37,6 +37,47 @@ export interface PendingExitPlan {
   planText: string;
 }
 
+/**
+ * How one outstanding question card is answered (AP-05).
+ *
+ * The card, the stale-card guard and the auto-continue timeout are shared by
+ * two completely different transports — grok's native `x.ai/ask_user_question`
+ * JSON-RPC request, and the `ask_user` tool of the host's own MCP server, which
+ * replies over a local pipe to a process the CLI spawned. Everything above this
+ * type is transport-blind because of it: the sidebar holds a responder, not a
+ * client, and never asks which kind it has.
+ */
+export interface QuestionResponder {
+  /** Deliver the user's selections. False means the response did not go out. */
+  answer(
+    answers: Record<string, string>,
+    annotations: Record<string, { notes?: string; preview?: string }>,
+    /** True when a host timeout, not a person, settled the card. */
+    auto?: boolean,
+  ): boolean;
+  /** Deliver a dismissal. False means the response did not go out. */
+  cancel(auto?: boolean): boolean;
+  /**
+   * The host is dropping this card without the user having acted — the turn
+   * ended under it, or the session restarted.
+   *
+   * Deliberately NOT the same as `cancel`. On the grok path the CLI owns the
+   * request and has already settled it, so the correct action is silence and
+   * anything else would put a stale JSON-RPC response on the pipe. On the MCP
+   * path nothing else will ever reply, so this must cancel or the CLI blocks
+   * inside `tools/call` for ever.
+   */
+  abandon(): void;
+}
+
+/** A card's in-progress selection, mirrored to the host for the timeout. */
+export interface QuestionDraft {
+  answers: Record<string, string>;
+  annotations: Record<string, { notes?: string; preview?: string }>;
+  /** Every question in the card already has an answer. */
+  complete: boolean;
+}
+
 /** A submitted plan comment owned by one live ACP process until its interject
  * response arrives. This is intentionally memory-only; process exit hands the
  * text to the ordinary queue/composer recovery path. */
@@ -214,7 +255,32 @@ export class Session {
    * agent stayed blocked, and on a rented machine the heartbeat that follows
    * `working` kept it awake and billing indefinitely.
    */
-  pendingQuestions = new Set<number | string>();
+  pendingQuestions = new Map<number | string, QuestionResponder>();
+
+  /**
+   * Draft selections reported by the card while the user is still choosing,
+   * keyed by the same request id (AP-05).
+   *
+   * Only read by the auto-continue timeout, and only when it fires: `complete`
+   * says whether every question already carries an answer, because sending a
+   * half-filled map would be worse than continuing without one. Cleared with
+   * the question it belongs to.
+   */
+  questionDrafts = new Map<number | string, QuestionDraft>();
+
+  /** Auto-continue timers for the cards above (AP-05, `companions.askTimeout`).
+   *  Held in the HOST, never the webview: a closed webview must not be able to
+   *  swallow a question or to keep one alive past its deadline. */
+  questionTimers = new Map<number | string, ReturnType<typeof setTimeout>>();
+
+  /**
+   * This session's bearer token for the host `ask_user` MCP server (AP-05).
+   *
+   * Undefined for grok, which raises questions over its own RPC and is handed
+   * no MCP server of ours at all. Revoked and re-minted on every session start,
+   * so a child process left behind by a dead CLI cannot reach a live card.
+   */
+  askUserToken?: string;
 
   /** Submitted plan comments still awaiting `_x.ai/interject` acceptance. */
   inFlightPlanComments = new Map<number | string, InFlightPlanComment>();

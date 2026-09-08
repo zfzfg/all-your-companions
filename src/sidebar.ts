@@ -95,6 +95,7 @@ import {
   sessionUiSnapshot,
   turnElapsedMs,
   turnIsInFlight,
+  type QuestionResponder,
 } from "./session";
 import { buildReapCandidates, selectReapable, computeDot, Dot } from "./session-pool";
 import { resolveVoiceKey, extractGrokAuthKey, parseVoiceCommand, buildSttKeyterms, voiceSettingForRepo, voiceSettingWriteTarget, sanitizeVoiceSendPhrase, sanitizeVoiceKeyterms, voiceConfiguredFingerprint, DEFAULT_SEND_PHRASE, MAX_RECORDING_SECONDS } from "./voice";
@@ -502,6 +503,7 @@ import {
   mcpConnectorSecretKey,
   mcpRemoteArgs,
   mergeReserved,
+  normalizeMcpName,
   parseConnectedConnectorStore,
   reservedFromMcpInventory,
   withAuthHeaderEnv,
@@ -509,7 +511,10 @@ import {
   type ConnectorDef,
   type ConnectorId,
   type ReservedMcpIdentity,
+  type AcpMcpStdioServer,
 } from "./mcp-connectors";
+import { ASK_USER_SERVER_NAME, askTimeoutMs } from "./ask-user-protocol";
+import { AskUserServer } from "./ask-user-server";
 import {
   authorizeMcpRemote,
   connectorsLackingOAuthToken,
@@ -4270,7 +4275,7 @@ Only continue if you trust this code.`,
     // would refuse to answer the card still on the reader's screen, leaving
     // that agent blocked with no way back short of restarting the session.
     if (!turnIsInFlight(session)) {
-      session.pendingQuestions.clear();
+      this.dropPendingQuestions(session);
       session.pendingPermissions.clear();
       session.pendingExitPlans.clear();
     }
@@ -8523,6 +8528,15 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     this.turnOrderTimers.clear();
     this.uplink?.dispose();
     this.uplink = undefined;
+    // Window reload and extension deactivation both land here. Closing the pipe
+    // cancels every outstanding question first — a CLI blocked inside
+    // `tools/call` has no timeout of its own and would wait for ever.
+    this.askUserChannel?.dispose();
+    this.askUserChannel = undefined;
+    for (const session of this.pool) {
+      session.askUserToken = undefined;
+      this.dropPendingQuestions(session);
+    }
     this.codexInstallAbort?.abort(new Error("Installation cancelled."));
     this.codexInstallAbort = undefined;
     try { this.settingsEditor?.dispose(); } catch { /* tab already gone */ }
@@ -9370,7 +9384,11 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     // this needs no message of its own.
     session.planEntries = [];
     session.pendingExitPlans.clear();
-    session.pendingQuestions.clear();
+    this.dropPendingQuestions(session);
+    // The old process's MCP children hold a token that must stop working the
+    // moment this session restarts — otherwise a stale child could still raise
+    // a card against a conversation that no longer exists.
+    this.revokeAskUserToken(session);
     session.inFlightPlanComments.clear();
     if (session.planModeRecovery?.warningTimer) clearTimeout(session.planModeRecovery.warningTimer);
     session.planModeRecovery = undefined;
@@ -9996,9 +10014,15 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       if (gen !== session.gen) return;
       // Questions are read-only and need a human — surface them in every mode
       // (plan/YOLO included); there's no sensible auto-answer.
-      session.pendingQuestions.add(req.id);
-      this.emit(session, { type: "questionRequest", req });
-      this.setStatus(session, "needs-you");
+      //
+      // The responder is the grok transport: the CLI made this a JSON-RPC
+      // request and is waiting on its own pipe for the response. `abandon` is
+      // silent here on purpose — see QuestionResponder.
+      this.showQuestion(session, req, {
+        answer: (answers, annotations) => client.respondQuestion(req.id, answers, annotations),
+        cancel: () => client.respondQuestionCancelled(req.id),
+        abandon: () => { /* the CLI settled its own request; saying more would be a stale reply */ },
+      });
     });
     client.on("exit", (code) => {
       if (gen !== session.gen) return; // suppress exit events from disposed/replaced clients
@@ -10922,8 +10946,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         // turn ended. Answering it again would write a duplicate JSON-RPC
         // response and drag a settled session back to `working` — with no turn
         // left to ever end it, which on a rented machine bills for ever.
-        if (!session.pendingQuestions.delete(msg.requestId)) break;
-        if (session.client?.respondQuestion(msg.requestId, msg.answers ?? {}, msg.annotations ?? {})) {
+        if (this.answerQuestion(session, msg.requestId, msg.answers ?? {}, msg.annotations ?? {})) {
           // Answering a QUESTION is not answering a permission card that is
           // also outstanding — the agent stays blocked on it, so `working`
           // would be wrong and would hold a rented machine awake indefinitely.
@@ -10931,11 +10954,20 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         }
         break;
       case "questionCancel":
-        if (!session.pendingQuestions.delete(msg.requestId)) break;
-        if (session.client?.respondQuestionCancelled(msg.requestId)) {
-          this.noteAnswered(session);
-        }
+        if (this.cancelQuestion(session, msg.requestId)) this.noteAnswered(session);
         break;
+      case "questionDraft": {
+        // Nothing renders from this — it exists so the auto-continue timeout can
+        // send what the user already marked instead of discarding it. Ignored
+        // for a card that is no longer outstanding, exactly like an answer.
+        if (!session.pendingQuestions.has(msg.requestId)) break;
+        session.questionDrafts.set(msg.requestId, {
+          answers: msg.answers ?? {},
+          annotations: msg.annotations ?? {},
+          complete: msg.complete === true,
+        });
+        break;
+      }
       case "setModel":
         await this.switchModel(
           msg.modelId,
@@ -12094,13 +12126,28 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     for (const [id, token] of this.mcpConnectorKeys ?? []) {
       if (store[id]) keyAuth[id] = token;
     }
-    return hostMcpServers(
+    const servers = hostMcpServers(
       store,
       this.reservedMcpIdentityFor(session),
       persistConnectorOAuthClientMetadata(store),
       keyAuth,
       this.lapsedOAuthConnectors(store),
     );
+    // AP-05. Appended here rather than inside hostMcpServers because that
+    // function is pure and this one owns a live pipe.
+    //
+    // Nothing about this may keep a session from starting: `mcpServers` is
+    // resolved inside `session/new`, so a throw here would surface as a session
+    // that never opens. A pipe that cannot bind — a locked-down machine, an
+    // unwritable tmpdir, a host with no extension root — costs this session its
+    // question cards and nothing else.
+    try {
+      const askUser = await this.askUserMcpServer(session);
+      if (askUser) servers.push(askUser);
+    } catch (error) {
+      this.host.appendLine(`[ask_user] not offering the question tool: ${(error as Error).message}`);
+    }
+    return servers;
   }
 
   /**
@@ -17941,6 +17988,202 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
 
   /** Pending {@link refreshSessionOrderAfterTurn} timers, so dispose can clear them. */
   private turnOrderTimers = new Set<ReturnType<typeof setTimeout>>();
+
+  // ---------- question cards (AP-05) ----------
+  //
+  // One card, two transports. `showQuestion` is the only place a card is
+  // raised, `answerQuestion` / `cancelQuestion` the only places one is settled,
+  // and none of them knows whether the answer will travel back over grok's ACP
+  // pipe or over the local socket to a CLI-spawned MCP server. Adding a third
+  // transport means adding a QuestionResponder, nothing here.
+
+  /**
+   * Raise a question card and take ownership of its lifetime.
+   *
+   * Arms the auto-continue timer here rather than in the webview: a webview
+   * that is closed, backgrounded or never opened must not be able to swallow a
+   * question, and a person who closes the tab must not thereby extend the
+   * deadline on a run they left behind.
+   */
+  showQuestion(session: Session, req: QuestionRequest, responder: QuestionResponder): void {
+    session.pendingQuestions.set(req.id, responder);
+    const timeout = askTimeoutMs(this.host.getConfiguration("grok").get<string>("askTimeout", "off"));
+    this.emit(session, { type: "questionRequest", req, ...(timeout === undefined ? {} : { autoContinueMs: timeout }) });
+    this.setStatus(session, "needs-you");
+    if (timeout === undefined) return;
+    const timer = setTimeout(() => this.autoContinueQuestion(session, req.id), timeout);
+    // Never the reason a host process stays alive.
+    (timer as unknown as { unref?: () => void }).unref?.();
+    session.questionTimers.set(req.id, timer);
+  }
+
+  /**
+   * Settle a card with the user's selections.
+   *
+   * The `delete` is the stale-card guard and it comes FIRST: a card that is no
+   * longer outstanding — replayed from the session buffer, or still on screen
+   * in a second tab — would otherwise write a duplicate response and drag a
+   * settled session back to `working` with no turn left to ever end it.
+   */
+  private answerQuestion(
+    session: Session,
+    requestId: number | string,
+    answers: Record<string, string>,
+    annotations: Record<string, { notes?: string; preview?: string }>,
+    auto = false,
+  ): boolean {
+    const responder = session.pendingQuestions.get(requestId);
+    if (!responder) return false;
+    this.forgetQuestion(session, requestId);
+    return responder.answer(answers, annotations, auto);
+  }
+
+  /** Settle a card as dismissed. Same stale-card guard as {@link answerQuestion}. */
+  private cancelQuestion(session: Session, requestId: number | string, auto = false): boolean {
+    const responder = session.pendingQuestions.get(requestId);
+    if (!responder) return false;
+    this.forgetQuestion(session, requestId);
+    return responder.cancel(auto);
+  }
+
+  private forgetQuestion(session: Session, requestId: number | string): void {
+    session.pendingQuestions.delete(requestId);
+    session.questionDrafts.delete(requestId);
+    const timer = session.questionTimers.get(requestId);
+    if (timer) { clearTimeout(timer); session.questionTimers.delete(requestId); }
+  }
+
+  /**
+   * `companions.askTimeout` elapsed with the card still up.
+   *
+   * Sends what the user already marked if — and only if — every question in the
+   * card carries an answer. A half-filled map is worse than none: the model
+   * would read a confident partial answer and never learn that the rest was
+   * guessed. Either way the card collapses marked as continued automatically,
+   * so the transcript never implies a person chose this.
+   */
+  private autoContinueQuestion(session: Session, requestId: number | string): void {
+    const draft = session.questionDrafts.get(requestId);
+    const settled = draft?.complete
+      ? this.answerQuestion(session, requestId, draft.answers, draft.annotations, true)
+      : this.cancelQuestion(session, requestId, true);
+    if (!settled && !session.pendingQuestions.has(requestId)) return;
+    this.emit(session, {
+      type: "questionResolved",
+      requestId,
+      auto: true,
+      ...(draft?.complete ? { answers: draft.answers } : {}),
+    });
+    this.noteAnswered(session);
+  }
+
+  /**
+   * Drop every outstanding card for this session without the user having acted.
+   *
+   * Each responder decides what that means for its own transport — silence for
+   * grok, whose CLI already settled the request, and a cancellation for the MCP
+   * path, where nothing else will ever reply and the tool call would otherwise
+   * block until the CLI is killed.
+   */
+  private dropPendingQuestions(session: Session): void {
+    for (const responder of session.pendingQuestions.values()) {
+      try { responder.abandon(); } catch { /* teardown is not worth failing over */ }
+    }
+    session.pendingQuestions.clear();
+    session.questionDrafts.clear();
+    for (const timer of session.questionTimers.values()) clearTimeout(timer);
+    session.questionTimers.clear();
+  }
+
+  /**
+   * The host-side `ask_user` MCP channel, created on first use.
+   *
+   * One per window, shared by every session: the pipe is the transport, the
+   * per-session token is the identity on it.
+   */
+  private askUser(): AskUserServer {
+    if (!this.askUserChannel) {
+      this.askUserChannel = new AskUserServer({
+        // From `extensionUri`, not a path relative to `out/`: the script is a
+        // packaged RESOURCE, and `.vscodeignore` has to keep `resources/mcp/**`
+        // in the VSIX or this path exists in development and nowhere else.
+        scriptPath: path.join(this.context.extensionUri.fsPath, "resources", "mcp", "ask-user-server.cjs"),
+        log: (message) => this.host.appendLine(message),
+        onRequest: (token, request) => {
+          const session = this.sessionForAskUserToken(token);
+          // No session owns this token any more: answer immediately so the CLI
+          // is not left blocked inside `tools/call`.
+          if (!session) { request.cancel(); return; }
+          this.showQuestion(session, {
+            id: request.id,
+            sessionId: session.activeSessionId ?? "",
+            // Narrowed to `QuestionItem`, the shape grok's RPC produces, so the
+            // card sees one thing and there is no second render path. The
+            // derived `header` is dropped here on purpose: nothing renders it
+            // today, and a field on the wire that no reader consumes is a
+            // promise the next feature would have to keep.
+            questions: request.questions.map((q) => ({
+              question: q.question,
+              options: q.options.map((option) => ({ ...option })),
+              multiSelect: q.multiSelect,
+            })),
+          }, {
+            answer: (answers, annotations, auto) => request.answer(answers, annotations, auto),
+            cancel: (auto) => request.cancel(auto),
+            abandon: () => { request.cancel(); },
+          });
+        },
+        onWithdraw: (token, id) => {
+          const session = this.sessionForAskUserToken(token);
+          if (!session || !session.pendingQuestions.has(id)) return;
+          // The CLI withdrew the call or its process died. Take the card down
+          // rather than leave a control that does nothing when pressed.
+          this.forgetQuestion(session, id);
+          this.emit(session, { type: "questionResolved", requestId: id });
+          this.noteAnswered(session);
+        },
+      });
+    }
+    return this.askUserChannel;
+  }
+
+  private askUserChannel?: AskUserServer;
+
+  private sessionForAskUserToken(token: string): Session | undefined {
+    for (const session of this.pool) {
+      if (session.askUserToken === token) return session;
+    }
+    return undefined;
+  }
+
+  private revokeAskUserToken(session: Session): void {
+    if (!session.askUserToken) return;
+    this.askUserChannel?.revoke(session.askUserToken);
+    session.askUserToken = undefined;
+  }
+
+  /**
+   * The `companions` MCP entry for this session, if it should get one.
+   *
+   * Withheld from grok, which already has a native question RPC — a second
+   * affordance for the same card would cost every grok turn the tool's tokens
+   * and let the model pick the worse of two identical paths. Withheld too when
+   * the provider already loads a server called `companions`, following the same
+   * rule the connectors use: skip ours rather than shadow theirs.
+   */
+  private async askUserMcpServer(session: Session): Promise<AcpMcpStdioServer | undefined> {
+    if (session.provider === "grok") return undefined;
+    const reserved = this.reservedMcpIdentityFor(session);
+    if (reserved.names.some((name) => normalizeMcpName(name) === ASK_USER_SERVER_NAME)) {
+      this.host.appendLine(`[ask_user] a provider MCP server is already named "${ASK_USER_SERVER_NAME}" — not adding ours`);
+      return undefined;
+    }
+    const channel = this.askUser();
+    if (!(await channel.listen())) return undefined;
+    this.revokeAskUserToken(session);
+    session.askUserToken = channel.register();
+    return channel.spawnSpec(session.askUserToken);
+  }
 
   /** True when any live pool member is mid-turn or waiting on the user. */
   /**

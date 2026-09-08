@@ -50,6 +50,13 @@ node_modules/**
 .git/**
 **/*.map
 **/*.ts
+# AP-05. resources/** is not excluded above, so the ask_user MCP script is
+# already packed — this negation makes that a decision rather than an accident,
+# because a later broad exclude would otherwise drop it silently and the feature
+# would work in Extension Development and nowhere else. It is a .cjs on purpose:
+# `**/*.ts` above would have excluded a .ts, and there is no build step that
+# would produce a .js for it under out/.
+!resources/mcp/**
 # Re-include only top-level compiled extension JS (out/*.js).
 # Do NOT use `!out/**/*.js` — that also un-ignores out/desktop/** and a later
 # `out/desktop/**` rule does not re-exclude those files under vsce's matcher.

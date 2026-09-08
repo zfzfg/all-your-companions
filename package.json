@@ -442,6 +442,23 @@
           "default": "",
           "description": "Model ID to use on new sessions. Empty = companion default."
         },
+        "companions.askTimeout": {
+          "type": "string",
+          "enum": [
+            "off",
+            "60s",
+            "5m",
+            "10m"
+          ],
+          "enumDescriptions": [
+            "Wait indefinitely (default)",
+            "Continue after 1 minute",
+            "Continue after 5 minutes",
+            "Continue after 10 minutes"
+          ],
+          "default": "off",
+          "description": "Auto-continue an unanswered question card after this long. The selection you already marked is sent if the card is complete; otherwise the companion is told to continue without an answer. The timer runs in the editor, so closing the panel neither pauses nor extends it."
+        },
         "companions.defaultMode": {
           "type": "string",
           "enum": [
@@ -581,6 +598,23 @@
           "type": "string",
           "default": "",
           "description": "Model ID to use on new sessions. Empty = CLI default. If a non-empty value isn't available for the session's agent, it's replaced with the model the CLI falls back to (no prompt)."
+        },
+        "grok.askTimeout": {
+          "type": "string",
+          "enum": [
+            "off",
+            "60s",
+            "5m",
+            "10m"
+          ],
+          "enumDescriptions": [
+            "Wait indefinitely (default)",
+            "Continue after 1 minute",
+            "Continue after 5 minutes",
+            "Continue after 10 minutes"
+          ],
+          "default": "off",
+          "description": "Auto-continue an unanswered question card after this long. The selection you already marked is sent if the card is complete; otherwise the companion is told to continue without an answer. The timer runs in the editor, so closing the panel neither pauses nor extends it."
         },
         "grok.defaultMode": {
           "type": "string",

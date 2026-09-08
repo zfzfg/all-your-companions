@@ -675,7 +675,21 @@ export type HostMsg =
   // ExitPlanRequest before posting, so the wire shape is wider than acp's type.
   | { type: "exitPlanRequest"; req: ExitPlanRequest & { planPath?: string; planName?: string } }
   | { type: "planResolved"; requestId: number | string; verdict: "approved" | "abandoned" | "rejected" }
-  | { type: "questionRequest"; req: QuestionRequest }
+  /** `autoContinueMs` is set only when `companions.askTimeout` armed a timer for
+   *  this card. It is what makes the card mirror its in-progress selection back
+   *  as `questionDraft`: with no timer there is nothing that could use a draft,
+   *  and an older client that ignores the field simply sends none. */
+  | { type: "questionRequest"; req: QuestionRequest; autoContinueMs?: number }
+  /**
+   * A question card settled without a click on THIS client (AP-05).
+   *
+   * Sent when the host's auto-continue timeout fired, or when the asking
+   * process withdrew the call, so a card left on screen collapses instead of
+   * offering buttons that now do nothing. `answers` is present only when a
+   * complete draft selection was sent on the user's behalf; `auto` marks the
+   * card as continued automatically rather than answered.
+   */
+  | { type: "questionResolved"; requestId: number | string; answers?: Record<string, string>; auto?: boolean }
   /** Answer to {@link WebviewMsg} `revertToolEdit`. `reason` is a short,
    *  user-facing explanation when `ok` is false (conflict, unreadable file,
    *  region no longer found) — never a raw error message. */
@@ -1138,6 +1152,11 @@ export type WebviewMsg =
   | { type: "exitPlanAnswer"; requestId: number | string; verdict: "approved" | "abandoned" | "rejected"; comment?: string }
   | { type: "questionAnswer"; requestId: number | string; answers?: Record<string, string>; annotations?: Record<string, { notes?: string; preview?: string }> }
   | { type: "questionCancel"; requestId: number | string }
+  /** In-progress selection on an open question card (AP-05). Renders nothing;
+   *  it exists so the host's auto-continue timeout can send what the user
+   *  already marked instead of discarding it. `complete` means every question
+   *  in the card has an answer — a partial draft is never sent on. */
+  | { type: "questionDraft"; requestId: number | string; answers?: Record<string, string>; annotations?: Record<string, { notes?: string; preview?: string }>; complete?: boolean }
   | { type: "setModel"; modelId: string; provider?: "grok" | "codex" | "claude" | "gemini" }
   | { type: "installCodex" }
   | { type: "cancelCodexInstall" }
@@ -1348,7 +1367,7 @@ const HOST_MESSAGE_TYPE_MAP: Record<HostMsg["type"], true> = {
   thoughtChunk: true, messageChunk: true, media: true, userMessageChunk: true,
   historyReplay: true, historyBatch: true, permissionHistoryQueue: true, planHistoryQueue: true,
   toolCall: true, toolCallUpdate: true, permissionRequest: true, permissionOptions: true,
-  permissionResolved: true, exitPlanRequest: true, planResolved: true, questionRequest: true, toolEditReverted: true,
+  permissionResolved: true, exitPlanRequest: true, planResolved: true, questionRequest: true, questionResolved: true, toolEditReverted: true,
   planNotice: true, autoCompactNotice: true, planBlocked: true, promptComplete: true, contextUsage: true, agentReset: true,
   agentError: true, agentEnd: true, exit: true, setBusy: true, summarizing: true,
   sessionContext: true, clearMessages: true, onboarding: true, error: true, hostNotice: true,
@@ -1369,7 +1388,7 @@ const WEBVIEW_MESSAGE_TYPE_MAP: Record<WebviewMsg["type"], true> = {
   setShowThinking: true, setAppPurpose: true, setExpandCommandOutputs: true, setSteerByDefault: true,
   setSoundNotifications: true, setProcessingSound: true, setReadRepliesAloud: true, setSummarizeRepliesAloud: true, setVoiceSendPhrase: true, setVoiceKeyterms: true, setTelemetryEnabled: true, setThumbsFeedback: true, summarizeSpeech: true, requestImageFull: true, composerFocus: true,
   dropFile: true, permissionAnswer: true, exitPlanAnswer: true, questionAnswer: true,
-  questionCancel: true, setModel: true, installCodex: true, cancelCodexInstall: true, runInstallCmd: true, runGrokLogin: true,
+  questionCancel: true, questionDraft: true, setModel: true, installCodex: true, cancelCodexInstall: true, runInstallCmd: true, runGrokLogin: true,
   cancelDeviceLogin: true, submitDeviceLoginCode: true,
   logout: true, checkGrokUpdate: true, updateGrok: true, recheckConnection: true, refreshProviders: true, retryProviderSession: true,
   listSessions: true, listRepoSessions: true, selectRepo: true, toggleRepoPin: true, toggleSessionPin: true,

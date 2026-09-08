@@ -172,6 +172,7 @@ Open VS Code Settings and search for `companions` (legacy `grok.*` settings are 
 | `companions.cliPath` | `""` | Path to companion CLI binary. Empty = auto-discover. |
 | `companions.defaultModel` | `""` | Model ID for new sessions. Empty = provider default. |
 | `companions.defaultEffort` | `""` | Reasoning effort (`none` / `low` / `medium` / `high` / `xhigh`). |
+| `companions.askTimeout` | `"off"` | Auto-continue an unanswered question card after `60s` / `5m` / `10m`. Timer runs in the editor, not the panel. |
 | `companions.defaultMode` | `""` | Default mode for fresh sessions (`Agent`, `Auto accept`). |
 | `companions.includeActiveFileByDefault` | `true` | Auto-add the active editor as a context chip. |
 | `companions.mentionIndexLimit` | `5000` | How many workspace files `@` autocomplete indexes. |

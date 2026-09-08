@@ -282,6 +282,9 @@ export const INBOUND_DISPOSITION: Record<WebviewMsg["type"], InboundDisposition>
   installCodex: "host-local",
   cancelCodexInstall: "host-local",
   questionAnswer: "propose",
+  // A draft is not an answer: it changes nothing until the card settles, and
+  // the host ignores one for a card that is no longer outstanding.
+  questionDraft: "propose",
   questionCancel: "propose",
   queueSend: "propose",
   dequeueSend: "propose",
@@ -570,6 +573,7 @@ export const REMOTE_REQUIRES_BOUND_SESSION: Record<WebviewMsg["type"], boolean> 
   cancelCodexInstall: false,
   questionAnswer: true,
   questionCancel: true,
+  questionDraft: true,
   queueSend: true,
   dequeueSend: true,
   clearQueuedSends: true,
@@ -969,6 +973,7 @@ export const OUTBOUND_DISPOSITION: Record<HostMsg["type"], OutboundDisposition> 
   exitPlanRequest: "mirror",
   planResolved: "mirror",
   questionRequest: "mirror",
+  questionResolved: "mirror",
   planNotice: "mirror",
   autoCompactNotice: "mirror",
   planBlocked: "mirror",
@@ -1150,6 +1155,7 @@ export const OUTBOUND_PROJECT_AUTH: Record<HostMsg["type"], OutboundProjectAuth>
   exitPlanRequest: "scope",
   planResolved: "scope",
   questionRequest: "scope",
+  questionResolved: "scope",
   planNotice: "scope",
   autoCompactNotice: "scope",
   planBlocked: "scope",

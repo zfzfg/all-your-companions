@@ -264,6 +264,14 @@ Spawns the fake `grok agent stdio` from `test/fixtures/fake-grok-acp.cjs` (a ~19
 - **Terminal-create gate (mutating)** — with `planActive=true`, `terminal/create` for `rm -rf` is refused; the host's terminal handler is never called.
 - **Terminal-create gate (read-only)** — with `planActive=true`, `terminal/create` for `ls -la` is allowed and reaches the terminal handler.
 
+### `test/ask-user-*.test.ts` — the `ask_user` host MCP server (AP-05, 69 tests)
+
+Three files, three levels, and a **new kind of child process in the unit suite**: `test/ask-user-ipc.test.ts` starts the SHIPPED `resources/mcp/ask-user-server.cjs` with `process.execPath` and speaks MCP JSON-RPC to its stdin/stdout, exactly as a CLI would. It is still binary-free — the child is our own script run by plain Node, never a `grok`/`claude`/`codex`/`gemini` binary — and it is the only place the real pipe, the real handshake and the real teardown paths are exercised together.
+
+- **`ask-user-server.test.ts` (pure)** — schema tolerance case by case (derived header on a word boundary, free text when `options` is absent, bare strings accepted, lone/duplicate options dropped, counts trimmed past 4/4), the one hard failure (`question` missing) coming back as a tool RESULT rather than a throw, answer→text mapping, frame codec, token gate, and `companions.askTimeout` parsing. It also **pins the shipped `.cjs` against the TypeScript module**: same constants, same tool description, env-only address/token, no `require` outside `node:`, and an `initialize` branch with no `await` in it (Codex kills a slow-starting MCP server).
+- **`ask-user-ipc.test.ts` (real pipe, real child)** — answer, cancel, auto-continue, a repair message returned as a result, a refused token (the child exits rather than linger), the **client dying mid-question** (card withdrawn), the **host disposing mid-question**, and a **revoked session token** (in-flight calls answered, no new spec issued). Each of these, done wrong, is a CLI blocked inside `tools/call` with no timeout of its own. Also asserts the spawn spec: `ELECTRON_RUN_AS_NODE`, `process.execPath`, script-only argv, address and token in `env`.
+- **`ask-user-host.test.ts` (sidebar bookkeeping, fake timers)** — the responder abstraction: `pendingQuestions` routes per card, refuses a second answer to the same id, and `abandon` is silent on the grok path but cancels on the MCP path. Plus the whole `companions.askTimeout` behaviour, including that a half-made draft is NOT sent on.
+
 ### `test/plan-restore.test.ts` — plan persist + restore decision (15 tests)
 
 Pure helpers extracted into [src/plan-restore.ts](src/plan-restore.ts) specifically for unit testing: no `vscode`, no fs, no ACP client to mock.
