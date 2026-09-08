@@ -530,6 +530,72 @@ body.settings-page .settings-surface {
   border-top: 1px solid var(--vscode-widget-border, rgba(127, 127, 127, .2));
 }
 
+/* AP-04 rule/instruction-file panel — same shape as .settings-mcp-list /
+   .settings-mcp-server, kept as its own class family since it is a different
+   feature (see media/settings.js renderRuleFiles). */
+.settings-rules-list {
+  overflow: hidden;
+  border: 1px solid var(--vscode-widget-border, rgba(127, 127, 127, .25));
+  border-radius: 8px;
+}
+
+.settings-rules-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 12px;
+  align-items: center;
+  min-height: 46px;
+  padding: 12px 14px;
+}
+
+.settings-rules-row + .settings-rules-row {
+  border-top: 1px solid var(--vscode-widget-border, rgba(127, 127, 127, .2));
+}
+
+/* A candidate that does not exist yet — greyed row, "Create" button. */
+.settings-rules-row.is-missing {
+  color: var(--vscode-descriptionForeground);
+}
+
+.settings-rules-row.is-missing .settings-rules-name {
+  opacity: 0.7;
+}
+
+.settings-rules-copy {
+  min-width: 0;
+}
+
+.settings-rules-copy .settings-row-desc {
+  overflow-wrap: anywhere;
+}
+
+.settings-rules-name {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.settings-rules-badge {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 10px;
+  border: 1px solid var(--vscode-widget-border, rgba(127, 127, 127, .3));
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.6;
+}
+
+/* "may be read" — no documented provider, shown for reference only, never a
+   guess (see rules-files.ts's module doc comment). Dashed border keeps it
+   visually distinct from a cited provider badge. */
+.settings-rules-badge.is-uncertain {
+  border-style: dashed;
+  font-style: italic;
+}
+
 .settings-connector:has(.settings-connector-key) {
   align-items: start;
 }

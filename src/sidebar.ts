@@ -20,6 +20,14 @@ import type { AcpProvider, BackendSessionListEntry } from "./acp-backend";
 import { isAdapterProvider, isAcpProvider, ACP_PROVIDERS } from "./acp-backend";
 import { allProviderCapabilities, providerCapability } from "./provider-capabilities";
 import { parsePlanEntries } from "./plan-entries";
+import {
+  appendRuleEntry,
+  ensureRuleFile,
+  resolveRuleFileStates,
+  ruleFileCandidates,
+  type RuleFile,
+  type RuleFileFs,
+} from "./rules-files";
 import { CODEX_ACP_ADAPTER_VERSION, CodexBackend, isCodexCredentialError } from "./codex-backend";
 import { locateCodexCli, resolveCodexHome } from "./codex-cli-locator";
 import { CODEX_MANAGED_VERSION, installManagedCodex } from "./codex-managed-installer";
@@ -11154,6 +11162,18 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         await this.host.openProjectConfig(this.sessionCwd(session));
         break;
       }
+      case "listRuleFiles": {
+        await this.refreshRuleFiles(session);
+        break;
+      }
+      case "openRuleFile": {
+        await this.openRuleFile(session, msg.path);
+        break;
+      }
+      case "appendRuleFile": {
+        await this.appendRuleFile(session, msg.text);
+        break;
+      }
       case "listMcpServers": {
         await this.refreshMcpServers(session);
         break;
@@ -11824,6 +11844,113 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         break;
     }
 
+  }
+
+  /** {@link RuleFileFs} over the ordinary host filesystem facade — the only
+   *  effectful seam AP-04 needs; see rules-files.ts for the pure logic this
+   *  feeds. `stat`/`readText` are left to reject on a missing path exactly
+   *  like `workspace.fs` does; rules-files.ts is the layer that turns that
+   *  into `exists:false` / `undefined`, so there is no double-catch here. */
+  private ruleFileFs(): RuleFileFs {
+    return {
+      stat: async (absPath) => {
+        const s = await this.host.fs.stat(Uri.file(absPath));
+        // VS Code FileType: File=1, Directory=2, SymbolicLink=64 (bitwise —
+        // a symlinked directory is 2|64). Bit 2 is the only one that matters
+        // here: open-vs-reveal only cares whether it resolves to a directory.
+        return { isDirectory: (s.type & 2) !== 0, size: s.size };
+      },
+      readText: async (absPath) => Buffer.from(await this.host.fs.readFile(Uri.file(absPath))).toString("utf8"),
+      writeText: async (absPath, content) => {
+        await this.host.fs.writeFile(Uri.file(absPath), Buffer.from(content, "utf8"));
+      },
+      mkdir: async (absPath) => {
+        await this.host.fs.createDirectory(Uri.file(absPath));
+      },
+    };
+  }
+
+  /** Same home resolution as cli-locator.ts's `effectiveHome()`: env override
+   *  first (so tests can redirect it), then `os.homedir()`. */
+  private resolvedUserHome(): string {
+    const env = process.env;
+    return (process.platform === "win32" ? env.USERPROFILE : env.HOME) || os.homedir();
+  }
+
+  private async currentRuleFiles(session: Session): Promise<RuleFile[]> {
+    const candidates = ruleFileCandidates(this.sessionCwd(session), this.resolvedUserHome());
+    return resolveRuleFileStates(candidates, this.ruleFileFs());
+  }
+
+  private postRuleFiles(files: RuleFile[]): void {
+    const message: Extract<HostMsg, { type: "ruleFiles" }> = { type: "ruleFiles", files };
+    this.post(message);
+    void this.settingsEditor?.webview.postMessage(message);
+  }
+
+  private async refreshRuleFiles(session: Session): Promise<void> {
+    this.postRuleFiles(await this.currentRuleFiles(session));
+  }
+
+  /**
+   * Open (or reveal) one rule-file candidate, creating it first if missing.
+   * `requestedPath` must match one of the host's OWN current candidates —
+   * intent only, never a renderer-supplied path, same discipline as
+   * openGlobalConfig/openProjectConfig above.
+   */
+  private async openRuleFile(session: Session, requestedPath: string): Promise<void> {
+    const candidates = ruleFileCandidates(this.sessionCwd(session), this.resolvedUserHome());
+    const target = candidates.find((f) => f.path === requestedPath);
+    if (!target) return;
+    try {
+      await ensureRuleFile(target, this.ruleFileFs());
+    } catch (err) {
+      await this.host.showErrorMessage(`Couldn't create ${target.label}: ${(err as Error)?.message || String(err)}`);
+      return;
+    }
+    if (target.kind === "directory") {
+      await this.host.showInFolder(target.path);
+    } else {
+      await this.host.openTextFile(target.path);
+    }
+    await this.refreshRuleFiles(session);
+  }
+
+  /**
+   * Chat action "Add as rule" (AP-04): append `text` (the user's chat
+   * selection) to a file the user picks from a native QuickPick. Directory
+   * candidates are not offered — there is nothing to append text to. The
+   * active session's provider and project sort its own likely file first;
+   * every candidate stays pickable, since a note about one provider's
+   * behavior can belong in anyone's rules file.
+   */
+  private async appendRuleFile(session: Session, text: string): Promise<void> {
+    const addition = String(text ?? "");
+    if (!addition.trim()) return;
+    const candidates = ruleFileCandidates(this.sessionCwd(session), this.resolvedUserHome())
+      .filter((f) => f.kind === "file");
+    const provider = session.provider;
+    const rank = (f: RuleFile) => (f.scope === "project" ? 0 : 10) + (f.providers.includes(provider) ? 0 : 1);
+    const ordered = [...candidates].sort((a, b) => rank(a) - rank(b));
+    const picks = ordered.map((f) => ({
+      label: f.label,
+      description: f.exists ? undefined : "Will be created",
+      detail: f.path,
+      file: f,
+    }));
+    const picked = await this.host.showQuickPick(picks, {
+      title: "Add as rule",
+      placeHolder: "Select a rule file to append to",
+    });
+    if (!picked) return;
+    const dateStamp = new Date().toISOString().slice(0, 10);
+    try {
+      await appendRuleEntry(picked.file, addition, dateStamp, this.ruleFileFs());
+    } catch (err) {
+      await this.host.showErrorMessage(`Couldn't update ${picked.file.label}: ${(err as Error)?.message || String(err)}`);
+      return;
+    }
+    await this.refreshRuleFiles(session);
   }
 
   /**

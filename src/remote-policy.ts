@@ -437,6 +437,12 @@ export const INBOUND_DISPOSITION: Record<WebviewMsg["type"], InboundDisposition>
   removeProjectFolder: "host-local",
   openGlobalConfig: "host-local",
   openProjectConfig: "host-local",
+  // AP-04: local candidate list (names the home directory), local editor/file
+  // manager actions, local fs write — none of the three is meaningful to a
+  // remote client, same class as openGlobalConfig/openProjectConfig above.
+  listRuleFiles: "host-local",
+  openRuleFile: "host-local",
+  appendRuleFile: "host-local",
   // Read-only inventory query through the live Grok ACP session. Same class as
   // refreshContextDetails: no turn, no mutation, no desk-local picker.
   // Mirroring the last fetch is not enough if
@@ -612,6 +618,9 @@ export const REMOTE_REQUIRES_BOUND_SESSION: Record<WebviewMsg["type"], boolean> 
   removeProjectFolder: false,
   openGlobalConfig: false,
   openProjectConfig: false,
+  listRuleFiles: false,
+  openRuleFile: false,
+  appendRuleFile: false,
   listMcpServers: false,
   listRoutines: false,
   saveRoutine: false,
@@ -887,6 +896,12 @@ export const OUTBOUND_DISPOSITION: Record<HostMsg["type"], OutboundDisposition> 
   // first, so a tab sees only routines and projects it may already reach.
   routines: "mirror",
   codexInstallProgress: "host-local",
+  // AP-04: candidate paths include the local home directory (e.g.
+  // `~/.claude/CLAUDE.md`), and the panel's only actions (open in the local
+  // editor, reveal in the local file manager, append via a local QuickPick)
+  // are meaningless off the machine running the host — same reasoning as
+  // codexInstallProgress/moveViewHint just above.
+  ruleFiles: "host-local",
   // Placement is a property of the machine running the extension, and `moveView`
   // is host-local anyway — a remote could neither act on the hint nor need it.
   moveViewHint: "host-local",
@@ -1055,6 +1070,9 @@ export const OUTBOUND_PROJECT_AUTH: Record<HostMsg["type"], OutboundProjectAuth>
   mcpServers: "none",
   mcpConnectors: "none",
   mcpConnectorAuthorization: "none",
+  // Suppressed before crossing (host-local, see OUTBOUND_DISPOSITION) — no
+  // project auth question ever applies to it.
+  ruleFiles: "none",
   routines: "entries",
   codexInstallProgress: "none",
   expandCommandOutputs: "none",

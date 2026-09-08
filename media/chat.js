@@ -783,6 +783,9 @@
     mcpError: "",
     mcpWarning: "",
     mcpConnectors: [],
+    // NULL, not [] — "no rule file locations" and "haven't asked yet" render
+    // differently in Settings → Advanced (renderRuleFiles).
+    ruleFiles: null,
     // While replaying an older session, suppress a legacy primer user turn and
     // grok's response until the next user message starts.
     suppressReplayTurn: false,
@@ -2898,6 +2901,7 @@
       mcpLoading: state.mcpLoading,
       mcpError: state.mcpError,
       mcpWarning: state.mcpWarning,
+      ruleFiles: state.ruleFiles,
       mcpConnectors: state.mcpConnectors,
       mcpRemoteConnect: state.mcpRemoteConnect === true,
       mcpConnectorAuthorization: state.mcpConnectorAuthorization,
@@ -16340,7 +16344,7 @@
     "initialState", "showThinking", "appPurpose", "expandCommandOutputs",
     "steerByDefault", "steerUnavailable", "soundNotifications", "processingSound",
     "readRepliesAloud", "summarizeRepliesAloud", "fontScale", "voiceConfigured",
-    "providerState", "githubState", "mcpServers", "mcpConnectors", "remoteStatus", "telemetryEnabled", "thumbsFeedback", "grokUpdateStatus", "initialized",
+    "providerState", "githubState", "mcpServers", "mcpConnectors", "remoteStatus", "telemetryEnabled", "thumbsFeedback", "grokUpdateStatus", "initialized", "ruleFiles",
   ]);
 
   function handleHostMessage(msg) {
@@ -16526,6 +16530,11 @@
         state.mcpLoading = msg.loading === true;
         state.mcpError = msg.error || "";
         state.mcpWarning = msg.warning || "";
+        refreshSettingsOverlay();
+        break;
+      case "ruleFiles":
+        // Always the full candidate list (never a delta) — see protocol.ts.
+        state.ruleFiles = Array.isArray(msg.files) ? msg.files : [];
         refreshSettingsOverlay();
         break;
       case "mcpConnectorAuthorization":
@@ -18839,18 +18848,20 @@
     navigator.clipboard.writeText(text || "");
   }
 
-  // Cut/Copy/Paste stay on the host/browser menu. Copy Link is ours, and only
-  // when a real target is under the pointer — a disabled row would be a lie.
+  // Cut/Copy/Paste stay on the host/browser menu. Copy Link, Copy and Add as
+  // rule are ours — Copy Link only when a real link target is under the
+  // pointer (a disabled row would be a lie), the other two whenever there is
+  // a selection, link or not.
   document.addEventListener("contextmenu", (e) => {
     if (e.defaultPrevented) return;
     const a = linkFromContextEvent(e);
     const href = copyableLinkHref(a);
-    if (!href) return;
+    const selected = String((window.getSelection && window.getSelection().toString()) || "");
+    if (!href && !selected) return;
     e.preventDefault();
     e.stopPropagation();
     closePopovers();
     closeRailMenu();
-    const selected = String((window.getSelection && window.getSelection().toString()) || "");
     const items = [];
     if (selected) {
       items.push({
@@ -18859,12 +18870,27 @@
         onSelect: () => writeClipboardText(selected),
       });
     }
-    items.push({
+    // AP-04: host-local (writes a local file, resolved by a native QuickPick
+    // the host shows itself) — a remote client has neither, same reasoning
+    // as every other hostLocal row in settings.js.
+    if (selected && !IS_REMOTE) {
+      items.push({
+        label: "Add as rule",
+        icon: ICON.file,
+        onSelect: () => vscode.postMessage({ type: "appendRuleFile", text: selected }),
+      });
+    }
+    if (href) items.push({
       label: "Copy Link",
       icon: ICON.copy,
       onSelect: () => writeClipboardText(href),
     });
-    openRailMenu(a, items, "chat-copy-link", { x: e.clientX, y: e.clientY });
+    // `a` is only set for a link target; a plain-text selection has no link,
+    // so fall back to whatever element the pointer is actually over — openRailMenu
+    // only reads its `dataset`/`contains`, never its position (the pointer
+    // coordinates above already do that).
+    const anchor = a || elementFromNode(e.target) || document.body;
+    openRailMenu(anchor, items, "chat-copy-link", { x: e.clientX, y: e.clientY });
   });
 
   input.addEventListener("paste", (e) => {

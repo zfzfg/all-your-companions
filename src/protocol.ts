@@ -36,6 +36,8 @@ import type { AcpProvider } from "./acp-backend";
 import type { CapabilitySupport, ProviderCapability } from "./provider-capabilities";
 import type { PlanEntry } from "./plan-entries";
 export type { PlanEntry };
+import type { RuleFile } from "./rules-files";
+export type { RuleFile };
 
 /** grok's tool-call payload as it comes off the wire (acp emits it untyped). The
  *  webview reads a handful of fields; the index signature keeps assignment from
@@ -505,6 +507,10 @@ export type HostMsg =
       errorId?: string;
     }
   | { type: "codexInstallProgress"; phase: "downloading" | "verifying" | "installing" | "idle"; receivedBytes?: number; totalBytes?: number; reason?: string }
+  /** AP-04 rule/instruction-file panel (Settings → Advanced). Host-local: it
+   *  names the local home directory, so it never crosses to a remote client
+   *  (see OUTBOUND_DISPOSITION). Always the FULL candidate list, never a delta. */
+  | { type: "ruleFiles"; files: RuleFile[] }
   /** Plan picker gate. `recheckable` means the version probe failed (not a
    *  verified-old CLI) — the row stays clickable so a later pick re-probes. */
   | { type: "planModeAvailability"; available: boolean; reason?: string; recheckable?: boolean }
@@ -989,6 +995,17 @@ export type WebviewMsg =
   | { type: "removeProjectFolder"; cwd?: string }
   | { type: "openGlobalConfig" }
   | { type: "openProjectConfig" }
+  /** AP-04: (re-)compute the rule/instruction-file candidate list for the
+   *  active project + home and answer with a `ruleFiles` frame. */
+  | { type: "listRuleFiles" }
+  /** AP-04: open an existing rule file/reveal a directory, creating it first
+   *  when missing. `path` must match one of the host's own last-sent
+   *  candidates — never a renderer-supplied path outside that set. */
+  | { type: "openRuleFile"; path: string }
+  /** AP-04 chat action "Add as rule": append `text` (the user's selection) to
+   *  a target the user picks via a native QuickPick the host shows itself —
+   *  the message carries no path, only the text to append. */
+  | { type: "appendRuleFile"; text: string }
   | { type: "listMcpServers" }
   /** Open the Routines page — the host answers with a `routines` frame. */
   | { type: "listRoutines" }
@@ -1339,7 +1356,7 @@ const HOST_MESSAGE_TYPE_MAP: Record<HostMsg["type"], true> = {
   soundNotifications: true, processingSound: true, readRepliesAloud: true, summarizeRepliesAloud: true, speechSummary: true, imageFull: true, moveComposerCaret: true, remoteStatus: true,
   setAllToolDetails: true, focusInput: true, findInSession: true, restoreComposer: true, truncateMessages: true, uiConfirmRequest: true,
   sessions: true, sessionRemoved: true, repoSessions: true, pinnedSessions: true, repos: true, sessionDot: true, queuedSends: true, submitQueuedSend: true,
-  steerUnavailable: true, feedbackAvailability: true, turnFeedbackAck: true, usage: true, providerCapabilities: true, planEntries: true,
+  steerUnavailable: true, feedbackAvailability: true, turnFeedbackAck: true, usage: true, providerCapabilities: true, planEntries: true, ruleFiles: true,
 };
 
 const WEBVIEW_MESSAGE_TYPE_MAP: Record<WebviewMsg["type"], true> = {
@@ -1347,7 +1364,7 @@ const WEBVIEW_MESSAGE_TYPE_MAP: Record<WebviewMsg["type"], true> = {
   setMode: true, setConfigOption: true, removeChip: true, toggleChip: true, openFile: true, showInFolder: true, openUrl: true,
   openText: true, openDiff: true, revertToolEdit: true, exportExpr: true, setEffort: true, openGlobalConfig: true,
   addProjectFolder: true, removeProjectFolder: true, createProject: true, cloneProject: true, setupGithubCli: true, listGithubRepos: true, githubSignOut: true, githubLoginWithToken: true,
-  openProjectConfig: true, listMcpServers: true, connectMcpConnector: true, disconnectMcpConnector: true, completeMcpConnectorOAuth: true,
+  openProjectConfig: true, listRuleFiles: true, openRuleFile: true, appendRuleFile: true, listMcpServers: true, connectMcpConnector: true, disconnectMcpConnector: true, completeMcpConnectorOAuth: true,
   listRoutines: true, saveRoutine: true, deleteRoutine: true, setRoutinePaused: true, runRoutineNow: true, showLogs: true, toggleDevTools: true, openSettings: true, openSettingsSurface: true, closeSettingsSurface: true, dismissWelcomeTip: true, welcomeTipShown: true, moveView: true,
   setShowThinking: true, setAppPurpose: true, setExpandCommandOutputs: true, setSteerByDefault: true,
   setSoundNotifications: true, setProcessingSound: true, setReadRepliesAloud: true, setSummarizeRepliesAloud: true, setVoiceSendPhrase: true, setVoiceKeyterms: true, setTelemetryEnabled: true, setThumbsFeedback: true, summarizeSpeech: true, requestImageFull: true, composerFocus: true,

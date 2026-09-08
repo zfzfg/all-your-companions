@@ -995,6 +995,14 @@
       message: () => ({ type: "openProjectConfig" }),
     },
     {
+      id: "ruleFiles",
+      category: "advanced",
+      title: "Rule files",
+      description: "Instruction files each connected agent may read for this project and your home directory — AGENTS.md, CLAUDE.md, GEMINI.md, and each provider's own directory.",
+      kind: "ruleFiles",
+      hostLocal: true,
+    },
+    {
       id: "routinesList",
       category: "routines",
       title: "Routines",
@@ -1505,6 +1513,10 @@
       routineModels: [],
       routineError: "",
       routineErrorId: "",
+      // NULL, not [] — same reasoning as routines above: an empty candidate
+      // list ("no rule file locations to check") and "the host has not
+      // answered yet" render differently (see renderRuleFiles).
+      ruleFiles: null,
       ...(partial || {}),
     };
   }
@@ -2806,10 +2818,101 @@
     el.appendChild(form);
   }
 
+  // AP-04: display label for a provider id on a rule-file badge. Kept tiny
+  // and local — the host (rules-files.ts) is the source of truth for WHICH
+  // providers apply; this only turns an id into a word.
+  const RULE_FILE_PROVIDER_LABEL = { grok: "Grok", codex: "Codex", claude: "Claude", gemini: "Gemini" };
+
+  function ruleFileBytesLabel(bytes) {
+    if (typeof bytes !== "number" || !Number.isFinite(bytes)) return "";
+    if (bytes < 1024) return bytes + " B";
+    return (Math.round((bytes / 1024) * 10) / 10) + " KB";
+  }
+
+  function renderRuleFilesState(text) {
+    const el = document.createElement("div");
+    el.className = "settings-mcp-state";
+    el.setAttribute("aria-live", "polite");
+    el.textContent = text;
+    return el;
+  }
+
+  /**
+   * AP-04 rule/instruction-file panel. The host NEVER interprets file
+   * content — this renders only what `ruleFileCandidates` computed (path,
+   * scope, provider list, exists, bytes). A provider badge only ever shows a
+   * provider the host cited evidence for (see rules-files.ts's module doc);
+   * an empty provider list renders as "may be read", never a guess.
+   */
+  function renderRuleFiles(snapshot, env) {
+    const el = document.createElement("div");
+    el.className = "settings-rules";
+    el.dataset.id = "ruleFiles";
+    const files = snapshot.ruleFiles;
+    if (!Array.isArray(files)) {
+      el.appendChild(renderRuleFilesState("Looking for rule files…"));
+      return el;
+    }
+    if (!files.length) {
+      el.appendChild(renderRuleFilesState("No project or home directory to check yet."));
+      return el;
+    }
+    const list = document.createElement("div");
+    list.className = "settings-rules-list";
+    for (const file of files) {
+      const row = document.createElement("div");
+      row.className = "settings-rules-row" + (file.exists ? "" : " is-missing");
+      const copy = document.createElement("div");
+      copy.className = "settings-rules-copy";
+      const name = document.createElement("div");
+      name.className = "settings-rules-name settings-row-title";
+      const label = document.createElement("span");
+      label.textContent = file.label;
+      name.appendChild(label);
+      const providers = Array.isArray(file.providers) ? file.providers : [];
+      if (providers.length) {
+        for (const p of providers) {
+          const badge = document.createElement("span");
+          badge.className = "settings-rules-badge";
+          badge.textContent = RULE_FILE_PROVIDER_LABEL[p] || p;
+          name.appendChild(badge);
+        }
+      } else {
+        const badge = document.createElement("span");
+        badge.className = "settings-rules-badge is-uncertain";
+        badge.textContent = "may be read";
+        badge.title = "No documented provider for this location — shown for reference only.";
+        name.appendChild(badge);
+      }
+      const detail = document.createElement("div");
+      detail.className = "settings-row-desc";
+      const sizeLabel = file.exists && file.kind === "file" ? ruleFileBytesLabel(file.bytes) : "";
+      detail.textContent = file.exists
+        ? (sizeLabel ? file.path + " · " + sizeLabel : file.path)
+        : file.path + " · not created yet";
+      copy.append(name, detail);
+      row.appendChild(copy);
+
+      if (!(env && env.isRemote)) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "settings-action settings-rules-open";
+        btn.dataset.path = file.path;
+        btn.textContent = file.exists ? "Open" : "Create";
+        row.appendChild(btn);
+      }
+
+      list.appendChild(row);
+    }
+    el.appendChild(list);
+    return el;
+  }
+
   function renderRow(row, snapshot, env, keyForm, githubTokenForm, githubCliStarted) {
     if (row.kind === "mcp") return renderMcpCatalog(snapshot, env);
     if (row.kind === "connectors") return renderConnectorsCatalog(snapshot, env, keyForm);
     if (row.kind === "routines") return renderRoutines(snapshot, env);
+    if (row.kind === "ruleFiles") return renderRuleFiles(snapshot, env);
     const el = document.createElement("div");
     el.className = "settings-row";
     el.dataset.id = row.id;
@@ -3001,6 +3104,7 @@
     let providersChecked = false;
     let mcpChecked = false;
     let routinesChecked = false;
+    let ruleFilesChecked = false;
     let lastPaintedCategory = "";
     let lastPaintedQuery = "";
     const post = typeof opts.post === "function" ? opts.post : () => {};
@@ -3140,6 +3244,12 @@
       requestMcpRefresh();
     }
 
+    function maybeRefreshRuleFiles() {
+      if (ruleFilesChecked || env.isRemote || categoryId !== "advanced" || query.trim()) return;
+      ruleFilesChecked = true;
+      post({ type: "listRuleFiles" });
+    }
+
     function runAction(row) {
       // `local` may be a plain name (a purely client-side action) or a
       // function of the current state, and it no longer swallows the row's
@@ -3225,6 +3335,7 @@
       maybeRefreshProviders();
       maybeRefreshMcp();
       maybeRefreshRoutines();
+      maybeRefreshRuleFiles();
       const key = paintKey();
       if (key === lastPaintedKey && container.firstChild) {
         paintDeferred = false;
@@ -3891,6 +4002,15 @@
           e.stopPropagation();
           if (env.isRemote) return;
           post({ type: "openGlobalConfig" });
+        });
+      });
+      body.querySelectorAll(".settings-rules-open").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          if (env.isRemote) return;
+          const path = btn.dataset.path;
+          if (!path) return;
+          post({ type: "openRuleFile", path });
         });
       });
       applyFocus(container, focus);

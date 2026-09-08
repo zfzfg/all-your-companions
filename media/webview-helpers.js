@@ -34,13 +34,13 @@
     "promptComplete", "contextUsage", "commandOutput", "expandCommandOutputs", "setAllToolDetails", "focusInput", "findInSession", "restoreComposer", "truncateMessages", "uiConfirmRequest", "agentReset", "agentError", "agentEnd", "exit", "setBusy", "summarizing",
     "sessionContext", "clearMessages", "onboarding", "error", "hostNotice", "xaiNotification", "subagentUpdate", "childStream", "runProgress", "sessions", "repoSessions", "pinnedSessions", "repos",
     "sessionDot", "queuedSends", "submitQueuedSend", "steerUnavailable", "feedbackAvailability", "turnFeedbackAck", "usage", "planEntries", "steerByDefault", "soundNotifications", "processingSound", "readRepliesAloud", "summarizeRepliesAloud", "speechSummary", "imageFull", "moveComposerCaret",
-    "remoteStatus",
+    "remoteStatus", "ruleFiles",
   ];
   const WEBVIEW_MESSAGE_TYPES = [
     "ready", "remotePreferences", "send", "newSession", "cancel", "pickModel", "setMode", "setConfigOption", "removeChip",
     "toggleChip", "openFile", "showInFolder", "openUrl", "openText", "openDiff", "revertToolEdit", "exportExpr", "setEffort",
     "addProjectFolder", "removeProjectFolder", "createProject", "cloneProject", "setupGithubCli", "listGithubRepos", "githubSignOut", "githubLoginWithToken",
-    "openGlobalConfig", "openProjectConfig", "listMcpServers", "connectMcpConnector", "disconnectMcpConnector", "completeMcpConnectorOAuth", "showLogs", "toggleDevTools", "openSettings", "openSettingsSurface", "closeSettingsSurface", "dismissWelcomeTip", "welcomeTipShown", "moveView",
+    "openGlobalConfig", "openProjectConfig", "listRuleFiles", "openRuleFile", "appendRuleFile", "listMcpServers", "connectMcpConnector", "disconnectMcpConnector", "completeMcpConnectorOAuth", "showLogs", "toggleDevTools", "openSettings", "openSettingsSurface", "closeSettingsSurface", "dismissWelcomeTip", "welcomeTipShown", "moveView",
     "listRoutines", "saveRoutine", "deleteRoutine", "setRoutinePaused", "runRoutineNow",
     "setShowThinking", "setAppPurpose", "setExpandCommandOutputs",
     "dropFile", "permissionAnswer", "exitPlanAnswer", "questionAnswer", "questionCancel",
