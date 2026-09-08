@@ -15901,7 +15901,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     return parseAppPurpose(this.state.get<string>(APP_PURPOSE_KEY));
   }
 
-  private buildInitialStateMsg(): Extract<HostMsg, { type: "initialState" }> {
+  private buildInitialStateMsg(session: Session = this.focused): Extract<HostMsg, { type: "initialState" }> {
     const cfg = this.host.getConfiguration("grok");
     const cwd = this.workspaceRoot();
     // Additive: older webviews ignore an unknown field; older hosts omit it
@@ -15909,9 +15909,12 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     const commandLanguage = commandLanguageForDialect(resolvedTerminalShellDialect());
     return {
       type: "initialState",
-      effort: rememberedEffort(
+      // The level this session is actually running at, not the last one chosen
+      // anywhere: a remote picking up a Claude conversation must not be shown
+      // grok's effort.
+      effort: session.client?.currentReasoningEffort || rememberedEffort(
         cfg.get<EffortPrefs>("defaultEffortByProvider", {}),
-        this.focused.provider,
+        session.provider,
         cfg.get<string>("defaultEffort", ""),
       ),
       cwd,
@@ -19438,7 +19441,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     // Catalog is already open-folder-filtered on desktop; still the sole source.
     const entries = this.localRepoCatalogEntries();
     // Never put a closed cwd on the wire (choke point rejects it); empty = unbound.
-    const initial = this.messageForRemote({ ...this.buildInitialStateMsg(), cwd: listCwd ?? "" });
+    const initial = this.messageForRemote({ ...this.buildInitialStateMsg(session ?? this.focused), cwd: listCwd ?? "" });
     const sessionCwd = session ? this.sessionCwd(session) : "";
     const sessionCwdOk = !!session && !!authorizedListCwd(sessionCwd, authorized, pathsEqual);
     const snap: HostMsg[] = [];

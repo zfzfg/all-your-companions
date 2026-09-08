@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, statSync } from "node:fs";
-import { execSync } from "node:child_process";
 import { homedir } from "node:os";
 import * as path from "node:path";
+import { findCliOnPath } from "./cli-path";
 import { codexManagedBinaryPath } from "./codex-managed-installer";
 
 export interface CodexLocatorFs {
@@ -41,29 +41,6 @@ const defaultFs: CodexLocatorFs = {
   },
 };
 
-function defaultWhich(name: string, platform: NodeJS.Platform): string | undefined {
-  const pathVar = process.env.PATH || process.env.Path || "";
-  const sep = platform === "win32" ? ";" : ":";
-  for (const dir of pathVar.split(sep)) {
-    if (!dir) continue;
-    const candidate = path.join(dir, name);
-    try {
-      if (existsSync(candidate) && statSync(candidate).isFile()) {
-        return candidate;
-      }
-    } catch {}
-  }
-  try {
-    const command = platform === "win32" ? `where ${name}` : `command -v ${name}`;
-    return execSync(command, {
-      encoding: "utf8",
-      windowsHide: true,
-      stdio: ["pipe", "pipe", "ignore"],
-    }).trim().split(/\r?\n/)[0]?.trim() || undefined;
-  } catch {
-    return undefined;
-  }
-}
 
 function versionParts(name: string): number[] {
   const match = /openai\.chatgpt-(\d+(?:\.\d+)*)/i.exec(name);
@@ -150,7 +127,7 @@ export function locateCodexCli(options: CodexLocatorOptions = {}): string | unde
   // to click. `cli-locator.ts` has always put `grok.cmd` first for this reason.
   const names = platform === "win32" ? ["codex.cmd", "codex.exe", "codex"] : ["codex"];
   for (const name of names) {
-    const found = (options.which ?? ((candidate) => defaultWhich(candidate, platform)))(name);
+    const found = (options.which ?? ((candidate) => findCliOnPath(candidate, env, platform, options.fs?.isFile)))(name);
     if (found && fs.isFile(found)) return found;
   }
 

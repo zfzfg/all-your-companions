@@ -90,6 +90,21 @@ export function buildPrompt(
   for (const chip of chips) {
     if (chip.hidden) continue;
     if (chip.selectionStart && chip.selectionEnd) {
+      // Too big to repeat every turn — name the range in the bucket the chip
+      // belongs to, so an ambient editor selection still reads as ambient and
+      // an attached one still reads as "act on this". The range goes on its own
+      // line because the restore parser (`parseAttachmentContext`) takes the
+      // rest of a path line verbatim: `a.ts (lines 2-400)` would come back as a
+      // chip pointing at a file of that name, which opens nothing. A second,
+      // indented line matches none of its patterns and is ignored instead.
+      const references = isImplicitChip(chip) ? openInEditor : attached;
+      const reference = `${chip.relPath}\n  Selected lines: ${chip.selectionStart}-${chip.selectionEnd}`;
+      // The line count follows from the range alone — decide before paying for
+      // the read, which is the point on a selection spanning a large file.
+      if (chip.selectionEnd - chip.selectionStart + 1 > MAX_SELECTION_LINES) {
+        references.push(reference);
+        continue;
+      }
       let content: string;
       try {
         content = deps.readFile(chip.path);
@@ -101,13 +116,8 @@ export function buildPrompt(
         .split("\n")
         .slice(chip.selectionStart - 1, chip.selectionEnd);
       const snippet = lines.join("\n");
-      if (lines.length > MAX_SELECTION_LINES || snippet.length > MAX_SELECTION_CHARS) {
-        // Too big to repeat every turn — name the range in the bucket the chip
-        // belongs to, so an ambient editor selection still reads as ambient and
-        // an attached one still reads as "act on this".
-        const ref = `${chip.relPath} (lines ${chip.selectionStart}-${chip.selectionEnd})`;
-        if (isImplicitChip(chip)) openInEditor.push(ref);
-        else attached.push(ref);
+      if (snippet.length > MAX_SELECTION_CHARS) {
+        references.push(reference);
         continue;
       }
       const ext = deps.extName(chip.path).replace(/^\./, "");

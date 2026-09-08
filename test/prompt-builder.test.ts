@@ -406,7 +406,7 @@ describe("selection size cap", () => {
     const chip = makeImplicitChip("/big.ts", "big.ts", 1, MAX_SELECTION_LINES + 50);
     const out = buildPrompt("what does this do?", [chip], bigDeps);
     expect(out).not.toContain("line42");
-    expect(out).toContain(`big.ts (lines 1-${MAX_SELECTION_LINES + 50})`);
+    expect(out).toContain(`big.ts\n  Selected lines: 1-${MAX_SELECTION_LINES + 50}`);
     // Still ambient, not "act on this".
     expect(out).toContain("Currently open in the editor (for context)");
   });
@@ -416,7 +416,23 @@ describe("selection size cap", () => {
     const out = buildPrompt("fix it", [chip], bigDeps);
     expect(out).not.toContain("line42");
     expect(out).toContain("Attached file:");
-    expect(out).toContain(`big.ts (lines 1-${MAX_SELECTION_LINES + 50})`);
+    expect(out).toContain(`big.ts\n  Selected lines: 1-${MAX_SELECTION_LINES + 50}`);
+  });
+
+  it("names an oversized selection without reading the file at all", () => {
+    const chip = makeImplicitChip("/big.ts", "big.ts", 1, MAX_SELECTION_LINES + 50);
+    const out = buildPrompt("what does this do?", [chip], {
+      readFile: () => { throw new Error("an oversized range must not be read from disk"); },
+      extName: () => ".ts",
+    });
+    expect(out).toContain(`big.ts\n  Selected lines: 1-${MAX_SELECTION_LINES + 50}`);
+  });
+
+  it("leaves the path alone on its own line, so restore still resolves it", () => {
+    const chip = makeImplicitChip("/big.ts", "big.ts", 1, MAX_SELECTION_LINES + 50);
+    const out = buildPrompt("what does this do?", [chip], bigDeps);
+    const line = out.split("\n").find((l) => l.includes("Currently open in the editor")) ?? "";
+    expect(line.endsWith("big.ts")).toBe(true);
   });
 
   it("still embeds a selection that is small enough to repeat", () => {

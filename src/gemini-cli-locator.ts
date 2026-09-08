@@ -1,7 +1,7 @@
 import { existsSync, statSync, readFileSync } from "node:fs";
-import { execFileSync, execSync } from "node:child_process";
 import { homedir } from "node:os";
 import * as path from "node:path";
+import { findCliOnPath } from "./cli-path";
 
 export interface GeminiLocatorFs {
   exists(path: string): boolean;
@@ -36,35 +36,6 @@ const defaultFs: GeminiLocatorFs = {
   },
 };
 
-function defaultWhich(name: string, platform: NodeJS.Platform): string | undefined {
-  const pathVar = process.env.PATH || process.env.Path || "";
-  const sep = platform === "win32" ? ";" : ":";
-  for (const dir of pathVar.split(sep)) {
-    if (!dir) continue;
-    const candidate = path.join(dir, name);
-    try {
-      if (existsSync(candidate) && statSync(candidate).isFile()) {
-        return candidate;
-      }
-    } catch {}
-  }
-  try {
-    if (platform === "win32") {
-      const out = execFileSync("where", [name], {
-        encoding: "utf8",
-        windowsHide: true,
-        stdio: ["ignore", "pipe", "ignore"],
-      });
-      return out.trim().split(/\r?\n/)[0]?.trim() || undefined;
-    }
-    return execSync(`command -v ${name}`, {
-      encoding: "utf8",
-      stdio: ["pipe", "pipe", "ignore"],
-    }).trim().split(/\r?\n/)[0]?.trim() || undefined;
-  } catch {
-    return undefined;
-  }
-}
 
 export function isAntigravityCli(cliPath: string): boolean {
   if (!cliPath) return false;
@@ -197,7 +168,7 @@ export function locateGeminiCli(options: GeminiLocatorOptions = {}): string | un
     return fs.isFile(configured) ? configured : undefined;
   }
 
-  const which = options.which ?? ((candidate) => defaultWhich(candidate, platform));
+  const which = options.which ?? ((candidate) => findCliOnPath(candidate, env, platform, options.fs?.isFile));
   const home = options.home || (platform === "win32" ? env.USERPROFILE : env.HOME) || homedir();
 
   // 1. Prefer Antigravity CLI (agy) on PATH
