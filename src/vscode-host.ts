@@ -20,6 +20,8 @@ import type {
   Host,
   HostCancellationToken,
   HostConfiguration,
+  HostDiagnostic,
+  HostDiagnosticsScope,
   HostContext,
   HostFileSystem,
   HostFileSystemWatcher,
@@ -31,6 +33,7 @@ import type {
   HostQuickPickOptions,
   HostSaveDialogOptions,
   HostTerminal,
+  HostTerminalCapture,
   HostTerminalOptions,
   HostTextDocumentContentProvider,
   HostTextEditor,
@@ -167,6 +170,94 @@ function wrapTerminal(term: vscode.Terminal): HostTerminal {
   };
 }
 
+const DIAGNOSTIC_SEVERITY: Record<number, HostDiagnostic["severity"]> = {
+  [vscode.DiagnosticSeverity.Error]: "error",
+  [vscode.DiagnosticSeverity.Warning]: "warning",
+  [vscode.DiagnosticSeverity.Information]: "info",
+  [vscode.DiagnosticSeverity.Hint]: "hint",
+};
+
+function toHostDiagnostics(docUri: vscode.Uri, items: readonly vscode.Diagnostic[]): HostDiagnostic[] {
+  // Forward slashes on both branches: the rest of the chip pipeline (and the
+  // agent reading the block) treats a path as POSIX-shaped, and asRelativePath
+  // hands back Windows separators for a workspace file.
+  const rel = vscode.workspace.asRelativePath(docUri, false).split("\\").join("/");
+  return items.map((d) => ({
+    path: rel,
+    // VS Code ranges are 0-based; the Problems panel (and every compiler) is
+    // 1-based, and this text is read by a model trained on compiler output.
+    line: d.range.start.line + 1,
+    column: d.range.start.character + 1,
+    severity: DIAGNOSTIC_SEVERITY[d.severity] ?? "info",
+    message: d.message,
+    ...(typeof d.source === "string" && d.source ? { source: d.source } : {}),
+  }));
+}
+
+/**
+ * Rolling capture of what the integrated terminals have printed.
+ *
+ * Fed by shell integration, which is the only stable way to see a terminal's
+ * output: `vscode.Terminal` exposes no buffer and no selection, and the
+ * copy-the-selection route would take over the user's clipboard every time a
+ * chip is attached. The trade is stated at the seam (Host.getTerminalCapture):
+ * a terminal without shell integration is invisible here, and the caller says
+ * so instead of attaching an empty chip.
+ */
+const TERMINAL_CAPTURE_CHARS = 200_000;
+
+class TerminalCaptureStore {
+  private readonly byTerminal = new Map<vscode.Terminal, string>();
+  private last: vscode.Terminal | undefined;
+
+  append(terminal: vscode.Terminal, chunk: string): void {
+    const next = (this.byTerminal.get(terminal) ?? "") + chunk;
+    this.byTerminal.set(
+      terminal,
+      next.length > TERMINAL_CAPTURE_CHARS ? next.slice(next.length - TERMINAL_CAPTURE_CHARS) : next,
+    );
+    this.last = terminal;
+  }
+
+  forget(terminal: vscode.Terminal): void {
+    this.byTerminal.delete(terminal);
+    if (this.last === terminal) this.last = undefined;
+  }
+
+  /** The terminal the user is looking at wins; otherwise the one that printed
+   *  most recently — "the last active terminal buffer", either way. */
+  current(): HostTerminalCapture | undefined {
+    const active = vscode.window.activeTerminal;
+    const terminal = active && this.byTerminal.has(active) ? active : this.last;
+    if (!terminal) return undefined;
+    const text = this.byTerminal.get(terminal);
+    if (!text) return undefined;
+    return { label: terminal.name || "Terminal", text };
+  }
+}
+
+/** Subscribe the capture store to shell integration. Every hook is optional at
+ *  runtime: an older VS Code (or a test double) simply captures nothing. */
+function watchTerminalOutput(store: TerminalCaptureStore): vscode.Disposable[] {
+  const subs: vscode.Disposable[] = [];
+  const start = (vscode.window as Partial<typeof vscode.window>).onDidStartTerminalShellExecution;
+  if (typeof start === "function") {
+    subs.push(
+      start((e) => {
+        void (async () => {
+          try {
+            for await (const chunk of e.execution.read()) store.append(e.terminal, chunk);
+          } catch {
+            // A stream that ends badly costs this command's output, nothing more.
+          }
+        })();
+      }),
+    );
+  }
+  subs.push(vscode.window.onDidCloseTerminal((t) => store.forget(t)));
+  return subs;
+}
+
 /** Single encoder for portable → VS Code URI. All comparisons against
  *  VS Code-produced URI strings must convert through this first.
  *  Exported so integration tests can assert encoder symmetry. */
@@ -274,6 +365,12 @@ export function createVsCodeHost(
   // wrong the other way would hide the correct destination in every VS Code.
   // In practice the probe wins the race anyway: in the host this exists for, the
   // webview is not resolved until activation's relocation focuses it.
+  const terminalCapture = new TerminalCaptureStore();
+  // Pushed onto the extension's subscriptions where there is a context; a host
+  // built without one (tests) keeps the listeners for the process lifetime,
+  // which is the same lifetime the host itself has there.
+  for (const sub of watchTerminalOutput(terminalCapture)) context?.subscriptions.push(sub);
+
   let secondarySideBar = context?.globalState.get<boolean>(SECONDARY_SIDE_BAR_PROBE_KEY) ?? true;
   void Promise.resolve(vscode.commands.getCommands(true)).then(
     (cmds) => {
@@ -445,6 +542,33 @@ export function createVsCodeHost(
       } catch {
         /* the conversation is open either way */
       }
+    },
+
+    getTerminalCapture() {
+      return terminalCapture.current();
+    },
+
+    async revealContextSource(source: "problems" | "terminal") {
+      try {
+        await vscode.commands.executeCommand(
+          source === "terminal" ? "workbench.action.terminal.focus" : "workbench.actions.view.problems",
+        );
+      } catch {
+        // A workbench that has moved or renamed the view is not an error the
+        // user needs to see — the chip still sends what it stands for.
+      }
+    },
+
+    getDiagnostics(scope: HostDiagnosticsScope) {
+      if (scope.scope === "file" && scope.path) {
+        const uri = vscode.Uri.file(scope.path);
+        return toHostDiagnostics(uri, vscode.languages.getDiagnostics(uri));
+      }
+      // Already grouped by file — the pure layer regroups defensively, but this
+      // is where the natural order comes from.
+      return vscode.languages
+        .getDiagnostics()
+        .flatMap(([uri, items]) => toHostDiagnostics(uri, items));
     },
 
     createTerminal(nameOrOptions: string | HostTerminalOptions) {

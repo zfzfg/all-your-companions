@@ -3,6 +3,7 @@ import type {
   HostCancellationToken,
   HostContext,
   HostDisposable,
+  HostTerminalCapture,
   HostTextDocumentContentProvider,
   HostWebview,
   HostWebviewView,
@@ -18,6 +19,7 @@ import { AcpClient, EffortLevel, ExitPlanRequest, PermissionRequest, QuestionReq
 import type { AcpProvider, BackendSessionListEntry } from "./acp-backend";
 import { isAdapterProvider, isAcpProvider, ACP_PROVIDERS } from "./acp-backend";
 import { allProviderCapabilities, providerCapability } from "./provider-capabilities";
+import { parsePlanEntries } from "./plan-entries";
 import { CODEX_ACP_ADAPTER_VERSION, CodexBackend, isCodexCredentialError } from "./codex-backend";
 import { locateCodexCli, resolveCodexHome } from "./codex-cli-locator";
 import { CODEX_MANAGED_VERSION, installManagedCodex } from "./codex-managed-installer";
@@ -216,6 +218,16 @@ import {
   toggleChip,
   allocateImageIndex,
 } from "./chips";
+import {
+  contextChipLabel,
+  isDiagnosticsChip,
+  isFileChip,
+  isTerminalChip,
+  makeDiagnosticsChip,
+  makeTerminalChip,
+  type ContextChip,
+  type ContextChipPayload,
+} from "./context-chips";
 import { buildPromptWithImages, buildQueuedPromptWithImages, type PromptImageInput, type QueuedPromptContribution } from "./prompt-builder";
 import {
   chipsForQueueSend,
@@ -240,11 +252,13 @@ import {
   buildExcludeGlob,
   clampMentionIndexLimit,
   filterMentionFiles,
+  filterMentionSources,
   isMentionPathInsideWorkspace,
   mergeMentionEntries,
   normalizeRelPath,
   orderMentionIndex,
   resolveMentionAttachmentPath,
+  type ContextSourceId,
 } from "./mention";
 import {
   alwaysApproveSource,
@@ -834,8 +848,8 @@ export class GrokSidebar {
   private readonly deviceLoginPreflightShown = new Set<AcpProvider>();
   private reaper?: ReturnType<typeof setInterval>;
   private oauthShadowWarningShown = false;
-  private get chips(): FileChip[] { return this.focused.chips; }
-  private set chips(value: FileChip[]) { this.focused.chips = value; }
+  private get chips(): ContextChip[] { return this.focused.chips; }
+  private set chips(value: ContextChip[]) { this.focused.chips = value; }
   /** Attachment-staging ops still in flight — see trackAttach. */
   private readonly pendingAttach = new Set<Promise<void>>();
   /** Cached findFiles snapshot for the `@` popover (no open-editor merge).
@@ -3999,7 +4013,7 @@ Only continue if you trust this code.`,
     text: string,
     session: Session = this.focused,
     requester?: RemoteRequester,
-    requestedChips?: FileChip[],
+    requestedChips?: ContextChip[],
     fromQueue = false,
   ): Promise<void> {
     const authored = text ?? "";
@@ -4079,13 +4093,17 @@ Only continue if you trust this code.`,
     const promptDeps = {
       readFile: (p: string) => fs.readFileSync(p, "utf8"),
       extName: (p: string) => path.extname(p),
+      // Collected here, in the same tick the interjection is built.
+      contextChipPayload: this.contextChipPayloads(
+        contributions.flatMap((item) => item.chips),
+      ),
     };
 
     const builtContributions: QueuedPromptContribution[] = [];
     for (const item of contributions) {
       const itemImages: PromptImageInput[] = [];
       for (const chip of item.chips) {
-        if (chip.hidden || !isImageChip(chip)) continue;
+        if (chip.hidden || !isFileChip(chip) || !isImageChip(chip)) continue;
         const read = await this.readImageChip(chip, session, gen);
         if (read === "gone") {
           putBackOnComposer();
@@ -4119,7 +4137,7 @@ Only continue if you trust this code.`,
 
     // Steer interjections mid-turn should NOT append ambient/implicit editor context (active file/selection)
     // to avoid token ballooning and cache thrashing during tool execution. Only explicit attachments are sent.
-    const implicitChips: FileChip[] = [];
+    const implicitChips: ContextChip[] = [];
     const slashCommand = matchSlashCommand(
       queuedSendsText(contributions) || authored,
       client.availableCommands.map((c) => c.name),
@@ -9339,6 +9357,10 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     session.sessionInfoUnsupported = false;
     session.sawCompactNotification = false;
     session.lastPlanText = "";
+    // A new, resumed or restarted conversation starts with no checklist. The
+    // paired `clearMessages` below empties the rail on the webview side, so
+    // this needs no message of its own.
+    session.planEntries = [];
     session.pendingExitPlans.clear();
     session.pendingQuestions.clear();
     session.inFlightPlanComments.clear();
@@ -9777,14 +9799,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     });
     client.on("plan", (u) => {
       if (gen !== session.gen) return;
-      // Fallback stash. Current CLIs send exit_plan_mode with planContent
-      // populated; postExitPlanRequest prefers req.plan over lastPlanText.
-      session.lastPlanText =
-        (typeof u?.plan === "string" ? u.plan : "") ||
-        (typeof u?.planText === "string" ? u.planText : "") ||
-        (typeof u?.content === "string" ? u.content : "") ||
-        (typeof u?.content?.text === "string" ? u.content.text : "");
-      this.host.appendLine(`[plan] event payload keys: ${Object.keys(u ?? {}).join(", ")}`);
+      this.applyPlanUpdate(session, u);
     });
     client.on("promptComplete", (meta) => {
       if (gen !== session.gen) return;
@@ -10736,12 +10751,16 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       case "removeChip": {
         // A removed image chip's staged file has no other reference — reclaim
         // it now instead of leaving multi-MB orphans until the weekly sweep.
+        // Only a file chip owns bytes on disk; a diagnostics / terminal chip
+        // has nothing to reclaim.
         const removed = session.chips.find((c) => c.id === msg.id);
-        if (removed && isImageChip(removed)) {
-          void fs.promises.unlink(removed.path).catch(() => {});
-        } else if (removed) {
-          const uploadDir = stagedUploadDirectory(this.fileStagingDir(), removed.path);
-          if (uploadDir) void fs.promises.rm(uploadDir, { recursive: true, force: true }).catch(() => {});
+        if (removed && isFileChip(removed)) {
+          if (isImageChip(removed)) {
+            void fs.promises.unlink(removed.path).catch(() => {});
+          } else {
+            const uploadDir = stagedUploadDirectory(this.fileStagingDir(), removed.path);
+            if (uploadDir) void fs.promises.rm(uploadDir, { recursive: true, force: true }).catch(() => {});
+          }
         }
         session.chips = removeChip(session.chips, msg.id);
         this.postChips(session);
@@ -11523,10 +11542,15 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         } catch (e) {
           this.host.appendLine(`[mention] index failed: ${(e as Error).message}`);
         }
+        // Virtual entries ride their own field so the file ranking above stays
+        // exactly what it was, and so `files` keeps meaning "paths the mention
+        // catalog can resolve".
+        const sources = filterMentionSources(msg.query);
+        const reply: HostMsg = { type: "mentionResults", query: msg.query, files, sources };
         if (requester) {
-          this.sendRemoteRequester(requester, { type: "mentionResults", query: msg.query, files });
+          this.sendRemoteRequester(requester, reply);
         } else {
-          this.post({ type: "mentionResults", query: msg.query, files });
+          this.post(reply);
         }
         break;
       }
@@ -11580,6 +11604,13 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         await this.trackAttach(this.addDroppedFile(abs, false, attachmentOwner));
         break;
       }
+      case "addContextChip":
+        this.addContextSourceChip(msg.source, attachmentOwner, requester);
+        break;
+      case "openContextChipSource":
+        // host-local by policy — a remote never reaches this arm.
+        await this.host.revealContextSource(msg.source);
+        break;
       case "listProjectDir": {
         // Remote file browse. Fence: repoScopeFor (which root) +
         // listTreeDir/resolveTreePath (paths inside it).
@@ -14812,6 +14843,44 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     this.diffProvider.delete(uris.left, uris.right);
   }
 
+  /**
+   * Take one ACP `plan` update into the session (AP-02).
+   *
+   * One notification, two unrelated shapes — see src/plan-entries.ts. The
+   * plan-TEXT stash below is unchanged from before AP-02 and still runs for
+   * every provider: on a structured update each of those reads is `undefined`
+   * and `lastPlanText` lands on "" exactly as it always did, so nothing about
+   * grok's or Antigravity's path can move. Only a real `entries` list adds
+   * anything, and there is no heuristic that could manufacture one from prose.
+   */
+  private applyPlanUpdate(session: Session, u: any): void {
+    // Fallback stash. Current CLIs send exit_plan_mode with planContent
+    // populated; postExitPlanRequest prefers req.plan over lastPlanText.
+    session.lastPlanText =
+      (typeof u?.plan === "string" ? u.plan : "") ||
+      (typeof u?.planText === "string" ? u.planText : "") ||
+      (typeof u?.content === "string" ? u.content : "") ||
+      (typeof u?.content?.text === "string" ? u.content.text : "");
+    this.host.appendLine(`[plan] event payload keys: ${Object.keys(u ?? {}).join(", ")}`);
+    const entries = parsePlanEntries(u);
+    if (!entries) return;
+    session.planEntries = entries;
+    this.emit(session, { type: "planEntries", entries });
+  }
+
+  /**
+   * Retire the checklist and SAY so.
+   *
+   * Separate from writing the field because the message is transient: a client
+   * that is never told keeps painting the list it last received, and no buffer
+   * replay will correct it.
+   */
+  private clearPlanEntries(session: Session): void {
+    if (!session.planEntries.length) return;
+    session.planEntries = [];
+    this.emit(session, { type: "planEntries", entries: [] });
+  }
+
   private async postExitPlanRequest(req: ExitPlanRequest, session: Session, gen: number): Promise<void> {
     const plan = req.plan || session.lastPlanText;
     let snapshot: { path: string; name: string } | undefined;
@@ -14883,6 +14952,9 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
   private applyRewindToView(session: Session, surviving: number): void {
     session.buffer = truncateReplayBuffer(session.buffer, surviving);
     session.userMessageCount = surviving;
+    // The checklist described the turns that just went away. Keeping it would
+    // claim steps against a conversation that no longer contains them.
+    this.clearPlanEntries(session);
     session.liveFeedbackEligible = false;
     session.turnRating = 0;
     session.historyEventCount = historyEventCount(session.buffer);
@@ -15086,10 +15158,11 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     }
   }
 
-  private async retainUploadedFilesForSession(session: Session, chips: FileChip[]): Promise<void> {
+  private async retainUploadedFilesForSession(session: Session, chips: ContextChip[]): Promise<void> {
     const sid = session.activeSessionId ?? session.client?.sessionId;
     if (!sid) return;
     const uploaded = chips
+      .filter(isFileChip)
       .filter((chip) => !chip.hidden && !!stagedUploadDirectory(this.fileStagingDir(), chip.path))
       .map((chip) => chip.path);
     if (!uploaded.length) return;
@@ -15262,6 +15335,104 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     return session;
   }
 
+  // ── Context chips: diagnostics and terminal (AP-03) ──────────────────────
+  //
+  // Two halves, deliberately far apart in time:
+  //   attach — probe the source through the host facade, refuse an empty one,
+  //            stage a chip that holds only metadata;
+  //   send   — read the source AGAIN (contextChipPayloads) and hand the fresh
+  //            bytes to the prompt builder.
+  // Nothing carries content between the two. A chip attached before a build ran
+  // must send the problems the build produced, not the empty list from before.
+
+  /**
+   * Stage `@problems` / `@terminal`.
+   *
+   * The probe is also the emptiness check: no problems and no captured output
+   * mean there is nothing to attach, and saying so beats a chip that silently
+   * contributes an empty block at send. A facade that throws lands in the same
+   * branch — the user is told, the composer is untouched.
+   */
+  private addContextSourceChip(
+    source: ContextSourceId,
+    owner: AttachmentOwner,
+    requester?: RemoteRequester,
+  ): void {
+    const session = owner();
+    if (!session) return; // asking tab gone — drop, never redirect
+    let chip: ContextChip;
+    if (source === "problems") {
+      let count: number;
+      try {
+        count = this.host.getDiagnostics({ scope: "workspace" }).length;
+      } catch (e) {
+        this.host.appendLine(`[context-chip] diagnostics probe failed: ${(e as Error).message}`);
+        this.reportRequester(requester, "warning", "Could not read the editor's problems.");
+        return;
+      }
+      if (!count) {
+        this.reportRequester(requester, "info", "No problems reported — nothing to attach.");
+        return;
+      }
+      chip = makeDiagnosticsChip({ scope: "workspace", count });
+    } else {
+      let capture: HostTerminalCapture | undefined;
+      try {
+        capture = this.host.getTerminalCapture();
+      } catch (e) {
+        this.host.appendLine(`[context-chip] terminal probe failed: ${(e as Error).message}`);
+        this.reportRequester(requester, "warning", "Could not read the terminal.");
+        return;
+      }
+      if (!capture?.text.trim()) {
+        this.reportRequester(
+          requester,
+          "info",
+          "No terminal output captured yet. Run a command in the integrated terminal first — capture needs shell integration.",
+        );
+        return;
+      }
+      chip = makeTerminalChip({
+        label: capture.label,
+        bytes: Buffer.byteLength(capture.text, "utf8"),
+      });
+    }
+    session.chips.push(chip);
+    this.postChips(session);
+  }
+
+  /**
+   * Collect, at SEND, what every visible non-file chip contributes.
+   *
+   * Returns a resolver for `PromptBuilderDeps.contextChipPayload`. A source that
+   * throws or emptied resolves to `undefined`, which the builder renders as
+   * nothing at all — the send goes through with one fewer block rather than
+   * failing, the same degradation an unreadable selection already gets.
+   */
+  private contextChipPayloads(
+    chips: readonly ContextChip[],
+  ): (chip: ContextChip) => ContextChipPayload | undefined {
+    const payloads = new Map<string, ContextChipPayload>();
+    for (const chip of chips) {
+      if (chip.hidden || isFileChip(chip)) continue;
+      try {
+        if (isDiagnosticsChip(chip)) {
+          const items = this.host.getDiagnostics({ scope: chip.scope, path: chip.path });
+          payloads.set(chip.id, { kind: "diagnostics", items });
+        } else if (isTerminalChip(chip)) {
+          const capture = this.host.getTerminalCapture();
+          if (capture) payloads.set(chip.id, { kind: "terminal", label: capture.label, text: capture.text });
+        }
+      } catch (e) {
+        // Logged, never fatal: the turn the user asked for still goes.
+        this.host.appendLine(
+          `[context-chip] ${contextChipLabel(chip)} could not be collected: ${(e as Error).message}`,
+        );
+      }
+    }
+    return (chip) => payloads.get(chip.id);
+  }
+
   /** A prompt is running or pending user action — a new prompt now would
    *  cancel it (a second `session/prompt` kills the in-flight turn). */
   /** Whether a prompt is genuinely running. This used to read `status`, which
@@ -15357,7 +15528,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     session: Session,
     text: string,
     bare: boolean,
-    chips: FileChip[] = explicitVisibleChips(session.chips),
+    chips: ContextChip[] = explicitVisibleChips(session.chips),
   ): void {
     if (bare) {
       this.emit(session, {
@@ -15445,17 +15616,17 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       ? queuedSendCommit.items.map((item) => ({ text: item.text, chips: item.chips ?? [] }))
       : undefined;
     const implicitChips = session.chips.filter((chip) => isImplicitChip(chip));
-    let chips: FileChip[] = [];
+    let chips: ContextChip[] = [];
     let contributions: QueuedPromptContribution[] | undefined;
     if (bare) {
       chips = [];
     } else if (queuedItems) {
       contributions = [];
-      const queuedChips: FileChip[] = [];
+      const queuedChips: ContextChip[] = [];
       for (const item of queuedItems) {
         const itemImages: PromptImageInput[] = [];
         for (const chip of item.chips) {
-          if (chip.hidden || !isImageChip(chip)) continue;
+          if (chip.hidden || !isFileChip(chip) || !isImageChip(chip)) continue;
           const read = await this.readImageChip(chip, session, gen);
           if (read === "gone") return;
           if (read === "failed") return;
@@ -15478,7 +15649,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       : [];
     if (!contributions) {
       for (const chip of chips) {
-        if (chip.hidden || !isImageChip(chip)) continue;
+        if (chip.hidden || !isFileChip(chip) || !isImageChip(chip)) continue;
         const read = await this.readImageChip(chip, session, gen);
         if (read === "gone") return;
         if (read === "failed") return;
@@ -15502,6 +15673,10 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     const promptDeps = {
       readFile: (p: string) => fs.readFileSync(p, "utf8"),
       extName: (p: string) => path.extname(p),
+      // The whole point of the chip split: the diagnostics and terminal state
+      // read HERE, after every attachment await, not the state that existed
+      // when the chip was staged.
+      contextChipPayload: this.contextChipPayloads(chips),
     };
     const { blocks: promptBlocks } = contributions
       ? buildQueuedPromptWithImages(contributions, implicitChips, promptDeps, slashCommand != null)
@@ -15742,7 +15917,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     session: Session,
     err: unknown,
     displayText: string,
-    chips: FileChip[],
+    chips: ContextChip[],
     promptBlocks: Parameters<AcpClient["prompt"]>[0],
   ): Promise<boolean> {
     const errorText = errorDetail(err);
@@ -16136,8 +16311,8 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     this.sendRemoteSession(session, remoteMessage);
   }
 
-  private localPreviewChips(session: Session, webview: HostWebview): FileChip[] {
-    return session.chips.map((chip) => isImageChip(chip)
+  private localPreviewChips(session: Session, webview: HostWebview): ContextChip[] {
+    return session.chips.map((chip) => isFileChip(chip) && isImageChip(chip)
       // Staging paths are genuine local disk (Uri.file roots).
       ? { ...chip, previewSrc: webview.asWebviewUri(Uri.file(chip.path)) }
       : chip);
@@ -16145,7 +16320,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
 
   private localizeHistoryMessage(message: HostMsg, webview: HostWebview): HostMsg {
     if (message.type === "userMessage" && message.chips) {
-      return { ...message, chips: message.chips.map((chip) => isImageChip(chip)
+      return { ...message, chips: message.chips.map((chip) => isFileChip(chip) && isImageChip(chip)
         ? { ...chip, ...(fs.existsSync(chip.path)
           ? { previewSrc: webview.asWebviewUri(Uri.file(chip.path)) }
           : {}) }
@@ -16156,7 +16331,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         ...message,
         queued: message.queued.map((item) => ({
           ...item,
-          ...(item.chips ? { chips: item.chips.map((chip) => isImageChip(chip)
+          ...(item.chips ? { chips: item.chips.map((chip) => isFileChip(chip) && isImageChip(chip)
             ? { ...chip, ...(fs.existsSync(chip.path)
               ? { previewSrc: webview.asWebviewUri(Uri.file(chip.path)) }
               : {}) }
@@ -16196,6 +16371,10 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     // one. `sessionUiSnapshot` restores eligibility after historyReplay ends.
     "turnFeedbackAck",
     "providerCapabilities",
+    // Whole-list replacement on every agent update. Buffered, a ten-step plan
+    // would replay ten stale checklists on every focus switch; `sessionUiSnapshot`
+    // re-sends the current one instead.
+    "planEntries",
   ]);
   /**
    * Host→rail catalog surface. Everything else stays chat-only so a user who
@@ -18920,7 +19099,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
   private refreshImplicitChip(forcePost = false): void {
     const includeActive = this.host.getConfiguration("grok")
       .get<boolean>("includeActiveFileByDefault", true);
-    const prev = this.chips.find(isImplicitChip);
+    const prev = this.chips.filter(isFileChip).find(isImplicitChip);
     const editor = this.host.getActiveTextEditor();
 
     if (!includeActive || !editor || editor.document.uri.scheme !== "file") {
@@ -19896,6 +20075,17 @@ ${fileShellOpen}
 
   <footer class="composer">
     <button id="scroll-bottom-btn" class="scroll-bottom-btn" type="button" title="Scroll to bottom"></button>
+    <!-- Agent step checklist (AP-02). Present but hidden until a structured
+         plan update with entries arrives; providers that send plan TEXT
+         never fill it. -->
+    <div id="todo-rail" class="todo-rail" hidden>
+      <button id="todo-rail-head" class="todo-rail-head" type="button" aria-expanded="true" aria-controls="todo-rail-list">
+        <span id="todo-rail-caret" class="todo-rail-caret" aria-hidden="true"></span>
+        <span class="todo-rail-title">Tasks</span>
+        <span id="todo-rail-count" class="todo-rail-count"></span>
+      </button>
+      <ol id="todo-rail-list" class="todo-rail-list"></ol>
+    </div>
     <div class="composer-card">
       <div id="attachments" class="attachments"></div>
       <div class="composer-input-wrap">

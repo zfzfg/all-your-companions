@@ -46,6 +46,14 @@ export const BODY = `
   </main>
   <footer class="composer">
     <button id="scroll-bottom-btn" class="scroll-bottom-btn"></button>
+    <div id="todo-rail" class="todo-rail" hidden>
+      <button id="todo-rail-head" class="todo-rail-head" type="button" aria-expanded="true" aria-controls="todo-rail-list">
+        <span id="todo-rail-caret" class="todo-rail-caret"></span>
+        <span class="todo-rail-title">Tasks</span>
+        <span id="todo-rail-count" class="todo-rail-count"></span>
+      </button>
+      <ol id="todo-rail-list" class="todo-rail-list"></ol>
+    </div>
     <div class="composer-card">
       <div id="attachments"></div>
       <div class="composer-input-wrap">

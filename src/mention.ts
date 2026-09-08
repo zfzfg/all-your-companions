@@ -182,3 +182,55 @@ export function filterMentionFiles(
   scored.sort((a, b) => a.tier - b.tier || a.path.length - b.path.length || a.path.localeCompare(b.path));
   return scored.slice(0, limit).map((s) => s.path);
 }
+
+// ── Non-file sources ─────────────────────────────────────────────────────────
+//
+// `@` answers with files AND with the two host-collected sources from AP-03.
+// They ride a SEPARATE additive field on `mentionResults` rather than being
+// mixed into `files`, for two reasons: `files` is a list of workspace-relative
+// paths that `addMentionFile` resolves against the mention catalog (a fake path
+// in it would be a hole, not a feature), and a client that predates this field
+// simply keeps showing files.
+
+/** Which host source a virtual `@` entry stands for. */
+export type ContextSourceId = "problems" | "terminal";
+
+export interface MentionSourceEntry {
+  source: ContextSourceId;
+  /** Inserted into the composer as `@<token> ` when picked. */
+  token: string;
+  label: string;
+  /** One line of explanation shown beside the label. */
+  detail: string;
+}
+
+/** The catalog, in the order it is offered. Errors before console output: a
+ *  problem list is the more common thing to hand an agent, and it is the one
+ *  that exists on every machine (terminal capture needs shell integration). */
+export const MENTION_SOURCES: readonly MentionSourceEntry[] = [
+  {
+    source: "problems",
+    token: "problems",
+    label: "@problems",
+    detail: "Errors and warnings the editor is reporting",
+  },
+  {
+    source: "terminal",
+    token: "terminal",
+    label: "@terminal",
+    detail: "Output of the terminal you last used",
+  },
+];
+
+/**
+ * Virtual entries for the head of the results list.
+ *
+ * Prefix match on the token only — no fuzzy tier. A source has ONE name, and
+ * the subsequence tier that helps find `src/a/b/chips.ts` would put `@problems`
+ * under `@ps`, above the files someone was actually reaching for. Empty query
+ * offers both, which is what makes them discoverable at all.
+ */
+export function filterMentionSources(query: string): MentionSourceEntry[] {
+  const q = query.toLowerCase();
+  return MENTION_SOURCES.filter((entry) => entry.token.startsWith(q));
+}

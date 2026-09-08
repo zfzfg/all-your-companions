@@ -49,7 +49,16 @@ export function isVisionMime(mime: string): boolean {
   return VISION_MIME_RE.test(mime);
 }
 
-export function isImageChip(chip: FileChip): boolean {
+/** Structural minimum the generic chip helpers below need. Typed this way (not
+ *  as `FileChip`) so they also serve the wider `ContextChip` union without
+ *  context-chips.ts having to re-implement identity, removal and toggling. */
+export interface ChipIdentity {
+  id: string;
+  hidden: boolean;
+  imageIndex?: number;
+}
+
+export function isImageChip(chip: ChipIdentity): boolean {
   return chip.imageIndex != null;
 }
 
@@ -158,7 +167,7 @@ export function makeImageChip(
  */
 export function allocateImageIndex(
   highWater: number,
-  staged: readonly FileChip[],
+  staged: readonly ChipIdentity[],
 ): { index: number; highWater: number } {
   let liveMax = 0;
   let any = false;
@@ -184,21 +193,21 @@ export function allocateImageIndex(
  * remembered preference seeds it.
  */
 export function implicitChipStartsHidden(
-  prev: FileChip | undefined,
+  prev: { hidden: boolean } | undefined,
   remembered: boolean,
 ): boolean {
   return prev ? prev.hidden : remembered;
 }
 
-export function removeChip(chips: FileChip[], id: string): FileChip[] {
+export function removeChip<T extends ChipIdentity>(chips: T[], id: string): T[] {
   return chips.filter((c) => c.id !== id);
 }
 
-export function toggleChip(chips: FileChip[], id: string): FileChip[] {
+export function toggleChip<T extends ChipIdentity>(chips: T[], id: string): T[] {
   return chips.map((c) => (c.id === id ? { ...c, hidden: !c.hidden } : c));
 }
 
-export function clearImplicitChips(chips: FileChip[]): FileChip[] {
+export function clearImplicitChips<T extends ChipIdentity>(chips: T[]): T[] {
   return chips.filter((c) => !isImplicitChip(c));
 }
 
@@ -206,7 +215,7 @@ export function clearImplicitChips(chips: FileChip[]): FileChip[] {
  *  (it mirrors IDE state, not a one-shot attachment) — and so does anything
  *  NOT in the send's snapshot: a chip staged while the send was pre-reading
  *  images belongs to the next turn, not the bin. */
-export function consumeChips(current: FileChip[], sent: FileChip[]): FileChip[] {
+export function consumeChips<T extends ChipIdentity>(current: T[], sent: readonly ChipIdentity[]): T[] {
   const sentIds = new Set(sent.map((c) => c.id));
   return current.filter((c) => isImplicitChip(c) || !sentIds.has(c.id));
 }
@@ -214,11 +223,11 @@ export function consumeChips(current: FileChip[], sent: FileChip[]): FileChip[] 
 /** An implicit chip is the active-editor file auto-added for ambient context
  *  (vs. a file the user explicitly attached). The id prefix is the source of
  *  truth — set by makeImplicitChip / makeExplicitChip. */
-export function isImplicitChip(chip: FileChip): boolean {
+export function isImplicitChip(chip: ChipIdentity): boolean {
   return chip.id.startsWith("implicit:");
 }
 
 /** A chip the user staged (file, image, @-mention) and did not hide. */
-export function isExplicitVisibleChip(chip: FileChip): boolean {
+export function isExplicitVisibleChip(chip: ChipIdentity): boolean {
   return !chip.hidden && !isImplicitChip(chip);
 }

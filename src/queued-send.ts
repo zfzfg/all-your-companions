@@ -1,20 +1,23 @@
-import type { FileChip } from "./chips";
+import type { ContextChip } from "./context-chips";
 import { isImplicitChip } from "./chips";
+import { isFileChip } from "./context-chips";
 import type { HostMsg, QueuedSend } from "./protocol";
 
 export type { QueuedSend };
 
 /** Session storage: chips always present (empty array if none). */
-export type QueuedSendEntry = { text: string; chips: FileChip[] };
+export type QueuedSendEntry = { text: string; chips: ContextChip[] };
 
-/** Persistable copy of a composer chip: drop webview-only preview fields. */
-export function cloneChipForQueue(chip: FileChip): FileChip {
+/** Persistable copy of a composer chip: drop webview-only preview fields.
+ *  Only a file chip has any — the other kinds are already pure metadata. */
+export function cloneChipForQueue(chip: ContextChip): ContextChip {
+  if (!isFileChip(chip)) return { ...chip };
   const { previewSrc: _previewSrc, fullId: _fullId, ...rest } = chip;
   return { ...rest };
 }
 
 /** Explicit attachments the user staged — not the ambient editor chip. */
-export function explicitVisibleChips(chips: readonly FileChip[]): FileChip[] {
+export function explicitVisibleChips(chips: readonly ContextChip[]): ContextChip[] {
   return chips.filter((chip) => !chip.hidden && !isImplicitChip(chip));
 }
 
@@ -28,9 +31,9 @@ export function explicitVisibleChips(chips: readonly FileChip[]): FileChip[] {
  *   is authoritative.
  */
 export function chipsForQueueSend(
-  sessionChips: readonly FileChip[],
-  requested: readonly Pick<FileChip, "id">[] | undefined,
-): FileChip[] {
+  sessionChips: readonly ContextChip[],
+  requested: readonly Pick<ContextChip, "id">[] | undefined,
+): ContextChip[] {
   const explicit = explicitVisibleChips(sessionChips);
   if (requested === undefined) return explicit.map(cloneChipForQueue);
   const ids = new Set(requested.map((chip) => chip.id).filter(Boolean));
@@ -40,7 +43,7 @@ export function chipsForQueueSend(
 /** True when any requested id still lives on a queued contribution. */
 export function queuedSendsContainChipIds(
   items: readonly QueuedSendEntry[],
-  requested: readonly Pick<FileChip, "id">[] | undefined,
+  requested: readonly Pick<ContextChip, "id">[] | undefined,
 ): boolean {
   if (!requested?.length) return false;
   const ids = new Set(requested.map((chip) => chip.id).filter(Boolean));
@@ -51,7 +54,7 @@ export function queuedSendsContainChipIds(
 export function enqueueQueuedSend(
   items: readonly QueuedSendEntry[],
   text: string,
-  chips: readonly FileChip[],
+  chips: readonly ContextChip[],
 ): QueuedSendEntry[] {
   return [...items, { text, chips: chips.map(cloneChipForQueue) }];
 }
@@ -161,11 +164,11 @@ export function dequeueQueuedSends(
  *  Queued chips lead: Edit prepends their text. Image numbers are left
  *  alone — a chip keeps the index it was shown. */
 export function restoreQueuedChips(
-  sessionChips: readonly FileChip[],
+  sessionChips: readonly ContextChip[],
   items: readonly QueuedSendEntry[],
-): FileChip[] {
+): ContextChip[] {
   const have = new Set(sessionChips.map((chip) => chip.id));
-  const fromQueue: FileChip[] = [];
+  const fromQueue: ContextChip[] = [];
   for (const item of items) {
     for (const chip of item.chips) {
       if (have.has(chip.id)) continue;
@@ -176,6 +179,6 @@ export function restoreQueuedChips(
   return [...fromQueue, ...sessionChips];
 }
 
-export function allQueuedChips(items: readonly QueuedSendEntry[]): FileChip[] {
+export function allQueuedChips(items: readonly QueuedSendEntry[]): ContextChip[] {
   return items.flatMap((item) => item.chips);
 }

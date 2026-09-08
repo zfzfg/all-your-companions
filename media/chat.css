@@ -3170,6 +3170,135 @@ blockquote {
   border-color: var(--vscode-focusBorder);
 }
 
+/* ---- todo rail (AP-02) ---- */
+
+/* The agent's step checklist, pinned directly above the composer so it stays in
+   view while the transcript scrolls under it. Sits inside .composer (a flex
+   column), so it needs no positioning of its own to stay put. Hidden entirely
+   when there are no steps -- an empty bordered strip reads as a broken feature,
+   and providers that send plan TEXT never fill this at all. */
+.todo-rail {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: var(--pad);
+  border: 1px solid var(--vscode-input-border, var(--vscode-editorWidget-border));
+  border-radius: var(--radius);
+  background: var(--vscode-editorWidget-background, var(--vscode-input-background));
+  overflow: hidden;
+}
+
+.todo-rail-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 8px;
+  border: 0;
+  background: none;
+  color: var(--vscode-foreground);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.todo-rail-head:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+.todo-rail-caret {
+  display: inline-flex;
+  align-items: center;
+  opacity: 0.7;
+}
+.todo-rail-title {
+  font-weight: 600;
+  font-size: 0.92em;
+}
+/* The counter is the whole point of the head when the list is folded away, so
+   it keeps full contrast while the label around it stays quiet. */
+.todo-rail-count {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.85em;
+  opacity: 0.85;
+}
+
+/* Bounded, then scrollable: a twenty-step plan must not push the composer off
+   the panel. */
+.todo-rail-list {
+  margin: 0;
+  padding: 0 8px 6px;
+  list-style: none;
+  max-height: 12em;
+  overflow-y: auto;
+}
+
+.todo-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 2px 0;
+  font-size: 0.92em;
+  line-height: 1.35;
+}
+.todo-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 12px;
+  height: 1.35em;
+}
+.todo-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Pending: an outline dot -- nothing has happened to this step yet. */
+.todo-pending .todo-mark::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border: 1px solid var(--vscode-descriptionForeground, currentColor);
+  border-radius: 50%;
+}
+.todo-pending .todo-text {
+  color: var(--vscode-descriptionForeground);
+}
+
+/* In progress: a ring that turns. Falls back to a plain ring under reduced
+   motion and in any renderer that ignores the animation. */
+.todo-in-progress .todo-mark::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid var(--vscode-progressBar-background, var(--vscode-focusBorder));
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: todo-spin 0.9s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .todo-in-progress .todo-mark::before { animation: none; border-top-color: inherit; }
+}
+@keyframes todo-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Completed: the tick glyph, and the text steps back -- done work should not
+   compete with the step being worked on. */
+.todo-completed .todo-mark {
+  color: var(--vscode-charts-green, var(--vscode-testing-iconPassed, #4ec9b0));
+}
+.todo-completed .todo-text {
+  color: var(--vscode-descriptionForeground);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+/* The one step the agent says it is on. */
+.todo-active .todo-text {
+  color: var(--vscode-foreground);
+  font-weight: 600;
+}
+
 /* Floating "Scroll to bottom" (#28). Anchored to the composer (the chat input
    area), so it sits inside the `--chat-zoom` scaled coordinate space and stays
    correctly placed above the input at any font scale. Hidden (opacity + no
@@ -3752,6 +3881,16 @@ textarea#input {
   width: 11px;
   height: 11px;
 }
+/* A diagnostics / terminal chip stands for a live source rather than a file, so
+   its whole body is clickable (it opens that panel). The pointer is the only
+   thing that says so — the row is otherwise a plain attachment on purpose, since
+   it behaves like one everywhere else. */
+.attachment-source {
+  cursor: pointer;
+}
+.attachment-source:hover {
+  border-color: var(--vscode-focusBorder);
+}
 .attachment-preview {
   display: inline-flex;
   flex: 0 0 auto;
@@ -4004,6 +4143,12 @@ textarea#input {
 .mention-item:hover .mention-dir, .mention-item.active .mention-dir {
   color: inherit;
   opacity: 0.75;
+}
+/* The virtual @problems / @terminal rows head the list. A rule under the last
+   one separates "sources the host collects" from "files in this workspace"
+   without a heading, which would cost a row in a six-row popover. */
+.mention-source + .mention-item:not(.mention-source) {
+  border-top: 1px solid var(--vscode-editorWidget-border);
 }
 
 /* ---- drag target ---- */

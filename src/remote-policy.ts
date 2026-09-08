@@ -11,7 +11,8 @@
 //   - outbound (host -> remote client): HostMsg, mirrored / transformed / suppressed.
 
 import type { HostMsg, HostUiCapabilities, WebviewMsg } from "./protocol";
-import { isImageChip, type FileChip } from "./chips";
+import { isImageChip } from "./chips";
+import { isFileChip, type ContextChip } from "./context-chips";
 import { isPrimerText } from "./grok-primer";
 import { projectMcpServersMessageForRemote } from "./mcp";
 import { countsAsUserBubble } from "./plan-restore";
@@ -353,6 +354,11 @@ export const INBOUND_DISPOSITION: Record<WebviewMsg["type"], InboundDisposition>
   // lexical + canonical workspace containment — same composer-state class
   // as removeChip/toggleChip
   addMentionFile: "propose",
+  // Same composer-state tier as addMentionFile, and the same reasoning: the
+  // message carries a source name, not content, and the content it later pulls
+  // in (workspace problems, the desk terminal's output) is no wider than what
+  // readProjectFile already hands a `view` remote.
+  addContextChip: "propose",
   // Durable connection mutation is desk-only. Remote clients may only retry an
   // already-connected provider's session through retryProviderSession.
   recheckConnection: "host-local",
@@ -463,6 +469,9 @@ export const INBOUND_DISPOSITION: Record<WebviewMsg["type"], InboundDisposition>
   moveView: "host-local",
   dropFile: "host-local",
   pickFile: "host-local",
+  // Focuses a panel in the local VS Code window; there is nothing for a remote
+  // tab to do with it, and it must not be able to poke the desk's workbench.
+  openContextChipSource: "host-local",
   voiceStart: "host-local",
   voiceStop: "host-local",
   remoteVoiceStart: "propose",
@@ -575,6 +584,8 @@ export const REMOTE_REQUIRES_BOUND_SESSION: Record<WebviewMsg["type"], boolean> 
   removeChip: true,
   toggleChip: true,
   addMentionFile: true,
+  addContextChip: true,
+  openContextChipSource: false,
   recheckConnection: false,
   refreshProviders: false,
   retryProviderSession: true,
@@ -913,6 +924,9 @@ export const OUTBOUND_DISPOSITION: Record<HostMsg["type"], OutboundDisposition> 
   modeChanged: "mirror",
   planModeAvailability: "mirror",
   providerCapabilities: "mirror",
+  // Display-only checklist of the agent's own steps; carries no path, no
+  // command, and no affordance. Same sensitivity as the mode badge beside it.
+  planEntries: "mirror",
   openModePopover: "mirror",
   chips: "mirror",
   commandsUpdate: "mirror",
@@ -1089,6 +1103,7 @@ export const OUTBOUND_PROJECT_AUTH: Record<HostMsg["type"], OutboundProjectAuth>
   modeChanged: "scope",
   planModeAvailability: "scope",
   providerCapabilities: "scope",
+  planEntries: "scope",
   commandsUpdate: "scope",
   mentionResults: "scope",
   // Carry the scoped repo cwd; authorize against that field (message-cwd) so a
@@ -1391,8 +1406,11 @@ function dataUriFitsThumbnailBudget(src: string): boolean {
   return payload.length <= MAX_REMOTE_THUMBNAIL_BYTES;
 }
 
-function inlineChipPreviewForRemote(chip: FileChip, deps: MediaInlineDeps): FileChip {
-  if (!isImageChip(chip)) return chip;
+function inlineChipPreviewForRemote(chip: ContextChip, deps: MediaInlineDeps): ContextChip {
+  // Only a file chip can carry pixels. A diagnostics / terminal chip crosses
+  // untouched: it holds no bytes, and a client too old to know its `kind`
+  // renders it from `relPath` as a plain chip rather than failing.
+  if (!isFileChip(chip) || !isImageChip(chip)) return chip;
   const src = chip.previewSrc?.startsWith("data:image/") && dataUriFitsThumbnailBudget(chip.previewSrc)
     ? chip.previewSrc
     : thumbnailDataUri(chip.path, chip.mimeType, deps);

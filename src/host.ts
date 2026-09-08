@@ -442,6 +442,41 @@ export interface HostSaveDialogOptions {
   title?: string;
 }
 
+/**
+ * One editor diagnostic, flattened at the seam.
+ *
+ * Deliberately not `vscode.Diagnostic`: the pure layer must be able to format
+ * these without the VS Code module, and a desktop host has its own language
+ * services to map onto the same five fields.
+ */
+export interface HostDiagnostic {
+  /** Workspace-relative where the path is inside a folder, forward slashes. */
+  path: string;
+  /** 1-based, matching what the Problems panel shows. */
+  line: number;
+  /** 1-based. */
+  column: number;
+  severity: "error" | "warning" | "info" | "hint";
+  message: string;
+  /** Producer ("ts", "eslint") when the language service names one. */
+  source?: string;
+}
+
+/** Which diagnostics {@link Host.getDiagnostics} should return. Mirrors the
+ *  shape of a diagnostics context chip so the caller passes the chip through. */
+export interface HostDiagnosticsScope {
+  scope: "file" | "workspace";
+  /** Absolute path; required for `scope: "file"`, ignored otherwise. */
+  path?: string;
+}
+
+/** A snapshot of what the user's terminal has printed. */
+export interface HostTerminalCapture {
+  /** Terminal name, for the chip label ("bash", "npm run dev"). */
+  label: string;
+  text: string;
+}
+
 export interface HostTerminalOptions {
   name: string;
   shellPath?: string;
@@ -534,6 +569,26 @@ export interface Host {
 
   // ── Terminals ──────────────────────────────────────────────────────────
   createTerminal(nameOrOptions: string | HostTerminalOptions): HostTerminal;
+  /**
+   * Output of the terminal the user last worked in, or `undefined` when the
+   * host has captured none.
+   *
+   * "Captured", not "read": VS Code has no API that hands back a terminal's
+   * scrollback, so the VS Code host keeps a rolling buffer fed by shell
+   * integration (`onDidStartTerminalShellExecution`). The alternative — select
+   * all, copy, read the clipboard — clobbers both the user's selection and
+   * their clipboard on every attach, which is too high a price for a context
+   * chip. A terminal without shell integration therefore reports nothing, and
+   * the caller must say so rather than attach an empty chip.
+   */
+  getTerminalCapture(): HostTerminalCapture | undefined;
+  /**
+   * Bring the surface a context chip stands for on screen: the problems list,
+   * or the terminal. A typed intent rather than a command id, so a desktop host
+   * can map it onto whatever it calls those places. Must never throw — failing
+   * to focus a panel cannot be allowed to look like a failed click.
+   */
+  revealContextSource(source: "problems" | "terminal"): Thenable<void>;
 
   // ── Progress ───────────────────────────────────────────────────────────
   withProgress<T>(
@@ -606,6 +661,15 @@ export interface Host {
   ): Thenable<Uri[]>;
   /** Whether `fsPath` belongs to an open workspace folder (matched by path). */
   isInWorkspace(fsPath: string): boolean;
+
+  // ── Diagnostics ────────────────────────────────────────────────────────
+  /**
+   * Problems currently reported by the host's language services. Cheap and
+   * synchronous — VS Code answers from an in-memory collection — so callers
+   * may use the returned length as the "is there anything here at all" probe
+   * before staging a chip.
+   */
+  getDiagnostics(scope: HostDiagnosticsScope): HostDiagnostic[];
 
   // ── Editor ─────────────────────────────────────────────────────────────
   getActiveTextEditor(): HostTextEditor | undefined;

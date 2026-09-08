@@ -1,10 +1,28 @@
-import { isImageChip, isImplicitChip, type FileChip } from "./chips";
+import { isImageChip, isImplicitChip } from "./chips";
+import {
+  isFileChip,
+  serializeContextChip,
+  type ContextChip,
+  type ContextChipPayload,
+} from "./context-chips";
 import type { PromptContentBlock } from "./acp";
 import { STAGED_IMAGE_TAG_HINT, WORKSPACE_IMAGE_TAG_HINT } from "./image-history";
 
 export interface PromptBuilderDeps {
   readFile: (path: string) => string;
   extName: (path: string) => string;
+  /**
+   * Freshly collected content for a NON-FILE chip (diagnostics, terminal),
+   * gathered by the host in the same tick as the send.
+   *
+   * Optional, and allowed to answer `undefined` per chip — an older caller that
+   * never sets it, a source that emptied since the chip was attached, and a
+   * host facade that threw all land in the same place: the chip contributes
+   * nothing. There is deliberately no fallback to a value stored on the chip,
+   * because a stored value is exactly the stale snapshot this split exists to
+   * prevent.
+   */
+  contextChipPayload?: (chip: ContextChip) => ContextChipPayload | undefined;
 }
 
 /** One attached image, pre-read by the host (the builder never touches the
@@ -80,15 +98,26 @@ export const MAX_SELECTION_CHARS = 20_000;
  */
 export function buildPrompt(
   text: string,
-  chips: FileChip[],
+  chips: ContextChip[],
   deps: PromptBuilderDeps,
   slashCommand = false,
 ): string {
   const attached: string[] = []; // explicitly attached whole files → bare paths, grok decides how to read
   const openInEditor: string[] = []; // implicit active-editor file → ambient context only
   const blocks: string[] = []; // selection-range chips (explicit or the live editor selection) → fenced snippet of exactly those lines
+  const sourceBlocks: string[] = []; // diagnostics / terminal chips → fenced block of freshly collected content
   for (const chip of chips) {
     if (chip.hidden) continue;
+    if (!isFileChip(chip)) {
+      // Content comes from the resolver, never from the chip — and it lands
+      // OUTSIDE the envelope, because terminal output and diagnostic messages
+      // are arbitrary text that would otherwise be read back as file paths by
+      // `parseAttachmentContext` (#151). Empty means "nothing to say": no
+      // header without a body.
+      const block = serializeContextChip(chip, deps.contextChipPayload?.(chip));
+      if (block) sourceBlocks.push(block);
+      continue;
+    }
     if (chip.selectionStart && chip.selectionEnd) {
       // Too big to repeat every turn — name the range in the bucket the chip
       // belongs to, so an ambient editor selection still reads as ambient and
@@ -151,6 +180,9 @@ export function buildPrompt(
     context.push(`${CONTEXT_TAG_OPEN}\n${contextSections.join("\n\n")}\n${CONTEXT_TAG_CLOSE}`);
   }
   context.push(...blocks);
+  // After the selection snippets, so restore can peel the two shapes in the
+  // order they were written (parseSelectionBlocks, then parseContextBlocks).
+  context.push(...sourceBlocks);
   const parts = slashCommand ? [text, ...context] : [...context, text];
   return parts.filter(Boolean).join("\n\n");
 }
@@ -187,7 +219,7 @@ export function buildPrompt(
  */
 export function buildPromptWithImages(
   text: string,
-  chips: FileChip[],
+  chips: ContextChip[],
   images: PromptImageInput[],
   deps: PromptBuilderDeps,
   slashCommand = false,
@@ -222,7 +254,7 @@ export function buildPromptWithImages(
  */
 export interface QueuedPromptContribution {
   text: string;
-  chips: FileChip[];
+  chips: ContextChip[];
   images: PromptImageInput[];
 }
 
@@ -238,7 +270,7 @@ export interface QueuedPromptContribution {
  */
 export function buildQueuedPromptWithImages(
   contributions: QueuedPromptContribution[],
-  implicitChips: FileChip[],
+  implicitChips: ContextChip[],
   deps: PromptBuilderDeps,
   slashCommand = false,
 ): { text: string; blocks: PromptContentBlock[] } {

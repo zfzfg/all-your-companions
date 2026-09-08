@@ -1,9 +1,10 @@
 import { AcpClient } from "./acp";
 import type { HostMsg } from "./protocol";
-import type { FileChip } from "./chips";
+import type { ContextChip } from "./context-chips";
 import { permissionOptionsForPlan } from "./plan-gate";
 import type { AcpProvider } from "./acp-backend";
 import { allProviderCapabilities } from "./provider-capabilities";
+import type { PlanEntry } from "./plan-entries";
 import {
   queuedSendsMessage,
   takeQueuedSendsPrefix,
@@ -85,7 +86,7 @@ export class Session {
   /** Provider is fixed once the first user turn enters history. */
   provider: AcpProvider = "grok";
   /** Host-owned composer attachments for this session/view. */
-  chips: FileChip[] = [];
+  chips: ContextChip[] = [];
   /** The live ACP client (one spawned `grok agent stdio` process), once started. */
   client?: AcpClient;
 
@@ -188,6 +189,17 @@ export class Session {
 
   /** Most recent plan text seen for this session (exit_plan_mode fallback). */
   lastPlanText = "";
+
+  /**
+   * The agent's step checklist from the structured ACP `plan` update (AP-02).
+   *
+   * Empty for grok and Antigravity, which send plan TEXT and no entries — that
+   * emptiness is the whole of the "no rail there" behaviour, and nothing infers
+   * a list from {@link lastPlanText}. The list is the memory of the RUN, so it
+   * deliberately outlives a turn: it is cleared by a session start/resume and by
+   * a rewind, not by the turn that filled it ending.
+   */
+  planEntries: PlanEntry[] = [];
 
   /** Live exit_plan_mode requests awaiting one answer, keyed by ACP request id. */
   pendingExitPlans = new Map<number | string, PendingExitPlan>();
@@ -648,7 +660,7 @@ export function finishQueuedSendCommit(
 export function sessionUiSnapshot(
   session: Session,
   modeId: string,
-  chips: FileChip[] = session.chips,
+  chips: ContextChip[] = session.chips,
 ): HostMsg[] {
   const messages: HostMsg[] = [];
   if (session.client?.currentModelId) {
@@ -671,6 +683,14 @@ export function sessionUiSnapshot(
       planModeUnavailableReason: session.planModeUnavailableReason,
     }),
   });
+  // Replacing state, never buffered (GrokSidebar.TRANSIENT_TYPES) — so this is
+  // the ONLY thing that puts the rail back after a focus switch, a reload or a
+  // remote (re)attach. Sent only when there IS a list: a provider that never
+  // speaks structured plans must not be handed an empty one, and the snapshot
+  // is always preceded by a `clearMessages` that has already emptied the rail.
+  if (session.planEntries.length) {
+    messages.push({ type: "planEntries", entries: session.planEntries });
+  }
   messages.push({ type: "feedbackAvailability", available: session.feedbackAvailable });
   if (session.liveFeedbackEligible) {
     messages.push({ type: "turnFeedbackAck", rating: session.turnRating });

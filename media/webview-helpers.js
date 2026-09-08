@@ -33,7 +33,7 @@
     "permissionResolved", "toolEditReverted", "exitPlanRequest", "planResolved", "questionRequest", "planNotice", "autoCompactNotice", "planBlocked",
     "promptComplete", "contextUsage", "commandOutput", "expandCommandOutputs", "setAllToolDetails", "focusInput", "findInSession", "restoreComposer", "truncateMessages", "uiConfirmRequest", "agentReset", "agentError", "agentEnd", "exit", "setBusy", "summarizing",
     "sessionContext", "clearMessages", "onboarding", "error", "hostNotice", "xaiNotification", "subagentUpdate", "childStream", "runProgress", "sessions", "repoSessions", "pinnedSessions", "repos",
-    "sessionDot", "queuedSends", "submitQueuedSend", "steerUnavailable", "feedbackAvailability", "turnFeedbackAck", "usage", "steerByDefault", "soundNotifications", "processingSound", "readRepliesAloud", "summarizeRepliesAloud", "speechSummary", "imageFull", "moveComposerCaret",
+    "sessionDot", "queuedSends", "submitQueuedSend", "steerUnavailable", "feedbackAvailability", "turnFeedbackAck", "usage", "planEntries", "steerByDefault", "soundNotifications", "processingSound", "readRepliesAloud", "summarizeRepliesAloud", "speechSummary", "imageFull", "moveComposerCaret",
     "remoteStatus",
   ];
   const WEBVIEW_MESSAGE_TYPES = [
@@ -46,7 +46,7 @@
     "dropFile", "permissionAnswer", "exitPlanAnswer", "questionAnswer", "questionCancel",
     "setModel", "installCodex", "cancelCodexInstall", "runInstallCmd", "runGrokLogin", "cancelDeviceLogin", "submitDeviceLoginCode", "logout", "checkGrokUpdate", "updateGrok",
     "recheckConnection", "refreshProviders", "retryProviderSession", "listSessions", "listRepoSessions", "selectRepo", "toggleRepoPin", "setRepoArchived", "setRepoColor", "toggleSessionPin", "resumeSession", "renameSession", "deleteSession",
-      "clearAllSessions", "pickFile", "mentionQuery", "addMentionFile", "listProjectDir", "readProjectFile", "writeProjectFile", "pasteImage", "uploadFile", "voiceStart", "voiceStop",
+      "clearAllSessions", "pickFile", "mentionQuery", "addMentionFile", "addContextChip", "openContextChipSource", "listProjectDir", "readProjectFile", "writeProjectFile", "pasteImage", "uploadFile", "voiceStart", "voiceStop",
       "remoteVoiceStart", "remoteVoiceChunk", "remoteVoiceStop",
     "queueSend", "dequeueSend", "clearQueuedSends", "steerSend", "turnFeedback", "forkSession", "setSteerByDefault",
     "setSoundNotifications", "setProcessingSound", "setReadRepliesAloud", "setSummarizeRepliesAloud", "setVoiceSendPhrase", "setVoiceKeyterms", "setTelemetryEnabled", "setThumbsFeedback", "summarizeSpeech", "requestImageFull", "composerFocus",
@@ -2871,6 +2871,28 @@
   }
 
   /**
+   * Done / total / active index for the agent's step checklist (AP-02).
+   *
+   * The webview's copy of `planProgress` from src/plan-entries.ts — plain JS
+   * cannot import the TypeScript, exactly as with the message-type lists above,
+   * and test/plan-entries.test.ts asserts the two agree. Tolerant of a missing
+   * or non-array list because it is also called during a session swap, when the
+   * state has been reset but a frame may still be in flight.
+   */
+  function planEntriesProgress(entries) {
+    const list = Array.isArray(entries) ? entries : [];
+    let done = 0;
+    let activeIndex = -1;
+    for (let i = 0; i < list.length; i++) {
+      const e = list[i];
+      if (!e) continue;
+      if (e.status === "completed") done++;
+      else if (e.status === "in_progress" && activeIndex < 0) activeIndex = i;
+    }
+    return { done: done, total: list.length, activeIndex: activeIndex };
+  }
+
+  /**
    * How long the waiting indicator has been on screen, for its label.
    *
    * A turn has no deadline the user can see. `session/prompt` tolerates 30
@@ -2893,7 +2915,108 @@
     return `${hr}h ${min % 60}m`;
   }
 
-  const api = { WELCOME_TIPS, welcomeTipById, welcomeTipsFor, welcomeTipCopy, splitWelcomeTipCopy, addProjectMenuItems, addProjectFolderPreview, addProjectForm, parseCloneQuery, filterGithubRepos, githubRepoNameParts, formatWaitElapsed, FILE_EXTS, HOST_MESSAGE_TYPES, WEBVIEW_MESSAGE_TYPES, isKnownHostMessage, composerHasSendIntent, explicitVisibleChips, normalizeQueuedSends, queuedSendsText, queuedSendsChips, contextOverheadTokens, nextContextBreakdown, contextBreakdownIsCurrent, createPendingOverlay, getMentionQuery, applyMentionPick, looksLikeFileRef, formatRelativeTime, modelPickerLabel, modelDisplayName, MIC_STATES, nextMicState, trailingSendPhrase, versionedSiblingUrl, buildQuestionAnswers, isFreeTextOptionLabel, isSubagentToolCall, subagentLabel, cleanSubagentOutput, parseSubagentTaskResult, shouldStickToBottom, stickThresholdPx, splitMath, stripUnsupportedTex, toolFailureText, isMediaGenToolCall, mediaGenZeroRetentionHint, TOOL_LABEL_MAX, middleElide, isAdvertisedSkill, getSlashQuery, applySlashPick, filterCommands, highlightQueryParts, appendHighlightedText, commandProgramLabel, commandTextPreview, MAX_COMMAND_OUTPUT_CHARS, capCommandOutput, extractToolResultOutput, commandOutputWasCancelled, commandOutputTruncationNote, computeLineDiff, parseAttachmentContext, parseSelectionBlocks, parseImageTags, orderPermissionOptions, defaultPermissionIndex, shouldFocusPermissionCard, isTypeThroughKey, isInterjectionText, stripInterjectionEnvelope, spokenTextFromMarkdown, isRelaySendRejection, panelReclampOnResizeAllowed, wireFullscreenSafeReclamp, distributeSidePanelWidths, chatZoomFactor, unzoomClientPx, exportSessionMarkdown, exportSessionFilename, isExportableSessionEvent, replayedUserBubbleVerdict, truncateExportEvents, flattenHistoryMessages, splitHistoryWindow, countHistoryReplayCounters, partitionHistoryCards, GITHUB_FINE_GRAINED_TOKEN_URL, fillFineGrainedTokenHint };
+  // ---------- context chips (AP-03) ----------
+  // Twins of src/context-chips.ts. A chip whose `kind` is absent or "file" is
+  // the shape this file has always seen — every branch below leaves it alone,
+  // which is also what makes an UNKNOWN future kind harmless: it falls through
+  // to `relPath`, which every variant carries for exactly that reason.
+
+  function contextChipKind(chip) {
+    const kind = chip && chip.kind;
+    return kind === "diagnostics" || kind === "terminal" ? kind : "file";
+  }
+
+  function chipBasename(p) {
+    return String(p || "").split(/[\/]/).pop() || String(p || "");
+  }
+
+  function chipPlural(n, noun) {
+    return n + " " + noun + (n === 1 ? "" : "s");
+  }
+
+  function chipSeverityNoun(severity) {
+    return severity === "error" ? "error" : severity === "warning" ? "warning" : "problem";
+  }
+
+  /** Human-readable size for a terminal capture ("812 B", "4.1 KB"). */
+  function formatChipBytes(bytes) {
+    if (typeof bytes !== "number" || !isFinite(bytes) || bytes < 0) return "0 B";
+    if (bytes < 1024) return Math.round(bytes) + " B";
+    const kb = bytes / 1024;
+    if (kb < 1024) return (kb < 10 ? kb.toFixed(1) : String(Math.round(kb))) + " KB";
+    const mb = kb / 1024;
+    return (mb < 10 ? mb.toFixed(1) : String(Math.round(mb))) + " MB";
+  }
+
+  /** The chip's visible text. File chips get the bare basename — the caller
+   *  adds the `:12-40` range suffix, which only files have. */
+  function contextChipLabel(chip) {
+    const kind = contextChipKind(chip);
+    if (kind === "diagnostics") {
+      const head = chipPlural(chip.count || 0, chipSeverityNoun(chip.severity));
+      return chip.scope === "file" && chip.path ? head + " in " + chipBasename(chip.path) : head;
+    }
+    if (kind === "terminal") return "Terminal: " + (chip.label || "Terminal");
+    return chipBasename(chip && chip.relPath);
+  }
+
+  /** The chip's hover text. */
+  function contextChipTitle(chip) {
+    const kind = contextChipKind(chip);
+    if (kind === "diagnostics") {
+      const where = chip.scope === "file" && chip.path ? chip.path : "the whole workspace";
+      return chipPlural(chip.count || 0, chipSeverityNoun(chip.severity))
+        + " in " + where + " — collected again when you send";
+    }
+    if (kind === "terminal") {
+      return 'Output of terminal "' + (chip.label || "Terminal") + '" ('
+        + formatChipBytes(chip.bytes) + ") — collected again when you send";
+    }
+    return (chip && (chip.originRelPath || chip.path)) || "";
+  }
+
+  // Peel the fenced blocks buildPrompt (src/prompt-builder.ts) emits for
+  // diagnostics / terminal chips, so a restored bubble shows the user's words
+  // and a chip instead of the whole dump inline. Runs AFTER parseSelectionBlocks
+  // because that is the order the two are written in, and only from the START of
+  // the remaining body — a look-alike header inside the user's own words stays
+  // put, exactly like the selection parser. Must stay in sync with
+  // serializeContextChip. Returns { body, sources: [{kind, label}] }.
+  const CONTEXT_BLOCK_HEADERS = [
+    { kind: "diagnostics", re: /^Problems (in the workspace|in `[^`\n]+`) \(([^\n]*)\):\n```text\n/ },
+    { kind: "terminal", re: /^Terminal output from `([^`\n]+)` \(([^\n]*)\):\n```console\n/ },
+  ];
+  const CONTEXT_BLOCK_CLOSE = /(?:^|\n)```[ \t]*(?:\n|$)/;
+
+  function parseContextBlocks(body) {
+    const input = typeof body === "string" ? body : body || "";
+    if (input.indexOf("```") === -1) return { body: input, sources: [] };
+    const sources = [];
+    let rest = input;
+    for (;;) {
+      rest = rest.replace(/^\n+/, "");
+      let matched = null;
+      for (const shape of CONTEXT_BLOCK_HEADERS) {
+        const m = rest.match(shape.re);
+        if (m) { matched = { kind: shape.kind, m }; break; }
+      }
+      if (!matched) break;
+      const afterHeader = rest.slice(matched.m[0].length);
+      const close = afterHeader.match(CONTEXT_BLOCK_CLOSE);
+      if (!close) break; // half-streamed block — leave it for the next chunk
+      sources.push({
+        kind: matched.kind,
+        label: matched.kind === "terminal"
+          ? "Terminal: " + matched.m[1]
+          : "Problems " + matched.m[1].replace(/`/g, ""),
+      });
+      rest = afterHeader.slice(close.index + close[0].length);
+    }
+    if (!sources.length) return { body: input, sources: [] };
+    return { body: rest.trim(), sources };
+  }
+
+  const api = { WELCOME_TIPS, welcomeTipById, welcomeTipsFor, welcomeTipCopy, splitWelcomeTipCopy, addProjectMenuItems, addProjectFolderPreview, addProjectForm, parseCloneQuery, filterGithubRepos, githubRepoNameParts, formatWaitElapsed, planEntriesProgress, FILE_EXTS, HOST_MESSAGE_TYPES, WEBVIEW_MESSAGE_TYPES, isKnownHostMessage, composerHasSendIntent, explicitVisibleChips, normalizeQueuedSends, queuedSendsText, queuedSendsChips, contextOverheadTokens, nextContextBreakdown, contextBreakdownIsCurrent, createPendingOverlay, getMentionQuery, applyMentionPick, looksLikeFileRef, formatRelativeTime, modelPickerLabel, modelDisplayName, MIC_STATES, nextMicState, trailingSendPhrase, versionedSiblingUrl, buildQuestionAnswers, isFreeTextOptionLabel, isSubagentToolCall, subagentLabel, cleanSubagentOutput, parseSubagentTaskResult, shouldStickToBottom, stickThresholdPx, splitMath, stripUnsupportedTex, toolFailureText, isMediaGenToolCall, mediaGenZeroRetentionHint, TOOL_LABEL_MAX, middleElide, isAdvertisedSkill, getSlashQuery, applySlashPick, filterCommands, highlightQueryParts, appendHighlightedText, commandProgramLabel, commandTextPreview, MAX_COMMAND_OUTPUT_CHARS, capCommandOutput, extractToolResultOutput, commandOutputWasCancelled, commandOutputTruncationNote, computeLineDiff, parseAttachmentContext, parseSelectionBlocks, parseImageTags, parseContextBlocks, contextChipLabel, contextChipTitle, formatChipBytes, orderPermissionOptions, defaultPermissionIndex, shouldFocusPermissionCard, isTypeThroughKey, isInterjectionText, stripInterjectionEnvelope, spokenTextFromMarkdown, isRelaySendRejection, panelReclampOnResizeAllowed, wireFullscreenSafeReclamp, distributeSidePanelWidths, chatZoomFactor, unzoomClientPx, exportSessionMarkdown, exportSessionFilename, isExportableSessionEvent, replayedUserBubbleVerdict, truncateExportEvents, flattenHistoryMessages, splitHistoryWindow, countHistoryReplayCounters, partitionHistoryCards, GITHUB_FINE_GRAINED_TOKEN_URL, fillFineGrainedTokenHint };
 
   if (typeof module !== "undefined" && module.exports) {
     module.exports = api;

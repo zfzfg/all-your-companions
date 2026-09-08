@@ -337,6 +337,13 @@
   const historyPopover = $("history-popover");
   const repoPopover = $("repo-popover");
   const scrollBottomBtn = $("scroll-bottom-btn");
+  // Agent step checklist (AP-02). Absent in shells that predate it (the relay
+  // serves its own page), so every use is null-guarded rather than assumed.
+  const todoRail = $("todo-rail");
+  const todoRailHead = $("todo-rail-head");
+  const todoRailCaret = $("todo-rail-caret");
+  const todoRailCount = $("todo-rail-count");
+  const todoRailList = $("todo-rail-list");
 
   // Canonical low→high ORDER for known effort ids, and the FALLBACK ladder when a
   // model advertises no menu (`max` is not a real grok level — see #3/#4).
@@ -408,6 +415,9 @@
     currentModelId: null,
     activeProvider: "grok",
     providerCapabilities: null,
+    /** The agent's step checklist, whole, as last sent by the host (AP-02).
+     *  Empty for providers that send plan TEXT instead of entries. */
+    planEntries: [],
     providersKnown: false,
     providers: [],
     // Settings → Providers re-observation in flight. Host-owned; see the
@@ -532,6 +542,10 @@
     // null while no token is under the caret (stale replies are dropped
     // against it, so fast typing can't render an older query's rows).
     mentionFiles: [],
+    // Virtual (non-file) entries the host offers for the same token — AP-03's
+    // `@problems` / `@terminal`. They head the list; `mentionActive` indexes
+    // sources FIRST, then files, so one counter still drives the keyboard.
+    mentionSources: [],
     mentionActive: 0,
     mentionQuery: null,
     pendingDiffByToolCallId: new Map(),
@@ -866,6 +880,8 @@
     panelLeft: `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/></svg>`,
     panelRight: `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/></svg>`,
     panelBottom: `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 15h18"/></svg>`,
+    diagnostics: `<svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>`,
+    terminalChip: `<svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="m7 11 2-2-2-2"/><path d="M11 13h4"/></svg>`,
     image: `<svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>`,
     cpu: `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M15 2v2"/><path d="M15 20v2"/><path d="M2 15h2"/><path d="M2 9h2"/><path d="M20 15h2"/><path d="M20 9h2"/><path d="M9 2v2"/><path d="M9 20v2"/></svg>`,
     squarePen: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z"/></svg>`,
@@ -1193,7 +1209,7 @@
 
   // ---------- markdown ----------
 
-  const { formatWaitElapsed, looksLikeFileRef, formatRelativeTime, modelPickerLabel, modelDisplayName, nextMicState, trailingSendPhrase, versionedSiblingUrl, buildQuestionAnswers, isFreeTextOptionLabel, isSubagentToolCall, subagentLabel, cleanSubagentOutput, parseSubagentTaskResult, shouldStickToBottom, stickThresholdPx, splitMath, stripUnsupportedTex, toolFailureText, isMediaGenToolCall, mediaGenZeroRetentionHint, TOOL_LABEL_MAX, middleElide, isAdvertisedSkill, getSlashQuery, applySlashPick, filterCommands, appendHighlightedText, commandProgramLabel, commandTextPreview, extractToolResultOutput, commandOutputWasCancelled, commandOutputTruncationNote, computeLineDiff, parseAttachmentContext, parseSelectionBlocks, parseImageTags, isKnownHostMessage, composerHasSendIntent, explicitVisibleChips, normalizeQueuedSends, queuedSendsText, queuedSendsChips, contextOverheadTokens, nextContextBreakdown, contextBreakdownIsCurrent, createPendingOverlay, getMentionQuery, applyMentionPick, orderPermissionOptions, defaultPermissionIndex, shouldFocusPermissionCard, isTypeThroughKey, isInterjectionText, stripInterjectionEnvelope, spokenTextFromMarkdown, isRelaySendRejection, wireFullscreenSafeReclamp, distributeSidePanelWidths, chatZoomFactor, unzoomClientPx, exportSessionMarkdown, exportSessionFilename, isExportableSessionEvent, replayedUserBubbleVerdict, truncateExportEvents, flattenHistoryMessages, splitHistoryWindow, countHistoryReplayCounters, partitionHistoryCards } = globalThis.GrokWebviewHelpers;
+  const { formatWaitElapsed, planEntriesProgress, looksLikeFileRef, formatRelativeTime, modelPickerLabel, modelDisplayName, nextMicState, trailingSendPhrase, versionedSiblingUrl, buildQuestionAnswers, isFreeTextOptionLabel, isSubagentToolCall, subagentLabel, cleanSubagentOutput, parseSubagentTaskResult, shouldStickToBottom, stickThresholdPx, splitMath, stripUnsupportedTex, toolFailureText, isMediaGenToolCall, mediaGenZeroRetentionHint, TOOL_LABEL_MAX, middleElide, isAdvertisedSkill, getSlashQuery, applySlashPick, filterCommands, appendHighlightedText, commandProgramLabel, commandTextPreview, extractToolResultOutput, commandOutputWasCancelled, commandOutputTruncationNote, computeLineDiff, parseAttachmentContext, parseSelectionBlocks, parseImageTags, parseContextBlocks, contextChipLabel, contextChipTitle, isKnownHostMessage, composerHasSendIntent, explicitVisibleChips, normalizeQueuedSends, queuedSendsText, queuedSendsChips, contextOverheadTokens, nextContextBreakdown, contextBreakdownIsCurrent, createPendingOverlay, getMentionQuery, applyMentionPick, orderPermissionOptions, defaultPermissionIndex, shouldFocusPermissionCard, isTypeThroughKey, isInterjectionText, stripInterjectionEnvelope, spokenTextFromMarkdown, isRelaySendRejection, wireFullscreenSafeReclamp, distributeSidePanelWidths, chatZoomFactor, unzoomClientPx, exportSessionMarkdown, exportSessionFilename, isExportableSessionEvent, replayedUserBubbleVerdict, truncateExportEvents, flattenHistoryMessages, splitHistoryWindow, countHistoryReplayCounters, partitionHistoryCards } = globalThis.GrokWebviewHelpers;
 
   function escapeAttr(s) {
     return String(s == null ? "" : s)
@@ -4102,6 +4118,24 @@
       closePopovers();
     };
     addPopover.appendChild(item);
+    // The same two sources `@problems` / `@terminal` offer, for people who
+    // reach for the + rather than type. Always offered: whether there is
+    // anything to attach is the host's answer, given when it is asked — not a
+    // guess made here from state the webview does not have.
+    for (const source of [
+      { id: "problems", icon: ICON.diagnostics, label: "Problems (errors & warnings)" },
+      { id: "terminal", icon: ICON.terminalChip, label: "Terminal output" },
+    ]) {
+      const row = document.createElement("div");
+      row.className = "toolbar-popover-item";
+      row.innerHTML = `<span class="add-item-icon">${source.icon}</span><span>${escapeHtml(source.label)}</span>`;
+      row.onclick = (e) => {
+        e.stopPropagation();
+        vscode.postMessage({ type: "addContextChip", source: source.id });
+        closePopovers();
+      };
+      addPopover.appendChild(row);
+    }
     positionPopover(addPopover, addBtn);
     addPopover.hidden = false;
   }
@@ -4684,6 +4718,13 @@
         meta.className = "history-row-meta";
         const parts = [];
         if (s.numMessages) parts.push(`${s.numMessages} msg`);
+        // Step progress exists only for the conversation this webview is
+        // showing — the checklist is live session state, not something the
+        // history index stores, so other rows correctly say nothing.
+        if (active && state.planEntries.length) {
+          const progress = planEntriesProgress(state.planEntries);
+          parts.push(`${progress.done}/${progress.total} steps`);
+        }
         parts.push(formatRelativeTime(s.updatedAt));
         meta.textContent = parts.join(" · ");
         main.appendChild(meta);
@@ -8769,6 +8810,85 @@
     return el;
   }
 
+  /**
+   * The agent's own step checklist, pinned above the composer (AP-02).
+   *
+   * Fed only by the host's `planEntries` message, which only providers that
+   * speak ACP's structured `plan` update ever produce. grok and Antigravity
+   * send plan TEXT, no message is posted for them, and this stays hidden —
+   * that absence IS the behaviour, not a fallback waiting to be filled in.
+   *
+   * The rail is rebuilt in place on every update rather than appended to: the
+   * message replaces the whole list, and a second card would be a second claim
+   * about the same run.
+   */
+  function todoRailCollapseKey() {
+    // Per conversation: a plan you folded away in one is not a statement about
+    // the next one's. No id yet (pre-session frames) parks on a shared key
+    // rather than leaking the previous conversation's choice.
+    return "grok.todoRail.collapsed:" + (state.activeSessionId || "none");
+  }
+
+  function todoRailCollapsed() {
+    return storedBool(todoRailCollapseKey(), false);
+  }
+
+  function renderTodoRail() {
+    if (!todoRail) return;
+    const entries = Array.isArray(state.planEntries) ? state.planEntries : [];
+    if (!entries.length) {
+      // Hidden, not emptied-in-place: an empty bordered card above the composer
+      // reads as a broken feature rather than as "no plan".
+      todoRail.hidden = true;
+      if (todoRailList) todoRailList.textContent = "";
+      return;
+    }
+    const progress = planEntriesProgress(entries);
+    const collapsed = todoRailCollapsed();
+    todoRail.hidden = false;
+    todoRail.classList.toggle("collapsed", collapsed);
+    if (todoRailCaret) todoRailCaret.innerHTML = collapsed ? ICON.chevronRight : ICON.chevronDown;
+    if (todoRailHead) {
+      todoRailHead.setAttribute("aria-expanded", collapsed ? "false" : "true");
+      todoRailHead.title = collapsed ? "Show steps" : "Hide steps";
+    }
+    if (todoRailCount) todoRailCount.textContent = progress.done + "/" + progress.total;
+    if (!todoRailList) return;
+    todoRailList.hidden = collapsed;
+    todoRailList.textContent = "";
+    for (let i = 0; i < entries.length; i++) {
+      const entry = entries[i] || {};
+      const status = entry.status === "completed" || entry.status === "in_progress"
+        ? entry.status
+        : "pending";
+      const li = document.createElement("li");
+      li.className = "todo-item todo-" + status.replace("_", "-");
+      if (i === progress.activeIndex) li.classList.add("todo-active");
+      li.dataset.todoId = entry.id || String(i);
+      if (entry.priority) li.dataset.todoPriority = entry.priority;
+      const mark = document.createElement("span");
+      mark.className = "todo-mark";
+      // Only the tick is a glyph; the dot and the spinner are drawn in CSS, so
+      // a shell without our stylesheet still shows readable text rows.
+      if (status === "completed") mark.innerHTML = ICON.check;
+      const text = document.createElement("span");
+      text.className = "todo-text";
+      text.textContent = entry.content || "";
+      text.title = entry.content || "";
+      li.appendChild(mark);
+      li.appendChild(text);
+      todoRailList.appendChild(li);
+    }
+  }
+
+  if (todoRailHead) {
+    todoRailHead.onclick = () => {
+      const next = !todoRailCollapsed();
+      try { window.localStorage.setItem(todoRailCollapseKey(), String(next)); } catch { /* unavailable */ }
+      renderTodoRail();
+    };
+  }
+
   function resetForNewSession() {
     clearSessionSuperseded();
     stopProcessingCue();
@@ -8814,6 +8934,11 @@
       }
     }
     state.welcomeVisible = true;
+    // The checklist belongs to the run that is going away. The host clears its
+    // own copy on the same swap and re-sends one only if the next conversation
+    // has a plan of its own.
+    state.planEntries = [];
+    renderTodoRail();
     state.pendingDiffByToolCallId.clear();
     state.revertedEdits.clear();
     state.toolItemsByToolCallId.clear();
@@ -9627,9 +9752,27 @@
   // composer chip's format (`name:8-15`, single line `name:8`) — full text kept,
   // overflow is CSS ellipsis. Shared by the live bubble (addMessage) and the
   // restore path (appendUserChunk, reconstructed from the parsed prompt).
+  /** Chip tag for a diagnostics / terminal block recovered from a replayed
+   *  prompt. The label is the block header's own words — there is no chip left
+   *  to read a count off. */
+  function makeRestoredSourceChipTag(source) {
+    const tag = document.createElement("span");
+    tag.className = "msg-chip";
+    const icon = source.kind === "terminal" ? ICON.terminalChip : ICON.diagnostics;
+    tag.insertAdjacentHTML("beforeend", icon + `<span>${escapeHtml(source.label)}</span>`);
+    tag.title = source.label;
+    return tag;
+  }
+
   function makeMsgChipTag(pathStr, chip) {
     const tag = document.createElement("span");
     tag.className = "msg-chip";
+    if (chip && (chip.kind === "diagnostics" || chip.kind === "terminal")) {
+      const icon = chip.kind === "terminal" ? ICON.terminalChip : ICON.diagnostics;
+      tag.insertAdjacentHTML("beforeend", icon + `<span>${escapeHtml(contextChipLabel(chip))}</span>`);
+      tag.title = contextChipTitle(chip);
+      return tag;
+    }
     const name = chip?.imageIndex != null ? `Image #${chip.imageIndex}` : (pathStr.split(/[\\/]/).pop() || pathStr);
     const icon = chip?.imageIndex != null ? ICON.image : ICON.file;
     const hasSel = chip?.selectionStart && chip?.selectionEnd;
@@ -12754,7 +12897,11 @@
     // the copy button yields: the user's words, not the context plumbing.
     const parsed = parseAttachmentContext(displayRaw);
     const selBlocks = parseSelectionBlocks(parsed.body);
-    const imageTags = parseImageTags(selBlocks.body);
+    // Diagnostics / terminal blocks sit right after the selection snippets, so
+    // they are peeled in the order they were written. Without this the restored
+    // bubble would show the whole problems dump as the user's own words.
+    const sourceBlocks = parseContextBlocks(selBlocks.body);
+    const imageTags = parseImageTags(sourceBlocks.body);
     const imagePreviews = new Map(
       (images || []).map((image) => [image.imageIndex, image]),
     );
@@ -12766,6 +12913,9 @@
       ...parsed.files.map((f) => makeMsgChipTag(f)),
       ...selBlocks.selections.map((s) =>
         makeMsgChipTag(s.path, { selectionStart: s.start, selectionEnd: s.end })),
+      // Restored from the block itself: what a replay can honestly say is which
+      // source was attached, not the count the chip carried when it was staged.
+      ...sourceBlocks.sources.map((source) => makeRestoredSourceChipTag(source)),
       ...imageTags.images.map((im) =>
         makeMsgChipTag(`Image #${im.index}`, {
           imageIndex: im.index,
@@ -14174,11 +14324,48 @@
     };
   }
 
+  /** One attachment row for a non-file context chip: icon, label, remove.
+   *  Clicking the body opens the source it stands for. */
+  function makeContextChipRow(chip) {
+    const el = document.createElement("div");
+    el.className = "attachment attachment-source";
+    el.title = contextChipTitle(chip);
+    el.innerHTML = chip.kind === "terminal" ? ICON.terminalChip : ICON.diagnostics;
+    const span = document.createElement("span");
+    span.textContent = contextChipLabel(chip);
+    el.appendChild(span);
+    el.onclick = () => {
+      // The panel the chip stands for. Host-local commands, so a remote tab
+      // (which has neither panel) simply gets nothing — the same as today's
+      // file chips, which do not open an editor on a phone either.
+      vscode.postMessage({ type: "openContextChipSource", source: chip.kind === "terminal" ? "terminal" : "problems" });
+    };
+    const rm = document.createElement("button");
+    rm.type = "button";
+    rm.className = "attachment-remove";
+    rm.title = "Remove";
+    rm.textContent = "×";
+    rm.onclick = (e) => {
+      e.stopPropagation();
+      vscode.postMessage({ type: "removeChip", id: chip.id });
+    };
+    el.appendChild(rm);
+    return el;
+  }
+
   function renderChips() {
     chipsEl.innerHTML = "";
     attachmentsEl.innerHTML = "";
     const imagePreviews = previewCacheForCurrentSession();
     for (const chip of state.chips) {
+      // Diagnostics / terminal chips (AP-03) carry no path, no selection and no
+      // pixels, so none of the file logic below applies to them. They are always
+      // explicit attachments — there is no ambient "problems of the file you are
+      // looking at" chip — so they only ever appear in the attachments row.
+      if (chip.kind === "diagnostics" || chip.kind === "terminal") {
+        attachmentsEl.appendChild(makeContextChipRow(chip));
+        continue;
+      }
       // Split on both separators — a file outside the workspace has an absolute
       // relPath (Windows backslashes), so split("/") alone would show the whole
       // path instead of just the name. The full path stays on the tooltip below.
@@ -14354,7 +14541,14 @@
   function hideMention() {
     if (mentionPopover) mentionPopover.hidden = true;
     state.mentionFiles = [];
+    state.mentionSources = [];
     state.mentionQuery = null;
+  }
+
+  /** Total rows on offer — sources first, then files. One number so the
+   *  keyboard handler stays the wrap-around it already was. */
+  function mentionRowCount() {
+    return state.mentionSources.length + state.mentionFiles.length;
   }
 
   function updateMention() {
@@ -14371,7 +14565,25 @@
   function renderMention() {
     mentionPopover.innerHTML = "";
     let activeEl = null;
-    state.mentionFiles.forEach((rel, i) => {
+    const sourceCount = state.mentionSources.length;
+    state.mentionSources.forEach((entry, i) => {
+      const el = document.createElement("div");
+      el.className = `mention-item mention-source${i === state.mentionActive ? " active" : ""}`;
+      if (i === state.mentionActive) activeEl = el;
+      const name = document.createElement("span");
+      name.className = "mention-name";
+      name.textContent = entry.label;
+      el.appendChild(name);
+      const detail = document.createElement("span");
+      detail.className = "mention-dir";
+      detail.textContent = entry.detail;
+      el.appendChild(detail);
+      el.title = entry.detail;
+      el.onclick = () => pickMentionSource(entry);
+      mentionPopover.appendChild(el);
+    });
+    state.mentionFiles.forEach((rel, idx) => {
+      const i = sourceCount + idx;
       const el = document.createElement("div");
       el.className = `mention-item${i === state.mentionActive ? " active" : ""}`;
       if (i === state.mentionActive) activeEl = el;
@@ -14401,6 +14613,26 @@
     vscode.postMessage({ type: "addMentionFile", relPath: rel });
     input.focus();
     renderInputHighlight();
+  }
+
+  /** Same two halves as a file pick — the token becomes `@problems `, and the
+   *  host is asked for the chip. The host may still refuse (nothing to attach),
+   *  which is why nothing here pretends a chip exists. */
+  function pickMentionSource(entry) {
+    const r = applyMentionPick(input.value, input.selectionStart || 0, entry.token);
+    input.value = r.text;
+    if (input.setSelectionRange) input.setSelectionRange(r.caret, r.caret);
+    hideMention();
+    vscode.postMessage({ type: "addContextChip", source: entry.source });
+    input.focus();
+    renderInputHighlight();
+  }
+
+  /** Row at the combined index: sources, then files. */
+  function pickMentionAt(index) {
+    const sourceCount = state.mentionSources.length;
+    if (index < sourceCount) pickMentionSource(state.mentionSources[index]);
+    else pickMention(state.mentionFiles[index - sourceCount]);
   }
 
   // ---------- send ----------
@@ -16347,6 +16579,15 @@
         refreshUserRewindButtons();
         updateSendButton();
         break;
+      case "planEntries":
+        // REPLACING state — the host sends the whole list every time, so this
+        // assigns rather than merges. An empty list retires the rail.
+        state.planEntries = Array.isArray(msg.entries) ? msg.entries : [];
+        renderTodoRail();
+        // The open conversation's history row carries the same counter; repaint
+        // it only while that list is actually on screen.
+        if (historyPopover && !historyPopover.hidden) renderSessionRows();
+        break;
       case "remoteStatus":
         state.remoteLinked = !!msg.linked;
         syncRemoteButton();
@@ -16789,7 +17030,9 @@
         // moved on) while this reply was in flight.
         if (!mentionPopover || state.mentionQuery === null || msg.query !== state.mentionQuery) break;
         state.mentionFiles = msg.files || [];
-        if (!state.mentionFiles.length) {
+        // Additive: a host that does not send `sources` simply offers files.
+        state.mentionSources = Array.isArray(msg.sources) ? msg.sources : [];
+        if (!mentionRowCount()) {
           // Keep the query: the token is still active, so more typing (or a
           // backspace) re-queries — only the empty row-list hides.
           mentionPopover.hidden = true;
@@ -18721,20 +18964,21 @@
     }
     // "@" popover nav — mutually exclusive with the slash popover (a slash token
     // can't contain whitespace, so `/cmd @file` never matches both).
-    if (mentionPopover && !mentionPopover.hidden && state.mentionFiles.length) {
+    if (mentionPopover && !mentionPopover.hidden && mentionRowCount()) {
+      const rows = mentionRowCount();
       if (e.key === "ArrowDown") {
         e.preventDefault();
-        state.mentionActive = (state.mentionActive + 1) % state.mentionFiles.length;
+        state.mentionActive = (state.mentionActive + 1) % rows;
         renderMention(); return;
       }
       if (e.key === "ArrowUp") {
         e.preventDefault();
-        state.mentionActive = (state.mentionActive - 1 + state.mentionFiles.length) % state.mentionFiles.length;
+        state.mentionActive = (state.mentionActive - 1 + rows) % rows;
         renderMention(); return;
       }
       if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
         e.preventDefault();
-        pickMention(state.mentionFiles[state.mentionActive]); return;
+        pickMentionAt(state.mentionActive); return;
       }
       if (e.key === "Escape") { hideMention(); return; }
     }

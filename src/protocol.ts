@@ -24,7 +24,8 @@
 import type { ModelInfo, PromptResultMeta, PromptUsage, PermissionRequest, ExitPlanRequest, QuestionRequest } from "./acp";
 import type { TurnEndStatus } from "./acp-dispatch";
 export type { TurnEndStatus };
-import type { FileChip } from "./chips";
+import type { ContextChip } from "./context-chips";
+import type { ContextSourceId, MentionSourceEntry } from "./mention";
 import type { RepoListEntry, SessionListEntry } from "./sessions";
 import type { Dot } from "./session-pool";
 import type { RunProgressUpdate } from "./run-progress";
@@ -33,6 +34,8 @@ import type { ConnectorView } from "./mcp-connectors";
 import type { RoutineDraft, RoutineModelOption, RoutineProjectOption, RoutineView } from "./routines";
 import type { AcpProvider } from "./acp-backend";
 import type { CapabilitySupport, ProviderCapability } from "./provider-capabilities";
+import type { PlanEntry } from "./plan-entries";
+export type { PlanEntry };
 
 /** grok's tool-call payload as it comes off the wire (acp emits it untyped). The
  *  webview reads a handful of fields; the index signature keeps assignment from
@@ -330,7 +333,7 @@ export type HostUiCapabilities = {
 /** One host-owned queued follow-up. `chips` omitted means none. */
 export type QueuedSend = {
   text: string;
-  chips?: FileChip[];
+  chips?: ContextChip[];
 };
 
 export type HostMsg =
@@ -459,6 +462,20 @@ export type HostMsg =
       provider: AcpProvider;
       capabilities: Record<ProviderCapability, CapabilitySupport>;
     }
+  /**
+   * The session's step checklist from the ACP `plan` update (AP-02).
+   *
+   * REPLACING state, not a delta — every send carries the whole list, and the
+   * webview must swap rather than append. It is therefore transient (never
+   * buffered) and is re-sent by `sessionUiSnapshot`; buffering it would replay
+   * one stale copy per update on every focus switch.
+   *
+   * Sent only by providers that speak the structured plan (Claude, Codex,
+   * Gemini). grok and Antigravity send plan TEXT and no list, so no message is
+   * posted for them at all and the rail stays absent — deliberately, with no
+   * text heuristic behind it (see src/plan-entries.ts).
+   */
+  | { type: "planEntries"; entries: PlanEntry[] }
   /** Grok's grok.com + user-level MCP inventory (`_x.ai/mcp/list`; project-file
    *  servers omitted). The desk keeps launch recipes and `configFile`; remotes
    *  receive `projectMcpServerForRemote` (page fields only — no `tag`).
@@ -540,12 +557,16 @@ export type HostMsg =
   | { type: "voiceSubmit"; text: string }
   | { type: "voiceTranscript"; text: string; send?: boolean }
   | { type: "voiceError" }
-  | { type: "chips"; chips: FileChip[] }
+  | { type: "chips"; chips: ContextChip[] }
   | { type: "commandsUpdate"; commands: unknown[] }
   // Reply to the webview's `mentionQuery` (the composer's `@` file popover):
   // workspace-relative paths (forward slashes), ranked by src/mention.ts. The
   // echoed `query` lets the webview drop stale replies after further typing.
-  | { type: "mentionResults"; query: string; files: string[] }
+  // `sources` is ADDITIVE (AP-03): the virtual `@problems` / `@terminal`
+  // entries that head the list. Absent means "this host has none" — a client
+  // that does not know the field keeps rendering files exactly as before, and
+  // a client that does treats absence the same way.
+  | { type: "mentionResults"; query: string; files: string[]; sources?: MentionSourceEntry[] }
   /**
    * Answer to `listProjectDir` (remote file browse). `cwd` echoes the scoped
    * root; `relPath` is the listed directory ("" = repo root). No absolute host
@@ -618,7 +639,7 @@ export type HostMsg =
   /** `steer` marks a mid-turn interjection (#52). It paints a user bubble but is
    *  NOT a prompt and gets no rewind point, so the bubble must not consume a
    *  rewind index — see refreshUserRewindButtons. */
-  | { type: "userMessage"; text: string; chips?: FileChip[]; steer?: boolean; submissionId?: string }
+  | { type: "userMessage"; text: string; chips?: ContextChip[]; steer?: boolean; submissionId?: string }
   | { type: "agentStart" }
   | { type: "thoughtChunk"; text: string }
   | { type: "messageChunk"; text: string }
@@ -907,7 +928,7 @@ export type WebviewMsg =
   | { type: "ready"; tabToken?: string }
   // Browser-owned remote preferences reported for session_start telemetry.
   | { type: "remotePreferences"; fontScale: number; readRepliesAloud: boolean; summarizeRepliesAloud?: boolean; usesTouch: boolean }
-  | { type: "send"; text: string; chips?: FileChip[]; bare?: boolean; queuedSendId?: string; submissionId?: string }
+  | { type: "send"; text: string; chips?: ContextChip[]; bare?: boolean; queuedSendId?: string; submissionId?: string }
   // `cwd` names the project to start in, for a client that can SEE which project
   // it is asking for — the VS Code rail's per-project "+". Optional and additive:
   // omitted, the host starts in its own scope exactly as before. The host
@@ -1173,6 +1194,18 @@ export type WebviewMsg =
   // composer, so the prompt carries both the prose reference and the chip.
   | { type: "addMentionFile"; relPath: string }
   /**
+   * Stage one host-collected context source (`@problems`, `@terminal`, or the
+   * matching `+` popover item) as a chip.
+   *
+   * The message names the SOURCE, never content: the host reads how many
+   * problems / how much output there is to decide whether a chip may exist at
+   * all, and reads the content itself only when the turn is sent.
+   */
+  | { type: "addContextChip"; source: ContextSourceId }
+  /** Clicking a diagnostics / terminal chip: bring the panel it stands for on
+   *  screen. Host-local — a remote tab has neither panel to show. */
+  | { type: "openContextChipSource"; source: ContextSourceId }
+  /**
    * Remote file browse: list one directory under the tab's selected repo
    * (`cwd` must be that scope — see `resolveRemoteFileRoot`). `relPath`
    * optional ("" / omit = repo root). Answered by `projectDirListing`.
@@ -1222,7 +1255,7 @@ export type WebviewMsg =
   // `chips` is additive (capabilities.queueSendChips). `text` stays required so
   // an image-only queue is `{ text: "", chips }` — a v2.0.4 host still accepts
   // the type and no-ops on empty text rather than dropping an unknown message.
-  | { type: "queueSend"; text: string; chips?: FileChip[] }
+  | { type: "queueSend"; text: string; chips?: ContextChip[] }
   // Old webviews: `index: 0` is the pending block (every host entry). Chip-aware
   // clients use `clearQueuedSends` for that block; a live host therefore treats
   // this message as the pre-split meaning.
@@ -1237,7 +1270,7 @@ export type WebviewMsg =
   // the whole item without losing it. `chips` is additive (same as queueSend).
   // `fromQueue` marks the pending-block button so the host snapshots
   // `queuedSends` before any await (a following `clearQueuedSends` can race).
-  | { type: "steerSend"; text: string; chips?: FileChip[]; fromQueue?: boolean }
+  | { type: "steerSend"; text: string; chips?: ContextChip[]; fromQueue?: boolean }
   /**
    * Rate the agent turn that just finished in this process. `rating` 0 clears.
    * No bubble index: the host does not reconstruct CLI `turn_number`.
@@ -1306,7 +1339,7 @@ const HOST_MESSAGE_TYPE_MAP: Record<HostMsg["type"], true> = {
   soundNotifications: true, processingSound: true, readRepliesAloud: true, summarizeRepliesAloud: true, speechSummary: true, imageFull: true, moveComposerCaret: true, remoteStatus: true,
   setAllToolDetails: true, focusInput: true, findInSession: true, restoreComposer: true, truncateMessages: true, uiConfirmRequest: true,
   sessions: true, sessionRemoved: true, repoSessions: true, pinnedSessions: true, repos: true, sessionDot: true, queuedSends: true, submitQueuedSend: true,
-  steerUnavailable: true, feedbackAvailability: true, turnFeedbackAck: true, usage: true, providerCapabilities: true,
+  steerUnavailable: true, feedbackAvailability: true, turnFeedbackAck: true, usage: true, providerCapabilities: true, planEntries: true,
 };
 
 const WEBVIEW_MESSAGE_TYPE_MAP: Record<WebviewMsg["type"], true> = {
@@ -1325,7 +1358,7 @@ const WEBVIEW_MESSAGE_TYPE_MAP: Record<WebviewMsg["type"], true> = {
   listSessions: true, listRepoSessions: true, selectRepo: true, toggleRepoPin: true, toggleSessionPin: true,
   setRepoArchived: true, setRepoColor: true,
   resumeSession: true, renameSession: true, deleteSession: true,
-  clearAllSessions: true, pickFile: true, mentionQuery: true, addMentionFile: true,
+  clearAllSessions: true, pickFile: true, mentionQuery: true, addMentionFile: true, addContextChip: true, openContextChipSource: true,
   listProjectDir: true, readProjectFile: true, writeProjectFile: true,
   pasteImage: true, uploadFile: true, voiceStart: true,
   voiceStop: true, remoteVoiceStart: true, remoteVoiceChunk: true,
