@@ -249,6 +249,48 @@ export class Session {
    */
   keepTranscriptOnStart = false;
 
+  /**
+   * Model / effort / mode this session must start with (AP-10).
+   *
+   * Consumed on the `newSession` path, BEFORE the first turn — never applied
+   * with a live `setModel`. The CLI binds the model's agent type at spawn and
+   * locks it after the first turn, so a later cross-agent switch fails with
+   * `MODEL_SWITCH_INCOMPATIBLE_AGENT` (`isIncompatibleAgentError`). A role is a
+   * fresh session every time, so there is nothing to switch — the recipe is
+   * simply what the session is started as, and this field is how it gets there.
+   *
+   * Cleared by `startSessionBody` once read, so a later restart of the same
+   * session object cannot silently inherit a role's model.
+   */
+  startOverrides?: { model?: string; effort?: string; mode?: "agent" | "plan" };
+
+  /**
+   * Extra sink for this session's assistant text (AP-10).
+   *
+   * Deliberately NOT `captureAgentText`, which REPLACES the transcript and
+   * suppresses usage accounting — a role session is a real, visible, billed
+   * session whose transcript the user can open, so its text must still reach
+   * the webview and its usage must still reach the ledger. This tap runs
+   * alongside both.
+   */
+  agentTextTap?: (text: string) => void;
+
+  /**
+   * The `/agent` role run this session is waiting on (AP-10).
+   *
+   * Lives on the CALLING session, not the role's: it is what makes Stop in the
+   * thread the user is looking at stop the role, and what stops a second
+   * `/agent` from starting while one is still running.
+   */
+  agentRun?: {
+    runId: string;
+    step: number;
+    roleName: string;
+    /** The role's own session, so Stop can cancel and tear it down. */
+    roleSession: Session;
+    cancelled: boolean;
+  };
+
   /** Live permission requests awaiting an answer, by request id. Set when the
    *  card is shown, read when the user answers so we can persist the resolved
    *  card (title + outcome) for replay on a resumed session, then deleted. */

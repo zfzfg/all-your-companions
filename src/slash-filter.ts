@@ -28,6 +28,59 @@ export function isAdvertisedSkill(cmd: SlashCmd | null | undefined): boolean {
   return typeof path === "string" && path.length > 0 && typeof scope === "string" && scope.length > 0;
 }
 
+/**
+ * Slash commands the HOST answers itself. They are never forwarded to a CLI.
+ *
+ * The precedent is `/compact` on the Antigravity adapter, which the host
+ * answers rather than passing down (agy-acp-adapter.ts). The rule matters more
+ * here than it did there: `/agent` is not a command any of the four CLIs
+ * advertises, so forwarding it would not produce an error — it would produce
+ * an ordinary, billed LLM turn in which the model politely improvises what it
+ * thinks `/agent reviewer …` might mean. That is worse than a failure, because
+ * it looks like the feature working.
+ */
+export const HOST_SLASH_COMMANDS: ReadonlySet<string> = new Set(["agent"]);
+
+export interface AgentCommand {
+  name: string;
+  task: string;
+}
+
+/** `/agent` typed with no role name — the popover case, and the one that
+ *  should list the roles rather than complain. */
+export type AgentCommandParse =
+  | { kind: "none" }
+  | { kind: "list" }
+  | { kind: "run"; command: AgentCommand }
+  | { kind: "error"; message: string };
+
+/**
+ * Parse `/agent <name> <task>` out of a composer message.
+ *
+ * Only at position 0 of the message, matching every other dispatching slash
+ * command (see {@link matchSlashCommand}) — `see /agent docs` in prose must
+ * stay prose. The task is everything after the name, verbatim including
+ * newlines: a briefing task is frequently a paragraph, and trimming it to one
+ * line would quietly truncate the only field the user actually wrote.
+ */
+export function parseAgentCommand(text: string): AgentCommandParse {
+  const match = /^\/agent(?:\s+([\s\S]*))?$/.exec(String(text ?? "").trim());
+  if (!match) return { kind: "none" };
+  const rest = (match[1] ?? "").trim();
+  if (!rest) return { kind: "list" };
+  const split = /^(\S+)(?:\s+([\s\S]*))?$/.exec(rest);
+  if (!split) return { kind: "list" };
+  const name = split[1].toLowerCase();
+  const task = (split[2] ?? "").trim();
+  if (!/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(name)) {
+    return { kind: "error", message: `\`${split[1]}\` is not a valid role name — lowercase letters, digits and dashes only.` };
+  }
+  if (!task) {
+    return { kind: "error", message: `\`/agent ${name}\` needs a task: \`/agent ${name} <what the role should do>\`.` };
+  }
+  return { kind: "run", command: { name, task } };
+}
+
 function isAsciiWhitespace(ch: string): boolean {
   return ch === " " || ch === "\t" || ch === "\n" || ch === "\r" || ch === "\f" || ch === "\v";
 }

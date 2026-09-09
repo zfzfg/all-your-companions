@@ -87,6 +87,11 @@ function storedSessionDir(cwd, sessionId) {
   return path.join(grokHome(), "sessions", encodeURIComponent(cwd), sessionId);
 }
 
+// The model this process is currently bound to. AP-10 runs two roles of the
+// SAME provider on DIFFERENT models as separate processes, and the only way a
+// test can prove they did not blend is for each reply to name its own model.
+let activeModelId = "fake-model";
+
 function sessionHandle(sessionId) {
   return {
     sessionId,
@@ -240,6 +245,7 @@ rl.on("line", async (line) => {
       // Echo the received _meta so a test can assert the client sent
       // reasoningEffort on a live effort switch.
       process.stderr.write(`SET_MODEL: ${JSON.stringify({ modelId: params.modelId, _meta: params._meta })}\n`);
+      if (typeof params.modelId === "string" && params.modelId) activeModelId = params.modelId;
       // Mirror real grok: broadcast model_changed with the EFFECTIVE effort
       // BEFORE the response — the authoritative signal the client's effort state
       // syncs from (acp.ts session_notification handler).
@@ -404,6 +410,43 @@ async function runScenario(promptId, text, params) {
       });
       notify("session/update", { sessionId: sessions.id, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "(compacted)" } } });
       respondOk(promptId, { stopReason: "end_turn", _meta: { totalTokens: 0 } });
+      return;
+    }
+
+    if (text.includes("SCENARIO_ROLE_REPLY")) {
+      // A reply in the AP-10 briefing return format, naming this process's own
+      // model and its own token count, so a two-role test can prove transcript
+      // and usage did not cross between the two sessions.
+      const body = [
+        "## Summary",
+        "Ran as " + activeModelId + ".",
+        "",
+        "## Files touched",
+        "- " + activeModelId + ".ts",
+        "",
+        "## Open",
+        "- none",
+        "",
+        "## Failed",
+        "- none",
+      ].join(String.fromCharCode(10));
+      notify("session/update", {
+        sessionId: sessions.id,
+        update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: body } },
+      });
+      respondOk(promptId, {
+        stopReason: "end_turn",
+        _meta: {
+          totalTokens: activeModelId.length,
+          modelId: activeModelId,
+          usage: {
+            totalTokens: activeModelId.length,
+            inputTokens: 1,
+            outputTokens: 1,
+            costUsdTicks: activeModelId.length * 1000,
+          },
+        },
+      });
       return;
     }
 

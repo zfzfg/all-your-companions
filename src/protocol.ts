@@ -792,6 +792,69 @@ export type HostMsg =
       /** Display name of `target`, so the collapsed card does not need a lookup. */
       targetName?: string;
     }
+  /**
+   * A `/agent` role run finished (AP-10). One card in the calling thread with
+   * everything needed to judge the run without opening it: role, who answered
+   * on which model, how long, **what it cost**, which files it touched, and the
+   * summary it returned.
+   *
+   * Cost is not optional decoration. A role is a SECOND run against a second
+   * (or the same) account, and the feature plan is explicit that a crew can
+   * cost more than the turn it replaced — so `cost` is always a sentence, and
+   * says "no cost reported" rather than showing a reassuring `$0.00` when the
+   * provider reported nothing.
+   *
+   * `runId`/`step` are the coordinates of the artefacts on disk; the card
+   * posts them back as `openAgentArtifact` rather than carrying a path, so the
+   * webview never learns a filesystem location.
+   *
+   * Buffered (a transcript event) and replay-safe: every field is a value, so
+   * a replayed card renders identically without the run being live.
+   */
+  | {
+      type: "agentResult";
+      id: string;
+      runId: string;
+      step: number;
+      role: string;
+      provider: AcpProvider;
+      /** Display name of the provider, so the card needs no lookup table. */
+      providerName: string;
+      /** Empty means the provider's default model — rendered as such. */
+      model?: string;
+      effort?: string;
+      mode?: string;
+      /** "$0.0123 · 4,210 tokens", or "no cost reported". Never blank. */
+      cost: string;
+      durationMs?: number;
+      outcome: "completed" | "failed" | "cancelled";
+      summary: string;
+      /** Files the role SAID it touched. A self-report — see `unreported`. */
+      files: string[];
+      open: string[];
+      failed: string[];
+      /**
+       * Edits the host's diff machinery recorded that the role did not
+       * mention. Present only when non-empty: two permanently-empty sections
+       * would train the reader to skip the one run where they are not.
+       *
+       * This is the dangerous direction of the discrepancy — a later step
+       * briefed from `files` alone would not know these happened.
+       */
+      unreported?: string[];
+      /** Files the role named that the host saw no edit for (read-only, a
+       *  shell-command edit that never became a diff, or a claim that did not
+       *  happen). Reported, never silently dropped. */
+      claimedOnly?: string[];
+      /** A note about the run's standing rather than its outcome — today, that
+       *  a review ran on the same companion as the calling conversation. */
+      caution?: string;
+      /** The role session, for "Open session". Absent if it never got an id. */
+      sessionId?: string;
+      cwd?: string;
+      /** Set when the run ended badly — shown instead of a summary. */
+      detail?: string;
+    }
   | { type: "agentEnd"; meta?: PromptResultMeta; status?: TurnEndStatus; durationMs?: number }
   // status/durationMs are present only when a turn was IN FLIGHT when the
   // process died — a clean exit between turns ends no turn.
@@ -1321,6 +1384,18 @@ export type WebviewMsg =
   // without that distinction a thawing background tab steals the conversation
   // back from the tab in the user's hand. Absent/false = today's refusal when
   // another tab already holds the session.
+  /**
+   * Open a `/agent` run's brief or result in an editor (AP-10).
+   *
+   * Coordinates, deliberately NOT a path. The artefacts live under
+   * globalStorage, outside every authorized workspace root, so
+   * `resolveChatOpenFilePath` would rightly refuse them — and widening that
+   * gate for this card would hand every renderer (including a remote one) a
+   * way to name a file outside the project. The host builds the path from its
+   * own run-store root instead, so the only thing crossing the wire is which
+   * step of which run.
+   */
+  | { type: "openAgentArtifact"; runId: string; step: number; which: "brief" | "result" }
   | { type: "resumeSession"; id: string; cwd?: string; claim?: boolean }
   // cwd names the PROJECT the row belongs to, so a client listing several of
   // them (the browser rail) can act on a conversation without first switching
@@ -1477,7 +1552,7 @@ const HOST_MESSAGE_TYPE_MAP: Record<HostMsg["type"], true> = {
   toolCall: true, toolCallUpdate: true, permissionRequest: true, permissionOptions: true,
   permissionResolved: true, exitPlanRequest: true, planResolved: true, questionRequest: true, questionResolved: true, toolEditReverted: true,
   planNotice: true, autoCompactNotice: true, planBlocked: true, promptComplete: true, contextUsage: true, agentReset: true,
-  agentError: true, limitOffer: true, limitOfferResolved: true, agentEnd: true, exit: true, setBusy: true, summarizing: true,
+  agentError: true, limitOffer: true, limitOfferResolved: true, agentResult: true, agentEnd: true, exit: true, setBusy: true, summarizing: true,
   sessionContext: true, clearMessages: true, onboarding: true, error: true, hostNotice: true,
   xaiNotification: true, subagentUpdate: true, childStream: true, runProgress: true, commandOutput: true, expandCommandOutputs: true, steerByDefault: true,
   soundNotifications: true, processingSound: true, readRepliesAloud: true, summarizeRepliesAloud: true, speechSummary: true, imageFull: true, moveComposerCaret: true, remoteStatus: true,
@@ -1501,7 +1576,7 @@ const WEBVIEW_MESSAGE_TYPE_MAP: Record<WebviewMsg["type"], true> = {
   logout: true, checkGrokUpdate: true, updateGrok: true, recheckConnection: true, refreshProviders: true, retryProviderSession: true,
   listSessions: true, listRepoSessions: true, selectRepo: true, toggleRepoPin: true, toggleSessionPin: true,
   setRepoArchived: true, setRepoColor: true,
-  resumeSession: true, renameSession: true, deleteSession: true,
+  openAgentArtifact: true, resumeSession: true, renameSession: true, deleteSession: true,
   clearAllSessions: true, pickFile: true, mentionQuery: true, addMentionFile: true, addContextChip: true, openContextChipSource: true,
   listProjectDir: true, readProjectFile: true, writeProjectFile: true,
   pasteImage: true, uploadFile: true, voiceStart: true,

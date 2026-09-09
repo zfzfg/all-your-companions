@@ -4415,6 +4415,19 @@ body.dragging { outline: 2px dashed var(--vscode-focusBorder); outline-offset: -
 /* ---------- question card (ask_user_question) ---------- */
 .card.question { border-left-color: var(--vscode-charts-purple, #b180d7); }
 .card.limit { border-left-color: var(--vscode-charts-orange, #d7ba7d); }
+/* AP-10 /agent result. Blue by default, red when the run failed — the card is
+   the only place a role run reports, so a failure must not read as a success. */
+.card.agent-result { border-left-color: var(--vscode-charts-blue, #4fc1ff); }
+.card.agent-result.failed { border-left-color: var(--vscode-errorForeground, #f48771); }
+.agent-result-summary { margin-top: 6px; white-space: pre-wrap; }
+.agent-result-list { margin-top: 6px; }
+.agent-result-list-title { font-size: 0.9em; opacity: 0.8; }
+.agent-result-list ul { margin: 2px 0 0; padding-left: 18px; }
+.agent-result-list li { word-break: break-word; }
+/* An edit the role never mentioned is the one row on this card that changes
+   what the next step should be told, so it is the one row that is coloured. */
+.agent-result-list.unreported .agent-result-list-title { color: var(--vscode-editorWarning-foreground, #cca700); opacity: 1; }
+.agent-result-caution { margin-top: 6px; font-size: 0.95em; color: var(--vscode-descriptionForeground); }
 .card.limit.resolved { opacity: 1; }
 /* "Grok is asking" / "You answered" reads as a small label so the question
    itself is the prominent line. */

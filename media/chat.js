@@ -8614,7 +8614,7 @@
     "permissionRequest", "permissionOptions", "permissionResolved",
     "exitPlanRequest", "planResolved", "questionRequest", "questionResolved", "planNotice",
     "autoCompactNotice", "planBlocked", "promptComplete", "commandOutput",
-    "agentReset", "agentError", "limitOffer", "limitOfferResolved", "agentEnd", "exit", "sessionContext",
+    "agentReset", "agentError", "limitOffer", "limitOfferResolved", "agentResult", "agentEnd", "exit", "sessionContext",
     "xaiNotification", "subagentUpdate", "childStream", "runProgress",
     "summarizing",
   ]);
@@ -11947,6 +11947,122 @@
     }
     const actions = el.querySelector(".card-actions");
     if (actions) actions.remove();
+  }
+
+  /**
+   * `/agent` result card (AP-10).
+   *
+   * Everything on it is a value carried by the message, so a replayed card is
+   * byte-identical to the live one and needs nothing from the host. The cost
+   * line is not optional and never omitted: a role is a SECOND, separately
+   * billed run, and the whole point of showing it is that a crew can cost more
+   * than the single turn it replaced.
+   */
+  function addAgentResultCard(msg) {
+    clearWelcome();
+    hideGrokking();
+    hideThinkingIndicator();
+    stopProcessingCue();
+    state.busy = false;
+    state.busyLocked = false;
+    updateSendButton();
+
+    const el = document.createElement("div");
+    el.className = "card agent-result" + (msg.outcome === "failed" ? " failed" : "");
+    el.dataset.agentRunId = String(msg.runId || "");
+    el.dataset.agentStep = String(msg.step != null ? msg.step : 1);
+
+    const title = document.createElement("div");
+    title.className = "card-title";
+    const verb = msg.outcome === "completed" ? "finished" : msg.outcome === "cancelled" ? "was stopped" : "failed";
+    title.textContent = "Role " + (msg.role || "agent") + " " + verb;
+    el.appendChild(title);
+
+    const meta = document.createElement("div");
+    meta.className = "card-subtitle";
+    const bits = [msg.providerName || msg.provider || "", msg.model || "default model"];
+    if (msg.effort) bits.push("effort " + msg.effort);
+    if (msg.mode) bits.push(msg.mode + " mode");
+    if (typeof msg.durationMs === "number") bits.push(Math.max(1, Math.round(msg.durationMs / 1000)) + "s");
+    // Always present — the host writes "no cost reported" rather than a
+    // reassuring $0.00 when the provider reported nothing.
+    bits.push(msg.cost || "no cost reported");
+    meta.textContent = bits.filter(Boolean).join(" · ");
+    el.appendChild(meta);
+
+    if (msg.detail) {
+      const detail = document.createElement("div");
+      detail.className = "card-subtitle";
+      detail.textContent = msg.detail;
+      el.appendChild(detail);
+    }
+    // A same-companion review is still a review, but it is not an outside one.
+    // Stated on the card so the label matches what actually happened.
+    if (msg.caution) {
+      const caution = document.createElement("div");
+      caution.className = "agent-result-caution";
+      caution.textContent = msg.caution;
+      el.appendChild(caution);
+    }
+    if (msg.summary) {
+      const body = document.createElement("div");
+      body.className = "agent-result-summary";
+      body.textContent = msg.summary;
+      el.appendChild(body);
+    }
+
+    const section = (label, items) => {
+      const list = Array.isArray(items) ? items.filter(Boolean) : [];
+      if (!list.length) return;
+      const wrap = document.createElement("div");
+      wrap.className = "agent-result-list"
+        + (label === "Edits the role did not report" ? " unreported" : "");
+      const heading = document.createElement("div");
+      heading.className = "agent-result-list-title";
+      heading.textContent = label + " (" + list.length + ")";
+      wrap.appendChild(heading);
+      const ul = document.createElement("ul");
+      list.forEach((entry) => {
+        const li = document.createElement("li");
+        li.textContent = String(entry);
+        ul.appendChild(li);
+      });
+      wrap.appendChild(ul);
+      el.appendChild(wrap);
+    };
+    section("Files touched (reported)", msg.files);
+    // Only rendered when non-empty (the host omits the field otherwise), so a
+    // clean run shows no discrepancy rows at all and a dirty one stands out.
+    section("Edits the role did not report", msg.unreported);
+    section("Reported but not observed", msg.claimedOnly);
+    section("Still open", msg.open);
+    section("Failed", msg.failed);
+
+    const actions = document.createElement("div");
+    actions.className = "card-actions";
+    const artifact = (label, which) => {
+      const btn = document.createElement("button");
+      btn.textContent = label;
+      btn.onclick = () => vscode.postMessage({
+        type: "openAgentArtifact",
+        runId: msg.runId,
+        step: msg.step != null ? msg.step : 1,
+        which,
+      });
+      actions.appendChild(btn);
+    };
+    artifact("Open briefing", "brief");
+    if (msg.outcome !== "cancelled" || msg.summary) artifact("Open result", "result");
+    if (msg.sessionId) {
+      const open = document.createElement("button");
+      open.textContent = "Open session";
+      open.onclick = () => vscode.postMessage({ type: "resumeSession", id: msg.sessionId, cwd: msg.cwd });
+      actions.appendChild(open);
+    }
+    el.appendChild(actions);
+
+    appendTranscriptChild(el);
+    scrollToBottom();
   }
 
   function addLimitOfferCard(msg) {
@@ -18020,6 +18136,10 @@
         }
         break;
       }
+      case "agentResult":
+        addAgentResultCard(msg);
+        state.ttsTurnText = "";
+        break;
       case "agentEnd":
         stopProcessingCue();
         hideGrokking(); // turn ended (defensive — content normally clears it first)

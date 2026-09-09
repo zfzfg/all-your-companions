@@ -168,8 +168,12 @@ describe("cross-project fallout of following the selection", () => {
     // second resume is not blocked by the first.
     const body = methodBody("private parkFocused()");
     expect(body).toMatch(/if \(cur\.priming\) return;/);
-    // …and the guard has to come first, or it guards nothing.
-    expect(body.indexOf("cur.priming")).toBeLessThan(body.indexOf("removeSessionFromDisk"));
+    // …and the guard has to come first, or it guards nothing. The teardown
+    // itself moved into `teardownEmptySession` for AP-10 (a cancelled `/agent`
+    // role session takes the same path); the ordering rule is unchanged and is
+    // now expressed against that call.
+    expect(body.indexOf("cur.priming")).toBeLessThan(body.indexOf("teardownEmptySession"));
+    expect(methodBody("private teardownEmptySession(")).toMatch(/removeSessionFromDisk/);
   });
 });
 

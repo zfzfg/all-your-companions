@@ -289,6 +289,10 @@ export const INBOUND_DISPOSITION: Record<WebviewMsg["type"], InboundDisposition>
   // AP-06: starts a turn on a partner companion or retries the last prompt —
   // same class as send. Never auto-fires; the person clicked.
   limitOfferAnswer: "propose",
+  // AP-10: opens a run's brief/result in a LOCAL editor tab. Nothing about it
+  // is meaningful on a phone, and it acts on the desk window, so it is
+  // host-local like every other "open this in the editor" message.
+  openAgentArtifact: "host-local",
   queueSend: "propose",
   dequeueSend: "propose",
   clearQueuedSends: "propose",
@@ -589,6 +593,10 @@ export const REMOTE_REQUIRES_BOUND_SESSION: Record<WebviewMsg["type"], boolean> 
   questionCancel: true,
   questionDraft: true,
   limitOfferAnswer: true,
+  // host-local, so a remote never sends it; the run store is addressed by
+  // runId, not by the bound session, and the entry says so rather than
+  // implying a session lookup that does not happen.
+  openAgentArtifact: false,
   queueSend: true,
   dequeueSend: true,
   clearQueuedSends: true,
@@ -1008,6 +1016,9 @@ export const OUTBOUND_DISPOSITION: Record<HostMsg["type"], OutboundDisposition> 
   agentError: "mirror",
   limitOffer: "mirror",
   limitOfferResolved: "mirror",
+  // AP-10: a transcript card like any other turn result. It carries no path,
+  // only run coordinates, so mirroring it leaks no filesystem layout.
+  agentResult: "mirror",
   agentEnd: "mirror",
   exit: "mirror",
   setBusy: "mirror",
@@ -1194,6 +1205,7 @@ export const OUTBOUND_PROJECT_AUTH: Record<HostMsg["type"], OutboundProjectAuth>
   agentError: "scope",
   limitOffer: "scope",
   limitOfferResolved: "scope",
+  agentResult: "scope",
   agentEnd: "scope",
   exit: "scope",
   setBusy: "scope",

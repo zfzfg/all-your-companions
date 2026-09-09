@@ -314,7 +314,25 @@ import {
   type QueuedSendEntry,
 } from "./queued-send";
 
-import { matchSlashCommand } from "./slash-filter";
+import { matchSlashCommand, parseAgentCommand } from "./slash-filter";
+import {
+  AGENT_ROLES_DIR,
+  findAgentRole,
+  loadAgentRoles,
+  validateRoleModel,
+  type AgentRole,
+  type AgentRoleFile,
+  type AgentRoleSet,
+} from "./agent-roles";
+import {
+  RESULT_FORMAT,
+  makeBriefing,
+  parseResult,
+  reconcileFiles,
+  renderBriefing,
+  renderResult,
+} from "./briefing";
+import { AgentRunStore, formatRunCost } from "./agent-run";
 import {
   MENTION_INDEX_LIMIT,
   MENTION_INDEX_TTL_MS,
@@ -1249,6 +1267,9 @@ export class GrokSidebar {
 
   /** Client-side file snapshots per user turn (AP-08). Lives under globalStorage. */
   private readonly checkpointStore: CheckpointStore;
+  /** `/agent` briefs, results and run logs (AP-10). Decision 18.1: runs are
+   *  execution noise and live in globalStorage, not in the project. */
+  private readonly agentRuns: AgentRunStore;
   private routineTimer?: ReturnType<typeof setInterval>;
   /** Last wake time the relay accepted. `undefined` = never published, which is
    *  distinct from `null` = published "nothing scheduled". */
@@ -1295,6 +1316,17 @@ export class GrokSidebar {
       root: path.join(this.context.globalStorageUri.fsPath, "checkpoints"),
       fs: nodeCheckpointFs(fs),
       log: (line) => this.host.appendLine(line),
+    });
+    this.agentRuns = new AgentRunStore({
+      root: path.join(this.context.globalStorageUri.fsPath, "runs"),
+      fs: {
+        mkdirSync: (dir, options) => { fs.mkdirSync(dir, options); },
+        writeFileSync: (file, data) => fs.writeFileSync(file, data, "utf8"),
+        appendFileSync: (file, data) => fs.appendFileSync(file, data, "utf8"),
+        existsSync: (target) => fs.existsSync(target),
+        rmSync: (target, options) => fs.rmSync(target, options),
+      },
+      join: (...parts) => path.join(...parts),
     });
     void this.sweepImageStaging();
     void this.sweepFileStaging();
@@ -1489,6 +1521,422 @@ export class GrokSidebar {
       });
     } catch (e) {
       finish("failed", { detail: `Failed — ${(e as Error).message}` });
+    }
+  }
+
+  /* --------------------------------------------------------------- /agent */
+
+  /**
+   * Role files for this project, folded over the five built-ins (AP-10).
+   *
+   * Read fresh on every `/agent`, deliberately: role files are edited in the
+   * same window that runs them, and a cache would hand the user yesterday's
+   * definition of a role they just fixed. There are at most a handful of small
+   * files, so the read is cheaper than the surprise.
+   */
+  private agentRoleSet(cwd: string): AgentRoleSet {
+    const dir = path.join(cwd, ".companions", "agents");
+    const files: AgentRoleFile[] = [];
+    let names: string[] = [];
+    try {
+      names = fs.readdirSync(dir).filter((name) => name.toLowerCase().endsWith(".md")).sort();
+    } catch {
+      // No directory is the normal case, not an error — the built-ins are the
+      // whole point of shipping five of them.
+      return loadAgentRoles([]);
+    }
+    for (const name of names) {
+      try {
+        files.push({
+          path: `${AGENT_ROLES_DIR}/${name}`,
+          stem: name.replace(/\.md$/i, ""),
+          text: fs.readFileSync(path.join(dir, name), "utf8"),
+        });
+      } catch (error) {
+        this.host.appendLine(`[agent] could not read ${AGENT_ROLES_DIR}/${name}: ${(error as Error).message}`);
+      }
+    }
+    return loadAgentRoles(files);
+  }
+
+  /**
+   * Which provider actually answers for this role.
+   *
+   * A role read from a FILE names its provider on purpose, and swapping that
+   * silently would defeat the point of a `reviewer` pinned to a second
+   * opinion. So a project role whose provider is not usable is an error the
+   * user is told about, not a substitution.
+   *
+   * A BUILT-IN role is the opposite case: its `provider` is a placeholder
+   * (agent-roles.ts says so), because a shipped default cannot know which
+   * accounts exist on this machine. It falls back to the calling session's
+   * provider so `/agent` works on the first run of a fresh install — except
+   * where the role declares `preferDifferentProvider`, which steers it AWAY
+   * from the caller. Without that, the shipped `reviewer` defaults to the same
+   * companion that just did the work: the weakest grade of review in §5.10,
+   * wearing the label of the strongest. With only one companion connected it
+   * still runs — a fresh session holding only the briefing IS a real review —
+   * and `runAgentRole` puts a caution on the card so nobody reads it as an
+   * outside opinion.
+   */
+  private resolveRoleProvider(role: AgentRole, caller: Session): { provider: AcpProvider } | { error: string } {
+    const usable = this.usableProviders();
+    if (!usable.length) return { error: "No companion is connected, so there is nothing to run a role on." };
+    // Checked BEFORE "the role's own provider is usable": for a BUILT-IN the
+    // provider is only a placeholder, so a reviewer whose placeholder happens
+    // to match the caller would otherwise never look elsewhere — which is the
+    // exact failure this preference exists to prevent.
+    if (role.preferDifferentProvider && role.source === "builtin") {
+      const elsewhere = usable.find((candidate) => candidate !== caller.provider);
+      if (elsewhere) return { provider: elsewhere };
+    }
+    if (usable.includes(role.provider)) return { provider: role.provider };
+    if (role.source === "project") {
+      return {
+        error:
+          `Role \`${role.name}\` runs on ${providerDisplayName(role.provider)}, which is not connected. `
+          + `Connect it, or change \`provider:\` in \`${role.path ?? AGENT_ROLES_DIR}\`.`,
+      };
+    }
+    return { provider: usable.includes(caller.provider) ? caller.provider : usable[0] };
+  }
+
+  /** Post a plain line into the calling thread and log it. */
+  private agentNotice(session: Session, level: "info" | "warning", text: string): void {
+    this.host.appendLine(`[agent] ${text}`);
+    this.emit(session, { type: "hostNotice", level, text });
+  }
+
+  /**
+   * `/agent <name> <task>` — commission one named role (AP-10, crew stage 1).
+   *
+   * Host-answered end to end; the text never reaches a CLI as a prompt (see
+   * `HOST_SLASH_COMMANDS`). The role runs in its OWN session — that is the
+   * mechanism, not an implementation detail: a fresh session holding nothing
+   * but a briefing is what stretches the context, and it is also what makes a
+   * second opinion worth having.
+   *
+   * Returns true when the message was consumed here, so the caller must not
+   * fall through to an ordinary send.
+   */
+  private async handleAgentCommand(text: string, session: Session, origin: MsgOrigin): Promise<boolean> {
+    const parsed = parseAgentCommand(text);
+    if (parsed.kind === "none") return false;
+
+    const cwd = this.sessionCwd(session);
+    const set = this.agentRoleSet(cwd);
+    // Broken role files are reported every time rather than once: the user is
+    // usually mid-edit on the file that is broken.
+    for (const problem of set.problems) this.agentNotice(session, "warning", problem.message);
+
+    this.emit(session, { type: "userMessage", text, chips: [] });
+
+    if (parsed.kind === "list") {
+      const lines = set.roles.map((role) => {
+        const where = role.source === "builtin" ? "built-in" : role.path ?? "project";
+        return `- \`/agent ${role.name}\` — ${role.whenToUse} (${where})`;
+      });
+      this.agentNotice(
+        session,
+        "info",
+        [`Roles available in this project (${AGENT_ROLES_DIR}, with built-ins as the fallback):`, ...lines].join("\n"),
+      );
+      return true;
+    }
+    if (parsed.kind === "error") {
+      this.agentNotice(session, "warning", parsed.message);
+      return true;
+    }
+
+    const { name, task } = parsed.command;
+    const role = findAgentRole(set, name);
+    if (!role) {
+      this.agentNotice(
+        session,
+        "warning",
+        `There is no role \`${name}\`. Available: ${set.roles.map((entry) => entry.name).join(", ")}. `
+        + `Define your own as \`${AGENT_ROLES_DIR}/${name}.md\`.`,
+      );
+      return true;
+    }
+    // One role at a time in stage 1. A second `/agent` would need a second
+    // card, a second Stop target and a second cost line; stage 4 is where
+    // parallelism gets the isolation that makes it safe.
+    if (session.agentRun) {
+      this.agentNotice(
+        session,
+        "warning",
+        `Role \`${session.agentRun.roleName}\` is still running. Stop it first, or wait for its card.`,
+      );
+      return true;
+    }
+    const resolved = this.resolveRoleProvider(role, session);
+    if ("error" in resolved) {
+      this.agentNotice(session, "warning", resolved.error);
+      return true;
+    }
+    const provider = resolved.provider;
+    // Model against provider — never a silent fall back to the default. An
+    // unwarmed cache reports `checked: false` and the run proceeds, because
+    // "we do not know the model list" is not "the model is wrong".
+    if (provider === role.provider) {
+      const cache = this.state.get<ProviderModelCache>(PROVIDER_MODEL_CACHE_KEY, {})[provider];
+      const verdict = validateRoleModel(role, cache?.models, providerDisplayName(provider));
+      if (!verdict.ok) {
+        this.agentNotice(session, "warning", verdict.message);
+        return true;
+      }
+      if (!verdict.checked && role.model) {
+        this.host.appendLine(
+          `[agent] ${providerDisplayName(provider)} model list is not warmed yet — `
+          + `role \`${role.name}\` model '${role.model}' not verified.`,
+        );
+      }
+    }
+
+    await this.runAgentRole({ ...role, provider }, task, session, origin);
+    return true;
+  }
+
+  /**
+   * Start the role session, brief it, and turn its reply into a card.
+   *
+   * Everything the role does — permission cards, diffs, checkpoints, usage —
+   * runs through the ordinary machinery of a session. Nothing here bypasses a
+   * grant; a role's edit is reviewed exactly like a hand-typed one.
+   */
+  private async runAgentRole(role: AgentRole, task: string, caller: Session, origin: MsgOrigin): Promise<void> {
+    const cwd = this.sessionCwd(caller);
+    const runId = this.agentRuns.newRunId();
+    const step = 1;
+    const startedAt = Date.now();
+
+    const briefing = makeBriefing({
+      runId,
+      step,
+      goal: task,
+      task,
+      acceptance:
+        "The task above is done, or the reason it could not be done is stated in the result. "
+        + "Nothing outside the task has been changed.",
+      // Paths, never contents (§5.4). The caller's attached file chips are the
+      // one thing this stage knows about the user's focus, so they are what the
+      // role gets pointed at.
+      files: caller.chips.filter((chip) => !chip.hidden && chip.relPath).map((chip) => chip.relPath),
+      decisions: [
+        "This role was commissioned from an existing conversation that you are not in and cannot see. "
+        + "Everything you were told is in this briefing.",
+      ],
+      forbidden: [
+        "Do not commit, push, or create a branch, tag or pull request.",
+        "Do not change anything outside the task described above, however tempting the adjacent fix looks.",
+        ...(role.mode === "plan" ? ["Do not edit, create or delete any file — this role runs read-only."] : []),
+        ...(role.scope?.length ? [`Do not touch files outside this role's scope: ${role.scope.join(", ")}.`] : []),
+      ],
+      returnFormat: RESULT_FORMAT,
+    });
+    const briefMarkdown = renderBriefing(briefing, role);
+
+    try {
+      this.agentRuns.writeBrief(runId, step, briefMarkdown);
+    } catch (error) {
+      // The brief IS the run. Without it on disk there is nothing to read back
+      // and nothing for a later step to build on, so this is where it stops.
+      this.agentNotice(
+        caller,
+        "warning",
+        `Could not write the briefing for run ${runId}: ${(error as Error).message}. The role was not started.`,
+      );
+      return;
+    }
+    this.logAgentRun({
+      at: startedAt,
+      runId,
+      step,
+      role: role.name,
+      provider: role.provider,
+      ...(role.model ? { model: role.model } : {}),
+      event: "briefed",
+    });
+
+    // Said plainly on the card when a review lands on the companion that just
+    // did the work: it is still a fresh session with only the briefing, which
+    // is a real review — but it is the weakest grade of one, and the label has
+    // to match (§5.10). Only ever a note; the run is not blocked.
+    const caution = role.preferDifferentProvider && role.provider === caller.provider
+      ? `This ran on ${providerDisplayName(role.provider)}, the same companion as this conversation — `
+        + `a fresh session with only the briefing, but not an outside opinion. `
+        + `Connect a second companion for a stronger review.`
+      : undefined;
+
+    const roleSession = this.newLocalSession();
+    roleSession.provider = role.provider;
+    roleSession.startOverrides = {
+      ...(role.model ? { model: role.model } : {}),
+      ...(role.effort ? { effort: role.effort } : {}),
+      ...(role.mode ? { mode: role.mode } : {}),
+    };
+    this.setSessionCwd(roleSession, cwd, this.workspaceRoot());
+    this.pool.add(roleSession);
+    caller.agentRun = { runId, step, roleName: role.name, roleSession, cancelled: false };
+    this.setStatus(caller, "working");
+    this.emit(caller, { type: "setBusy", value: true });
+    this.agentNotice(
+      caller,
+      "info",
+      `Running role \`${role.name}\` on ${providerDisplayName(role.provider)}`
+      + `${role.model ? ` (${role.model})` : ""} in its own session — run ${runId}, step ${step}.`,
+    );
+
+    let reply = "";
+    roleSession.agentTextTap = (chunk) => { reply += chunk; };
+    let outcome: "completed" | "failed" | "cancelled" = "completed";
+    let detail: string | undefined;
+    try {
+      const client = await this.startSession(undefined, roleSession);
+      if (!client) {
+        outcome = "failed";
+        detail = `${providerDisplayName(role.provider)} could not start a session for this role.`;
+      } else if (caller.agentRun?.cancelled) {
+        outcome = "cancelled";
+        detail = "Stopped before the briefing was sent.";
+      } else {
+        this.nameAgentRoleSession(roleSession, role, runId, step);
+        await this.handleSend(briefMarkdown, false, roleSession, origin);
+        if (caller.agentRun?.cancelled) {
+          outcome = "cancelled";
+          detail = "Stopped while the role was working.";
+        } else if (roleSession.status === "error") {
+          outcome = "failed";
+          detail = "The role's turn ended in an error — open its session for the message.";
+        }
+      }
+    } catch (error) {
+      outcome = "failed";
+      detail = (error as Error).message;
+    } finally {
+      roleSession.agentTextTap = undefined;
+    }
+
+    const result = parseResult(reply);
+    // The role's own list, measured against what the host's diff machinery
+    // actually recorded for that session (AP-09's blocks). A self-report is
+    // the weakest link in the format; this is the only evidence available
+    // about it, and both halves travel so neither is mistaken for the other.
+    const observed = reviewCenterSnapshot(roleSession.reviewBlocks, String(roleSession.userMessageCount))
+      .map((file) => file.path);
+    const reconciliation = reconcileFiles(result.files, observed);
+    // Stopped before it said anything: this run produced nothing, so it leaves
+    // nothing behind — no result file, no directory holding an unanswered
+    // brief, and above all no empty "New session" in the rail. The card still
+    // appears; the user asked for a role and is owed an answer about it.
+    const producedNothing = outcome === "cancelled" && !reply.trim();
+    if (producedNothing) {
+      this.discardAgentRoleSession(roleSession);
+    } else {
+      try {
+        const resultPath = this.agentRuns.writeResult(runId, step, renderResult(result, reply, reconciliation));
+        this.host.appendLine(`[agent] run ${runId} step ${step}: ${resultPath}`);
+      } catch (error) {
+        this.host.appendLine(`[agent] could not write the result for run ${runId}: ${(error as Error).message}`);
+      }
+    }
+
+    const roleSessionId = roleSession.activeSessionId;
+    const usage = roleSessionId
+      ? this.persistedUsageLedger(roleSessionId, roleSession.userMessageCount).usage
+      : undefined;
+    const durationMs = Date.now() - startedAt;
+
+    caller.agentRun = undefined;
+    this.setStatus(caller, outcome === "failed" ? "error" : "done");
+    this.emit(caller, { type: "setBusy", value: false });
+    this.emit(caller, {
+      type: "agentResult",
+      id: `${runId}-${step}`,
+      runId,
+      step,
+      role: role.name,
+      provider: role.provider,
+      providerName: providerDisplayName(role.provider),
+      ...(role.model ? { model: role.model } : {}),
+      ...(role.effort ? { effort: role.effort } : {}),
+      ...(role.mode ? { mode: role.mode } : {}),
+      cost: formatRunCost(usage?.costUsdTicks, usage?.totalTokens),
+      durationMs,
+      outcome,
+      summary: result.summary,
+      files: result.files,
+      open: result.open,
+      failed: result.failed,
+      ...(reconciliation.unreported.length ? { unreported: reconciliation.unreported } : {}),
+      ...(reconciliation.claimedOnly.length ? { claimedOnly: reconciliation.claimedOnly } : {}),
+      ...(caution ? { caution } : {}),
+      ...(roleSessionId ? { sessionId: roleSessionId } : {}),
+      cwd,
+      ...(detail ? { detail } : {}),
+    });
+    // The closing log line, then — for a run that produced nothing — the
+    // directory itself. In that order: writing the log first and deleting
+    // afterwards is what keeps `discard` from being undone by its own record.
+    if (producedNothing) {
+      this.host.appendLine(`[agent] run ${runId} was stopped before it produced anything; discarded.`);
+      try { this.agentRuns.discard(runId); } catch { /* nothing to clean up */ }
+    } else {
+      this.logAgentRun({
+        at: Date.now(),
+        runId,
+        step,
+        role: role.name,
+        provider: role.provider,
+        ...(role.model ? { model: role.model } : {}),
+        event: outcome === "completed" ? "finished" : outcome === "cancelled" ? "cancelled" : "failed",
+        ...(roleSessionId ? { sessionId: roleSessionId } : {}),
+        ...(detail ? { detail } : {}),
+        durationMs,
+        ...(usage?.costUsdTicks !== undefined ? { costUsdTicks: usage.costUsdTicks } : {}),
+      });
+    }
+    this.postSessionsList();
+  }
+
+  /** Name a role session before its turn, for the reason routines do the same:
+   *  an interrupted run still leaves a row, and an untitled one is the hardest
+   *  to account for afterwards. */
+  private nameAgentRoleSession(roleSession: Session, role: AgentRole, runId: string, step: number): void {
+    const id = roleSession.activeSessionId;
+    if (!id) return;
+    const overrides = this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
+    void this.state.update(SESSION_META_KEY, {
+      ...overrides,
+      [id]: { ...(overrides[id] ?? {}), customName: `${role.name} · ${runId} step ${step}` },
+    });
+    this.sessionCache.delete(id);
+    this.postSessionName(roleSession);
+  }
+
+  /** A role session that produced nothing is removed outright — the same path
+   *  as an abandoned empty "New session" (see {@link teardownEmptySession}). */
+  private discardAgentRoleSession(roleSession: Session): void {
+    if (roleSession.hasHistory) return;
+    this.teardownEmptySession(roleSession);
+  }
+
+  /** Stop the running role, if any. Returns true when there was one. */
+  private cancelAgentRun(caller: Session): boolean {
+    const run = caller.agentRun;
+    if (!run) return false;
+    run.cancelled = true;
+    void run.roleSession.client?.cancel("user Stop click (/agent)");
+    return true;
+  }
+
+  private logAgentRun(entry: Parameters<AgentRunStore["appendLog"]>[0]): void {
+    try {
+      this.agentRuns.appendLog(entry);
+    } catch (error) {
+      // The log is the account of the run, not the run.
+      this.host.appendLine(`[agent] could not append to the run log: ${(error as Error).message}`);
     }
   }
 
@@ -9821,11 +10269,16 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     if (this.mcpConnectorKeysReady) await this.mcpConnectorKeysReady;
     if (gen !== session.gen) return undefined;
     const env = session.provider === "grok" ? this.buildEnv(cwd) : { ...process.env };
-    const effortStr = rememberedEffort(
-      cfg.get<EffortPrefs>("defaultEffortByProvider", {}),
-      session.provider,
-      cfg.get<string>("defaultEffort", ""),
-    );
+    // A role's effort (AP-10) wins over the remembered default, and it is
+    // applied HERE — on the spawn, ahead of `session/new` — because that is the
+    // only place grok takes `--reasoning-effort` at all and the only point an
+    // adapter's `setReasoningEffort` runs before the first turn.
+    const effortStr = session.startOverrides?.effort
+      || rememberedEffort(
+        cfg.get<EffortPrefs>("defaultEffortByProvider", {}),
+        session.provider,
+        cfg.get<string>("defaultEffort", ""),
+      );
     const effort = effortStr ? (effortStr as EffortLevel) : undefined;
     // Transient spawn/init after an update can throw once; retry the plain
     // failure only (auth and the Windows stdio pin keep their own paths).
@@ -9986,6 +10439,9 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     });
     client.on("messageChunk", (text: string) => {
       if (gen !== session.gen) return;
+      // AP-10: a role run reads the reply while it still renders and still
+      // bills. Additive on purpose — see Session.agentTextTap.
+      session.agentTextTap?.(text);
       if (session.captureAgentText !== undefined) {
         session.captureAgentText += text;
         return;
@@ -10423,7 +10879,16 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       await client.start();
       clock.record("spawn+init", clock.elapsed(spawnAt));
       if (gen !== session.gen) { client.dispose(); return undefined; }
-      const defaultModel = this.providerDefaultForProject(cwd, session.provider) ?? "";
+      // AP-10: a role's model is set on the `newSession` path, before the first
+      // turn, and NEVER by a live switch — the CLI locks the model's agent type
+      // after turn one and a cross-agent `set_model` then fails with
+      // MODEL_SWITCH_INCOMPATIBLE_AGENT. Read once and cleared, so a later
+      // restart of this same session object does not inherit the role's model.
+      const startOverrides = session.startOverrides;
+      session.startOverrides = undefined;
+      const defaultModel = startOverrides?.model
+        || this.providerDefaultForProject(cwd, session.provider)
+        || "";
       if (resumeId) {
         replayBegan = true;
         // Queue any saved plans BEFORE replay starts so the webview can interleave
@@ -10550,6 +11015,13 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         clock.record("load", 0);
         clock.record("replay(post)", 0);
         session.activeSessionId = client.sessionId;
+        // A role that declares `mode: plan` is read-only by construction, and
+        // that has to be true from its first turn — asking for it afterwards
+        // would let one write through first.
+        if (startOverrides?.mode === "plan" && session.planModeAvailable) {
+          this.setPlanActive(session, true);
+          try { await client.setMode("plan"); } catch { /* best-effort */ }
+        }
         if (session.autoApprove) {
           try {
             if (session.provider === "codex") {
@@ -10889,6 +11361,18 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         break;
       }
       case "send":
+        // `/agent` is answered by the HOST and never reaches a CLI (AP-10).
+        // Ahead of the queued-send bookkeeping on purpose: a role run is not a
+        // turn on this session, so it must not consume a queued-send dispatch.
+        //
+        // The SYNCHRONOUS parse comes first and the await only happens for a
+        // real `/agent`. An unconditional `await` here would suspend every
+        // ordinary send before the duplicate-dequeue check below, which is one
+        // of the few places in this file where the ordering is the behaviour.
+        if (parseAgentCommand(msg.text).kind !== "none") {
+          await this.handleAgentCommand(msg.text, session, origin);
+          break;
+        }
         let queuedSendCommit: { text: string; items: QueuedSendEntry[] } | undefined;
         if (origin === "remote" && msg.queuedSendId) {
           if (session.completedQueuedSendIds.includes(msg.queuedSendId)) {
@@ -10930,6 +11414,9 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         else await this.newFocusedSession(origin, msg.cwd);
         break;
       case "cancel": {
+        // Stop stops the ROLE when one is running for this thread (AP-10) —
+        // the role holds the turn, this session does not.
+        if (this.cancelAgentRun(session)) break;
         const cancelled = session.turnToken;
         await session.client?.cancel("user Stop click");
         if (cancelled) this.armCancelRecovery(session, cancelled);
@@ -11161,6 +11648,19 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         } else {
           void this.host.openResource(p);
         }
+        break;
+      }
+      case "openAgentArtifact": {
+        // Coordinates in, path out — the run store owns the location, so no
+        // renderer can name a file outside it (see the protocol note).
+        const target = msg.which === "brief"
+          ? this.agentRuns.briefPath(msg.runId, msg.step)
+          : this.agentRuns.resultPath(msg.runId, msg.step);
+        if (!fs.existsSync(target)) {
+          this.agentNotice(session, "warning", `That run artefact is no longer on disk (${msg.runId}, step ${msg.step}).`);
+          break;
+        }
+        void this.host.openResource(target);
         break;
       }
       case "showInFolder": {
@@ -16770,6 +17270,19 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     // turn ended while another was focused). Only the focused session may spawn
     // a client on demand; a background target without one has nothing to talk to.
     const session = target ?? this.focused;
+    // Backstop for every OTHER caller of this method — a queued send flushed
+    // after a turn, a routine prompt. `/agent` is host-answered and must never
+    // reach a CLI as a prompt (AP-10); the composer path catches it earlier so
+    // it does not consume a queued-send dispatch. A briefing never starts with
+    // `/agent`, so the role run below cannot re-enter this branch.
+    //
+    // Parsed synchronously, awaited only on a hit: an unconditional await on
+    // entry suspends every send before the `turnInFlight` fast path below, and
+    // the races that path exists for are decided in exactly that window.
+    if (parseAgentCommand(text).kind !== "none") {
+      await this.handleAgentCommand(text, session, origin);
+      return;
+    }
     await this.waitForSessionStart(session);
     // Desk↔remote co-attach: the OTHER view only learns `busy` once the
     // mirrored agentStart crosses the relay, so a send can race through that
@@ -18657,13 +19170,27 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     // another): tear down its process AND delete its on-disk dir so it doesn't pile
     // up in history (#24). The next focused session becomes the single live "New
     // session"; abandoning this one removes it entirely.
-    const id = cur.activeSessionId;
-    const cwd = this.sessionCwd(cur);
-    const provider = cur.provider;
+    this.teardownEmptySession(cur);
+  }
+
+  /**
+   * Tear a session's process down AND delete its conversation directory.
+   *
+   * Extracted from {@link parkFocused} so an abandoned `/agent` role session
+   * goes through exactly the same path (AP-10): a role cancelled before its
+   * first prompt has produced nothing, and every one of those left behind
+   * would be another unaccountable "New session" in the rail — the #24 problem
+   * arriving by a second route. The CALLER decides a session is empty; this
+   * only removes it.
+   */
+  private teardownEmptySession(session: Session): void {
+    const id = session.activeSessionId;
+    const cwd = this.sessionCwd(session);
+    const provider = session.provider;
     // Retain the pipe for session/delete. disposeSession still owns all pool
     // and remote bookkeeping; its second detach finds no client to terminate.
-    const client = isAdapterProvider(provider) ? this.detachClient(cur) : undefined;
-    this.disposeSession(cur);
+    const client = isAdapterProvider(provider) ? this.detachClient(session) : undefined;
+    this.disposeSession(session);
     if (isAdapterProvider(provider)) {
       void this.discardAdapterEmptySession(provider, id, cwd, client).finally(() => client?.dispose()).then((removed) => {
         if (removed) this.postSessionRemoved(id, cwd);
