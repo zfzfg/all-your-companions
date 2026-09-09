@@ -43,6 +43,7 @@ export function isAdvertisedSkill(cmd: SlashCmd | null | undefined): boolean {
  */
 export const HOST_SLASH_COMMANDS: ReadonlySet<string> = new Set([
   "agent",
+  "agents",
   // AP-11. Same rule, same reason: no CLI advertises these, so forwarding
   // one buys a billed turn in which the model improvises what it might mean.
   "handoff",
@@ -52,13 +53,36 @@ export const HOST_SLASH_COMMANDS: ReadonlySet<string> = new Set([
   "crew",
 ]);
 
+/** Host slash commands advertised in autocomplete popovers with clear descriptions */
+export const EXTENSION_HOST_SLASH_COMMANDS: SlashCmd[] = [
+  {
+    name: "agent",
+    description: "Run a single task with a named agent role (e.g. planner, reviewer, implementer)",
+  },
+  {
+    name: "agents",
+    description: "List and manage available agent roles for this project",
+  },
+  {
+    name: "crew",
+    description: "Walk the current plan step-by-step with a team of specialized roles (/crew [preset] [goal])",
+  },
+  {
+    name: "handoff",
+    description: "Hand off conversation context to another role (default: implementer)",
+  },
+  {
+    name: "second-opinion",
+    description: "Request an independent review of recent changes from another model/reviewer",
+  },
+];
+
 export interface AgentCommand {
   name: string;
   task: string;
 }
 
-/** `/agent` typed with no role name — the popover case, and the one that
- *  should list the roles rather than complain. */
+/** `/agent` or `/agents` typed with no role name — lists roles rather than complain. */
 export type AgentCommandParse =
   | { kind: "none" }
   | { kind: "list" }
@@ -66,7 +90,7 @@ export type AgentCommandParse =
   | { kind: "error"; message: string };
 
 /**
- * Parse `/agent <name> <task>` out of a composer message.
+ * Parse `/agent <name> <task>` or `/agents [name] [task]` out of a composer message.
  *
  * Only at position 0 of the message, matching every other dispatching slash
  * command (see {@link matchSlashCommand}) — `see /agent docs` in prose must
@@ -75,7 +99,7 @@ export type AgentCommandParse =
  * line would quietly truncate the only field the user actually wrote.
  */
 export function parseAgentCommand(text: string): AgentCommandParse {
-  const match = /^\/agent(?:\s+([\s\S]*))?$/.exec(String(text ?? "").trim());
+  const match = /^\/agents?(?:\s+([\s\S]*))?$/.exec(String(text ?? "").trim());
   if (!match) return { kind: "none" };
   const rest = (match[1] ?? "").trim();
   if (!rest) return { kind: "list" };

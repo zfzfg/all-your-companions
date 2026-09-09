@@ -533,13 +533,15 @@ body.settings-page .settings-surface {
 /* AP-04 rule/instruction-file panel — same shape as .settings-mcp-list /
    .settings-mcp-server, kept as its own class family since it is a different
    feature (see media/settings.js renderRuleFiles). */
-.settings-rules-list {
+.settings-rules-list,
+.settings-agent-roles-list {
   overflow: hidden;
   border: 1px solid var(--vscode-widget-border, rgba(127, 127, 127, .25));
   border-radius: 8px;
 }
 
-.settings-rules-row {
+.settings-rules-row,
+.settings-agent-roles-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 6px 12px;
@@ -548,7 +550,8 @@ body.settings-page .settings-surface {
   padding: 12px 14px;
 }
 
-.settings-rules-row + .settings-rules-row {
+.settings-rules-row + .settings-rules-row,
+.settings-agent-roles-row + .settings-agent-roles-row {
   border-top: 1px solid var(--vscode-widget-border, rgba(127, 127, 127, .2));
 }
 
@@ -561,15 +564,18 @@ body.settings-page .settings-surface {
   opacity: 0.7;
 }
 
-.settings-rules-copy {
+.settings-rules-copy,
+.settings-agent-roles-copy {
   min-width: 0;
 }
 
-.settings-rules-copy .settings-row-desc {
+.settings-rules-copy .settings-row-desc,
+.settings-agent-roles-copy .settings-row-desc {
   overflow-wrap: anywhere;
 }
 
-.settings-rules-name {
+.settings-rules-name,
+.settings-agent-roles-name {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -577,7 +583,8 @@ body.settings-page .settings-surface {
   min-width: 0;
 }
 
-.settings-rules-badge {
+.settings-rules-badge,
+.settings-agent-roles-badge {
   flex: none;
   padding: 1px 6px;
   border-radius: 10px;

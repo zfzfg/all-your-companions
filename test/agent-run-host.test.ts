@@ -211,6 +211,15 @@ describe("parseAgentCommand", () => {
     expect(parsed).toEqual({ kind: "run", command: { name: "fixer", task: "make tests pass\nrun: npm test" } });
   });
 
+  it("parses /agents as an alias for /agent", () => {
+    expect(parseAgentCommand("/agents")).toEqual({ kind: "list" });
+    expect(parseAgentCommand("/agent")).toEqual({ kind: "list" });
+    expect(parseAgentCommand("/agents reviewer check diff")).toEqual({
+      kind: "run",
+      command: { name: "reviewer", task: "check diff" },
+    });
+  });
+
   it("rejects a name that would read as a flag", () => {
     const parsed = parseAgentCommand("/agent --force do it");
     expect(parsed.kind).toBe("error");

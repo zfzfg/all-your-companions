@@ -54,6 +54,28 @@
     "remoteSignIn", "remoteSignOut", "unlinkRemoteDevice", "openRemotePortal",
     "openUpdateRelease", "restartToUpdate",
   ];
+  const EXTENSION_HOST_SLASH_COMMANDS = [
+    {
+      name: "agent",
+      description: "Run a single task with a named agent role (e.g. planner, reviewer, implementer)",
+    },
+    {
+      name: "agents",
+      description: "List and manage available agent roles for this project",
+    },
+    {
+      name: "crew",
+      description: "Walk the current plan step-by-step with a team of specialized roles (/crew [preset] [goal])",
+    },
+    {
+      name: "handoff",
+      description: "Hand off conversation context to another role (default: implementer)",
+    },
+    {
+      name: "second-opinion",
+      description: "Request an independent review of recent changes from another model/reviewer",
+    },
+  ];
   const HOST_MESSAGE_TYPE_SET = new Set(HOST_MESSAGE_TYPES);
   /** True when `type` is a host->webview message the contract knows about. A
    *  false here means the host posted a type this webview build can't handle —
@@ -3028,7 +3050,7 @@
     return { body: rest.trim(), sources };
   }
 
-  const api = { WELCOME_TIPS, welcomeTipById, welcomeTipsFor, welcomeTipCopy, splitWelcomeTipCopy, addProjectMenuItems, addProjectFolderPreview, addProjectForm, parseCloneQuery, filterGithubRepos, githubRepoNameParts, formatWaitElapsed, planEntriesProgress, formatReviewHeadline, FILE_EXTS, HOST_MESSAGE_TYPES, WEBVIEW_MESSAGE_TYPES, isKnownHostMessage, composerHasSendIntent, explicitVisibleChips, normalizeQueuedSends, queuedSendsText, queuedSendsChips, contextOverheadTokens, nextContextBreakdown, contextBreakdownIsCurrent, createPendingOverlay, getMentionQuery, applyMentionPick, looksLikeFileRef, formatRelativeTime, modelPickerLabel, modelDisplayName, MIC_STATES, nextMicState, trailingSendPhrase, versionedSiblingUrl, buildQuestionAnswers, isFreeTextOptionLabel, isSubagentToolCall, subagentLabel, cleanSubagentOutput, parseSubagentTaskResult, shouldStickToBottom, stickThresholdPx, splitMath, stripUnsupportedTex, toolFailureText, isMediaGenToolCall, mediaGenZeroRetentionHint, TOOL_LABEL_MAX, middleElide, isAdvertisedSkill, getSlashQuery, applySlashPick, filterCommands, highlightQueryParts, appendHighlightedText, commandProgramLabel, commandTextPreview, MAX_COMMAND_OUTPUT_CHARS, capCommandOutput, extractToolResultOutput, commandOutputWasCancelled, commandOutputTruncationNote, computeLineDiff, parseAttachmentContext, parseSelectionBlocks, parseImageTags, parseContextBlocks, contextChipLabel, contextChipTitle, formatChipBytes, orderPermissionOptions, defaultPermissionIndex, shouldFocusPermissionCard, isTypeThroughKey, isInterjectionText, stripInterjectionEnvelope, spokenTextFromMarkdown, isRelaySendRejection, panelReclampOnResizeAllowed, wireFullscreenSafeReclamp, distributeSidePanelWidths, chatZoomFactor, unzoomClientPx, exportSessionMarkdown, exportSessionFilename, isExportableSessionEvent, replayedUserBubbleVerdict, truncateExportEvents, flattenHistoryMessages, splitHistoryWindow, countHistoryReplayCounters, partitionHistoryCards, GITHUB_FINE_GRAINED_TOKEN_URL, fillFineGrainedTokenHint };
+  const api = { WELCOME_TIPS, welcomeTipById, welcomeTipsFor, welcomeTipCopy, splitWelcomeTipCopy, addProjectMenuItems, addProjectFolderPreview, addProjectForm, parseCloneQuery, filterGithubRepos, githubRepoNameParts, formatWaitElapsed, planEntriesProgress, formatReviewHeadline, FILE_EXTS, HOST_MESSAGE_TYPES, WEBVIEW_MESSAGE_TYPES, EXTENSION_HOST_SLASH_COMMANDS, isKnownHostMessage, composerHasSendIntent, explicitVisibleChips, normalizeQueuedSends, queuedSendsText, queuedSendsChips, contextOverheadTokens, nextContextBreakdown, contextBreakdownIsCurrent, createPendingOverlay, getMentionQuery, applyMentionPick, looksLikeFileRef, formatRelativeTime, modelPickerLabel, modelDisplayName, MIC_STATES, nextMicState, trailingSendPhrase, versionedSiblingUrl, buildQuestionAnswers, isFreeTextOptionLabel, isSubagentToolCall, subagentLabel, cleanSubagentOutput, parseSubagentTaskResult, shouldStickToBottom, stickThresholdPx, splitMath, stripUnsupportedTex, toolFailureText, isMediaGenToolCall, mediaGenZeroRetentionHint, TOOL_LABEL_MAX, middleElide, isAdvertisedSkill, getSlashQuery, applySlashPick, filterCommands, highlightQueryParts, appendHighlightedText, commandProgramLabel, commandTextPreview, MAX_COMMAND_OUTPUT_CHARS, capCommandOutput, extractToolResultOutput, commandOutputWasCancelled, commandOutputTruncationNote, computeLineDiff, parseAttachmentContext, parseSelectionBlocks, parseImageTags, parseContextBlocks, contextChipLabel, contextChipTitle, formatChipBytes, orderPermissionOptions, defaultPermissionIndex, shouldFocusPermissionCard, isTypeThroughKey, isInterjectionText, stripInterjectionEnvelope, spokenTextFromMarkdown, isRelaySendRejection, panelReclampOnResizeAllowed, wireFullscreenSafeReclamp, distributeSidePanelWidths, chatZoomFactor, unzoomClientPx, exportSessionMarkdown, exportSessionFilename, isExportableSessionEvent, replayedUserBubbleVerdict, truncateExportEvents, flattenHistoryMessages, splitHistoryWindow, countHistoryReplayCounters, partitionHistoryCards, GITHUB_FINE_GRAINED_TOKEN_URL, fillFineGrainedTokenHint };
 
   if (typeof module !== "undefined" && module.exports) {
     module.exports = api;

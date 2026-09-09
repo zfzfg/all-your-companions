@@ -316,7 +316,7 @@ import {
   type QueuedSendEntry,
 } from "./queued-send";
 
-import { matchSlashCommand, parseAgentCommand, parseCrewCommand, parseHandoffCommand } from "./slash-filter";
+import { EXTENSION_HOST_SLASH_COMMANDS, matchSlashCommand, parseAgentCommand, parseCrewCommand, parseHandoffCommand } from "./slash-filter";
 import {
   applyStepOutcome,
   assignStepRole,
@@ -1667,12 +1667,21 @@ export class GrokSidebar {
     if (parsed.kind === "list") {
       const lines = set.roles.map((role) => {
         const where = role.source === "builtin" ? "built-in" : role.path ?? "project";
-        return `- \`/agent ${role.name}\` — ${role.whenToUse} (${where})`;
+        const mode = role.mode === "plan" ? "Plan mode" : "Agent mode";
+        return `- \`/agent ${role.name}\` — **${role.name}** (${mode}, ${where})\n  ${role.whenToUse}`;
       });
       this.agentNotice(
         session,
         "info",
-        [`Roles available in this project (${AGENT_ROLES_DIR}, with built-ins as the fallback):`, ...lines].join("\n"),
+        [
+          `### Available Agent Roles`,
+          `Run any role in its own session with \`/agent <name> <task>\`. Click a role below to paste it:`,
+          ``,
+          ...lines,
+          ``,
+          `---`,
+          `**Configuring Roles:** Define custom roles as \`${AGENT_ROLES_DIR}/<name>.md\` or open **Settings (⚙) → Rules & Agents**.`,
+        ].join("\n"),
       );
       return true;
     }
@@ -2096,26 +2105,16 @@ export class GrokSidebar {
       return true;
     }
 
+    this.emit(session, { type: "userMessage", text, chips: [] });
+
     const cwd = this.sessionCwd(session);
     const presets = this.crewPresetSet(cwd);
     const preset = findCrewPreset(presets, parsed.preset);
     const roles = this.agentRoleSet(cwd);
     const goal = parsed.goal || this.lastUserMessageText(session) || "Carry out the current plan.";
 
-    const cap = providerCapability(session.provider, "structuredPlan", {
-      sawPlanEntries: session.planEntries.length > 0,
-    });
     let entries = session.planEntries.filter((e) => e.content.trim());
     if (!entries.length) {
-      if (cap.state === "no") {
-        this.agentNotice(
-          session,
-          "warning",
-          `${providerDisplayName(session.provider)} reports plans as prose, not as a step list, so a crew cannot start here. `
-          + `Point the planner role at Claude, Codex or Gemini, or run /crew from a session that already has a checklist.`,
-        );
-        return true;
-      }
       const planner = findAgentRole(roles, "planner");
       if (!planner) {
         this.agentNotice(session, "warning", "No `planner` role is loaded, so a crew cannot invent a step list.");
@@ -11524,7 +11523,13 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     });
     client.on("commandsUpdate", (cmds) => {
       if (gen !== session.gen) return;
-      this.emit(session, { type: "commandsUpdate", commands: cmds });
+      const merged = [...cmds];
+      for (const hostCmd of EXTENSION_HOST_SLASH_COMMANDS) {
+        if (!merged.some((c) => c.name === hostCmd.name)) {
+          merged.push(hostCmd);
+        }
+      }
+      this.emit(session, { type: "commandsUpdate", commands: merged });
       if (session.provider === "grok") {
         session.feedbackCommandsAdvertise = commandsAdvertiseFeedback(cmds);
         this.refreshFeedbackAvailability(session);
@@ -22901,10 +22906,11 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
    * chat webview stay in sync through the same handlers the gear uses.
    */
   async openSettingsEditor(category?: string): Promise<void> {
+    const targetCategory = category === "rules" ? "advanced" : category;
     if (this.settingsEditor) {
       this.settingsEditor.reveal();
-      if (category) {
-        void this.settingsEditor.webview.postMessage({ type: "settingsCategory", category });
+      if (targetCategory) {
+        void this.settingsEditor.webview.postMessage({ type: "settingsCategory", category: targetCategory });
       }
       return;
     }
@@ -22925,7 +22931,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     if (this.settingsEditor !== panel) return;
     panel.webview.html = this.getSettingsHtml(panel.webview, {
       remoteLinked: !!token,
-      category,
+      category: targetCategory,
     });
     panel.webview.onDidReceiveMessage((raw) => {
       const msg = raw as WebviewMsg;

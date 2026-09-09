@@ -52,6 +52,11 @@ body.desk .session-name-chip { padding-left: 0; }
 
 * { box-sizing: border-box; }
 
+/* Ensure HTML hidden attribute is strictly respected regardless of author display:flex/block */
+[hidden] {
+  display: none !important;
+}
+
 /* Explicit scrollbar styling for every scroller (messages, textarea, popovers).
    Left unstyled, the webview renders the platform's native bars ÔÇö on Windows 11
    that's Fluent scrollbars with ARROW BUTTONS, which put a stray Ôľ╝ at the
@@ -1279,7 +1284,8 @@ a:hover {
   color: var(--vscode-foreground);
 }
 .toolbar-popover-item:hover { background: var(--vscode-list-hoverBackground); }
-.toolbar-popover-item:hover .mode-item-label { color: var(--vscode-list-hoverForeground, var(--vscode-foreground)); }
+.toolbar-popover-item:hover .mode-item-label,
+.toolbar-popover-item:hover .crew-trigger-label { color: var(--vscode-list-hoverForeground, var(--vscode-foreground)); }
 .toolbar-popover-item.active { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground, var(--vscode-foreground)); }
 .toolbar-popover-item.active .mode-item-desc { color: var(--vscode-list-activeSelectionForeground, var(--vscode-descriptionForeground)); opacity: 0.75; }
 /* textLink, not button-background. `button.background` is a SURFACE colour and
@@ -3186,6 +3192,9 @@ blockquote {
   background: var(--vscode-editorWidget-background, var(--vscode-input-background));
   overflow: hidden;
 }
+.todo-rail[hidden] {
+  display: none !important;
+}
 
 .todo-rail-head {
   display: flex;
@@ -3261,6 +3270,9 @@ blockquote {
   background: var(--vscode-editorWidget-background, var(--vscode-input-background));
   overflow: hidden;
 }
+.crew-run[hidden] {
+  display: none !important;
+}
 .crew-run-head {
   display: flex;
   align-items: center;
@@ -3328,6 +3340,9 @@ blockquote {
   border-radius: var(--radius);
   background: var(--vscode-editorWidget-background, var(--vscode-input-background));
   overflow: hidden;
+}
+.review-center[hidden] {
+  display: none !important;
 }
 .review-center-head {
   display: flex;
@@ -4003,8 +4018,8 @@ textarea#input {
   flex: 1;
   min-width: 0;
 }
-.mode-item-label { font-size: 12px; font-weight: 500; line-height: 16px; }
-.mode-item-desc { font-size: 11px; color: var(--vscode-descriptionForeground); white-space: normal; line-height: 1.3; }
+.mode-item-label, .crew-trigger-label { font-size: 12px; font-weight: 500; line-height: 16px; }
+.mode-item-desc, .crew-trigger-desc { font-size: 11px; color: var(--vscode-descriptionForeground); white-space: normal; line-height: 1.3; }
 .mode-popover-item.disabled { opacity: 0.45; cursor: not-allowed; }
 .mode-popover-item.disabled:hover { background: transparent; }
 .mode-item-disabled-note { display: block; font-size: 10px; color: var(--vscode-descriptionForeground); opacity: 0.85; margin-top: 3px; line-height: 1.3; white-space: normal; }
@@ -4506,6 +4521,120 @@ body.dragging { outline: 2px dashed var(--vscode-focusBorder); outline-offset: -
    the only place a role run reports, so a failure must not read as a success. */
 .card.agent-result { border-left-color: var(--vscode-charts-blue, #4fc1ff); }
 .card.agent-result.failed { border-left-color: var(--vscode-errorForeground, #f48771); }
+.card.agent-roles-card {
+  border-left-color: var(--vscode-charts-blue, #4fc1ff);
+  background: var(--vscode-editorWidget-background, var(--vscode-input-background));
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.agent-roles-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.agent-roles-card-title {
+  font-weight: 600;
+  font-size: 1.05em;
+  color: var(--vscode-foreground);
+}
+.agent-roles-card-sub {
+  font-size: 0.88em;
+  opacity: 0.8;
+  line-height: 1.4;
+}
+.agent-roles-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+.agent-role-card-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 8px;
+  border-radius: var(--radius);
+  background: var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--vscode-input-border, rgba(128, 128, 128, 0.2));
+}
+.agent-role-item-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.agent-role-btn {
+  background: var(--vscode-button-secondaryBackground, #3a3d41);
+  color: var(--vscode-button-secondaryForeground, #fff);
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 4px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 0.88em;
+  font-weight: 600;
+  padding: 2px 8px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.agent-role-btn:hover {
+  background: var(--vscode-button-secondaryHoverBackground, #45494e);
+}
+.agent-role-tag {
+  font-size: 0.78em;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: var(--vscode-badge-background, #4d4d4d);
+  color: var(--vscode-badge-foreground, #fff);
+  text-transform: uppercase;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.agent-role-tag.mode-plan {
+  background: var(--vscode-charts-yellow, #d7ba7d);
+  color: #1e1e1e;
+}
+.agent-role-tag.mode-agent {
+  background: var(--vscode-charts-blue, #4fc1ff);
+  color: #1e1e1e;
+}
+.agent-role-where {
+  margin-left: auto;
+  font-size: 0.8em;
+  opacity: 0.7;
+}
+.agent-role-desc {
+  font-size: 0.88em;
+  line-height: 1.35;
+  opacity: 0.9;
+}
+.agent-roles-card-footer {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--vscode-input-border, rgba(128, 128, 128, 0.15));
+}
+.agent-roles-card-footer button {
+  background: none;
+  border: 1px solid var(--vscode-input-border, var(--vscode-editorWidget-border));
+  color: var(--vscode-textLink-foreground, #3794ff);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 0.85em;
+  cursor: pointer;
+}
+.agent-roles-card-footer button:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+.agent-roles-hint {
+  font-size: 0.82em;
+  opacity: 0.75;
+  line-height: 1.35;
+}
 .agent-result-summary { margin-top: 6px; white-space: pre-wrap; }
 .agent-result-list { margin-top: 6px; }
 .agent-result-list-title { font-size: 0.9em; opacity: 0.8; }
@@ -4759,16 +4888,54 @@ body.session-superseded .msg-edit-btn {
 
 .plan-notice {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  color: var(--vscode-descriptionForeground);
-  padding: 5px 10px;
-  margin: 4px 0;
-  border-left: 2px solid var(--vscode-charts-blue, #569cd6);
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--vscode-foreground);
+  padding: 8px 12px;
+  margin: 6px 0;
+  border-left: 3px solid var(--vscode-charts-blue, #569cd6);
   background: var(--vscode-textBlockQuote-background, rgba(86, 156, 214, 0.08));
+  border-radius: var(--radius);
 }
-.plan-notice svg { flex-shrink: 0; opacity: 0.8; }
+.plan-notice svg { flex-shrink: 0; opacity: 0.8; margin-top: 2px; }
+.plan-notice-body {
+  flex: 1;
+  min-width: 0;
+  line-height: 1.45;
+}
+.plan-notice-body h3 {
+  margin: 0 0 6px;
+  font-size: 1.1em;
+  font-weight: 600;
+  color: var(--vscode-foreground);
+}
+.plan-notice-body p {
+  margin: 4px 0;
+}
+.plan-notice-body ul {
+  margin: 4px 0;
+  padding-left: 18px;
+}
+.plan-notice-body li {
+  margin: 3px 0;
+}
+.plan-notice-body code {
+  background: var(--chat-surface-code, rgba(128, 128, 128, 0.2));
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 0.9em;
+  font-weight: 600;
+}
+.plan-notice-body code:hover {
+  background: var(--vscode-button-secondaryHoverBackground, rgba(128, 128, 128, 0.35));
+}
+.plan-notice-body hr {
+  margin: 8px 0;
+  border: 0;
+  border-top: 1px solid var(--vscode-input-border, rgba(128, 128, 128, 0.2));
+}
 
 .plan-tools {
   display: flex;

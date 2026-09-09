@@ -1010,6 +1010,13 @@
       hostLocal: true,
     },
     {
+      id: "agentRoles",
+      category: "advanced",
+      title: "Agent Roles & Personas",
+      description: "Roles for crew and individual agents: planner, implementer, reviewer, researcher, fixer. Stored in .companions/agents/<role>.md or project root.",
+      kind: "agentRoles",
+    },
+    {
       id: "routinesList",
       category: "routines",
       title: "Routines",
@@ -1350,12 +1357,16 @@
           ...snapshot.mcpServers.map((s) => [s.displayName, s.name, s.scopeName, s.configFile].filter(Boolean).join(" ")),
         ].join(" ")
       : "";
+    const extraRoles = row.kind === "agentRoles"
+      ? "planner implementer reviewer researcher fixer crew multi-agent persona roles agents /agent /crew rules"
+      : "";
     const section = connectorSection(row);
     return [
       rowTitle(row, snapshot, env),
       rowDescription(row, snapshot, env),
       extraConnectors,
       extraMcp,
+      extraRoles,
       section,
       cat ? cat.title : "",
       row.id,
@@ -2847,6 +2858,66 @@
     return el;
   }
 
+  function renderAgentRoles(snapshot, env) {
+    const el = document.createElement("div");
+    el.className = "settings-agent-roles";
+    el.dataset.id = "agentRoles";
+
+    const intro = document.createElement("div");
+    intro.className = "settings-row-desc";
+    intro.style.marginBottom = "12px";
+    intro.textContent =
+      "Built-in agent personas. In chat, run /agent <role> to switch persona, or /crew <task> to execute a multi-agent workflow (Planner → Implementer → Reviewer). Roles can be extended with custom instructions in .companions/agents/<role>.md or project rule files.";
+    el.appendChild(intro);
+
+    const ROLES = [
+      { name: "planner", label: "Planner", desc: "Formulates step-by-step implementation plans, identifies risks, and blueprints architecture before coding." },
+      { name: "implementer", label: "Implementer", desc: "Writes clean, modular code, implements planned changes, and creates or updates files." },
+      { name: "reviewer", label: "Reviewer", desc: "Inspects code diffs, verifies adherence to requirements, tests edge cases, and flags bugs." },
+      { name: "researcher", label: "Researcher", desc: "Conducts deep code exploration, inspects APIs and patterns across the workspace." },
+      { name: "fixer", label: "Fixer", desc: "Diagnoses compile errors, test failures, and broken builds with minimal targeted fixes." },
+    ];
+
+    const list = document.createElement("div");
+    list.className = "settings-agent-roles-list";
+
+    for (const r of ROLES) {
+      const row = document.createElement("div");
+      row.className = "settings-agent-roles-row";
+
+      const copy = document.createElement("div");
+      copy.className = "settings-agent-roles-copy";
+
+      const name = document.createElement("div");
+      name.className = "settings-agent-roles-name settings-row-title";
+
+      const label = document.createElement("span");
+      label.textContent = r.label;
+      name.appendChild(label);
+
+      const badge = document.createElement("span");
+      badge.className = "settings-agent-roles-badge";
+      badge.textContent = "built-in";
+      name.appendChild(badge);
+
+      const commandBadge = document.createElement("span");
+      commandBadge.className = "settings-agent-roles-badge";
+      commandBadge.textContent = "/agent " + r.name;
+      name.appendChild(commandBadge);
+
+      const detail = document.createElement("div");
+      detail.className = "settings-row-desc";
+      detail.textContent = r.desc;
+
+      copy.append(name, detail);
+      row.appendChild(copy);
+      list.appendChild(row);
+    }
+
+    el.appendChild(list);
+    return el;
+  }
+
   /**
    * AP-04 rule/instruction-file panel. The host NEVER interprets file
    * content — this renders only what `ruleFileCandidates` computed (path,
@@ -3024,6 +3095,7 @@
     if (row.kind === "mcp") return renderMcpCatalog(snapshot, env);
     if (row.kind === "connectors") return renderConnectorsCatalog(snapshot, env, keyForm);
     if (row.kind === "routines") return renderRoutines(snapshot, env);
+    if (row.kind === "agentRoles") return renderAgentRoles(snapshot, env);
     if (row.kind === "permissionRules") return renderPermissionRules(snapshot, env);
     if (row.kind === "ruleFiles") return renderRuleFiles(snapshot, env);
     const el = document.createElement("div");
@@ -3206,7 +3278,7 @@
     if (!container) throw new Error("GrokSettings.mount requires a container");
     const env = defaultEnv({ ...(opts.env || {}), standalone: !!opts.standalone });
     let snapshot = defaultSnapshot(opts.snapshot);
-    let categoryId = opts.category || "general";
+    let categoryId = opts.category === "rules" ? "advanced" : (opts.category || "general");
     let query = "";
     let keyForm = { id: "", value: "", readOnly: false };
     let oauthForm = { attemptId: "", value: "" };

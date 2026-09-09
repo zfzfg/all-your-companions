@@ -460,7 +460,7 @@
     contextWindow: 200000,
     usedTokens: 0,
     useCtrlEnter: false,
-    commands: [],
+    commands: (typeof EXTENSION_HOST_SLASH_COMMANDS !== "undefined" ? [...EXTENSION_HOST_SLASH_COMMANDS] : []),
     chips: [],
     // Start busy+locked: opening the view immediately spins up a session
     // (ready → startSession), so the send button shows the spinner from the
@@ -3413,6 +3413,12 @@
       () => { setAppPurpose("coding"); renderGearMain(); gearPopover.hidden = false; },
     );
 
+    addSection("Rules & Agents");
+    addGearItem(
+      `<span class="gear-lead">${ICON.file}<span>Rules & Agent Roles</span></span>`,
+      () => openSettingsCategory("advanced"),
+    );
+
     addSection("Settings");
     addGearItem(`<span class="gear-lead">${ICON.gear}<span>Settings</span></span>`, () => openAllSettings());
     // Older hosts have no provider account frame; retain their existing action.
@@ -4136,6 +4142,50 @@
       };
       modePopover.appendChild(el);
     }
+
+    const sec = document.createElement("div");
+    sec.className = "popover-section";
+    sec.textContent = "Multi-Agent & Crew";
+    modePopover.appendChild(sec);
+
+    const crewEl = document.createElement("div");
+    crewEl.className = "toolbar-popover-item mode-popover-item";
+    crewEl.innerHTML =
+      `<span class="mode-item-icon">${ICON.bot}</span>` +
+      `<span class="mode-item-body">` +
+        `<span class="crew-trigger-label">Crew Orchestration (/crew)</span>` +
+        `<span class="crew-trigger-desc">Run task with Planner, Implementer, Reviewer</span>` +
+      `</span>`;
+    crewEl.onclick = (e) => {
+      e.stopPropagation();
+      closePopovers();
+      if (promptInput) {
+        promptInput.value = "/crew ";
+        promptInput.focus();
+        updateSendButton();
+      }
+    };
+    modePopover.appendChild(crewEl);
+
+    const rolesEl = document.createElement("div");
+    rolesEl.className = "toolbar-popover-item mode-popover-item";
+    rolesEl.innerHTML =
+      `<span class="mode-item-icon">${ICON.bot}</span>` +
+      `<span class="mode-item-body">` +
+        `<span class="crew-trigger-label">Agent Roles (/agent)</span>` +
+        `<span class="crew-trigger-desc">Assign persona: planner, implementer, reviewer, fixer</span>` +
+      `</span>`;
+    rolesEl.onclick = (e) => {
+      e.stopPropagation();
+      closePopovers();
+      if (promptInput) {
+        promptInput.value = "/agent ";
+        promptInput.focus();
+        updateSendButton();
+      }
+    };
+    modePopover.appendChild(rolesEl);
+
     positionPopover(modePopover, modeBtn);
     modePopover.hidden = false;
   }
@@ -13022,7 +13072,30 @@
     hideGrokking();
     const el = document.createElement("div");
     el.className = "plan-notice";
-    el.innerHTML = `${ICON.listTree}<span>${escapeHtml(text)}</span>`;
+    const str = String(text ?? "");
+    const hasMarkdown = str.includes("\n") || str.includes("`") || str.includes("#") || str.includes("**");
+    if (hasMarkdown) {
+      const body = document.createElement("div");
+      body.className = "plan-notice-body";
+      body.innerHTML = renderMarkdown(str);
+      body.querySelectorAll("code").forEach((codeEl) => {
+        const txt = (codeEl.textContent || "").trim();
+        if (txt.startsWith("/agent ") || txt.startsWith("/crew")) {
+          codeEl.style.cursor = "pointer";
+          codeEl.title = "Click to paste into prompt";
+          codeEl.onclick = (e) => {
+            e.stopPropagation();
+            input.value = txt + (txt.endsWith(" ") ? "" : " ");
+            input.focus();
+            updateSendButton();
+          };
+        }
+      });
+      el.innerHTML = `<span class="plan-notice-icon">${ICON.listTree}</span>`;
+      el.appendChild(body);
+    } else {
+      el.innerHTML = `${ICON.listTree}<span>${escapeHtml(str)}</span>`;
+    }
     appendTranscriptChild(el);
     scrollToBottom();
   }
@@ -17653,9 +17726,21 @@
         renderChips();
         updateSendButton();
         break;
-      case "commandsUpdate":
-        state.commands = msg.commands || [];
+      case "commandsUpdate": {
+        const incoming = Array.isArray(msg.commands) ? msg.commands : [];
+        const extra = (typeof EXTENSION_HOST_SLASH_COMMANDS !== "undefined") ? EXTENSION_HOST_SLASH_COMMANDS : [];
+        const seen = new Set(incoming.map((c) => (c.name || "").replace(/^\//, "")));
+        const merged = [...incoming];
+        for (const cmd of extra) {
+          const raw = (cmd.name || "").replace(/^\//, "");
+          if (!seen.has(raw)) {
+            merged.push(cmd);
+            seen.add(raw);
+          }
+        }
+        state.commands = merged;
         break;
+      }
       case "mentionResults": {
         // Only render rows that answer the token still under the caret — the
         // popover may have closed (query null) or the user typed further (query
