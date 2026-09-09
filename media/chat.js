@@ -355,6 +355,12 @@
   const reviewScopeTurn = $("review-scope-turn");
   const reviewScopeSession = $("review-scope-session");
   const reviewRevertAll = $("review-revert-all");
+  const crewRunEl = $("crew-run");
+  const crewRunToggle = $("crew-run-toggle");
+  const crewRunCaret = $("crew-run-caret");
+  const crewRunCount = $("crew-run-count");
+  const crewRunList = $("crew-run-list");
+  const crewRunStop = $("crew-run-stop");
 
   // Canonical low→high ORDER for known effort ids, and the FALLBACK ladder when a
   // model advertises no menu (`max` is not a real grok level — see #3/#4).
@@ -433,6 +439,7 @@
     reviewFiles: [],
     reviewTurnId: "",
     reviewScope: "turn",
+    crewRun: null,
     providersKnown: false,
     providers: [],
     // Settings → Providers re-observation in flight. Host-owned; see the
@@ -9065,6 +9072,67 @@
       renderReviewCenter();
     };
   }
+
+  function renderCrewRun() {
+    if (!crewRunEl) return;
+    const run = state.crewRun;
+    if (!run || !Array.isArray(run.steps) || !run.steps.length) {
+      crewRunEl.hidden = true;
+      if (crewRunList) crewRunList.textContent = "";
+      return;
+    }
+    crewRunEl.hidden = false;
+    const done = run.steps.filter((s) => s.status === "done" || s.status === "skipped").length;
+    let ticks = 0;
+    for (const s of run.steps) if (typeof s.costUsdTicks === "number") ticks += s.costUsdTicks;
+    if (crewRunCount) {
+      crewRunCount.textContent = done + "/" + run.steps.length + " · " + (run.status || "");
+      if (ticks) crewRunCount.textContent += " · $" + (ticks / 1e10).toFixed(4);
+    }
+    if (crewRunStop) {
+      const live = run.status === "running" || run.status === "planning" || run.status === "assigning";
+      crewRunStop.hidden = !live;
+    }
+    if (!crewRunList) return;
+    crewRunList.textContent = "";
+    for (const step of run.steps) {
+      const li = document.createElement("li");
+      li.className = "crew-step crew-step-" + (step.status || "pending");
+      const label = document.createElement("button");
+      label.type = "button";
+      label.className = "crew-step-open";
+      label.textContent = (step.index || "?") + ". " + (step.role ? step.role + " — " : "") + (step.title || "");
+      if (step.sessionId) {
+        label.onclick = () => vscode.postMessage({ type: "openCrewSession", sessionId: step.sessionId });
+      } else {
+        label.disabled = true;
+      }
+      const meta = document.createElement("span");
+      meta.className = "crew-step-meta";
+      const bits = [step.status];
+      if (typeof step.durationMs === "number") bits.push(Math.round(step.durationMs / 100) / 10 + "s");
+      if (typeof step.costUsdTicks === "number") bits.push("$" + (step.costUsdTicks / 1e10).toFixed(4));
+      const files = (step.filesObserved && step.filesObserved.length) ? step.filesObserved : (step.filesReported || []);
+      if (files.length) bits.push(files.length + " file" + (files.length === 1 ? "" : "s"));
+      meta.textContent = bits.filter(Boolean).join(" · ");
+      li.appendChild(label);
+      li.appendChild(meta);
+      crewRunList.appendChild(li);
+    }
+  }
+
+  if (crewRunToggle) {
+    crewRunToggle.onclick = () => {
+      if (!crewRunEl) return;
+      crewRunEl.classList.toggle("collapsed");
+      const collapsed = crewRunEl.classList.contains("collapsed");
+      crewRunToggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+      if (crewRunList) crewRunList.hidden = collapsed;
+    };
+  }
+  if (crewRunStop) {
+    crewRunStop.onclick = () => vscode.postMessage({ type: "stopCrew" });
+  }
   if (reviewScopeTurn) {
     reviewScopeTurn.onclick = (e) => {
       e.stopPropagation();
@@ -9141,6 +9209,8 @@
     state.reviewTurnId = "";
     state.reviewScope = "turn";
     renderReviewCenter();
+    state.crewRun = null;
+    renderCrewRun();
     state.pendingDiffByToolCallId.clear();
     state.revertedEdits.clear();
     state.toolItemsByToolCallId.clear();
@@ -17145,6 +17215,10 @@
         renderReviewCenter();
         // Whether this turn has anything to review just changed.
         syncSecondOpinionButtons();
+        break;
+      case "crewRun":
+        state.crewRun = msg.run && typeof msg.run === "object" ? msg.run : null;
+        renderCrewRun();
         break;
       case "remoteStatus":
         state.remoteLinked = !!msg.linked;

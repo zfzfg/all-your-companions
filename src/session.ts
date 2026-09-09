@@ -7,6 +7,8 @@ import { allProviderCapabilities } from "./provider-capabilities";
 import type { PlanEntry } from "./plan-entries";
 import type { ReviewDiffBlock } from "./review-center";
 import { reviewCenterSnapshot } from "./review-center";
+import type { CrewRun } from "./crew";
+import type { PermissionRule } from "./permission-rules";
 import type { CheckpointFile, CheckpointSkippedFile } from "./checkpoints";
 import {
   queuedSendsMessage,
@@ -290,6 +292,31 @@ export class Session {
     roleSession: Session;
     cancelled: boolean;
   };
+
+  /**
+   * In-flight parallel crew roles (AP-13). Sequential `/agent` still uses
+   * {@link agentRun} (one slot). Stop cancels every handle here.
+   */
+  crewLive?: {
+    runId: string;
+    step: number;
+    roleName: string;
+    roleSession: Session;
+    cancelled: boolean;
+  }[];
+
+  /**
+   * Live crew chain this session is driving (AP-12). Transient replacing
+   * state — `sessionUiSnapshot` re-sends it; it is never buffered.
+   */
+  crewRun?: CrewRun;
+
+  /**
+   * AP-07 overlay for a role session (18.5). Concatenated after user rules
+   * so a tight `allow edit src/**` can last-match-win over implicit ask;
+   * Deny and the floor still win first.
+   */
+  rolePermissionRules?: PermissionRule[];
 
   /** Live permission requests awaiting an answer, by request id. Set when the
    *  card is shown, read when the user answers so we can persist the resolved
@@ -860,6 +887,9 @@ export function sessionUiSnapshot(
       currentTurnId,
       files: reviewCenterSnapshot(session.reviewBlocks, currentTurnId),
     });
+  }
+  if (session.crewRun) {
+    messages.push({ type: "crewRun", run: session.crewRun });
   }
   messages.push({ type: "feedbackAvailability", available: session.feedbackAvailable });
   if (session.liveFeedbackEligible) {

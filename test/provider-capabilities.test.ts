@@ -72,13 +72,22 @@ describe("provider-capabilities (AP-01)", () => {
     });
   });
 
+  it("worktree is yes for every provider via the local git path (AP-13a)", () => {
+    // Both sides of the old `session.provider === "grok"` worktree branch:
+    // grok still uses its RPC when a session is live, and the other three
+    // now share the host-local git path rather than a "requires Grok" no.
+    for (const provider of ACP_PROVIDERS) {
+      expect(providerCapability(provider, "worktree")).toEqual({ state: "yes" });
+    }
+  });
+
   it("non-grok providers report planMode as yes natively", () => {
     expect(providerCapability("codex", "planMode")).toEqual({ state: "yes" });
     expect(providerCapability("claude", "planMode")).toEqual({ state: "yes" });
     expect(providerCapability("gemini", "planMode")).toEqual({ state: "yes" });
   });
 
-  it("pins user-facing reason texts for unsupported steer, fork, worktree", () => {
+  it("pins user-facing reason texts for unsupported steer, fork, and worktree-as-yes (AP-13a)", () => {
     for (const provider of ["codex", "claude", "gemini"] as const) {
       const pName = provider === "codex" ? "Codex" : provider === "claude" ? "Claude" : "Gemini";
 
@@ -94,10 +103,8 @@ describe("provider-capabilities (AP-01)", () => {
         reason: `Forking conversations is not supported by ${pName}.`,
       });
 
-      expect(providerCapability(provider, "worktree")).toEqual({
-        state: "no",
-        reason: "Worktree isolation requires Grok (_x.ai/git/worktree).",
-      });
+      // AP-13a: local git path makes worktrees a host feature, not a Grok RPC.
+      expect(providerCapability(provider, "worktree")).toEqual({ state: "yes" });
 
       expect(providerCapability(provider, "clientPlanGate")).toEqual({
         state: "no",

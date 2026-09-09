@@ -239,6 +239,7 @@ export function activate(context: vscode.ExtensionContext): GrokExtensionApi {
     await vscode.commands.executeCommand("workbench.action.moveFocusedView", GROK_VIEW_ID);
   });
   registerPair("companions.newSession", "grok.newSession", () => sidebar.newSession());
+  registerPair("companions.runCrew", "grok.runCrew", () => sidebar.runCrewCommand());
   registerPair("companions.newWorktreeSession", "grok.newWorktreeSession", () => sidebar.newWorktreeSession());
   registerPair("companions.applyWorktree", "grok.applyWorktree", () => sidebar.applyFocusedWorktree());
   registerPair("companions.removeWorktree", "grok.removeWorktree", () => sidebar.removeFocusedWorktree());

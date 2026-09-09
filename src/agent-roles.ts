@@ -33,6 +33,12 @@
  * guessing in either direction would be worse than skipping the check.
  */
 import type { AcpProvider } from "./acp-backend";
+import {
+  createRule,
+  type PermissionAction,
+  type PermissionKind,
+  type PermissionRule,
+} from "./permission-rules";
 
 export type AgentRoleMode = "agent" | "plan";
 
@@ -40,6 +46,17 @@ export interface AgentRoleBudget {
   toolCalls?: number;
   tokens?: number;
   usd?: number;
+}
+
+/**
+ * One line of a role's AP-07 overlay: `allow edit src/**`, `deny execute rm`.
+ * Tight on purpose (18.5) — never a blanket auto-accept.
+ */
+export interface AgentRolePermission {
+  action: PermissionAction;
+  kind: PermissionKind;
+  pathGlob?: string;
+  commandPrefix?: string;
 }
 
 export interface AgentRole {
@@ -51,9 +68,15 @@ export interface AgentRole {
   effort?: string;
   mode?: AgentRoleMode;
   /** Globs this role may touch. Empty means the whole project. Stage 1 puts
-   *  these in the briefing as a stated boundary; enforcement is AP-13. */
+   *  these in the briefing as a stated boundary; AP-13 also feeds them to
+   *  {@link permissions} when the role file has no explicit overlay. */
   scope?: string[];
   budget?: AgentRoleBudget;
+  /**
+   * Tight AP-07 overlay for this role (18.5). Deny still wins; the floor
+   * cannot be overridden. Absent means the usual card / Auto accept.
+   */
+  permissions?: AgentRolePermission[];
   /** The documentation from the source note — and the text a later
    *  orchestrator (AP-12) reads to assign a step. Never empty. */
   whenToUse: string;
@@ -210,7 +233,11 @@ export const BUILTIN_ROLES: readonly AgentRole[] = [
 ];
 
 function builtinCopy(): AgentRole[] {
-  return BUILTIN_ROLES.map((role) => ({ ...role, ...(role.scope ? { scope: [...role.scope] } : {}) }));
+  return BUILTIN_ROLES.map((role) => ({
+    ...role,
+    ...(role.scope ? { scope: [...role.scope] } : {}),
+    ...(role.permissions ? { permissions: role.permissions.map((p) => ({ ...p })) } : {}),
+  }));
 }
 
 // ---------------------------------------------------------------------------
@@ -227,7 +254,7 @@ function builtinCopy(): AgentRole[] {
  * reported as a problem naming the line, never half-understood.
  *
  * Unknown keys are IGNORED rather than rejected, so a role file written for a
- * later stage (`permissions`, whatever AP-13 adds) still loads here.
+ * later stage still loads here. `permissions:` is now a known list (AP-13).
  */
 export interface Frontmatter {
   fields: Record<string, unknown>;
@@ -410,6 +437,7 @@ export function parseAgentRole(file: AgentRoleFile): { role?: AgentRole; problem
   const systemPreamble = str(fields.system_preamble) || str(fields.systemPreamble);
   const preferDifferent = fields.prefer_different_provider === true
     || fields.preferDifferentProvider === true;
+  const permissions = parseRolePermissions(fields.permissions);
 
   return {
     role: {
@@ -420,6 +448,7 @@ export function parseAgentRole(file: AgentRoleFile): { role?: AgentRole; problem
       ...(modeRaw ? { mode: modeRaw as AgentRoleMode } : {}),
       ...(scope.length ? { scope } : {}),
       ...(Object.keys(budget).length ? { budget } : {}),
+      ...(permissions.length ? { permissions } : {}),
       whenToUse,
       ...(whenNotToUse ? { whenNotToUse } : {}),
       ...(systemPreamble ? { systemPreamble } : {}),
@@ -428,6 +457,52 @@ export function parseAgentRole(file: AgentRoleFile): { role?: AgentRole; problem
       path: file.path,
     },
   };
+}
+
+const ACTIONS = new Set<PermissionAction>(["allow", "ask", "deny"]);
+const KINDS = new Set<PermissionKind>(["read", "edit", "execute", "other"]);
+
+/** `allow edit src/**` / `deny execute rm`. A scalar like `strict` is ignored. */
+export function parseRolePermissionLine(line: string): AgentRolePermission | undefined {
+  const parts = String(line ?? "").trim().split(/\s+/).filter(Boolean);
+  if (parts.length < 2) return undefined;
+  const action = parts[0]!.toLowerCase() as PermissionAction;
+  const kind = parts[1]!.toLowerCase() as PermissionKind;
+  if (!ACTIONS.has(action) || !KINDS.has(kind)) return undefined;
+  const rest = parts.slice(2).join(" ").trim();
+  const perm: AgentRolePermission = { action, kind };
+  if (rest) {
+    if (kind === "execute") perm.commandPrefix = rest;
+    else perm.pathGlob = rest;
+  }
+  return perm;
+}
+
+export function parseRolePermissions(value: unknown): AgentRolePermission[] {
+  const lines = Array.isArray(value) ? value.map(str) : [];
+  const out: AgentRolePermission[] = [];
+  for (const line of lines) {
+    const parsed = parseRolePermissionLine(line);
+    if (parsed) out.push(parsed);
+  }
+  return out;
+}
+
+/** Role overlay as AP-07 rules. Caller concatenates after user rules so last-match-wins. */
+export function rolePermissionsToRules(role: AgentRole, now = 0): PermissionRule[] {
+  const perms = role.permissions ?? [];
+  return perms.map((p, i) => createRule({
+    id: `role-${role.name}-${i + 1}`,
+    action: p.action,
+    scope: "workspace",
+    createdAt: now,
+    note: `role ${role.name}`,
+    match: {
+      kind: p.kind,
+      ...(p.pathGlob ? { pathGlob: p.pathGlob } : {}),
+      ...(p.commandPrefix ? { commandPrefix: p.commandPrefix } : {}),
+    },
+  }));
 }
 
 /**

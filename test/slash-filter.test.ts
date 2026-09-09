@@ -5,8 +5,10 @@ import {
   filterCommands,
   getSlashQuery,
   HIDDEN_SLASH_COMMANDS,
+  HOST_SLASH_COMMANDS,
   isAdvertisedSkill,
   matchSlashCommand,
+  parseCrewCommand,
 } from "../src/slash-filter";
 
 describe("getSlashQuery", () => {
@@ -253,5 +255,29 @@ describe("matchSlashCommand", () => {
   it("falls back to shape alone before available_commands arrives", () => {
     expect(matchSlashCommand("/compact", [])).toBe("compact");
     expect(matchSlashCommand("/tmp/foo is broken", [])).toBeNull();
+  });
+});
+
+describe("parseCrewCommand (AP-12)", () => {
+  it("is a host slash command and is never forwarded", () => {
+    expect(HOST_SLASH_COMMANDS.has("crew")).toBe(true);
+  });
+
+  it("parses /crew, an optional preset, and a verbatim goal", () => {
+    expect(parseCrewCommand("/crew")).toEqual({ kind: "run" });
+    expect(parseCrewCommand("/crew ship")).toEqual({ kind: "run", preset: "ship" });
+    expect(parseCrewCommand("/crew ship do the thing\nnow")).toEqual({
+      kind: "run",
+      preset: "ship",
+      goal: "do the thing\nnow",
+    });
+  });
+
+  it("rejects a preset name that would read as a flag", () => {
+    expect(parseCrewCommand("/crew --force")).toMatchObject({ kind: "error" });
+  });
+
+  it("does not match prose that merely mentions /crew", () => {
+    expect(parseCrewCommand("see /crew docs")).toEqual({ kind: "none" });
   });
 });

@@ -31,6 +31,7 @@ suite("grok-build extension smoke", () => {
     for (const id of [
       "grok.open",
       "grok.newSession",
+      "grok.runCrew",
       "grok.showLogs",
       "grok.settings",
       "grok.findInSession",

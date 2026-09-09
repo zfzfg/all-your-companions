@@ -99,7 +99,9 @@ Switch from the bottom toolbar — even mid-turn, so you can flip to **Auto acce
 <details>
 <summary><strong>Worktree sessions</strong> — isolate code edits in a git worktree</summary>
 
-**Companions: New Worktree Session** creates an isolated git worktree under `~/.grok/worktrees/` and opens a fresh session whose cwd is that checkout — so agent edits don't touch your main tree until you **Apply worktree**.
+**Companions: New Worktree Session** creates an isolated git worktree under `~/.grok/worktrees/` and opens a fresh session whose cwd is that checkout — so agent edits don't touch your main tree until you **Apply worktree**. Works for all four companions: a live Grok session uses Grok's worktree RPCs (including clone mode); otherwise the host runs `git worktree add` itself (linked worktrees only). **Apply worktree** copies files back with a conflict check — a file you changed in the main checkout since the worktree branched is never overwritten silently.
+
+`/crew [preset]` walks a step list as a team: each step is a fresh session with a compact briefing, assigned to a role by host rules (you are asked when that is unclear). Sequential is the default; `parallel: true` on the preset runs independent writers at the same time, each in its own worktree. The Crew panel above the composer shows every step's role, status, duration and cost. **Companions: Run Crew** is the same action from the Command Palette.
 
 </details>
 
@@ -225,6 +227,7 @@ Open VS Code Settings and search for `companions` (legacy `grok.*` settings are 
 | `Companions: Insert @-Mention` | Insert `@`-mention for active file | `Alt+G` |
 | `Companions: Compact Conversation` | Compact conversation to reclaim context | — |
 | `Companions: New Worktree Session` | Spawn an isolated git worktree session | — |
+| `Companions: Run Crew` | Walk a plan as a chain of roles (`/crew`). Sequential by default | — |
 | `Companions: Show Logs` | Open output channel (ACP JSON-RPC logs) | — |
 
 *(Legacy `Grok:*` commands remain registered as aliases for backward compatibility.)*

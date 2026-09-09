@@ -108,6 +108,10 @@
         "title": "All your Companions: New Session"
       },
       {
+        "command": "companions.runCrew",
+        "title": "All your Companions: Run Crew"
+      },
+      {
         "command": "companions.newWorktreeSession",
         "title": "All your Companions: New Worktree Session"
       },
@@ -195,6 +199,10 @@
       {
         "command": "grok.newSession",
         "title": "All your Companions: New Session"
+      },
+      {
+        "command": "grok.runCrew",
+        "title": "All your Companions: Run Crew"
       },
       {
         "command": "grok.newWorktreeSession",

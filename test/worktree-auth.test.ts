@@ -377,29 +377,23 @@ describe("worktree validation reads git first", () => {
     expect(region).toContain("claimedSourceGitRoot: claimedGitRoot");
   });
 
-  it("keeps the temporary create client alive through validation", () => {
-    // Validation asks this same client for its worktree list. Disposing right
-    // after `createWorktree` made that call reject every time — invisible for a
-    // linked worktree, which local git lists anyway, and fatal for a clone,
-    // which only the ACP list mentions. So creating one before any session
-    // existed for the project failed and left the clone on disk.
+  it("does not start Grok just to create a worktree (AP-13a)", () => {
+    // The temp-client lifetime this used to pin is gone: create uses a live
+    // Grok client when one is already running in this checkout, and local git
+    // otherwise. Starting a throwaway grok.exe just to `git worktree add` is
+    // the lock AP-13a removes — and it is what made "Could not start Grok to
+    // create a worktree" the only answer on a Claude-only install.
     const src = fs.readFileSync(path.join(root, "src", "sidebar.ts"), "utf8");
-    const start = src.indexOf("const creator = await this.clientForWorktreeCreate(sourcePath);");
+    const start = src.indexOf("Creating git worktree");
     expect(start).toBeGreaterThan(-1);
-    const region = src.slice(start, src.indexOf("Create worktree failed", start));
-    const lastValidate = region.lastIndexOf("listAuthoritativeWorktreePaths");
-    const release = region.indexOf("await releaseCreator();");
-    const sessionStart = region.indexOf("await this.startSession(undefined, wtSession);");
-    expect(lastValidate).toBeGreaterThan(-1);
-    expect(release, "released after the last validation query").toBeGreaterThan(lastValidate);
-    // ...and BEFORE the persistent session starts. A temporary grok.exe still
-    // running holds the executable's lock on Windows, and the first session
-    // after an extension upgrade is when the silent CLI updater runs: it would
-    // fail, then record the version anyway, skipping the update for the whole
-    // release.
-    expect(sessionStart, "the new session starts after the creator is gone").toBeGreaterThan(release);
-    // Idempotent, so the belt in `finally` cannot double-dispose.
-    expect(region).toContain("if (creatorDisposed || !disposeAfter) return;");
+    const region = src.slice(start, src.indexOf("private watchWorktreeCreate", start));
+    expect(region).toContain("liveGrokWorktreeClient");
+    expect(region).toContain("createWorktreeViaLocalGit");
+    expect(region).not.toContain("clientForWorktreeCreate");
+    expect(region).not.toContain("Could not start Grok to create a worktree.");
+    // The RPC path still exists for a live Grok session (clone mode).
+    expect(region).toContain("using Grok RPC (clone mode available)");
+    expect(region).toContain("using local git (linked worktree; clone mode is Grok-only)");
   });
 
   it("refuses a path that already existed before the create", () => {
@@ -408,7 +402,8 @@ describe("worktree validation reads git first", () => {
     // over a checkout somebody else is working in — and Apply and Remove would
     // then act on it.
     const src = fs.readFileSync(path.join(root, "src", "sidebar.ts"), "utf8");
-    const start = src.indexOf("const creator = await this.clientForWorktreeCreate(sourcePath);");
+    const start = src.indexOf("using Grok RPC (clone mode available)");
+    expect(start).toBeGreaterThan(-1);
     const region = src.slice(start, src.indexOf("this.worktreeCache.push", start));
     const snapshot = region.indexOf("const preExisting = await this.listAuthoritativeWorktreePaths");
     const create = region.indexOf("await client.createWorktree");

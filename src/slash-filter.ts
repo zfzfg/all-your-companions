@@ -47,6 +47,9 @@ export const HOST_SLASH_COMMANDS: ReadonlySet<string> = new Set([
   // one buys a billed turn in which the model improvises what it might mean.
   "handoff",
   "second-opinion",
+  // AP-12. A chain is N billed sessions; forwarding `/crew` would be one more,
+  // in which the model improvises an orchestration it cannot actually run.
+  "crew",
 ]);
 
 export interface AgentCommand {
@@ -133,6 +136,37 @@ export function parseHandoffCommand(text: string): HandoffCommandParse {
     };
   }
   return { kind: "run", handoff, role };
+}
+
+export type CrewCommandParse =
+  | { kind: "none" }
+  | { kind: "run"; preset?: string; goal?: string }
+  | { kind: "error"; message: string };
+
+/**
+ * Parse `/crew [preset] [goal]`.
+ *
+ * The preset is optional (the built-in `default` stands in). Anything after
+ * the preset name is the goal, verbatim — same reason `/agent`'s task keeps
+ * newlines. An omitted goal means the host derives it from the last user
+ * message, like a handoff.
+ */
+export function parseCrewCommand(text: string): CrewCommandParse {
+  const match = /^\/crew(?:\s+([\s\S]*))?$/.exec(String(text ?? "").trim());
+  if (!match) return { kind: "none" };
+  const rest = (match[1] ?? "").trim();
+  if (!rest) return { kind: "run" };
+  const split = /^(\S+)(?:\s+([\s\S]*))?$/.exec(rest);
+  if (!split) return { kind: "run" };
+  const preset = split[1].toLowerCase();
+  if (!/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(preset)) {
+    return {
+      kind: "error",
+      message: `\`${split[1]}\` is not a valid crew preset name — lowercase letters, digits and dashes only.`,
+    };
+  }
+  const goal = (split[2] ?? "").trim();
+  return { kind: "run", preset, ...(goal ? { goal } : {}) };
 }
 
 function isAsciiWhitespace(ch: string): boolean {

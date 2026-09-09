@@ -50,7 +50,7 @@ export interface AgentRunStoreOptions {
  * it from the conversation (AP-11), and a result read months later should not
  * have to guess which of those it is looking at.
  */
-export type AgentRunTrigger = "command" | "handoff" | "second-opinion";
+export type AgentRunTrigger = "command" | "handoff" | "second-opinion" | "crew-step";
 
 /** One line of `log.jsonl`. Deliberately flat and additive — stage 3 will add
  *  fields, and a reader must survive not knowing them. */

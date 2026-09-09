@@ -468,20 +468,88 @@ export function cloneWorktreeSourceMatches(opts: {
  * Pure against the text (no spawn).
  */
 export function parseGitWorktreeListPorcelain(stdout: string): string[] {
-  if (!stdout || typeof stdout !== "string") return [];
-  const out: string[] = [];
+  return parseGitWorktreeList(stdout).map((r) => r.path);
+}
+
+/**
+ * Parse `git worktree list --porcelain` into the same {@link WorktreeRecord}
+ * shape the Grok RPC list uses. One data model, two sources — otherwise the
+ * surface would have two truths about the same checkout.
+ *
+ * Local git can only produce linked worktrees (decision 18.8). Clone-mode is
+ * a Grok RPC invention and is never inferred here.
+ */
+export function parseGitWorktreeList(porcelain: string): WorktreeRecord[] {
+  if (!porcelain || typeof porcelain !== "string") return [];
+  const out: WorktreeRecord[] = [];
   const seen = new Set<string>();
-  for (const line of stdout.split(/\r?\n/)) {
-    // porcelain: "worktree /abs/path"
-    if (!line.startsWith("worktree ")) continue;
-    const p = line.slice("worktree ".length).trim();
-    if (!p) continue;
-    const key = normalizeFsPath(p);
-    if (!key || seen.has(key)) continue;
+  let current: Partial<WorktreeRecord> & { path?: string } | undefined;
+  const flush = () => {
+    const rec = current;
+    const wtPath = rec?.path;
+    if (!rec || !wtPath) {
+      current = undefined;
+      return;
+    }
+    const key = normalizeFsPath(wtPath);
+    if (!key || seen.has(key)) {
+      current = undefined;
+      return;
+    }
     seen.add(key);
-    out.push(p);
+    const label = path.basename(wtPath) || wtPath;
+    out.push({
+      id: wtPath,
+      path: wtPath,
+      sourceRepo: "",
+      repoName: "",
+      kind: rec.kind === "bare" ? "bare" : "session",
+      creationMode: "linked",
+      gitRef: rec.gitRef ?? "",
+      headCommit: rec.headCommit ?? "",
+      status: rec.status === "prunable" ? "prunable" : "alive",
+      label,
+      userProvidedLabel: false,
+    });
+    current = undefined;
+  };
+  for (const rawLine of porcelain.split(/\r?\n/)) {
+    const line = rawLine.replace(/\s+$/, "");
+    if (!line) {
+      flush();
+      continue;
+    }
+    if (line.startsWith("worktree ")) {
+      flush();
+      const p = unquotePorcelainPath(line.slice("worktree ".length));
+      if (p) current = { path: p };
+      continue;
+    }
+    if (!current) continue;
+    if (line.startsWith("HEAD ")) current.headCommit = line.slice("HEAD ".length).trim();
+    else if (line.startsWith("branch ")) {
+      const ref = line.slice("branch ".length).trim();
+      current.gitRef = ref.replace(/^refs\/heads\//, "") || ref;
+    } else if (line === "detached") current.gitRef = "HEAD";
+    else if (line === "bare") current.kind = "bare";
+    else if (line === "prunable" || line.startsWith("prunable ")) current.status = "prunable";
   }
+  flush();
   return out;
+}
+
+/** Porcelain quotes paths with special characters as C strings. */
+function unquotePorcelainPath(raw: string): string {
+  const s = raw.replace(/^\s+/, "").replace(/\s+$/, "");
+  if (s.length >= 2 && s.startsWith('"') && s.endsWith('"')) {
+    return s.slice(1, -1).replace(/\\([\\nrt"])/g, (_, ch: string) => {
+      if (ch === "n") return "\n";
+      if (ch === "t") return "\t";
+      if (ch === "r") return "\r";
+      return ch;
+    });
+  }
+  return s;
 }
 
 function belongsToRepo(sourceGitRoot: string | undefined, repoGitRoot: string | undefined): boolean {

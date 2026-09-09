@@ -12,7 +12,7 @@ export type ProviderCapability =
   | "steer"          // _x.ai/interject (mid-turn injection)
   | "rewind"         // _x.ai/rewind/* (conversation + fs rollback)
   | "fork"           // _x.ai/session/fork (branch conversation)
-  | "worktree"       // _x.ai/git/worktree/* (dedicated worktree session)
+  | "worktree"       // isolated git worktree sessions (Grok RPC or local git, AP-13a)
   | "planMode"       // Plan mode availability
   | "clientPlanGate" // Client-side fs/terminal safety gate (vs adapter-enforced)
   | "vision"         // Multimodal image attachments in turns
@@ -58,7 +58,8 @@ export const PROVIDER_CAPABILITIES: Record<
     rewind: { state: "yes" },
     // Fork via _x.ai/session/fork (docs/architecture.md:56, file-upload.ts)
     fork: { state: "yes" },
-    // Worktree creation via _x.ai/git/worktree/* (worktree.ts, sidebar.ts:5060)
+    // Grok RPC `_x.ai/git/worktree/*` when a Grok session is live; local git
+    // path otherwise (worktree-local.ts, AP-13a).
     worktree: { state: "yes" },
     // Plan mode for Grok is CLI version-dependent (>= 0.2.101 required)
     planMode: { state: "probe", reason: "Checking Plan mode availability…" },
@@ -93,11 +94,9 @@ export const PROVIDER_CAPABILITIES: Record<
       state: "no",
       reason: "Forking conversations is not supported by Codex.",
     },
-    // Worktree isolation uses Grok-specific RPCs (sidebar.ts:5060)
-    worktree: {
-      state: "no",
-      reason: "Worktree isolation requires Grok (_x.ai/git/worktree).",
-    },
+    // Local git path (worktree-local.ts). Grok RPC is used only when a Grok
+    // session is already running — we never start Grok just to make a worktree.
+    worktree: { state: "yes" },
     // Native collaboration / Plan mode supported by Codex ACP (docs/architecture.md:869, 977)
     planMode: { state: "yes" },
     // Codex manages edits and permissions natively; no client safety gate (codex-backend.ts:296)
@@ -140,11 +139,9 @@ export const PROVIDER_CAPABILITIES: Record<
       state: "no",
       reason: "Forking conversations is not supported by Claude.",
     },
-    // Worktree isolation uses Grok-specific RPCs (sidebar.ts:5060)
-    worktree: {
-      state: "no",
-      reason: "Worktree isolation requires Grok (_x.ai/git/worktree).",
-    },
+    // Local git path (worktree-local.ts). Grok RPC is used only when a Grok
+    // session is already running — we never start Grok just to make a worktree.
+    worktree: { state: "yes" },
     // Native Plan mode supported by Claude Code (docs/architecture.md:869, 977)
     planMode: { state: "yes" },
     // Claude manages plan enforcement in the adapter (claude-backend.ts:422)
@@ -187,11 +184,9 @@ export const PROVIDER_CAPABILITIES: Record<
       state: "no",
       reason: "Forking conversations is not supported by Gemini.",
     },
-    // Worktree isolation uses Grok-specific RPCs (sidebar.ts:5060)
-    worktree: {
-      state: "no",
-      reason: "Worktree isolation requires Grok (_x.ai/git/worktree).",
-    },
+    // Local git path (worktree-local.ts). Grok RPC is used only when a Grok
+    // session is already running — we never start Grok just to make a worktree.
+    worktree: { state: "yes" },
     // Native Plan mode supported by Gemini / Antigravity (sidebar.ts:9414)
     planMode: { state: "yes" },
     // Gemini manages execution and permissions in the adapter (gemini-backend.ts:434)

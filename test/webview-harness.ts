@@ -54,6 +54,17 @@ export const BODY = `
       </button>
       <ol id="todo-rail-list" class="todo-rail-list"></ol>
     </div>
+    <div id="crew-run" class="crew-run" hidden>
+      <div class="crew-run-head">
+        <button id="crew-run-toggle" class="crew-run-toggle" type="button" aria-expanded="true" aria-controls="crew-run-list">
+          <span id="crew-run-caret" class="crew-run-caret"></span>
+          <span class="crew-run-title">Crew</span>
+          <span id="crew-run-count" class="crew-run-count"></span>
+        </button>
+        <button id="crew-run-stop" class="crew-run-stop" type="button">Stop</button>
+      </div>
+      <ol id="crew-run-list" class="crew-run-list"></ol>
+    </div>
     <div id="review-center" class="review-center" hidden>
       <div class="review-center-head">
         <button id="review-center-toggle" class="review-center-toggle" type="button" aria-expanded="true" aria-controls="review-center-list">

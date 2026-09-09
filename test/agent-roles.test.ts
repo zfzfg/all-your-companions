@@ -9,9 +9,11 @@ import {
   loadAgentRoles,
   parseAgentRole,
   parseFrontmatter,
+  rolePermissionsToRules,
   validateRoleModel,
   type AgentRoleFile,
 } from "../src/agent-roles";
+import { decidePermission } from "../src/permission-rules";
 
 function file(stem: string, text: string): AgentRoleFile {
   return { path: `.companions/agents/${stem}.md`, stem, text };
@@ -115,7 +117,33 @@ describe("parseAgentRole", () => {
       file("x", "---\nprovider: claude\nwhen_to_use: a\npermissions: strict\n---\n"),
     );
     expect(role).toBeTruthy();
+    // A scalar is not a list of `allow edit glob` lines, so AP-13 ignores it
+    // rather than treating "strict" as a blanket auto-accept.
     expect(role as unknown as Record<string, unknown>).not.toHaveProperty("permissions");
+  });
+
+  it("reads tight permission lines and ignores junk in the same list", () => {
+    const { role } = parseAgentRole(file("x", [
+      "---",
+      "provider: claude",
+      "when_to_use: a",
+      "permissions:",
+      "  - allow edit src/**",
+      "  - deny execute rm",
+      "  - strict",
+      "---",
+      "",
+    ].join("\n")));
+    expect(role?.permissions).toEqual([
+      { action: "allow", kind: "edit", pathGlob: "src/**" },
+      { action: "deny", kind: "execute", commandPrefix: "rm" },
+    ]);
+    const overlay = rolePermissionsToRules(role!);
+    expect(decidePermission(overlay, { tool: "edit", kind: "edit", paths: ["src/a.ts"] }, "/r").action).toBe("allow");
+    expect(decidePermission(overlay, { tool: "bash", kind: "execute", command: "rm -rf src", paths: [] }, "/r").action).toBe("deny");
+    expect(decidePermission(overlay, {
+      tool: "edit", kind: "edit", paths: [".env"],
+    }, "/r").action).toBe("deny"); // floor, not the role overlay
   });
 });
 

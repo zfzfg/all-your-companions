@@ -3252,6 +3252,71 @@ blockquote {
   overflow-wrap: anywhere;
 }
 
+.crew-run {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: var(--pad);
+  border: 1px solid var(--vscode-input-border, var(--vscode-editorWidget-border));
+  border-radius: var(--radius);
+  background: var(--vscode-editorWidget-background, var(--vscode-input-background));
+  overflow: hidden;
+}
+.crew-run-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px 4px 0;
+}
+.crew-run-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  background: none;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  padding: 4px 8px;
+  font: inherit;
+}
+.crew-run-title { font-weight: 600; }
+.crew-run-count { opacity: 0.7; font-size: 0.9em; }
+.crew-run-stop {
+  background: none;
+  border: 0;
+  color: var(--vscode-errorForeground, inherit);
+  cursor: pointer;
+  font: inherit;
+  padding: 4px 8px;
+}
+.crew-run-list {
+  margin: 0;
+  padding: 0 8px 8px;
+  list-style: none;
+}
+.crew-run.collapsed .crew-run-list { display: none; }
+.crew-step {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 0;
+  border-top: 1px solid var(--vscode-input-border, var(--vscode-editorWidget-border));
+}
+.crew-step-open {
+  background: none;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  padding: 0;
+}
+.crew-step-open:disabled { cursor: default; opacity: 0.85; }
+.crew-step-meta { opacity: 0.7; font-size: 0.85em; }
+.crew-step-running .crew-step-open { color: var(--vscode-charts-yellow, inherit); }
+.crew-step-done .crew-step-open { color: var(--vscode-charts-green, inherit); }
+.crew-step-failed .crew-step-open { color: var(--vscode-errorForeground, inherit); }
+
 /* Multi-file change overview (AP-09). Same sticky slot as the todo rail —
    above the composer, hidden entirely when the selected scope has no files
    so an empty bordered strip never reads as a broken feature. */

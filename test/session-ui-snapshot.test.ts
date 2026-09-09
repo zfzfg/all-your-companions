@@ -72,6 +72,27 @@ describe("sessionUiSnapshot", () => {
     });
   });
 
+  it("re-sends a live crew run after a focus swap (AP-12, R5)", () => {
+    const session = new Session();
+    session.crewRun = {
+      runId: "run-1",
+      goal: "Ship",
+      cwd: "/r",
+      status: "running",
+      steps: [{
+        index: 1,
+        title: "Write it",
+        status: "running",
+        filesReported: [],
+        filesObserved: [],
+      }],
+    };
+    expect(sessionUiSnapshot(session, "agent")).toContainEqual({
+      type: "crewRun",
+      run: session.crewRun,
+    });
+  });
+
   it("replays thumbs availability and the live-turn rating after a focus swap", () => {
     const session = new Session();
     session.feedbackAvailable = true;

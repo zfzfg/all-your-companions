@@ -293,6 +293,10 @@ export const INBOUND_DISPOSITION: Record<WebviewMsg["type"], InboundDisposition>
   // is meaningful on a phone, and it acts on the desk window, so it is
   // host-local like every other "open this in the editor" message.
   openAgentArtifact: "host-local",
+  // Opens a conversation already in the pool — no path, no spend.
+  openCrewSession: "host-local",
+  // Stops a billed multi-session run. Same class as cancel.
+  stopCrew: "full",
   // Starts a second billed run whose role can edit files (AP-11). Anything
   // that spends money or changes the tree is `full`, never `propose`.
   requestHandoff: "full",
@@ -600,6 +604,8 @@ export const REMOTE_REQUIRES_BOUND_SESSION: Record<WebviewMsg["type"], boolean> 
   // runId, not by the bound session, and the entry says so rather than
   // implying a session lookup that does not happen.
   openAgentArtifact: false,
+  openCrewSession: true,
+  stopCrew: true,
   // The whole briefing is derived from ONE session's state, so there is
   // nothing to derive without a bound one.
   requestHandoff: true,
@@ -985,6 +991,7 @@ export const OUTBOUND_DISPOSITION: Record<HostMsg["type"], OutboundDisposition> 
   planEntries: "mirror",
   // Display-only file list with counts; the revert actions travel inbound.
   reviewCenter: "mirror",
+  crewRun: "mirror",
   openModePopover: "mirror",
   chips: "mirror",
   commandsUpdate: "mirror",
@@ -1173,6 +1180,7 @@ export const OUTBOUND_PROJECT_AUTH: Record<HostMsg["type"], OutboundProjectAuth>
   providerCapabilities: "scope",
   planEntries: "scope",
   reviewCenter: "scope",
+  crewRun: "scope",
   commandsUpdate: "scope",
   mentionResults: "scope",
   // Carry the scoped repo cwd; authorize against that field (message-cwd) so a

@@ -38,6 +38,8 @@ import type { PlanEntry } from "./plan-entries";
 export type { PlanEntry };
 import type { ReviewCenterFileView, ReviewScope } from "./review-center";
 export type { ReviewCenterFileView, ReviewScope };
+import type { CrewRun } from "./crew";
+export type { CrewRun };
 import type { RuleFile } from "./rules-files";
 export type { RuleFile };
 import type { LimitOfferAction, LimitOfferRecommended, LimitOfferTarget } from "./limit-errors";
@@ -498,6 +500,13 @@ export type HostMsg =
    * diffs for that path, including a file edited more than once.
    */
   | { type: "reviewCenter"; currentTurnId: string; files: ReviewCenterFileView[] }
+  /**
+   * Live crew-run panel (AP-12). REPLACING state — the host sends the whole
+   * run, the webview swaps. Transient (never buffered); re-sent by
+   * `sessionUiSnapshot`. `run: null` hides the panel rather than painting a
+   * blank card.
+   */
+  | { type: "crewRun"; run: CrewRun | null }
   /** Grok's grok.com + user-level MCP inventory (`_x.ai/mcp/list`; project-file
    *  servers omitted). The desk keeps launch recipes and `configFile`; remotes
    *  receive `projectMcpServerForRemote` (page fields only — no `tag`).
@@ -858,7 +867,7 @@ export type HostMsg =
        * user typed it, the other two mean the host derived it from the
        * conversation — and a reader judging the result should know which.
        */
-      origin?: "command" | "handoff" | "second-opinion";
+      origin?: "command" | "handoff" | "second-opinion" | "crew-step";
       /** The role session, for "Open session". Absent if it never got an id. */
       sessionId?: string;
       cwd?: string;
@@ -1406,6 +1415,10 @@ export type WebviewMsg =
    * step of which run.
    */
   | { type: "openAgentArtifact"; runId: string; step: number; which: "brief" | "result" }
+  /** Open the session that ran a crew step (AP-12). Coordinates, not a path. */
+  | { type: "openCrewSession"; sessionId: string }
+  /** Stop the crew run on this session — the whole run, not just the step. */
+  | { type: "stopCrew" }
   /**
    * Commission a role from the thread itself (AP-11) — the button form of
    * `/handoff` and `/second-opinion`.
@@ -1580,7 +1593,7 @@ const HOST_MESSAGE_TYPE_MAP: Record<HostMsg["type"], true> = {
   soundNotifications: true, processingSound: true, readRepliesAloud: true, summarizeRepliesAloud: true, speechSummary: true, imageFull: true, moveComposerCaret: true, remoteStatus: true,
   setAllToolDetails: true, focusInput: true, findInSession: true, restoreComposer: true, truncateMessages: true, uiConfirmRequest: true,
   sessions: true, sessionRemoved: true, repoSessions: true, pinnedSessions: true, repos: true, sessionDot: true, queuedSends: true, submitQueuedSend: true,
-  steerUnavailable: true, feedbackAvailability: true, turnFeedbackAck: true, usage: true, providerCapabilities: true, planEntries: true, reviewCenter: true, ruleFiles: true, permissionRules: true,
+  steerUnavailable: true, feedbackAvailability: true, turnFeedbackAck: true, usage: true, providerCapabilities: true, planEntries: true, reviewCenter: true, crewRun: true, ruleFiles: true, permissionRules: true,
 };
 
 const WEBVIEW_MESSAGE_TYPE_MAP: Record<WebviewMsg["type"], true> = {
@@ -1598,7 +1611,7 @@ const WEBVIEW_MESSAGE_TYPE_MAP: Record<WebviewMsg["type"], true> = {
   logout: true, checkGrokUpdate: true, updateGrok: true, recheckConnection: true, refreshProviders: true, retryProviderSession: true,
   listSessions: true, listRepoSessions: true, selectRepo: true, toggleRepoPin: true, toggleSessionPin: true,
   setRepoArchived: true, setRepoColor: true,
-  openAgentArtifact: true, requestHandoff: true, resumeSession: true, renameSession: true, deleteSession: true,
+  openAgentArtifact: true, openCrewSession: true, stopCrew: true, requestHandoff: true, resumeSession: true, renameSession: true, deleteSession: true,
   clearAllSessions: true, pickFile: true, mentionQuery: true, addMentionFile: true, addContextChip: true, openContextChipSource: true,
   listProjectDir: true, readProjectFile: true, writeProjectFile: true,
   pasteImage: true, uploadFile: true, voiceStart: true,

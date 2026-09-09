@@ -243,6 +243,7 @@ import {
 import { randomUUID } from "node:crypto";
 import { execGrokCli } from "./cli-process";
 import { listGitWorktreePaths } from "./git-worktree-list";
+import { LocalGitWorktrees, nodeGitRunner, nodeWorktreeFs } from "./worktree-local";
 import {
   locateGrokCli,
   extensionWasUpgraded,
@@ -315,11 +316,32 @@ import {
   type QueuedSendEntry,
 } from "./queued-send";
 
-import { matchSlashCommand, parseAgentCommand, parseHandoffCommand } from "./slash-filter";
+import { matchSlashCommand, parseAgentCommand, parseCrewCommand, parseHandoffCommand } from "./slash-filter";
+import {
+  applyStepOutcome,
+  assignStepRole,
+  cancelCrewRun,
+  crewCostTicks,
+  crewProgress,
+  insertCrewStep,
+  makeCrewRun,
+  setCrewStatus,
+  startCrewStep,
+  stepsFromPlan,
+  type CrewRun,
+  type CrewStep,
+} from "./crew";
+import { assignStep } from "./crew-assign";
+import { CREW_PRESETS_DIR, findCrewPreset, loadCrewPresets, type CrewPresetFile } from "./crew-preset";
+import { briefingForCrewStep, fixerTitle, verifyInsertsFixer } from "./crew-run";
+import { nextIndependentSteps } from "./crew-parallel";
+import { FileClaimStore } from "./file-claims";
+import { checkBudget, countUnreapable, nextFailoverProvider, parallelSlotCap, repeatedFailingTool } from "./crew-budget";
 import {
   AGENT_ROLES_DIR,
   findAgentRole,
   loadAgentRoles,
+  rolePermissionsToRules,
   validateRoleModel,
   type AgentRole,
   type AgentRoleFile,
@@ -1745,10 +1767,22 @@ export class GrokSidebar {
     trigger: AgentRunTrigger,
     caller: Session,
     origin: MsgOrigin,
-  ): Promise<void> {
-    const cwd = this.sessionCwd(caller);
-    const runId = this.agentRuns.newRunId();
-    const step = 1;
+    coords?: { runId: string; step: number; cwd?: string; live?: boolean },
+  ): Promise<{
+    outcome: "completed" | "failed" | "cancelled";
+    filesReported: string[];
+    filesObserved: string[];
+    costUsdTicks?: number;
+    totalTokens?: number;
+    durationMs: number;
+    sessionId?: string;
+    detail?: string;
+    summary: string;
+    planEntries: import("./plan-entries").PlanEntry[];
+  }> {
+    const cwd = coords?.cwd ?? this.sessionCwd(caller);
+    const runId = coords?.runId ?? this.agentRuns.newRunId();
+    const step = coords?.step ?? 1;
     const startedAt = Date.now();
 
     // The coordinates belong to the RUN, so they are stamped here and never
@@ -1769,7 +1803,15 @@ export class GrokSidebar {
         "warning",
         `Could not write the briefing for run ${runId}: ${(error as Error).message}. The role was not started.`,
       );
-      return;
+      return {
+        outcome: "failed",
+        filesReported: [],
+        filesObserved: [],
+        durationMs: 0,
+        detail: (error as Error).message,
+        summary: "",
+        planEntries: [],
+      };
     }
     this.logAgentRun({
       at: startedAt,
@@ -1799,10 +1841,21 @@ export class GrokSidebar {
       ...(role.mode ? { mode: role.mode } : {}),
     };
     this.setSessionCwd(roleSession, cwd, this.workspaceRoot());
+    const overlay = rolePermissionsToRules(role);
+    if (overlay.length) roleSession.rolePermissionRules = overlay;
     this.pool.add(roleSession);
-    caller.agentRun = { runId, step, roleName: role.name, roleSession, cancelled: false };
-    this.setStatus(caller, "working");
-    this.emit(caller, { type: "setBusy", value: true });
+    const liveHandle = coords?.live
+      ? { runId, step, roleName: role.name, roleSession, cancelled: false }
+      : undefined;
+    if (liveHandle) {
+      caller.crewLive = [...(caller.crewLive ?? []), liveHandle];
+    } else {
+      caller.agentRun = { runId, step, roleName: role.name, roleSession, cancelled: false };
+      this.setStatus(caller, "working");
+      this.emit(caller, { type: "setBusy", value: true });
+    }
+    const roleCancelled = () =>
+      !!(liveHandle?.cancelled || caller.agentRun?.cancelled || caller.crewRun?.status === "cancelled");
     this.agentNotice(
       caller,
       "info",
@@ -1819,13 +1872,13 @@ export class GrokSidebar {
       if (!client) {
         outcome = "failed";
         detail = `${providerDisplayName(role.provider)} could not start a session for this role.`;
-      } else if (caller.agentRun?.cancelled) {
+      } else if (roleCancelled()) {
         outcome = "cancelled";
         detail = "Stopped before the briefing was sent.";
       } else {
         this.nameAgentRoleSession(roleSession, role, runId, step);
         await this.handleSend(briefMarkdown, false, roleSession, origin);
-        if (caller.agentRun?.cancelled) {
+        if (roleCancelled()) {
           outcome = "cancelled";
           detail = "Stopped while the role was working.";
         } else if (roleSession.status === "error") {
@@ -1870,9 +1923,13 @@ export class GrokSidebar {
       : undefined;
     const durationMs = Date.now() - startedAt;
 
-    caller.agentRun = undefined;
-    this.setStatus(caller, outcome === "failed" ? "error" : "done");
-    this.emit(caller, { type: "setBusy", value: false });
+    if (liveHandle) {
+      caller.crewLive = (caller.crewLive ?? []).filter((h) => h !== liveHandle);
+    } else {
+      caller.agentRun = undefined;
+      this.setStatus(caller, outcome === "failed" ? "error" : "done");
+      this.emit(caller, { type: "setBusy", value: false });
+    }
     this.emit(caller, {
       type: "agentResult",
       id: `${runId}-${step}`,
@@ -1908,7 +1965,11 @@ export class GrokSidebar {
     // afterwards is what keeps `discard` from being undone by its own record.
     if (producedNothing) {
       this.host.appendLine(`[agent] run ${runId} was stopped before it produced anything; discarded.`);
-      try { this.agentRuns.discard(runId); } catch { /* nothing to clean up */ }
+      // A chain's step 2+ shares the run directory with earlier paid steps —
+      // discarding it would throw those away. Only step 1 is the whole run.
+      if (step <= 1) {
+        try { this.agentRuns.discard(runId); } catch { /* nothing to clean up */ }
+      }
     } else {
       this.logAgentRun({
         at: Date.now(),
@@ -1925,6 +1986,18 @@ export class GrokSidebar {
       });
     }
     this.postSessionsList();
+    return {
+      outcome,
+      filesReported: result.files,
+      filesObserved: observed,
+      ...(usage?.costUsdTicks !== undefined ? { costUsdTicks: usage.costUsdTicks } : {}),
+      ...(usage?.totalTokens !== undefined ? { totalTokens: usage.totalTokens } : {}),
+      durationMs,
+      ...(roleSessionId ? { sessionId: roleSessionId } : {}),
+      ...(detail ? { detail } : {}),
+      summary: result.summary,
+      planEntries: [...roleSession.planEntries],
+    };
   }
 
   /** Name a role session before its turn, for the reason routines do the same:
@@ -1952,10 +2025,557 @@ export class GrokSidebar {
   /** Stop the running role, if any. Returns true when there was one. */
   private cancelAgentRun(caller: Session): boolean {
     const run = caller.agentRun;
-    if (!run) return false;
+    if (caller.crewRun && caller.crewRun.status === "running") {
+      caller.crewRun = cancelCrewRun(caller.crewRun, "Stopped.");
+      this.emitCrewRun(caller);
+    }
+    let stopped = false;
+    if (caller.crewLive?.length) {
+      for (const live of caller.crewLive) {
+        live.cancelled = true;
+        void live.roleSession.client?.cancel("user Stop click (/crew)");
+      }
+      stopped = true;
+    }
+    if (!run) return stopped || !!caller.crewRun;
     run.cancelled = true;
     void run.roleSession.client?.cancel("user Stop click (/agent)");
     return true;
+  }
+
+  private emitCrewRun(session: Session): void {
+    this.emit(session, { type: "crewRun", run: session.crewRun ?? null });
+  }
+
+  private crewPresetSet(cwd: string) {
+    const dir = path.join(cwd, ".companions", "crews");
+    const files: CrewPresetFile[] = [];
+    let names: string[] = [];
+    try {
+      names = fs.readdirSync(dir).filter((name) => name.toLowerCase().endsWith(".md")).sort();
+    } catch {
+      return loadCrewPresets([]);
+    }
+    for (const name of names) {
+      try {
+        files.push({
+          path: `${CREW_PRESETS_DIR}/${name}`,
+          stem: name.replace(/\.md$/i, ""),
+          text: fs.readFileSync(path.join(dir, name), "utf8"),
+        });
+      } catch (error) {
+        this.host.appendLine(`[crew] could not read ${CREW_PRESETS_DIR}/${name}: ${(error as Error).message}`);
+      }
+    }
+    return loadCrewPresets(files);
+  }
+
+  /**
+   * `/crew [preset] [goal]` — walk a plan as a chain of roles (AP-12/13).
+   * Sequential is the default. `parallel: true` on the preset runs independent
+   * writers in one wave, each in its own worktree.
+   *
+   * Parsed synchronously at both intercept points, awaited only on a hit —
+   * the same rule as `/agent` (Erkenntnis 14). Stop holds the RUN, not just
+   * the step. Grok as planner is refused: an empty entries list is not "a
+   * plan with zero steps".
+   */
+  private async handleCrewCommand(text: string, session: Session, origin: MsgOrigin): Promise<boolean> {
+    const parsed = parseCrewCommand(text);
+    if (parsed.kind === "none") return false;
+    if (parsed.kind === "error") {
+      this.agentNotice(session, "warning", parsed.message);
+      return true;
+    }
+    if (session.crewRun && (session.crewRun.status === "running" || session.crewRun.status === "assigning" || session.crewRun.status === "planning")) {
+      this.agentNotice(session, "warning", "A crew is already running in this conversation. Stop it first.");
+      return true;
+    }
+    if (this.runningRoleName(session)) {
+      this.agentNotice(session, "warning", "A role is already running in this conversation.");
+      return true;
+    }
+
+    const cwd = this.sessionCwd(session);
+    const presets = this.crewPresetSet(cwd);
+    const preset = findCrewPreset(presets, parsed.preset);
+    const roles = this.agentRoleSet(cwd);
+    const goal = parsed.goal || this.lastUserMessageText(session) || "Carry out the current plan.";
+
+    const cap = providerCapability(session.provider, "structuredPlan", {
+      sawPlanEntries: session.planEntries.length > 0,
+    });
+    let entries = session.planEntries.filter((e) => e.content.trim());
+    if (!entries.length) {
+      if (cap.state === "no") {
+        this.agentNotice(
+          session,
+          "warning",
+          `${providerDisplayName(session.provider)} reports plans as prose, not as a step list, so a crew cannot start here. `
+          + `Point the planner role at Claude, Codex or Gemini, or run /crew from a session that already has a checklist.`,
+        );
+        return true;
+      }
+      const planner = findAgentRole(roles, "planner");
+      if (!planner) {
+        this.agentNotice(session, "warning", "No `planner` role is loaded, so a crew cannot invent a step list.");
+        return true;
+      }
+      const resolved = this.resolveRoleProvider(planner, session);
+      if ("error" in resolved) {
+        this.agentNotice(session, "warning", resolved.error);
+        return true;
+      }
+      const plannerCap = providerCapability(resolved.provider, "structuredPlan");
+      if (plannerCap.state === "no") {
+        this.agentNotice(
+          session,
+          "warning",
+          `Planner would run on ${providerDisplayName(resolved.provider)}, which reports plans as prose, not as a step list. `
+          + `Give the planner a companion that speaks structured plans, or start from an existing checklist.`,
+        );
+        return true;
+      }
+      const runId = this.agentRuns.newRunId();
+      session.crewRun = makeCrewRun({ runId, goal, cwd, steps: [], preset: preset.name, verify: preset.verify });
+      session.crewRun = setCrewStatus(session.crewRun, "planning");
+      this.emitCrewRun(session);
+      const planned = await this.runAgentRole(
+        { ...planner, provider: resolved.provider },
+        {
+          goal,
+          task: "Produce an ordered checklist of concrete steps for this goal. Do not edit any file.",
+          acceptance: "A structured step list the host can walk, one step per item.",
+          files: [],
+          decisions: [],
+          forbidden: ["Do not edit any file."],
+          provenance: [`Crew ${runId} asked the planner for a step list.`],
+        },
+        "crew-step",
+        session,
+        origin,
+        { runId, step: 1 },
+      );
+      entries = planned.planEntries.filter((e) => e.content.trim());
+      if (!entries.length) {
+        this.agentNotice(session, "warning", "The planner did not report a step list, so the crew did not start.");
+        session.crewRun = setCrewStatus(session.crewRun, "failed", "planner produced no steps");
+        this.emitCrewRun(session);
+        return true;
+      }
+    }
+
+    const steps = stepsFromPlan(entries);
+    const runId = session.crewRun?.runId ?? this.agentRuns.newRunId();
+    let run = makeCrewRun({
+      runId,
+      goal,
+      cwd,
+      steps,
+      preset: preset.name,
+      verify: preset.verify,
+      checkpointTurnId: String(session.userMessageCount),
+      ...(preset.parallel ? { parallel: true } : {}),
+    });
+    this.logAgentRun({
+      at: Date.now(),
+      runId,
+      step: 0,
+      role: "crew",
+      provider: session.provider,
+      event: "started",
+      detail: `preset=${preset.name} steps=${steps.length}`,
+    });
+
+    for (const step of run.steps) {
+      const assignment = assignStep({ title: step.title, files: [] }, roles.roles);
+      if (assignment.kind === "assigned") {
+        run = assignStepRole(run, step.index, assignment.role, assignment.why);
+        this.logAgentRun({
+          at: Date.now(), runId, step: step.index, role: assignment.role,
+          provider: session.provider, event: "briefed", detail: assignment.why,
+        });
+      } else {
+        const candidates = assignment.kind === "ambiguous" ? assignment.candidates : roles.roles.map((r) => r.name);
+        const picked = await this.askCrewAssignment(session, step.title, candidates, assignment.why);
+        if (!picked) {
+          run = cancelCrewRun(run, "Assignment cancelled.");
+          session.crewRun = run;
+          this.emitCrewRun(session);
+          return true;
+        }
+        run = assignStepRole(run, step.index, picked, `user chose ${picked} (${assignment.why})`);
+        this.logAgentRun({
+          at: Date.now(), runId, step: step.index, role: picked,
+          provider: session.provider, event: "briefed", detail: `user chose ${picked}`,
+        });
+      }
+    }
+
+    run = setCrewStatus(run, "running");
+    session.crewRun = run;
+    this.emitCrewRun(session);
+    if (preset.parallel) {
+      this.setStatus(session, "working");
+      this.emit(session, { type: "setBusy", value: true });
+    }
+
+    const worktrees: { path: string; label: string; sourceGitRoot: string }[] = [];
+    let previous: { summary: string; filesReported: string[]; filesObserved: string[]; verify?: string } | undefined;
+    while (session.crewRun && session.crewRun.status === "running") {
+      const cap = parallelSlotCap({
+        maxLive: GrokSidebar.MAX_LIVE_SESSIONS,
+        unreapable: this.crewUnreapableCount(),
+      });
+      const wave = nextIndependentSteps(session.crewRun, { parallel: !!preset.parallel, cap });
+      if (!wave.length) {
+        session.crewRun = setCrewStatus(session.crewRun, "review");
+        this.emitCrewRun(session);
+        break;
+      }
+
+      type Prepared = { step: CrewStep; role: AgentRole; brief: ReturnType<typeof briefingForCrewStep>; stepCwd: string };
+      const prepared: Prepared[] = [];
+      for (const step of wave) {
+        if (!session.crewRun || session.crewRun.status !== "running") break;
+        const roleName = step.role;
+        const role = roleName ? findAgentRole(roles, roleName) : undefined;
+        if (!role) {
+          session.crewRun = applyStepOutcome(session.crewRun, step.index, {
+            status: "failed",
+            detail: `No role named ${roleName ?? "(unassigned)"} is loaded.`,
+          });
+          this.emitCrewRun(session);
+          break;
+        }
+        const resolved = this.resolveRoleProvider(role, session);
+        if ("error" in resolved) {
+          session.crewRun = applyStepOutcome(session.crewRun, step.index, { status: "failed", detail: resolved.error });
+          this.emitCrewRun(session);
+          break;
+        }
+        let stepCwd = cwd;
+        if (preset.parallel) {
+          const wt = await this.createCrewWorktree(cwd, `crew-${runId.slice(-8)}-s${step.index}`);
+          if ("error" in wt) {
+            session.crewRun = applyStepOutcome(session.crewRun, step.index, { status: "failed", detail: wt.error });
+            this.emitCrewRun(session);
+            break;
+          }
+          worktrees.push(wt);
+          stepCwd = wt.path;
+        }
+        session.crewRun = startCrewStep(session.crewRun, step.index);
+        prepared.push({
+          step,
+          role: { ...role, provider: resolved.provider },
+          brief: briefingForCrewStep({ run: session.crewRun, step, previous }),
+          stepCwd,
+        });
+      }
+      this.emitCrewRun(session);
+      if (!prepared.length || !session.crewRun || session.crewRun.status !== "running") break;
+
+      const runOne = (p: Prepared) => this.executeCrewRole(p, session, origin, runId, !!preset.parallel);
+      const results = prepared.length > 1
+        ? await Promise.all(prepared.map(runOne))
+        : [await runOne(prepared[0]!)];
+
+      const summaries: NonNullable<typeof previous>[] = [];
+      for (let i = 0; i < prepared.length; i++) {
+        const p = prepared[i]!;
+        const result = results[i]!;
+        const settled = await this.settleCrewStep({
+          session, origin, roles, runId, cwd: p.stepCwd, step: p.step, role: p.role, result,
+        });
+        if (settled.previous) summaries.push(settled.previous);
+        if (!session.crewRun || session.crewRun.status !== "running") break;
+      }
+      if (summaries.length) {
+        previous = {
+          summary: summaries.map((s) => s.summary).filter(Boolean).join(" | "),
+          filesReported: this.uniqueCrewPaths(summaries.flatMap((s) => s.filesReported)),
+          filesObserved: this.uniqueCrewPaths(summaries.flatMap((s) => s.filesObserved)),
+          ...(summaries.some((s) => s.verify)
+            ? { verify: summaries.map((s) => s.verify).filter(Boolean).join(" ") }
+            : {}),
+        };
+      }
+    }
+
+    for (const wt of worktrees) {
+      await this.applyCrewWorktree(session, wt);
+    }
+    if (preset.parallel) {
+      this.emit(session, { type: "setBusy", value: false });
+      if (session.status === "working") this.setStatus(session, "done");
+    }
+
+    if (session.crewRun && session.crewRun.status === "review") {
+      this.emitReviewCenter(session);
+      session.crewRun = setCrewStatus(session.crewRun, "done");
+      this.emitCrewRun(session);
+      const progress = crewProgress(session.crewRun);
+      const cost = crewCostTicks(session.crewRun);
+      this.agentNotice(
+        session,
+        "info",
+        `Crew ${session.crewRun.runId} finished: ${progress.done}/${progress.total} steps`
+        + (cost ? `, cost ticks ${cost}` : "")
+        + ". Review the combined diffs in the Review panel.",
+      );
+    }
+    try { this.crewFileClaims().releaseRun(runId); } catch { /* claims are a lock, not the run */ }
+    return true;
+  }
+
+  private async executeCrewRole(
+    prepared: { step: CrewStep; role: AgentRole; brief: ReturnType<typeof briefingForCrewStep>; stepCwd: string },
+    session: Session,
+    origin: MsgOrigin,
+    runId: string,
+    live: boolean,
+  ) {
+    const { step, role, brief, stepCwd } = prepared;
+    const coords = { runId, step: step.index, cwd: stepCwd, ...(live ? { live: true as const } : {}) };
+    const exhausted: AcpProvider[] = [];
+    let provider: AcpProvider = role.provider;
+    let result = await this.runAgentRole({ ...role, provider }, brief, "crew-step", session, origin, coords);
+    while (
+      result.outcome === "failed"
+      && (() => {
+        const kind = classifyLimitError(provider, result.detail || "");
+        return kind === "quota" || kind === "rate";
+      })()
+      && session.crewRun
+    ) {
+      exhausted.push(provider);
+      const next = nextFailoverProvider(exhausted, this.usableProviders());
+      if (!next) break;
+      this.logAgentRun({
+        at: Date.now(), runId, step: step.index, role: role.name, provider: next,
+        event: "started", detail: `failover from ${provider} (limit)`,
+      });
+      provider = next;
+      result = await this.runAgentRole({ ...role, provider }, brief, "crew-step", session, origin, coords);
+    }
+    return result;
+  }
+
+  private async settleCrewStep(opts: {
+    session: Session;
+    origin: MsgOrigin;
+    roles: AgentRoleSet;
+    runId: string;
+    cwd: string;
+    step: CrewStep;
+    role: AgentRole;
+    result: Awaited<ReturnType<GrokSidebar["executeCrewRole"]>>;
+  }): Promise<{ previous?: { summary: string; filesReported: string[]; filesObserved: string[]; verify?: string } }> {
+    const { session, roles, runId, cwd, step, role, result } = opts;
+    if (!session.crewRun) return {};
+    for (const file of result.filesObserved) {
+      const claim = this.crewFileClaims().tryClaim({
+        path: file, runId, step: step.index, role: role.name, at: Date.now(),
+      });
+      if (!claim.ok) {
+        const keep = await this.confirmInChat(session, {
+          title: "File already claimed",
+          body: `${file} is held by ${claim.heldBy.role} (step ${claim.heldBy.step}). Overwrite anyway?`,
+          confirmLabel: "Overwrite",
+          danger: true,
+        });
+        if (!keep) {
+          session.crewRun = applyStepOutcome(session.crewRun, step.index, {
+            status: "failed",
+            detail: `${file} is claimed by ${claim.heldBy.role}`,
+            filesObserved: result.filesObserved,
+          });
+          this.emitCrewRun(session);
+          return {};
+        }
+      }
+    }
+    if (session.crewRun.status !== "running") return {};
+
+    const budget = checkBudget(
+      { toolCalls: 0, tokens: result.totalTokens ?? 0, usdTicks: result.costUsdTicks ?? 0 },
+      role.budget,
+    );
+    if (!budget.ok) {
+      const keep = await this.confirmInChat(session, {
+        title: "Budget reached",
+        body: `${role.name} hit its ${budget.limit} cap (${budget.used} / ${budget.cap}). Continue, or stop the crew?`,
+        confirmLabel: "Continue",
+      });
+      if (!keep) {
+        session.crewRun = cancelCrewRun(session.crewRun, `${role.name} hit ${budget.limit}`);
+        this.emitCrewRun(session);
+        return {};
+      }
+    }
+
+    const failCalls = result.filesReported.length
+      ? []
+      : (result.detail ? [{ tool: result.detail, ok: false as const }] : []);
+    if (repeatedFailingTool(failCalls)) {
+      const keep = await this.confirmInChat(session, {
+        title: "Repeated failing tool",
+        body: `${role.name} retried the same failing call. Continue, or stop the crew?`,
+        confirmLabel: "Continue",
+      });
+      if (!keep) {
+        session.crewRun = cancelCrewRun(session.crewRun, `${role.name} repeated a failing tool`);
+        this.emitCrewRun(session);
+        return {};
+      }
+    }
+
+    session.crewRun = applyStepOutcome(session.crewRun, step.index, {
+      status: result.outcome === "completed" ? "done" : result.outcome === "cancelled" ? "cancelled" : "failed",
+      filesReported: result.filesReported,
+      filesObserved: result.filesObserved,
+      costUsdTicks: result.costUsdTicks,
+      durationMs: result.durationMs,
+      sessionId: result.sessionId,
+      detail: result.detail,
+    });
+    this.emitCrewRun(session);
+    if (result.outcome !== "completed") return {};
+
+    const previous: { summary: string; filesReported: string[]; filesObserved: string[]; verify?: string } = {
+      summary: result.summary,
+      filesReported: result.filesReported,
+      filesObserved: result.filesObserved,
+    };
+    if (session.crewRun.verify && role.name !== "reviewer" && role.name !== "planner") {
+      const verify = await this.runCrewVerify(session.crewRun.verify, cwd);
+      previous.verify = verify.code === 0
+        ? `\`${session.crewRun.verify}\` passed.`
+        : `\`${session.crewRun.verify}\` failed (exit ${verify.code}).`;
+      if (verifyInsertsFixer(verify)) {
+        const fixer = findAgentRole(roles, "fixer");
+        if (fixer) {
+          session.crewRun = insertCrewStep(session.crewRun, step.index, {
+            title: fixerTitle({ command: session.crewRun.verify, output: verify.output }),
+            role: "fixer",
+            assignWhy: `verify \`${session.crewRun.verify}\` exited ${verify.code}`,
+          });
+          this.emitCrewRun(session);
+        }
+      }
+    }
+    return { previous };
+  }
+
+  private async askCrewAssignment(
+    session: Session,
+    title: string,
+    candidates: string[],
+    why: string,
+  ): Promise<string | undefined> {
+    const options = candidates.map((name) => ({ label: name }));
+    if (!options.length) return undefined;
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (value: string | undefined) => {
+        if (settled) return;
+        settled = true;
+        resolve(value);
+      };
+      this.showQuestion(session, {
+        id: `crew-assign-${Date.now()}`,
+        sessionId: session.activeSessionId || "crew",
+        questions: [{
+          question: `Which role should handle: ${title}?\n${why}`,
+          options,
+        }],
+      }, {
+        answer: (answers) => {
+          const first = Object.values(answers)[0];
+          finish(typeof first === "string" && candidates.includes(first) ? first : candidates[0]);
+          return true;
+        },
+        cancel: () => { finish(undefined); return true; },
+        abandon: () => { finish(undefined); },
+      });
+    });
+  }
+
+  private async runCrewVerify(command: string, cwd: string): Promise<{ code: number; output: string }> {
+    const runner = this.crewVerifyRunner;
+    if (runner) return runner(command, cwd);
+    // Host-side verify is opt-in via the preset. A missing command is a skip,
+    // not a red check — we do not invent a test runner.
+    return { code: 0, output: "" };
+  }
+
+  /** Tests inject a verify runner so `npm test` never starts a real one. */
+  crewVerifyRunner?: (command: string, cwd: string) => Promise<{ code: number; output: string }>;
+  /** Tests inject worktree create/apply so `npm test` never starts git. */
+  crewWorktreeCreate?: (sourcePath: string, label: string) => Promise<{ path: string; label: string; sourceGitRoot: string } | { error: string }>;
+  crewWorktreeApply?: (wt: { path: string; label: string; sourceGitRoot: string }) => Promise<void>;
+
+  private uniqueCrewPaths(paths: readonly string[]): string[] {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const p of paths) {
+      const n = String(p ?? "").replace(/\\/g, "/");
+      if (!n || seen.has(n)) continue;
+      seen.add(n);
+      out.push(n);
+    }
+    return out;
+  }
+
+  private async createCrewWorktree(
+    sourcePath: string,
+    label: string,
+  ): Promise<{ path: string; label: string; sourceGitRoot: string } | { error: string }> {
+    if (this.crewWorktreeCreate) return this.crewWorktreeCreate(sourcePath, label);
+    const sourceGitRoot = gitRootForPath(sourcePath, defaultFs) || sourcePath;
+    const root = path.join(resolveGrokHome(), "worktrees");
+    const created = await this.worktreeLocal().create({ sourcePath, label, root });
+    if ("error" in created) return created;
+    return {
+      path: created.worktreePath,
+      label: label || path.basename(created.worktreePath),
+      sourceGitRoot: created.sourceGitRoot || sourceGitRoot,
+    };
+  }
+
+  private async applyCrewWorktree(
+    session: Session,
+    wt: { path: string; label: string; sourceGitRoot: string },
+  ): Promise<void> {
+    if (this.crewWorktreeApply) return this.crewWorktreeApply(wt);
+    await this.applyWorktreeViaLocalGit(session, wt.path, wt.sourceGitRoot, wt.label);
+  }
+
+  private crewUnreapableCount(): number {
+    try {
+      return countUnreapable(this.pool, this.focused);
+    } catch {
+      return 1;
+    }
+  }
+
+  private fileClaims?: FileClaimStore;
+
+  private crewFileClaims(): FileClaimStore {
+    return this.fileClaims ?? (this.fileClaims = new FileClaimStore({
+      dir: path.join(this.context.globalStorageUri.fsPath, "file-claims").replace(/\\/g, "/"),
+      fs: {
+        mkdirSync: (p, o) => fs.mkdirSync(p, o),
+        writeFileSync: (p, data, o) => fs.writeFileSync(p, data, o),
+        readFileSync: (p, enc) => fs.readFileSync(p, enc),
+        readdirSync: (p) => fs.readdirSync(p),
+        existsSync: (p) => fs.existsSync(p),
+        unlinkSync: (p) => fs.unlinkSync(p),
+        rmSync: (p, o) => fs.rmSync(p, o),
+      },
+      now: () => Date.now(),
+    }));
   }
 
   private logAgentRun(entry: Parameters<AgentRunStore["appendLog"]>[0]): void {
@@ -2055,7 +2675,7 @@ export class GrokSidebar {
    * yields to a dialog the user can sit on for a minute.
    */
   private runningRoleName(session: Session): string | undefined {
-    return session.agentRun?.roleName;
+    return session.agentRun?.roleName ?? session.crewLive?.[0]?.roleName;
   }
 
   private async startHandoff(
@@ -4733,7 +5353,11 @@ Only continue if you trust this code.`,
     const facts = extractPermissionFacts(req.toolCall);
     const loaded = this.loadPermissionRuleState(cwd);
     this.maybePromptWorkspaceRulesAdoption(session, cwd, loaded);
-    const decision = decidePermission(loaded.active, facts, cwd);
+    const decision = decidePermission(
+      [...loaded.active, ...(session.rolePermissionRules ?? [])],
+      facts,
+      cwd,
+    );
     if (decision.action === "ask") return false;
     if (decision.action === "deny") {
       const rejectId = pickRejectOption(req.options ?? []);
@@ -6012,6 +6636,11 @@ Only continue if you trust this code.`,
    * is skipped when `fromRemote` is true so a phone tap never stalls on a desk
    * input box (auto-named worktree instead).
    */
+  /** Command Palette / `companions.runCrew` — same as typing `/crew`. */
+  async runCrewCommand(): Promise<void> {
+    await this.handleCrewCommand("/crew", this.focused, "local");
+  }
+
   async newWorktreeSession(opts?: { fromRemote?: boolean }): Promise<void> {
     // No worktree-from-worktree — checkouts stay singular. The gear hides this
     // inside a worktree; guard the Command-Palette path too.
@@ -6085,13 +6714,19 @@ Only continue if you trust this code.`,
       { title: "Creating git worktree…", cancellable: false },
       async () => {
         try {
-          // Create needs a live sessionId. Prefer a workspace-cwd client so we
-          // don't pin a worktree to a session that already lives in another wt;
-          // otherwise spin a short-lived ACP client just for the create RPC.
-          const creator = await this.clientForWorktreeCreate(sourcePath);
-          if (!creator) {
-            return void this.host.showErrorMessage("Could not start Grok to create a worktree.");
+          // Grok RPC stays the path when a Grok session is already running for
+          // this checkout — it is proven and it knows clone mode. We never
+          // start Grok just to make a worktree (AP-13a): no live Grok client
+          // means the local git path, which can only produce a linked worktree
+          // and says so rather than pretending a clone happened (18.8).
+          const live = this.liveGrokWorktreeClient(sourcePath);
+          if (!live) {
+            this.host.appendLine("[worktree] using local git (linked worktree; clone mode is Grok-only)");
+            await this.createWorktreeViaLocalGit(sourcePath, label);
+            return;
           }
+          this.host.appendLine("[worktree] using Grok RPC (clone mode available)");
+          const creator = { client: live, disposeAfter: false };
           const { client, disposeAfter } = creator;
           // Disposed after the LAST validation query, not here and not at the
           // end. Not here, because validation asks this same client for its
@@ -6535,6 +7170,135 @@ Only continue if you trust this code.`,
   }
 
   /**
+   * A live Grok ACP client whose cwd is `sourcePath`.
+   *
+   * The RPC path is only used when Grok is already running in this checkout —
+   * clone mode lives there, and starting a throwaway Grok just to `git
+   * worktree add` is the lock AP-13a removes. A Grok session in a different
+   * cwd does not count: its create would be about a different repository.
+   */
+  private liveGrokWorktreeClient(sourcePath: string): AcpClient | undefined {
+    const match = (s: Session) =>
+      s.provider === "grok" && !!s.client?.sessionId && pathsEqual(this.sessionCwd(s), sourcePath);
+    for (const s of this.pool) {
+      if (match(s) && s.client) return s.client;
+    }
+    if (match(this.focused) && this.focused.client) return this.focused.client;
+    return undefined;
+  }
+
+  /** Lazy local-git worktree ops. Tests inject `this.localWorktrees`. */
+  private localWorktrees?: LocalGitWorktrees;
+
+  private worktreeLocal(): LocalGitWorktrees {
+    return this.localWorktrees ?? (this.localWorktrees = new LocalGitWorktrees({
+      git: nodeGitRunner(),
+      fs: nodeWorktreeFs(),
+      now: () => Date.now(),
+      join: (...parts) => path.join(...parts),
+      dirname: (p) => path.dirname(p),
+      basename: (p) => path.basename(p),
+      log: (msg) => this.host.appendLine(msg),
+    }));
+  }
+
+  /**
+   * Create a linked worktree with local git and open a session in it.
+   * The choice is already logged by the caller; this is the body.
+   */
+  private async createWorktreeViaLocalGit(sourcePath: string, label: string): Promise<void> {
+    const sourceGitRoot = gitRootForPath(sourcePath, defaultFs) || sourcePath;
+    const root = path.join(resolveGrokHome(), "worktrees");
+    const created = await this.worktreeLocal().create({
+      sourcePath,
+      label: label || undefined,
+      root,
+    });
+    if ("error" in created) {
+      return void this.host.showErrorMessage(`Create worktree failed: ${created.error}`);
+    }
+    const wtPath = created.worktreePath;
+    const wtLabel = label || path.basename(wtPath);
+    const ready = await this.waitForWorktreeReady(wtPath, 30000);
+    if (!ready) {
+      return void this.host.showErrorMessage(
+        `Worktree "${wtLabel}" was created but its checkout never appeared on disk — the session wasn't started. Try again, or check \`git worktree list\`.`,
+      );
+    }
+    const listed = await listGitWorktreePaths(sourceGitRoot, {
+      log: (msg) => this.host.appendLine(msg),
+    });
+    if (
+      !worktreePathAuthorizedForRepo({
+        worktreePath: wtPath,
+        sourceRepo: sourcePath,
+        listedWorktreePaths: listed,
+        claimedSourceGitRoot: created.sourceGitRoot,
+        sourceGitRoot,
+      })
+    ) {
+      this.host.appendLine(`[worktree] refused unlisted/unauthorized path from local create: ${wtPath}`);
+      return void this.host.showErrorMessage(
+        `Worktree "${wtLabel}" could not be confirmed as part of this repository, so no session was started. The checkout was left at ${wtPath} — remove it yourself if you don't want it.`,
+      );
+    }
+    await this.bindCreatedWorktreeSession(wtPath, wtLabel, sourceGitRoot, !!label);
+  }
+
+  /** Cache + open a fresh session in a worktree that has already been validated. */
+  private async bindCreatedWorktreeSession(
+    wtPath: string,
+    wtLabel: string,
+    sourceGitRoot: string,
+    userProvidedLabel: boolean,
+  ): Promise<void> {
+    this.worktreeCache = this.worktreeCache.filter((w) => !pathsEqual(w.path, wtPath));
+    this.worktreeCache.push({
+      id: wtLabel,
+      path: wtPath,
+      sourceRepo: sourceGitRoot,
+      repoName: path.basename(sourceGitRoot),
+      kind: "session",
+      creationMode: "linked",
+      gitRef: "HEAD",
+      headCommit: "",
+      status: "alive",
+      label: wtLabel,
+      userProvidedLabel,
+    });
+    this.parkFocused();
+    const wtSession = this.newLocalSession();
+    this.focused = wtSession;
+    this.pool.add(wtSession);
+    wtSession.cwd = wtPath;
+    wtSession.worktree = {
+      path: wtPath,
+      label: wtLabel,
+      sourceGitRoot,
+    };
+    await this.startSession(undefined, wtSession);
+    const id = wtSession.activeSessionId;
+    if (id) {
+      const overrides = this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
+      await this.state.update(SESSION_META_KEY, {
+        ...overrides,
+        [id]: {
+          ...(overrides[id] ?? {}),
+          customName: worktreeDisplayName(wtLabel),
+          worktreePath: wtPath,
+          worktreeLabel: wtLabel,
+          sourceGitRoot,
+        },
+      });
+      this.sessionCache.delete(id);
+    }
+    this.postSessionsList();
+    void this.host.showInformationMessage(
+      `Worktree session ready: ${wtLabel}. Edits stay isolated until you Apply worktree.`,
+    );
+  }
+
+  /**
    * Get an AcpClient that can call worktree/create against `sourcePath`.
    * Returns `{ disposeAfter:true }` when we spun up a temporary process.
    */
@@ -6579,9 +7343,6 @@ Only continue if you trust this code.`,
         "This session is not in a worktree. Start one with Grok: New Worktree Session.",
       );
     }
-    if (!session.client?.sessionId) {
-      return void this.host.showWarningMessage("Start the session before applying its worktree.");
-    }
     if (!skipConfirm) {
       const ok = await this.host.showWarningMessage(
         `Apply worktree "${wt.label}" into the main checkout?\n\n${wt.path}\n→ ${wt.sourceGitRoot || this.workspaceRoot()}`,
@@ -6590,17 +7351,75 @@ Only continue if you trust this code.`,
       );
       if (ok !== "Apply") return;
     }
-    try {
-      const r = await session.client.applyWorktree(wt.path);
-      if (r === "unsupported") {
-        return void this.host.showWarningMessage(
-          "Apply worktree needs a newer Grok Build CLI. Update via Settings → About.",
+    const sourceGitRoot = wt.sourceGitRoot || this.workspaceRoot();
+    const grokClient = session.provider === "grok" ? session.client : undefined;
+    if (grokClient?.sessionId) {
+      this.host.appendLine("[worktree] using Grok RPC (clone mode available)");
+      try {
+        const r = await grokClient.applyWorktree(wt.path);
+        if (r === "unsupported") {
+          return void this.host.showWarningMessage(
+            "Apply worktree needs a newer Grok Build CLI. Update via Settings → About.",
+          );
+        }
+        const n = r.files?.length ?? 0;
+        this.host.appendLine(`[worktree] apply ${wt.path}: ${n} file(s), status=${r.status}`);
+        void this.host.showInformationMessage(
+          n ? `Applied ${n} file${n === 1 ? "" : "s"} from worktree "${wt.label}".` : `Worktree "${wt.label}" applied (no file changes).`,
         );
+      } catch (e: any) {
+        void this.host.showErrorMessage(`Apply worktree failed: ${e?.message ?? e}`);
       }
-      const n = r.files?.length ?? 0;
-      this.host.appendLine(`[worktree] apply ${wt.path}: ${n} file(s), status=${r.status}`);
+      return;
+    }
+    this.host.appendLine("[worktree] using local git (linked worktree; clone mode is Grok-only)");
+    await this.applyWorktreeViaLocalGit(session, wt.path, sourceGitRoot, wt.label);
+  }
+
+  /**
+   * File-by-file apply through the same conflict rule as planEditRevert:
+   * a source file that moved since the branch point is a card, never a write.
+   */
+  private async applyWorktreeViaLocalGit(
+    session: Session,
+    worktreePath: string,
+    sourceGitRoot: string,
+    label: string,
+  ): Promise<void> {
+    try {
+      const first = await this.worktreeLocal().apply({ worktreePath, sourceGitRoot });
+      if ("conflicts" in first && first.conflicts.length) {
+        const listed = first.conflicts.map((f) => `• ${f}`).join("\n");
+        const ok = await this.confirmInChat(session, {
+          title: "Files changed since this worktree branched",
+          body: `These files in the main checkout changed after the worktree was created. Overwrite them?\n${listed}`,
+          confirmLabel: "Overwrite",
+          danger: true,
+        });
+        if (!ok) {
+          this.host.appendLine(`[worktree] apply ${worktreePath}: refused ${first.conflicts.length} conflict(s), no write`);
+          return;
+        }
+        const second = await this.worktreeLocal().apply({ worktreePath, sourceGitRoot, overwrite: true });
+        if ("error" in second && !("conflicts" in second)) {
+          return void this.host.showErrorMessage(`Apply worktree failed: ${second.error}`);
+        }
+        if ("files" in second) {
+          const n = second.files.length;
+          this.host.appendLine(`[worktree] apply ${worktreePath}: ${n} file(s), status=${second.status} (overwrite)`);
+          void this.host.showInformationMessage(
+            n ? `Applied ${n} file${n === 1 ? "" : "s"} from worktree "${label}".` : `Worktree "${label}" applied (no file changes).`,
+          );
+        }
+        return;
+      }
+      if ("error" in first) {
+        return void this.host.showErrorMessage(`Apply worktree failed: ${first.error}`);
+      }
+      const n = first.files?.length ?? 0;
+      this.host.appendLine(`[worktree] apply ${worktreePath}: ${n} file(s), status=${first.status}`);
       void this.host.showInformationMessage(
-        n ? `Applied ${n} file${n === 1 ? "" : "s"} from worktree "${wt.label}".` : `Worktree "${wt.label}" applied (no file changes).`,
+        n ? `Applied ${n} file${n === 1 ? "" : "s"} from worktree "${label}".` : `Worktree "${label}" applied (no file changes).`,
       );
     } catch (e: any) {
       void this.host.showErrorMessage(`Apply worktree failed: ${e?.message ?? e}`);
@@ -6640,17 +7459,30 @@ Only continue if you trust this code.`,
           if (s !== session) this.pool.delete(s);
         }
       }
-      // Need a live client for the remove RPC — use the target if still up, else temp.
-      let client = session.client;
-      let disposeAfter = false;
-      if (!client) {
-        const tmp = await this.clientForWorktreeCreate(this.workspaceRoot());
-        if (!tmp) {
-          return void this.host.showErrorMessage("Could not start Grok to remove the worktree.");
+      // Grok RPC when this session is Grok and still has a client — clone-mode
+      // checkouts only the CLI can name. Otherwise local `git worktree remove`
+      // (AP-13a). We never start Grok just to delete a directory.
+      const grokClient = session.provider === "grok" ? session.client : undefined;
+      if (!grokClient?.sessionId) {
+        this.host.appendLine("[worktree] using local git (linked worktree; clone mode is Grok-only)");
+        const local = await this.worktreeLocal().remove({ worktreePath: wt.path, force: true });
+        if ("error" in local) {
+          const refusal = this.canSelfRemoveWorktree(wt);
+          if (refusal) {
+            this.host.appendLine(`[worktree] self-remove refused: ${refusal}`);
+            void this.host.showErrorMessage(
+              `Remove worktree failed: ${local.error}. The checkout at ${wt.path} was left alone because ${refusal}.`,
+            );
+            return;
+          }
+          this.host.appendLine(`[worktree] local remove failed (${local.error}); removing the checkout directly`);
+          fs.rmSync(wt.path, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
         }
-        client = tmp.client;
-        disposeAfter = tmp.disposeAfter;
+        await this.finishRemovedWorktree(session, wt, strandedHolders, { removed: true });
+        return;
       }
+      this.host.appendLine("[worktree] using Grok RPC (clone mode available)");
+      const client = grokClient;
       let r;
       try {
         try {
@@ -6681,18 +7513,31 @@ Only continue if you trust this code.`,
           fs.rmSync(wt.path, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
           r = { removed: true };
         }
-      } finally {
-        if (disposeAfter) {
-          const probeId = client.sessionId;
-          await client.dispose();
-          if (probeId) this.removeSessionFromDisk(probeId, this.workspaceRoot());
-        }
+      } catch (e: any) {
+        void this.host.showErrorMessage(`Remove worktree failed: ${e?.message ?? e}`);
+        return;
       }
       if (r === "unsupported") {
         return void this.host.showWarningMessage(
           "Remove worktree needs a newer Grok Build CLI. Update via Settings → About.",
         );
       }
+      await this.finishRemovedWorktree(session, wt, strandedHolders, r);
+    } catch (e: any) {
+      void this.host.showErrorMessage(`Remove worktree failed: ${e?.message ?? e}`);
+    }
+  }
+
+  /**
+   * After a successful remove: drop the cache/meta, start a replacement
+   * conversation in the project the worktree was cut from, re-home remotes.
+   */
+  private async finishRemovedWorktree(
+    session: Session,
+    wt: { path: string; label: string; sourceGitRoot?: string },
+    strandedHolders: Set<string>,
+    r: { removed: boolean },
+  ): Promise<void> {
       // WHO OWNED IT — captured before the records that answer that are erased.
       // `resolveLocalRepoTarget` finds the owning project by walking session
       // ownership, and the next few lines drop the worktree from the cache and
@@ -6749,9 +7594,6 @@ Only continue if you trust this code.`,
         for (const message of this.buildRemoteSnapshot(holder)) this.sendRemoteClient(holder, message);
       }
       void this.host.showInformationMessage(`Removed worktree "${wt.label}".`);
-    } catch (e: any) {
-      void this.host.showErrorMessage(`Remove worktree failed: ${e?.message ?? e}`);
-    }
   }
 
   /** Cached worktree list for the current repo (refreshed on create/list). */
@@ -11630,6 +12472,10 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
           await this.handleHandoffCommand(msg.text, session, origin);
           break;
         }
+        if (parseCrewCommand(msg.text).kind !== "none") {
+          await this.handleCrewCommand(msg.text, session, origin);
+          break;
+        }
         let queuedSendCommit: { text: string; items: QueuedSendEntry[] } | undefined;
         if (origin === "remote" && msg.queuedSendId) {
           if (session.completedQueuedSendIds.includes(msg.queuedSendId)) {
@@ -11912,6 +12758,18 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         // named neither the role nor the task, so the host shows what it
         // chose before spending anything on it.
         await this.startHandoff(msg.kind, msg.role, session, origin, true);
+        break;
+      }
+      case "stopCrew": {
+        this.cancelAgentRun(session);
+        break;
+      }
+      case "openCrewSession": {
+        const id = String(msg.sessionId ?? "").trim();
+        if (!id) break;
+        const live = [...this.pool].find((s) => s.activeSessionId === id);
+        if (live) this.focusSession(live);
+        else await this.openSession(id);
         break;
       }
       case "openAgentArtifact": {
@@ -17553,6 +18411,10 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       await this.handleHandoffCommand(text, session, origin);
       return;
     }
+    if (parseCrewCommand(text).kind !== "none") {
+      await this.handleCrewCommand(text, session, origin);
+      return;
+    }
     await this.waitForSessionStart(session);
     // Desk↔remote co-attach: the OTHER view only learns `busy` once the
     // mirrored agentStart crosses the relay, so a send can race through that
@@ -18448,6 +19310,9 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     // Same replacing-state as the checklist: N diffs would replay N stale
     // panels on every focus switch. sessionUiSnapshot re-sends the current one.
     "reviewCenter",
+    // Same replacing-state as the review panel: N step updates would replay
+    // N stale crews on every focus switch. sessionUiSnapshot re-sends it.
+    "crewRun",
   ]);
   /**
    * Host→rail catalog surface. Everything else stays chat-only so a user who
@@ -22368,6 +23233,17 @@ ${fileShellOpen}
         <span id="todo-rail-count" class="todo-rail-count"></span>
       </button>
       <ol id="todo-rail-list" class="todo-rail-list"></ol>
+    </div>
+    <div id="crew-run" class="crew-run" hidden>
+      <div class="crew-run-head">
+        <button id="crew-run-toggle" class="crew-run-toggle" type="button" aria-expanded="true" aria-controls="crew-run-list">
+          <span id="crew-run-caret" class="crew-run-caret" aria-hidden="true"></span>
+          <span class="crew-run-title">Crew</span>
+          <span id="crew-run-count" class="crew-run-count"></span>
+        </button>
+        <button id="crew-run-stop" class="crew-run-stop" type="button">Stop</button>
+      </div>
+      <ol id="crew-run-list" class="crew-run-list"></ol>
     </div>
     <!-- Multi-file change overview (AP-09). Hidden until a turn produces
          diffs; empty list hides it rather than painting a blank card. -->
