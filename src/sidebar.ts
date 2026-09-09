@@ -24,6 +24,7 @@ import {
   completedBlocksForPath,
   dropReviewPath,
   dropReviewTurnsAfter,
+  filesForScope,
   ingestReviewToolCall,
   normalizeReviewPath,
   planDiscardAll,
@@ -314,7 +315,7 @@ import {
   type QueuedSendEntry,
 } from "./queued-send";
 
-import { matchSlashCommand, parseAgentCommand } from "./slash-filter";
+import { matchSlashCommand, parseAgentCommand, parseHandoffCommand } from "./slash-filter";
 import {
   AGENT_ROLES_DIR,
   findAgentRole,
@@ -331,8 +332,18 @@ import {
   reconcileFiles,
   renderBriefing,
   renderResult,
+  roleForbidden,
+  type Briefing,
+  type BriefingInput,
 } from "./briefing";
-import { AgentRunStore, formatRunCost } from "./agent-run";
+import {
+  defaultRoleFor,
+  deriveBriefing,
+  handoffLabel,
+  type HandoffKind,
+  type ThreadContext,
+} from "./handoff";
+import { AgentRunStore, formatRunCost, type AgentRunTrigger } from "./agent-run";
 import {
   MENTION_INDEX_LIMIT,
   MENTION_INDEX_TTL_MS,
@@ -1694,7 +1705,30 @@ export class GrokSidebar {
       }
     }
 
-    await this.runAgentRole({ ...role, provider }, task, session, origin);
+    await this.runAgentRole(
+      { ...role, provider },
+      {
+        goal: task,
+        task,
+        acceptance:
+          "The task above is done, or the reason it could not be done is stated in the result. "
+          + "Nothing outside the task has been changed.",
+        // Paths, never contents (§5.4). The caller's attached file chips are
+        // the one thing a typed `/agent` knows about the user's focus, so they
+        // are what the role gets pointed at. A derived run (AP-11) knows more
+        // and says so in its own provenance block.
+        files: session.chips.filter((chip) => !chip.hidden && chip.relPath).map((chip) => chip.relPath),
+        decisions: [
+          "This role was commissioned from an existing conversation that you are not in and cannot see. "
+          + "Everything you were told is in this briefing.",
+        ],
+        forbidden: roleForbidden({ ...role, provider }),
+        returnFormat: RESULT_FORMAT,
+      },
+      "command",
+      session,
+      origin,
+    );
     return true;
   }
 
@@ -1705,36 +1739,24 @@ export class GrokSidebar {
    * runs through the ordinary machinery of a session. Nothing here bypasses a
    * grant; a role's edit is reviewed exactly like a hand-typed one.
    */
-  private async runAgentRole(role: AgentRole, task: string, caller: Session, origin: MsgOrigin): Promise<void> {
+  private async runAgentRole(
+    role: AgentRole,
+    brief: BriefingInput,
+    trigger: AgentRunTrigger,
+    caller: Session,
+    origin: MsgOrigin,
+  ): Promise<void> {
     const cwd = this.sessionCwd(caller);
     const runId = this.agentRuns.newRunId();
     const step = 1;
     const startedAt = Date.now();
 
-    const briefing = makeBriefing({
-      runId,
-      step,
-      goal: task,
-      task,
-      acceptance:
-        "The task above is done, or the reason it could not be done is stated in the result. "
-        + "Nothing outside the task has been changed.",
-      // Paths, never contents (§5.4). The caller's attached file chips are the
-      // one thing this stage knows about the user's focus, so they are what the
-      // role gets pointed at.
-      files: caller.chips.filter((chip) => !chip.hidden && chip.relPath).map((chip) => chip.relPath),
-      decisions: [
-        "This role was commissioned from an existing conversation that you are not in and cannot see. "
-        + "Everything you were told is in this briefing.",
-      ],
-      forbidden: [
-        "Do not commit, push, or create a branch, tag or pull request.",
-        "Do not change anything outside the task described above, however tempting the adjacent fix looks.",
-        ...(role.mode === "plan" ? ["Do not edit, create or delete any file — this role runs read-only."] : []),
-        ...(role.scope?.length ? [`Do not touch files outside this role's scope: ${role.scope.join(", ")}.`] : []),
-      ],
-      returnFormat: RESULT_FORMAT,
-    });
+    // The coordinates belong to the RUN, so they are stamped here and never
+    // passed in: a caller that could choose its own runId could collide with
+    // one already on disk. Everything above them is the caller's — that split
+    // is what lets `/agent` (typed task) and AP-11 (derived task) share this
+    // one function instead of growing a second, thinner copy of it.
+    const briefing: Briefing = makeBriefing({ ...brief, runId, step });
     const briefMarkdown = renderBriefing(briefing, role);
 
     try {
@@ -1872,6 +1894,11 @@ export class GrokSidebar {
       ...(reconciliation.unreported.length ? { unreported: reconciliation.unreported } : {}),
       ...(reconciliation.claimedOnly.length ? { claimedOnly: reconciliation.claimedOnly } : {}),
       ...(caution ? { caution } : {}),
+      // What started this run. Additive and carried as a value, so a replayed
+      // card still says whether the user typed the task or the host derived it
+      // — which is the difference between a claim they made and one we made
+      // for them.
+      origin: trigger,
       ...(roleSessionId ? { sessionId: roleSessionId } : {}),
       cwd,
       ...(detail ? { detail } : {}),
@@ -1938,6 +1965,230 @@ export class GrokSidebar {
       // The log is the account of the run, not the run.
       this.host.appendLine(`[agent] could not append to the run log: ${(error as Error).message}`);
     }
+  }
+
+  // ---------- handoff and second opinion (AP-11) ----------
+  //
+  // The same run machinery as `/agent`, reached with a task nobody typed.
+  // Everything specific to that lives in these four methods: what the host is
+  // allowed to look at (buildThreadContext), what it makes of it
+  // (deriveBriefing, pure, in handoff.ts), whether to ask first, and the two
+  // entry points. The run itself is unchanged, deliberately — abort, cleanup,
+  // reconciliation, cost and card were all solved once in AP-10.
+
+  /**
+   * The last thing the USER said in this conversation, and nothing else.
+   *
+   * A backwards walk that stops at the first hit. That bound is the feature,
+   * not an optimisation: the briefing exists so a fresh session does NOT
+   * inherit a transcript (§5.4), and one user message is the smallest thing
+   * that still carries the goal in the words the user chose. "While we are
+   * here, take the last three" is how that guarantee gets lost, so the shape
+   * of this function refuses to make it easy.
+   */
+  private lastUserMessageText(session: Session): string {
+    for (let i = session.buffer.length - 1; i >= 0; i -= 1) {
+      const msg = session.buffer[i];
+      if (msg.type === "userMessage") return String(msg.text ?? "").trim();
+    }
+    return "";
+  }
+
+  /** `Claude · claude-opus-5` — who did the work being handed over. The model
+   *  half is omitted rather than guessed when no client is live. */
+  private sessionRunLabel(session: Session): string {
+    const model = session.client?.currentModelId;
+    return model
+      ? `${providerDisplayName(session.provider)} · ${model}`
+      : providerDisplayName(session.provider);
+  }
+
+  /**
+   * Everything the derivation may see, and nothing more.
+   *
+   * Assembled here rather than inside handoff.ts so that module stays pure —
+   * and so the list of what the host is willing to hand over is one readable
+   * object instead of a set of reaches into a live Session.
+   */
+  private buildThreadContext(session: Session, kind: HandoffKind): ThreadContext {
+    // Turn scope for a second opinion (judge what just happened), session
+    // scope for a handoff (the successor inherits all of it).
+    const files = reviewCenterSnapshot(session.reviewBlocks, String(session.userMessageCount));
+    const scoped = filesForScope(files, kind === "second-opinion" ? "turn" : "session");
+    // `sawPlanEntries` is positive evidence only. It resolves `gemini`, which
+    // is one provider id over two CLIs that differ here — and leaves it a
+    // probe when nothing has arrived, because "has not planned yet" and
+    // "cannot report a plan" are different sentences in the briefing.
+    const cap = providerCapability(session.provider, "structuredPlan", {
+      sawPlanEntries: session.planEntries.length > 0,
+    });
+    return {
+      kind,
+      lastUserText: this.lastUserMessageText(session),
+      planEntries: session.planEntries,
+      structuredPlan: cap.state === "yes" ? "yes" : cap.state === "no" ? "no" : "unknown",
+      changedFiles: scoped.map((file) => file.path),
+      chipPaths: session.chips.filter((chip) => !chip.hidden && chip.relPath).map((chip) => chip.relPath),
+      callerLabel: this.sessionRunLabel(session),
+    };
+  }
+
+  /**
+   * Commission a role from the thread (AP-11).
+   *
+   * `confirm` is true for the BUTTON path only. A button names neither the
+   * role nor the task — the host chose both — so it shows what it decided
+   * before spending anything. A typed `/handoff reviewer` named the role and
+   * asked for it, which is the same standing `/agent` has, and `/agent` does
+   * not ask either.
+   *
+   * Decision §18.3: the confirmation carries **no cost or token figure**. The
+   * only number about money in this whole path is the exact one on the result
+   * card afterwards.
+   */
+  /**
+   * The running role, re-read AFTER an await.
+   *
+   * Through a call rather than the property directly, because an earlier
+   * `if (session.agentRun) return` narrows it to `undefined` for the rest of
+   * the function — and that narrowing stops being true the moment control
+   * yields to a dialog the user can sit on for a minute.
+   */
+  private runningRoleName(session: Session): string | undefined {
+    return session.agentRun?.roleName;
+  }
+
+  private async startHandoff(
+    kind: HandoffKind,
+    roleName: string | undefined,
+    session: Session,
+    origin: MsgOrigin,
+    confirm: boolean,
+  ): Promise<void> {
+    const label = handoffLabel(kind);
+    const cwd = this.sessionCwd(session);
+    const set = this.agentRoleSet(cwd);
+    for (const problem of set.problems) this.agentNotice(session, "warning", problem.message);
+
+    const wanted = roleName || defaultRoleFor(kind);
+    const role = findAgentRole(set, wanted);
+    if (!role) {
+      this.agentNotice(
+        session,
+        "warning",
+        `${label} needs a role \`${wanted}\`, and there is none. Available: `
+        + `${set.roles.map((entry) => entry.name).join(", ")}.`,
+      );
+      return;
+    }
+    // One role at a time, same rule and same reason as `/agent`: a second
+    // card, a second Stop target and a second cost line is AP-13's problem.
+    if (session.agentRun) {
+      this.agentNotice(
+        session,
+        "warning",
+        `Role \`${session.agentRun.roleName}\` is still running. Stop it first, or wait for its card.`,
+      );
+      return;
+    }
+
+    // Derive BEFORE resolving a provider or asking anything. A refusal is the
+    // cheapest possible outcome and must not cost a dialog, let alone a
+    // session — and "there is nothing to review" is a real answer, not an
+    // error state.
+    const derived = deriveBriefing(this.buildThreadContext(session, kind));
+    if (derived.kind === "refused") {
+      this.agentNotice(session, "info", `${label}: ${derived.reason}`);
+      return;
+    }
+
+    const resolved = this.resolveRoleProvider(role, session);
+    if ("error" in resolved) {
+      this.agentNotice(session, "warning", resolved.error);
+      return;
+    }
+    const provider = resolved.provider;
+    if (provider === role.provider) {
+      const cache = this.state.get<ProviderModelCache>(PROVIDER_MODEL_CACHE_KEY, {})[provider];
+      const verdict = validateRoleModel(role, cache?.models, providerDisplayName(provider));
+      if (!verdict.ok) {
+        this.agentNotice(session, "warning", verdict.message);
+        return;
+      }
+    }
+
+    const runsOn = `${providerDisplayName(provider)}${role.model ? ` · ${role.model}` : ""}`;
+    if (confirm) {
+      const ok = await this.confirmInChat(session, {
+        title: `${label}: run \`${role.name}\`?`,
+        body:
+          `${runsOn}, in its own session. The briefing is written from this conversation — `
+          + `the goal, the steps reported so far and the files that changed. The conversation `
+          + `itself is not sent.`,
+        confirmLabel: `Run ${role.name}`,
+      });
+      // A confirm lost to a reload resolves false, and that is the right way
+      // round: nothing happens, and nothing is billed.
+      if (!ok) return;
+      // Re-checked after the await. The dialog is open for as long as the user
+      // takes, and `/agent` in another window is one click away.
+      const running = this.runningRoleName(session);
+      if (running) {
+        this.agentNotice(
+          session,
+          "warning",
+          `Role \`${running}\` started in the meantime. Stop it first, or wait for its card.`,
+        );
+        return;
+      }
+    }
+
+    // Only the BUTTON path writes this line. A typed command was already
+    // echoed verbatim by handleHandoffCommand — including when it turns out
+    // to be an error, because the user should see what they typed — and
+    // echoing again here put the same request in the transcript twice.
+    if (confirm) {
+      this.emit(session, {
+        type: "userMessage",
+        text: `/${kind} ${role.name}`,
+        chips: [],
+      });
+    }
+    await this.runAgentRole(
+      { ...role, provider },
+      {
+        ...derived.briefing,
+        // The role's OWN standing rules are merged in on top of the ones the
+        // derivation set. Duplicates collapse in makeBriefing, and the
+        // kind-specific line (a reviewer may not edit) stays first, where it
+        // is read.
+        forbidden: [...derived.briefing.forbidden, ...roleForbidden({ ...role, provider })],
+        returnFormat: RESULT_FORMAT,
+      },
+      kind,
+      session,
+      origin,
+    );
+  }
+
+  /**
+   * `/handoff [role]` and `/second-opinion [role]` — the typed form (AP-11).
+   *
+   * Returns true when the message was consumed here, so the caller must not
+   * fall through to an ordinary send.
+   */
+  private async handleHandoffCommand(text: string, session: Session, origin: MsgOrigin): Promise<boolean> {
+    const parsed = parseHandoffCommand(text);
+    if (parsed.kind === "none") return false;
+    this.emit(session, { type: "userMessage", text, chips: [] });
+    if (parsed.kind === "error") {
+      this.agentNotice(session, "warning", parsed.message);
+      return true;
+    }
+    // Typed, so not confirmed: the user named the action and, if they wanted
+    // one, the role.
+    await this.startHandoff(parsed.handoff, parsed.role, session, origin, false);
+    return true;
   }
 
   /** Connected models, in the shape the Routines form needs. */
@@ -11373,6 +11624,12 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
           await this.handleAgentCommand(msg.text, session, origin);
           break;
         }
+        // AP-11, under the same rule as the guard above and for the same
+        // reason: parsed SYNCHRONOUSLY, awaited only on a hit.
+        if (parseHandoffCommand(msg.text).kind !== "none") {
+          await this.handleHandoffCommand(msg.text, session, origin);
+          break;
+        }
         let queuedSendCommit: { text: string; items: QueuedSendEntry[] } | undefined;
         if (origin === "remote" && msg.queuedSendId) {
           if (session.completedQueuedSendIds.includes(msg.queuedSendId)) {
@@ -11648,6 +11905,13 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         } else {
           void this.host.openResource(p);
         }
+        break;
+      }
+      case "requestHandoff": {
+        // The button form (AP-11). Confirmed, unlike the typed one: a click
+        // named neither the role nor the task, so the host shows what it
+        // chose before spending anything on it.
+        await this.startHandoff(msg.kind, msg.role, session, origin, true);
         break;
       }
       case "openAgentArtifact": {
@@ -17283,6 +17547,12 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       await this.handleAgentCommand(text, session, origin);
       return;
     }
+    // AP-11. Same backstop, same synchronous-guard rule. A briefing never
+    // starts with one of these either, so a role run cannot re-enter here.
+    if (parseHandoffCommand(text).kind !== "none") {
+      await this.handleHandoffCommand(text, session, origin);
+      return;
+    }
     await this.waitForSessionStart(session);
     // Desk↔remote co-attach: the OTHER view only learns `busy` once the
     // mirrored agentStart crosses the relay, so a send can race through that
@@ -22112,6 +22382,7 @@ ${fileShellOpen}
           <button id="review-scope-turn" class="review-scope-btn" type="button" aria-pressed="true">This turn</button>
           <button id="review-scope-session" class="review-scope-btn" type="button" aria-pressed="false">Session</button>
         </div>
+        <button id="review-handoff" class="review-handoff" type="button">Hand off</button>
         <button id="review-revert-all" class="review-revert-all" type="button">Discard all</button>
       </div>
       <ul id="review-center-list" class="review-center-list"></ul>

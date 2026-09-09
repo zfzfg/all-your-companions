@@ -293,6 +293,9 @@ export const INBOUND_DISPOSITION: Record<WebviewMsg["type"], InboundDisposition>
   // is meaningful on a phone, and it acts on the desk window, so it is
   // host-local like every other "open this in the editor" message.
   openAgentArtifact: "host-local",
+  // Starts a second billed run whose role can edit files (AP-11). Anything
+  // that spends money or changes the tree is `full`, never `propose`.
+  requestHandoff: "full",
   queueSend: "propose",
   dequeueSend: "propose",
   clearQueuedSends: "propose",
@@ -597,6 +600,9 @@ export const REMOTE_REQUIRES_BOUND_SESSION: Record<WebviewMsg["type"], boolean> 
   // runId, not by the bound session, and the entry says so rather than
   // implying a session lookup that does not happen.
   openAgentArtifact: false,
+  // The whole briefing is derived from ONE session's state, so there is
+  // nothing to derive without a bound one.
+  requestHandoff: true,
   queueSend: true,
   dequeueSend: true,
   clearQueuedSends: true,

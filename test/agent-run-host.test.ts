@@ -545,6 +545,11 @@ describe("fault injection on the run-artefact stream", () => {
 describe("async boundaries in the send path", () => {
   const sidebarSrc = readFileSync(new URL("../src/sidebar.ts", import.meta.url), "utf8");
 
+  /** Drop `//` and block comments so a rule EXPLAINED in prose is not read
+   *  as a violation of itself. */
+  const stripComments = (text: string) =>
+    text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+
   // Caught by the Electron smoke, not by this suite: an unconditional
   // `await this.handleAgentCommand(...)` at the head of either send path
   // suspends EVERY ordinary message before the checks that decide the
@@ -573,7 +578,14 @@ describe("async boundaries in the send path", () => {
     // Nothing may await BEFORE that synchronous guard — an await there
     // suspends every ordinary send, which is the whole regression. The await
     // inside the guard is fine: it only runs for an actual `/agent`.
-    const beforeGuard = head.slice(0, head.indexOf("if (parseAgentCommand(text)"));
-    expect(beforeGuard).not.toMatch(/await/);
+    //
+    // Comments are stripped first, and that is not cosmetic: the prose right
+    // above the guard in sidebar.ts explains the rule using the word
+    // "await", so a raw text search reports a violation that is really an
+    // explanation. (This assertion previously held two literal backspace
+    // bytes where `\b` was intended and therefore matched nothing at all —
+    // it passed without ever checking anything.)
+    const beforeGuard = stripComments(head.slice(0, head.indexOf("if (parseAgentCommand(text)")));
+    expect(beforeGuard).not.toMatch(/\bawait\b/);
   });
 });

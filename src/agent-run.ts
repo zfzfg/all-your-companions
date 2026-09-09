@@ -42,6 +42,16 @@ export interface AgentRunStoreOptions {
   join?: (...parts: string[]) => string;
 }
 
+/**
+ * What caused a role to be commissioned.
+ *
+ * Worth recording because the three differ in who wrote the task. With
+ * `command` the user typed it and owns it; with the other two the HOST derived
+ * it from the conversation (AP-11), and a result read months later should not
+ * have to guess which of those it is looking at.
+ */
+export type AgentRunTrigger = "command" | "handoff" | "second-opinion";
+
 /** One line of `log.jsonl`. Deliberately flat and additive — stage 3 will add
  *  fields, and a reader must survive not knowing them. */
 export interface AgentRunLogEntry {

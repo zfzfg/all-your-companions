@@ -34,9 +34,15 @@
  */
 import type { AgentRole } from "./agent-roles";
 
-/** Bumped only for a breaking change to the section set. Written into the
- *  stamp so a later reader can tell which shape it is holding. */
-export const BRIEFING_FORMAT_VERSION = 1;
+/**
+ * Bumped only for a breaking change to the section set. Written into the stamp
+ * so a later reader can tell which shape it is holding.
+ *
+ * v2 (AP-11) adds the optional `## Where this came from` section. A v1 run
+ * already on disk stays readable: {@link parseResult} never depended on the
+ * section set, and the stamp says which shape each directory holds.
+ */
+export const BRIEFING_FORMAT_VERSION = 2;
 
 export interface Briefing {
   /** Groups every step of one run. Stable for the life of the run. */
@@ -58,6 +64,53 @@ export interface Briefing {
   forbidden: string[];
   /** Expected structure of the reply. Defaults to {@link RESULT_FORMAT}. */
   returnFormat: string;
+  /**
+   * Where this briefing's contents came from — and, for each source that gave
+   * nothing, WHY (AP-11).
+   *
+   * Only meaningful when the host DERIVED the briefing instead of being handed
+   * a task: `/agent` leaves it empty and the section does not render at all.
+   * It earns its tokens on one distinction. A role told "no steps" reasonably
+   * reads that as "there was nothing to do"; a role told "this companion
+   * reports no step list" knows the gap is structural and not its to close.
+   * The same confusion one level down is what decided AP-02 against a
+   * heuristic.
+   */
+  provenance?: string[];
+}
+
+/** What {@link makeBriefing} accepts before the run stamps its coordinates on.
+ *  Split out so a caller can assemble a briefing without being able to choose
+ *  its `runId` — that belongs to the run, and a caller-chosen one could
+ *  collide with a directory already on disk. */
+export type BriefingInput = Partial<Briefing> & Pick<Briefing, "task">;
+
+/**
+ * The prohibitions every commissioned role carries, whoever wrote its task.
+ *
+ * One list rather than one per entry point: a role that may not commit when
+ * the user typed the task may not commit when the host derived it either, and
+ * two copies of that rule would drift the first time one of them is edited.
+ */
+export const BASE_FORBIDDEN: readonly string[] = [
+  "Do not commit, push, or create a branch, tag or pull request.",
+  "Do not change anything outside the task described above, however tempting the adjacent fix looks.",
+];
+
+/**
+ * {@link BASE_FORBIDDEN} plus whatever this particular role's own definition
+ * already promised — read-only in plan mode, and its declared file scope.
+ *
+ * Stated in the briefing even though neither is enforced here (scope
+ * enforcement is AP-13): a boundary the role is told about is one it can
+ * respect, and one it can be judged against afterwards.
+ */
+export function roleForbidden(role: AgentRole): string[] {
+  return [
+    ...BASE_FORBIDDEN,
+    ...(role.mode === "plan" ? ["Do not edit, create or delete any file — this role runs read-only."] : []),
+    ...(role.scope?.length ? [`Do not touch files outside this role's scope: ${role.scope.join(", ")}.`] : []),
+  ];
 }
 
 export interface AgentResult {
@@ -254,6 +307,18 @@ export function renderBriefing(briefing: Briefing, role: AgentRole): string {
   );
 
   sections.push(`## Already decided\n\n${bullets(briefing.decisions, "nothing recorded")}`);
+  // Omitted entirely when empty, exactly like the reconciliation sections in
+  // renderResult and for the same reason: a heading that is always present and
+  // usually says nothing trains the reader to skip the one run where it says
+  // something. It also leaves an `/agent` briefing byte-identical to its v1
+  // shape apart from the stamp.
+  if (cleanList(briefing.provenance).length) {
+    sections.push(
+      `## Where this came from\n\n${bullets(briefing.provenance ?? [], "not recorded")}\n\n`
+      + "This briefing was assembled by the host from a conversation you are not in. The list above "
+      + "is what it could see — treat a gap in it as a gap, not as an absence.",
+    );
+  }
   sections.push(`## Do not\n\n${bullets(briefing.forbidden, "no additional restrictions beyond the role's own")}`);
   sections.push(`## Return format\n\n${clean(briefing.returnFormat) || RESULT_FORMAT}`);
 
@@ -268,7 +333,7 @@ export function renderBriefing(briefing: Briefing, role: AgentRole): string {
 
 /** Build a briefing with the defaults stage 1 uses, so a caller cannot
  *  accidentally omit `returnFormat` and get a role that answers in prose. */
-export function makeBriefing(input: Partial<Briefing> & Pick<Briefing, "runId" | "step" | "task">): Briefing {
+export function makeBriefing(input: BriefingInput & Pick<Briefing, "runId" | "step">): Briefing {
   return {
     runId: input.runId,
     step: input.step,
@@ -279,6 +344,7 @@ export function makeBriefing(input: Partial<Briefing> & Pick<Briefing, "runId" |
     decisions: cleanList(input.decisions),
     forbidden: cleanList(input.forbidden),
     returnFormat: clean(input.returnFormat) || RESULT_FORMAT,
+    ...(cleanList(input.provenance).length ? { provenance: cleanList(input.provenance) } : {}),
   };
 }
 

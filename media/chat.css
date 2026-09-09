@@ -3323,6 +3323,28 @@ blockquote {
   background: var(--vscode-list-hoverBackground);
   color: var(--vscode-foreground);
 }
+/* AP-11. Sits beside Discard all and shares its shape — one is where the work
+   goes next, the other is where it stops, and they belong to the same row. */
+.review-handoff {
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 3px;
+  font-size: 11px;
+  padding: 1px 6px;
+  cursor: pointer;
+}
+.review-handoff:hover {
+  color: var(--vscode-foreground);
+  background: var(--vscode-toolbar-hoverBackground);
+}
+/* Disabled rather than hidden (the AP-01 rule), so the footer does not shift
+   under the cursor when a turn happens to change nothing. */
+.msg-second-opinion-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 .review-revert-all {
   flex: 0 0 auto;
   padding: 2px 8px;

@@ -67,6 +67,7 @@ export const BODY = `
         </div>
         <button id="review-revert-all" class="review-revert-all" type="button">Discard all</button>
       </div>
+        <button id="review-handoff" class="review-handoff" type="button">Hand off</button>
       <ul id="review-center-list" class="review-center-list"></ul>
     </div>
     <div class="composer-card">

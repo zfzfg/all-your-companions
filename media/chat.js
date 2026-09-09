@@ -351,6 +351,7 @@
   const reviewCenterCaret = $("review-center-caret");
   const reviewCenterCount = $("review-center-count");
   const reviewCenterList = $("review-center-list");
+  const reviewHandoff = $("review-handoff");
   const reviewScopeTurn = $("review-scope-turn");
   const reviewScopeSession = $("review-scope-session");
   const reviewRevertAll = $("review-revert-all");
@@ -8975,6 +8976,12 @@
     if (reviewScopeTurn) reviewScopeTurn.setAttribute("aria-pressed", state.reviewScope === "turn" ? "true" : "false");
     if (reviewScopeSession) reviewScopeSession.setAttribute("aria-pressed", state.reviewScope === "session" ? "true" : "false");
     const canDiscardAll = rows.some((f) => state.reviewScope === "turn" ? f.turnCompleted : f.completed);
+    // Handoff belongs to the state of the WORK, not to one turn — which is
+    // also why it sits in this panel: the panel is only here when there is
+    // something to hand over.
+    if (reviewHandoff) {
+      reviewHandoff.title = "Hand this work over to another role, with a briefing";
+    }
     if (reviewRevertAll) {
       reviewRevertAll.disabled = !canDiscardAll;
       reviewRevertAll.title = canDiscardAll
@@ -9048,6 +9055,9 @@
     }
   }
 
+  if (reviewHandoff) {
+    reviewHandoff.onclick = () => vscode.postMessage({ type: "requestHandoff", kind: "handoff" });
+  }
   if (reviewCenterToggle) {
     reviewCenterToggle.onclick = () => {
       const next = !reviewCenterCollapsed();
@@ -10219,6 +10229,9 @@
     if (!a || !a.hidden) return;
     a.hidden = false;
     stampTurnDuration(a, end);
+    // The turn is over: this is the first moment a second opinion on it is
+    // a coherent request.
+    syncSecondOpinionButtons();
     const ts = a.querySelector(".msg-timestamp");
     if (!ts) return;
     if (!state.replaying) {
@@ -10315,6 +10328,64 @@
     if (down) down.setAttribute("aria-pressed", rating === -1 ? "true" : "false");
   }
 
+  /**
+   * "Second opinion" on the footer of the turn that just finished (AP-11).
+   *
+   * Same placement rule as the thumbs, and for the same reason: a turn's
+   * prose is split into several .msg.agent blocks, and an action under each
+   * of them is the noise revealTurnFooter already exists to prevent. One
+   * button, on the conclusion of the newest turn.
+   *
+   * Disabled — visibly, with a reason — rather than hidden when this client
+   * has seen no changes in the turn. That is the AP-01 rule for an action
+   * that does not currently apply, and it keeps the footer from shifting
+   * under the cursor. The check here is a HINT: the host holds the
+   * authoritative diff record and refuses again on its own if there is
+   * genuinely nothing to review.
+   */
+  function turnHasReviewableWork() {
+    const files = Array.isArray(state.reviewFiles) ? state.reviewFiles : [];
+    return files.some((f) => (f.turnAdded || 0) !== 0 || (f.turnRemoved || 0) !== 0);
+  }
+
+  function insertSecondOpinionButton(actions) {
+    const btn = document.createElement("button");
+    btn.className = "msg-action-btn msg-second-opinion-btn";
+    btn.type = "button";
+    btn.setAttribute("aria-label", "Get a second opinion on this turn");
+    btn.innerHTML = `<span class="msg-action-glyph">${ICON.search || "?"}</span>`;
+    btn.onclick = () => {
+      if (btn.disabled) return;
+      vscode.postMessage({ type: "requestHandoff", kind: "second-opinion" });
+    };
+    // Appended AFTER the timestamp, not woven into the row. The footer's
+    // existing order is Copy → thumbs → timestamp, and both of those
+    // adjacencies are pinned by turn-feedback.dom.test.ts (#114). Slotting a
+    // new button between them would have meant rewriting two expectations
+    // that were describing a deliberate layout, to make room for a button
+    // that is happy at the end of the row.
+    actions.appendChild(btn);
+    return btn;
+  }
+
+  function stripSecondOpinionButton(actions) {
+    const btn = actions.querySelector(".msg-second-opinion-btn");
+    if (btn) btn.remove();
+  }
+
+  function syncSecondOpinionButtons() {
+    const live = liveTurnActions();
+    for (const actions of liveTranscriptQueryAll(".msg.agent .msg-actions")) {
+      if (actions !== live) { stripSecondOpinionButton(actions); continue; }
+      const btn = actions.querySelector(".msg-second-opinion-btn") || insertSecondOpinionButton(actions);
+      const ok = turnHasReviewableWork();
+      btn.disabled = !ok;
+      btn.title = ok
+        ? "Second opinion — brief another role on this turn's changes"
+        : "Nothing changed in this turn to review";
+    }
+  }
+
   function syncFeedbackButtons() {
     const live = liveTurnActions();
     for (const actions of liveTranscriptQueryAll(".msg.agent .msg-actions")) {
@@ -10325,6 +10396,7 @@
         stripTurnThumbs(actions);
       }
     }
+    syncSecondOpinionButtons();
   }
 
   /** Thumbs rate only the turn that just finished in this process. */
@@ -11984,6 +12056,10 @@
     if (msg.effort) bits.push("effort " + msg.effort);
     if (msg.mode) bits.push(msg.mode + " mode");
     if (typeof msg.durationMs === "number") bits.push(Math.max(1, Math.round(msg.durationMs / 1000)) + "s");
+    // Who wrote the task. Absent on cards replayed from before AP-11, which
+    // is why nothing here assumes it.
+    if (msg.origin === "handoff") bits.push("handoff");
+    else if (msg.origin === "second-opinion") bits.push("second opinion");
     // Always present — the host writes "no cost reported" rather than a
     // reassuring $0.00 when the provider reported nothing.
     bits.push(msg.cost || "no cost reported");
@@ -17067,6 +17143,8 @@
         state.reviewTurnId = typeof msg.currentTurnId === "string" ? msg.currentTurnId : "";
         state.reviewFiles = Array.isArray(msg.files) ? msg.files : [];
         renderReviewCenter();
+        // Whether this turn has anything to review just changed.
+        syncSecondOpinionButtons();
         break;
       case "remoteStatus":
         state.remoteLinked = !!msg.linked;

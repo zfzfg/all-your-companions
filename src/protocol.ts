@@ -849,6 +849,16 @@ export type HostMsg =
       /** A note about the run's standing rather than its outcome — today, that
        *  a review ran on the same companion as the calling conversation. */
       caution?: string;
+      /**
+       * What commissioned this run (AP-11).
+       *
+       * Optional and additive, so an older client and a replayed buffer
+       * written before AP-11 both render correctly without it. It matters
+       * because the three differ in who wrote the task: `command` means the
+       * user typed it, the other two mean the host derived it from the
+       * conversation — and a reader judging the result should know which.
+       */
+      origin?: "command" | "handoff" | "second-opinion";
       /** The role session, for "Open session". Absent if it never got an id. */
       sessionId?: string;
       cwd?: string;
@@ -1396,6 +1406,18 @@ export type WebviewMsg =
    * step of which run.
    */
   | { type: "openAgentArtifact"; runId: string; step: number; which: "brief" | "result" }
+  /**
+   * Commission a role from the thread itself (AP-11) — the button form of
+   * `/handoff` and `/second-opinion`.
+   *
+   * `role` is optional: a button carries no role name, so the host picks the
+   * action's default and names it on the confirmation before anything runs.
+   *
+   * Classified `full`: it spends money on a second billed run and the role it
+   * starts can edit files. Nothing about it is display-only, and a client
+   * that may only view a session must not be able to send it.
+   */
+  | { type: "requestHandoff"; kind: "handoff" | "second-opinion"; role?: string }
   | { type: "resumeSession"; id: string; cwd?: string; claim?: boolean }
   // cwd names the PROJECT the row belongs to, so a client listing several of
   // them (the browser rail) can act on a conversation without first switching
@@ -1576,7 +1598,7 @@ const WEBVIEW_MESSAGE_TYPE_MAP: Record<WebviewMsg["type"], true> = {
   logout: true, checkGrokUpdate: true, updateGrok: true, recheckConnection: true, refreshProviders: true, retryProviderSession: true,
   listSessions: true, listRepoSessions: true, selectRepo: true, toggleRepoPin: true, toggleSessionPin: true,
   setRepoArchived: true, setRepoColor: true,
-  openAgentArtifact: true, resumeSession: true, renameSession: true, deleteSession: true,
+  openAgentArtifact: true, requestHandoff: true, resumeSession: true, renameSession: true, deleteSession: true,
   clearAllSessions: true, pickFile: true, mentionQuery: true, addMentionFile: true, addContextChip: true, openContextChipSource: true,
   listProjectDir: true, readProjectFile: true, writeProjectFile: true,
   pasteImage: true, uploadFile: true, voiceStart: true,

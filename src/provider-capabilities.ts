@@ -19,7 +19,8 @@ export type ProviderCapability =
   | "manualCompact"  // Manual /compact turn handling
   | "questionRpc"    // x.ai/ask_user_question (NOT the host-MCP server in AP-05)
   | "feedback"       // _x.ai/feedback (thumbs rating)
-  | "subagents";     // Subagent delegation & lifecycle rail
+  | "subagents"      // Subagent delegation & lifecycle rail
+  | "structuredPlan"; // ACP `plan` update carries entries[], not prose (AP-02)
 
 export type CapabilitySupport =
   | { state: "yes" }
@@ -38,6 +39,7 @@ export const PROVIDER_CAPABILITY_NAMES: readonly ProviderCapability[] = [
   "questionRpc",
   "feedback",
   "subagents",
+  "structuredPlan",
 ] as const;
 
 /**
@@ -72,6 +74,11 @@ export const PROVIDER_CAPABILITIES: Record<
     feedback: { state: "yes" },
     // Subagent execution and lifecycle tracking (docs/architecture.md:1004, acp-dispatch.ts)
     subagents: { state: "yes" },
+    // grok sends plan PROSE, never entries[] (plan-entries.ts head comment)
+    structuredPlan: {
+      state: "no",
+      reason: "Grok reports plans as prose, not as a step list, so there is no checklist to read.",
+    },
   },
   codex: {
     // Steer not implemented by OpenAI Codex ACP adapter; answers -32601 (media/chat.js:4150)
@@ -117,6 +124,8 @@ export const PROVIDER_CAPABILITIES: Record<
       state: "no",
       reason: "Subagent delegation is not supported by Codex.",
     },
+    // Codex sends the entries[] shape of the ACP plan update (plan-entries.ts)
+    structuredPlan: { state: "yes" },
   },
   claude: {
     // Claude Code has no interjection RPC; queued send is used instead (media/chat.js:4151)
@@ -162,6 +171,8 @@ export const PROVIDER_CAPABILITIES: Record<
       state: "no",
       reason: "Subagent delegation is not supported by Claude.",
     },
+    // Claude sends the entries[] shape of the ACP plan update (plan-entries.ts)
+    structuredPlan: { state: "yes" },
   },
   gemini: {
     // Steer not supported by Gemini / Antigravity (media/chat.js:4158)
@@ -210,6 +221,14 @@ export const PROVIDER_CAPABILITIES: Record<
       state: "no",
       reason: "Subagent delegation is not supported by Gemini.",
     },
+    // One provider id, two CLIs: Gemini CLI sends entries[], Antigravity sends
+    // prose (plan-entries.ts head comment). Resolved at runtime by whether a
+    // list has actually arrived; unresolved it stays a probe, because the
+    // wrong guess here writes a false sentence into every derived briefing.
+    structuredPlan: {
+      state: "probe",
+      reason: "Gemini CLI reports a step list; Antigravity reports plans as prose.",
+    },
   },
 };
 
@@ -218,6 +237,14 @@ export interface RuntimeCapabilityContext {
   planModeAvailable?: boolean;
   cliVerified?: boolean;
   planModeUnavailableReason?: string;
+  /**
+   * This session has received at least one `plan` update carrying entries.
+   *
+   * Positive evidence only, and that asymmetry is the point: having seen a
+   * list proves the protocol; not having seen one proves nothing, because a
+   * session may simply not have planned yet.
+   */
+  sawPlanEntries?: boolean;
 }
 
 /**
@@ -253,6 +280,15 @@ export function providerCapability(
       return { state: "no", reason };
     }
     return { state: "probe", reason: "Checking Plan mode availability…" };
+  }
+
+  // `gemini` is one provider id over two CLIs that differ here (Gemini CLI
+  // sends entries, Antigravity sends prose), so the static cell cannot answer.
+  // One list actually seen settles it; nothing seen leaves it a probe rather
+  // than guessing, because "has not planned yet" and "cannot report a plan"
+  // call for different briefings.
+  if (cap === "structuredPlan" && provider === "gemini" && runtime?.sawPlanEntries === true) {
+    return { state: "yes" };
   }
 
   return baseSupport;

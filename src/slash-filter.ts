@@ -1,3 +1,5 @@
+import type { HandoffKind } from "./handoff";
+
 export interface SlashCmd {
   name: string;
   description?: string;
@@ -39,7 +41,13 @@ export function isAdvertisedSkill(cmd: SlashCmd | null | undefined): boolean {
  * thinks `/agent reviewer …` might mean. That is worse than a failure, because
  * it looks like the feature working.
  */
-export const HOST_SLASH_COMMANDS: ReadonlySet<string> = new Set(["agent"]);
+export const HOST_SLASH_COMMANDS: ReadonlySet<string> = new Set([
+  "agent",
+  // AP-11. Same rule, same reason: no CLI advertises these, so forwarding
+  // one buys a billed turn in which the model improvises what it might mean.
+  "handoff",
+  "second-opinion",
+]);
 
 export interface AgentCommand {
   name: string;
@@ -79,6 +87,52 @@ export function parseAgentCommand(text: string): AgentCommandParse {
     return { kind: "error", message: `\`/agent ${name}\` needs a task: \`/agent ${name} <what the role should do>\`.` };
   }
   return { kind: "run", command: { name, task } };
+}
+
+/** `/handoff` and `/second-opinion` (AP-11) — the typed form of the two
+ *  thread actions. */
+export type HandoffCommandParse =
+  | { kind: "none" }
+  | { kind: "run"; handoff: HandoffKind; role?: string }
+  | { kind: "error"; message: string };
+
+/**
+ * Parse `/handoff [role]` or `/second-opinion [role]`.
+ *
+ * Unlike {@link parseAgentCommand} the role is OPTIONAL — each action has a
+ * sensible default (`implementer`, `reviewer`) and, unlike `/agent`, there is
+ * no task to supply: the host derives it from the conversation. That is the
+ * whole point of these two commands, so requiring an argument would be asking
+ * for the one thing the user does not have to say.
+ *
+ * Anything AFTER the role name is rejected rather than ignored. A user who
+ * types `/second-opinion check the auth flow` is trying to give instructions;
+ * silently dropping them and reviewing something else would be worse than
+ * saying that this command does not take a task.
+ */
+export function parseHandoffCommand(text: string): HandoffCommandParse {
+  const match = /^\/(handoff|second-opinion)(?:\s+([\s\S]*))?$/.exec(String(text ?? "").trim());
+  if (!match) return { kind: "none" };
+  const handoff: HandoffKind = match[1] === "handoff" ? "handoff" : "second-opinion";
+  const rest = (match[2] ?? "").trim();
+  if (!rest) return { kind: "run", handoff };
+  const parts = rest.split(/\s+/);
+  const role = parts[0].toLowerCase();
+  if (!/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(role)) {
+    return {
+      kind: "error",
+      message: `\`${parts[0]}\` is not a valid role name — lowercase letters, digits and dashes only.`,
+    };
+  }
+  if (parts.length > 1) {
+    return {
+      kind: "error",
+      message:
+        `\`/${match[1]}\` takes a role name and nothing else — the task is derived from this `
+        + `conversation. Use \`/agent ${role} <task>\` to write the task yourself.`,
+    };
+  }
+  return { kind: "run", handoff, role };
 }
 
 function isAsciiWhitespace(ch: string): boolean {

@@ -9,8 +9,11 @@ import {
 } from "../src/provider-capabilities";
 
 describe("provider-capabilities (AP-01)", () => {
-  it("defines all 11 capabilities explicitly across all 4 ACP providers with no missing cells", () => {
-    expect(PROVIDER_CAPABILITY_NAMES).toHaveLength(11);
+  it("defines all 12 capabilities explicitly across all 4 ACP providers with no missing cells", () => {
+    // 12 since AP-11 added `structuredPlan`. The number is asserted rather
+    // than derived so that adding a capability is a deliberate act: every
+    // new cell is a claim about a provider that someone has to substantiate.
+    expect(PROVIDER_CAPABILITY_NAMES).toHaveLength(12);
     expect(ACP_PROVIDERS).toHaveLength(4);
 
     for (const provider of ACP_PROVIDERS) {
@@ -145,5 +148,38 @@ describe("provider-capabilities (AP-01)", () => {
       state: "no",
       reason: "Unknown capability 'unknownCapability'.",
     });
+  });
+});
+
+describe("structuredPlan (AP-11) — does this companion report a step list at all", () => {
+  // The cell exists because a derived briefing has to say WHY it carries no
+  // steps: "this companion reports none" and "this companion cannot report
+  // any" lead a role to do different things. §1.3 also forbids a provider
+  // special path that is not in the matrix, and this is one.
+  it("is no for grok, which sends plan prose", () => {
+    const support = providerCapability("grok", "structuredPlan");
+    expect(support.state).toBe("no");
+    if (support.state !== "no") throw new Error("unreachable");
+    expect(support.reason).toMatch(/prose/i);
+  });
+
+  it("is yes for claude and codex, which send entries", () => {
+    expect(providerCapability("claude", "structuredPlan").state).toBe("yes");
+    expect(providerCapability("codex", "structuredPlan").state).toBe("yes");
+  });
+
+  it("stays a probe for gemini until a list is actually seen", () => {
+    // One provider id, two CLIs: Gemini CLI sends entries, Antigravity sends
+    // prose. Guessing either way writes a false sentence into every briefing
+    // derived from such a session.
+    expect(providerCapability("gemini", "structuredPlan").state).toBe("probe");
+    expect(providerCapability("gemini", "structuredPlan", { sawPlanEntries: false }).state).toBe("probe");
+    expect(providerCapability("gemini", "structuredPlan", { sawPlanEntries: true }).state).toBe("yes");
+  });
+
+  it("does not let a seen list talk grok out of its static no", () => {
+    // Positive evidence resolves an unknown; it does not overrule a documented
+    // protocol fact, or a stray event would flip the cell for everyone.
+    expect(providerCapability("grok", "structuredPlan", { sawPlanEntries: true }).state).toBe("no");
   });
 });

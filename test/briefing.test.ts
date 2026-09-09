@@ -5,6 +5,8 @@
 // render/parse round trip so "structured return" is a contract rather than a
 // hope.
 import { describe, expect, it } from "vitest";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import {
   BRIEFING_FORMAT_VERSION,
   RESULT_FORMAT,
@@ -306,5 +308,103 @@ describe("renderResult with a reconciliation", () => {
     // rather than being folded into it — `files` must not absorb them.
     expect(parseResult(dirty).files).toEqual(["a.ts"]);
     expect(parseResult(dirty).failed).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Golden files
+// ---------------------------------------------------------------------------
+
+/**
+ * Byte-exact pins on the rendered briefing.
+ *
+ * These exist because of a specific decision. §14 required AP-10's format to
+ * be field-proven and a week stable before AP-11 built on it; the maintainer
+ * waived that on 2026-09-09 (UMSETZUNG_FORTSCHRITT.md, finding 15). Calendar
+ * time was the weaker guarantee anyway — it proves nothing about the bytes —
+ * so these two files are what replaces it. A change to the section set, the
+ * section ORDER, the wording of a boilerplate line or the stamp now fails a
+ * test instead of silently invalidating every run already on disk.
+ *
+ * When one of these fails, the question is never "how do I update the file".
+ * It is: is this a deliberate format change? If yes, bump
+ * BRIEFING_FORMAT_VERSION with it, because runs written by the old code are
+ * still out there and their stamp has to keep telling the truth.
+ */
+describe("golden files (the substitute for a week of field stability)", () => {
+  const golden = (name: string) =>
+    fs.readFileSync(path.join(__dirname, "fixtures", name), "utf8");
+
+  const goldenRole: AgentRole = {
+    name: "reviewer",
+    provider: "claude",
+    model: "claude-opus-5",
+    effort: "high",
+    mode: "agent",
+    scope: ["src/**"],
+    whenToUse: "Checking finished work against its briefing.",
+    whenNotToUse: "On its own work, in its own thread.",
+    systemPreamble: "You are reviewing, not fixing.",
+    source: "builtin",
+  };
+
+  it("renders an /agent briefing byte for byte", () => {
+    const text = renderBriefing(makeBriefing({
+      runId: "run-20260909-120000-abc",
+      step: 1,
+      goal: "Ship AP-11.",
+      task: "Review src/handoff.ts against the acceptance criterion.",
+      acceptance: "Every finding names a file and a line.",
+      files: ["src/handoff.ts"],
+      decisions: ["Runs live in globalStorage (18.1)."],
+      forbidden: ["Do not edit any file."],
+      returnFormat: RESULT_FORMAT,
+    }), goldenRole);
+    expect(text).toBe(golden("briefing-agent.golden.md"));
+    // The section AP-11 added must be absent here, not merely empty: an
+    // /agent briefing is a v1-shaped document apart from the stamp.
+    expect(text).not.toContain("## Where this came from");
+  });
+
+  it("renders a derived briefing byte for byte, provenance section included", () => {
+    const text = renderBriefing(makeBriefing({
+      runId: "run-20260909-120000-abc",
+      step: 1,
+      goal: "Get the checkout flow off the legacy token.",
+      task:
+        "Review the changes listed under \"Files in scope\" against the goal above. Read the files "
+        + "as they now stand in the working tree; that is the work you are judging.",
+      acceptance:
+        "Every finding names a file and a line. Findings are judged against the goal above, not "
+        + "against personal preference. No file has been changed by you.",
+      files: ["src/checkout.ts"],
+      decisions: [
+        "The work under review was carried out as these steps: Swap the reader.",
+        "The work under review was done on Grok \u00b7 grok-4.",
+        "You are not in that conversation and cannot see it. Everything you were told is in this briefing.",
+      ],
+      forbidden: [
+        "Do not edit, create or delete any file — this is a review, not a repair.",
+        "Do not commit, push, or create a branch, tag or pull request.",
+        "Do not change anything outside the task described above, however tempting the adjacent fix looks.",
+      ],
+      provenance: [
+        "Goal: the last thing the user asked for in that conversation, in their words.",
+        "Plan steps: 1 completed, 0 still open, as reported by the companion.",
+        "Files: 1 path the host observed being edited, plus anything the user had attached.",
+        "Not included: the conversation itself. You are seeing what was written down about it, not what was said in it.",
+      ],
+      returnFormat: RESULT_FORMAT,
+    }), goldenRole);
+    expect(text).toBe(golden("briefing-derived.golden.md"));
+  });
+
+  it("keeps the stamp's version in step with the constant", () => {
+    // The stamp is how a run directory stays interpretable without the code
+    // that wrote it, so a version that drifts from the format is worse than
+    // no version at all.
+    for (const name of ["briefing-agent.golden.md", "briefing-derived.golden.md"]) {
+      expect(golden(name)).toContain(`<!-- companions:briefing v${BRIEFING_FORMAT_VERSION} `);
+    }
   });
 });
