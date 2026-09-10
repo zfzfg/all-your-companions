@@ -25,7 +25,7 @@
   // directions (and that chat.js actually handles every host type).
   const HOST_MESSAGE_TYPES = [
     "initialState", "moveViewHint", "welcomeTips", "projectSetup", "githubState", "githubRepos", "providerState", "providerCapabilities", "mcpServers", "mcpConnectors", "mcpConnectorAuthorization", "routines", "codexInstallProgress", "planModeAvailability", "showThinking", "appPurpose", "fontScale", "grokUpdateStatus", "updateAvailable", "updateReady", "telemetryEnabled", "thumbsFeedback", "initialized",
-    "cliUpdating", "session", "sessionName", "sessionRemoved", "modelChanged", "modeChanged", "openModePopover",
+    "cliUpdating", "session", "sessionName", "sessionRemoved", "modelChanged", "modeChanged", "sessionType", "companionSubagent", "subagentTray", "openModePopover",
     "voiceState", "voiceConfigured", "voicePartial", "voiceSubmit", "voiceTranscript",
     "voiceError", "chips", "commandsUpdate", "mentionResults", "projectDirListing", "projectFileContent", "projectFileWriteResult", "userMessage", "agentStart", "thoughtChunk",
     "messageChunk", "media", "userMessageChunk", "historyReplay", "historyBatch", "permissionHistoryQueue",
@@ -37,7 +37,7 @@
     "remoteStatus", "ruleFiles", "permissionRules", "agentRoles",
   ];
   const WEBVIEW_MESSAGE_TYPES = [
-    "ready", "remotePreferences", "send", "newSession", "cancel", "pickModel", "setMode", "setConfigOption", "removeChip",
+    "ready", "remotePreferences", "send", "newSession", "cancel", "pickModel", "setMode", "setSessionType", "setSubagentsEnabled", "subagentRosterSave", "companionSubagentAction", "setConfigOption", "removeChip",
     "toggleChip", "openFile", "showInFolder", "openUrl", "openText", "openDiff", "revertToolEdit", "reviewRevertFile", "reviewRevertAll", "exportExpr", "setEffort",
     "addProjectFolder", "removeProjectFolder", "createProject", "cloneProject", "setupGithubCli", "listGithubRepos", "githubSignOut", "githubLoginWithToken",
     "openGlobalConfig", "openProjectConfig", "listRuleFiles", "openRuleFile", "appendRuleFile", "listAgentRoles", "saveAgentRole", "deleteAgentRole", "saveCrewFlow", "deleteCrewFlow", "listPermissionRules", "deletePermissionRule", "adoptPermissionRules", "listMcpServers", "connectMcpConnector", "disconnectMcpConnector", "completeMcpConnectorOAuth", "showLogs", "toggleDevTools", "openSettings", "openSettingsSurface", "closeSettingsSurface", "dismissWelcomeTip", "welcomeTipShown", "moveView",
@@ -472,8 +472,29 @@
     "dispatchagent", "runagent", "delegate", "delegatetask", "task", "agent", "agents",
   ]);
 
+  /**
+   * AP-16 companion tools, matched on the normalized name.
+   *
+   * `spawn` IS a delegation and folds into the host's own card (one run, one
+   * card — §6.11). `await` and `list` are NOT: awaiting a child that already
+   * has a card would draw a second empty one beside it, and listing the roster
+   * is a lookup, not a delegation.
+   */
+  const COMPANION_SPAWN_TOOL = "companionsspawnsubagent";
+  const COMPANION_NON_SPAWN_TOOLS = new Set([
+    "companionsawaitsubagents",
+    "companionslistsubagenttargets",
+  ]);
+
   function isSubagentToolCall(call) {
     if (!call) return false;
+    // Checked before every other signal, including `kind`: these names are ours
+    // and unambiguous, and `companions_await_subagents` would otherwise match
+    // the "subagent" substring rules further down.
+    const companionName = String(call.tool || call.name || call.title || "")
+      .replace(/[_\s-]/g, "").toLowerCase();
+    if (COMPANION_NON_SPAWN_TOOLS.has(companionName)) return false;
+    if (companionName === COMPANION_SPAWN_TOOL) return true;
     if (call.kind === "subagent" || call.kind === "agent") return true;
     // Structural marker on grok 0.2.9x: _meta["x.ai/tool"].name carries the
     // real tool id regardless of how the call is titled — and when present it

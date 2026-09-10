@@ -482,6 +482,185 @@
           "default": "",
           "description": "Mode for new sessions. Empty = Agent."
         },
+        "companions.sessionType.default": {
+          "type": "string",
+          "enum": [
+            "agent",
+            "crew"
+          ],
+          "enumDescriptions": [
+            "Agent — one companion you chat with, which may delegate to companion subagents.",
+            "Crew — a stage-gated workflow run: you describe an idea, the crew plans, implements and reviews it."
+          ],
+          "default": "agent",
+          "description": "Session type for new sessions. Chosen before the first message and locked once one is sent. This is a different setting from the Agent/Plan/Auto-accept permission mode above."
+        },
+        "companions.subagents.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Let the agent launch companion subagents on other connected companions in Agent sessions. Each subagent is a separate run on the companion it uses and counts against that companion's subscription usage limits."
+        },
+        "companions.subagents.spawnPolicy": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "ask",
+            "auto-read-only"
+          ],
+          "enumDescriptions": [
+            "Start subagents without asking, within the limits below.",
+            "Ask before every subagent, showing its target, permissions and full task.",
+            "Start read-only subagents without asking; ask before anything that can edit."
+          ],
+          "default": "auto",
+          "description": "When to ask before a subagent is started."
+        },
+        "companions.subagents.roster": {
+          "type": "object",
+          "default": {},
+          "description": "Per-companion subagent settings, keyed by companion id (grok, codex, claude, gemini). Each entry may set enabled, allowedModels, defaultModel, defaultEffort, maxEffort, notes and allowWrite. Edit this in Settings → Agents & Crew rather than by hand.",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean",
+                "default": true,
+                "description": "Offer this companion as a subagent."
+              },
+              "allowedModels": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": [],
+                "description": "Models the agent may pick. Empty means every model this companion has."
+              },
+              "defaultModel": {
+                "type": "string",
+                "default": "",
+                "description": "Model to use when the agent does not name one. Empty means the companion's own default."
+              },
+              "defaultEffort": {
+                "type": "string",
+                "default": "",
+                "description": "Reasoning effort to use when none is chosen."
+              },
+              "maxEffort": {
+                "type": "string",
+                "default": "",
+                "description": "Ceiling. A higher request is lowered, and the agent is told."
+              },
+              "notes": {
+                "type": "string",
+                "default": "",
+                "description": "What this companion is good at. The agent reads this when it chooses a subagent."
+              },
+              "allowWrite": {
+                "type": "boolean",
+                "default": true,
+                "description": "Allow subagents on this companion to edit files. Off means read-only only."
+              }
+            }
+          }
+        },
+        "companions.subagents.limits.maxConcurrent": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 3,
+          "description": "How many subagents may run at once."
+        },
+        "companions.subagents.limits.maxPerTurn": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 4,
+          "description": "How many subagents one turn may start."
+        },
+        "companions.subagents.limits.maxPerSession": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 20,
+          "description": "How many subagents one session may start."
+        },
+        "companions.subagents.limits.timeoutSec": {
+          "type": "integer",
+          "minimum": 30,
+          "default": 900,
+          "description": "Give up on a subagent after this many seconds."
+        },
+        "companions.subagents.limits.foregroundWaitSec": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 40,
+          "description": "How long a subagent tool call may block before it answers 'running' and hands back an id to collect later. Deliberately below the shortest tool-call timeout the companion CLIs enforce."
+        },
+        "companions.subagents.limits.resultInlineChars": {
+          "type": "integer",
+          "minimum": 200,
+          "default": 4000,
+          "description": "How much of a subagent's report is returned inline. The rest stays on disk and is read on request."
+        },
+        "companions.subagents.defaultProfile": {
+          "type": "string",
+          "enum": [
+            "read-only",
+            "scoped-edit",
+            "inherit"
+          ],
+          "enumDescriptions": [
+            "Read-only: the subagent may look, never change anything.",
+            "Scoped edit: the subagent may edit the files it was given.",
+            "Inherit: the same permissions the session itself has, never more."
+          ],
+          "default": "read-only",
+          "description": "What a subagent may do when the agent does not say."
+        },
+        "companions.subagents.defaultEffort": {
+          "type": "string",
+          "default": "inherit",
+          "description": "Reasoning effort for subagents. 'inherit' means the same effort as the session that started them."
+        },
+        "companions.subagents.routing": {
+          "type": "array",
+          "default": [],
+          "description": "Reserved for keyword routing rules. Not read yet.",
+          "items": {
+            "type": "object"
+          }
+        },
+        "companions.subagents.maxDepth": {
+          "type": "integer",
+          "enum": [
+            1,
+            2
+          ],
+          "default": 1,
+          "description": "How deep delegation may go. Only 1 is supported; 2 is reserved."
+        },
+        "companions.subagents.readOnlyCommandAllowList": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "git status",
+            "git diff",
+            "git log",
+            "ls",
+            "rg",
+            "grep"
+          ],
+          "description": "Commands a read-only subagent may still run."
+        },
+        "companions.subagents.propagateAutoAccept": {
+          "type": "boolean",
+          "default": false,
+          "description": "Let Auto accept in a session also auto-approve its subagents' edits. Off by default: a subagent's edits are the ones you have looked at least."
+        },
+        "companions.crew.stagesMayUseSubagents": {
+          "type": "boolean",
+          "default": false,
+          "description": "Reserved: let crew stages start subagents of their own. Not read yet."
+        },
         "companions.defaultEffort": {
           "type": "string",
           "enum": [

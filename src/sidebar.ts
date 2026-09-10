@@ -374,8 +374,10 @@ import {
   renderBriefing,
   renderResult,
   roleForbidden,
+  type AgentResult,
   type Briefing,
   type BriefingInput,
+  type FileReconciliation,
 } from "./briefing";
 import {
   defaultRoleFor,
@@ -533,6 +535,59 @@ import {
   sessionCatalogDirs,
   sessionDirFor,
 } from "./sessions";
+import {
+  applySessionTypeSwitch,
+  defaultSessionTypeFromSetting,
+  effectiveSessionType,
+  isSessionTypeLocked,
+  forkedSessionTypeMeta,
+  lockSessionType,
+  type SessionType,
+  type SessionTypeMeta,
+} from "./session-type";
+import {
+  COMPANIONS_AWAIT_TOOL,
+  COMPANIONS_LIST_TOOL,
+  COMPANIONS_REVIEW_HINT,
+  COMPANIONS_SERVER_NAME,
+  COMPANIONS_SPAWN_TOOL,
+  capInlineText,
+  normalizeAwaitArguments,
+  normalizeListArguments,
+  normalizeSpawnArguments,
+  refusalPayload,
+  type AwaitArguments,
+  type ListArguments,
+  type SpawnArguments,
+} from "./companions-protocol";
+import { CompanionsHostServer, type CompanionsCall } from "./companions-server";
+import {
+  parseSubagentMentions,
+  renderDirectiveBlock,
+  unfollowedDirectives,
+  type SubagentDirective,
+} from "./subagent-directives";
+import {
+  SubagentRegistry,
+  deriveSubagentLabel,
+  isTerminalSubagentStatus,
+  profileBadge,
+  subagentForbidden,
+  subagentPermissionOverlay,
+  subagentReturnFormat,
+  uncollectedFollowUpText,
+} from "./companion-subagents";
+import {
+  EFFORT_ORDER,
+  isEffortLevel,
+  listEligibleTargets,
+  resolveTarget,
+  type EligibilityInput,
+  type EligibilityResult,
+  type RefusalCode,
+  type RosterEntry,
+  type SpawnLimits,
+} from "./target-eligibility";
 import {
   base64DecodedByteLength,
   isTrustedCodexGeneratedImagePath,
@@ -1847,7 +1902,21 @@ export class GrokSidebar {
     trigger: AgentRunTrigger,
     caller: Session,
     origin: MsgOrigin,
-    coords?: { runId: string; step: number; cwd?: string; live?: boolean },
+    coords?: {
+      runId: string;
+      step: number;
+      cwd?: string;
+      live?: boolean;
+      /**
+       * AP-16. Set when this run is a companion subagent rather than an
+       * `/agent` role or a crew step. It changes three things and nothing else:
+       * the caller's turn state is NOT taken over (several subagents run at
+       * once, and the parent keeps working), the `/agent` result card is not
+       * emitted (a `companionSubagent` card is, keyed by this id), and the
+       * child session is stamped hidden before its first turn.
+       */
+      subagent?: { subagentId: string; label: string; profile: string };
+    },
   ): Promise<{
     outcome: "completed" | "failed" | "cancelled";
     filesReported: string[];
@@ -1859,6 +1928,12 @@ export class GrokSidebar {
     detail?: string;
     summary: string;
     planEntries: import("./plan-entries").PlanEntry[];
+    /** AP-16: the host's own file evidence, for the subagent card and result. */
+    reconciliation?: FileReconciliation;
+    /** AP-16: the parsed result, so the tool payload does not re-parse. */
+    parsed?: AgentResult;
+    /** AP-16: the child's whole reply, for `await` with `action: "read"`. */
+    rawReply?: string;
   }> {
     const cwd = coords?.cwd ?? this.sessionCwd(caller);
     const runId = coords?.runId ?? this.agentRuns.newRunId();
@@ -1924,10 +1999,22 @@ export class GrokSidebar {
     const overlay = rolePermissionsToRules(role);
     if (overlay.length) roleSession.rolePermissionRules = overlay;
     this.pool.add(roleSession);
-    const liveHandle = coords?.live
+    const subagentCoords = coords?.subagent;
+    // AP-16 §6.6 point 1: stamped BEFORE the first turn, so no history refresh
+    // can race the child into the list.
+    if (subagentCoords) this.markHiddenChildSession(roleSession, caller, subagentCoords.subagentId);
+    const subagentHandle = subagentCoords
+      ? { subagentId: subagentCoords.subagentId, roleSession, cancelled: false }
+      : undefined;
+    const liveHandle = coords?.live && !subagentCoords
       ? { runId, step, roleName: role.name, roleSession, cancelled: false }
       : undefined;
-    if (liveHandle) {
+    if (subagentHandle) {
+      // Deliberately NOT `caller.agentRun`: that slot is one-at-a-time, and it
+      // is what makes Stop stop a `/agent`. Several subagents run at once, and
+      // the parent turn's own state is managed by the D20 bookkeeping instead.
+      caller.subagentLive = [...(caller.subagentLive ?? []), subagentHandle];
+    } else if (liveHandle) {
       caller.crewLive = [...(caller.crewLive ?? []), liveHandle];
     } else {
       caller.agentRun = { runId, step, roleName: role.name, roleSession, cancelled: false };
@@ -1935,13 +2022,21 @@ export class GrokSidebar {
       this.emit(caller, { type: "setBusy", value: true });
     }
     const roleCancelled = () =>
-      !!(liveHandle?.cancelled || caller.agentRun?.cancelled || caller.crewRun?.status === "cancelled");
-    this.agentNotice(
-      caller,
-      "info",
-      `Running role \`${role.name}\` on ${providerDisplayName(role.provider)}`
-      + `${role.model ? ` (${role.model})` : ""} in its own session — run ${runId}, step ${step}.`,
-    );
+      !!(subagentHandle?.cancelled
+        || liveHandle?.cancelled
+        || (!subagentHandle && caller.agentRun?.cancelled)
+        || (!subagentHandle && caller.crewRun?.status === "cancelled"));
+    // A subagent announces itself on its own card, not as a line in the
+    // parent's transcript — §6.11 is explicit that a child's output never
+    // reaches the parent's own transcript text.
+    if (!subagentCoords) {
+      this.agentNotice(
+        caller,
+        "info",
+        `Running role \`${role.name}\` on ${providerDisplayName(role.provider)}`
+        + `${role.model ? ` (${role.model})` : ""} in its own session — run ${runId}, step ${step}.`,
+      );
+    }
 
     let reply = "";
     roleSession.agentTextTap = (chunk) => { reply += chunk; };
@@ -2003,12 +2098,33 @@ export class GrokSidebar {
       : undefined;
     const durationMs = Date.now() - startedAt;
 
-    if (liveHandle) {
+    if (subagentHandle) {
+      caller.subagentLive = (caller.subagentLive ?? []).filter((h) => h !== subagentHandle);
+    } else if (liveHandle) {
       caller.crewLive = (caller.crewLive ?? []).filter((h) => h !== liveHandle);
     } else {
       caller.agentRun = undefined;
       this.setStatus(caller, outcome === "failed" ? "error" : "done");
       this.emit(caller, { type: "setBusy", value: false });
+    }
+    // A companion subagent renders as its own card (§6.11) and must not also
+    // produce an `/agent` result card — one run, one card.
+    if (subagentCoords) {
+      return {
+        outcome,
+        filesReported: result.files,
+        filesObserved: observed,
+        ...(usage?.costUsdTicks !== undefined ? { costUsdTicks: usage.costUsdTicks } : {}),
+        ...(usage?.totalTokens !== undefined ? { totalTokens: usage.totalTokens } : {}),
+        durationMs,
+        ...(roleSessionId ? { sessionId: roleSessionId } : {}),
+        ...(detail ? { detail } : {}),
+        summary: result.summary,
+        planEntries: roleSession.planEntries,
+        reconciliation,
+        parsed: result,
+        rawReply: reply,
+      };
     }
     this.emit(caller, {
       type: "agentResult",
@@ -2104,6 +2220,9 @@ export class GrokSidebar {
 
   /** Stop the running role, if any. Returns true when there was one. */
   private cancelAgentRun(caller: Session): boolean {
+    // AP-16 §6.5 point 8: Stop means stop. A parent's running subagents are
+    // cancelled with its turn, whether or not an `/agent` role is also running.
+    this.cancelSubagentsOf(caller, "the user pressed Stop");
     const run = caller.agentRun;
     if (caller.crewRun && caller.crewRun.status === "running") {
       caller.crewRun = cancelCrewRun(caller.crewRun, "Stopped.");
@@ -3018,6 +3137,32 @@ export class GrokSidebar {
         ...(preset.path ? { path: preset.path } : {}),
         draft: presetToDraft(preset),
       })),
+      // AP-16 §6.2. Delivered with the roles because the roster editor lives in
+      // the same settings section and needs exactly the same provider + model
+      // data — a second message would be two round trips for one page.
+      subagentRoster: (() => {
+        const roster = this.subagentRoster();
+        const usable = new Set(this.usableProviders());
+        return PROVIDER_ORDER.map((id) => ({
+          id,
+          label: providerDisplayName(id),
+          // Live status, from the same state `usableProviderIds` reads (§6.2).
+          status: usable.has(id)
+            ? ("usable" as const)
+            : connected.has(id)
+              ? ("needs-login" as const)
+              : ("not-connected" as const),
+          enabled: roster[id]?.enabled !== false,
+          allowWrite: roster[id]?.allowWrite !== false,
+          allowedModels: roster[id]?.allowedModels ?? [],
+          defaultModel: roster[id]?.defaultModel ?? "",
+          defaultEffort: roster[id]?.defaultEffort ?? "",
+          maxEffort: roster[id]?.maxEffort ?? "",
+          notes: roster[id]?.notes ?? "",
+        }));
+      })(),
+      subagentsEnabled: this.subagentsEnabledGlobally(),
+      efforts: [...EFFORT_ORDER],
       providers: PROVIDER_ORDER.map((id) => ({
         id,
         label: providerDisplayName(id),
@@ -6385,8 +6530,15 @@ Only continue if you trust this code.`,
       const prev = overrides[r.newSessionId] ?? {};
       const parentUploads = overrides[session.activeSessionId]?.uploadedFiles ?? [];
       const parentMeta = overrides[session.activeSessionId] ?? {};
+      // AP-15 §5.4. A fork inherits the session type and is born locked: it is
+      // a branch of a conversation that has already started, so its type is as
+      // settled as its parent's. `forkedSessionTypeMeta` deliberately carries
+      // ONLY the type and the stamp — a fork must not inherit the parent's
+      // `crewRunId` or its list of subagents, which belong to the original run.
+      const forkedType = forkedSessionTypeMeta(parentMeta, Date.now());
       const carried: SessionMetaOverrides[string] = {
         ...prev,
+        ...forkedType,
         customName: forkName,
         uploadedFiles: [...new Set([...(prev.uploadedFiles ?? []), ...parentUploads])],
         contextUsed: parentMeta.contextUsed,
@@ -8355,6 +8507,1216 @@ Only continue if you trust this code.`,
     const overrides = this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
     return cwdIsAuthorized(cwd, this.localTrustedSessionCwds(overrides), pathsEqual);
   }
+
+  // ---------------------------------------------------------------- AP-15 --
+  // Session type (Agent | Crew). The pure decisions live in `session-type.ts`;
+  // everything here is the plumbing that pure module deliberately refuses to
+  // own — the setting, the metadata record, the webview message.
+
+  /**
+   * What a brand-new session starts as (`companions.sessionType.default`).
+   *
+   * Guarded, and the guard is the same claim the pure fallback makes: a
+   * setting must never be able to stop a session from being created. A host
+   * that cannot answer (a harness, a configuration provider that throws) gets
+   * the default rather than an exception on the `+` button.
+   */
+  private configuredDefaultSessionType(): SessionType {
+    try {
+      return defaultSessionTypeFromSetting(
+        this.host.getConfiguration("companions").get<string>("sessionType.default", "agent"),
+      );
+    } catch {
+      return "agent";
+    }
+  }
+
+  /** The stored AP-15 metadata for a session, or undefined before it has an id. */
+  private sessionTypeMetaFor(session: Session): SessionTypeMeta | undefined {
+    const id = session.activeSessionId;
+    if (!id) return undefined;
+    return this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {})[id];
+  }
+
+  /**
+   * Has this conversation started?
+   *
+   * Two sources, because they answer at different times: the live send counter
+   * for a session that is open right now, and the persisted `hasHistory` for
+   * one restored from disk. Either one being true means the type is settled.
+   */
+  private sessionHasStarted(session: Session): boolean {
+    return session.userMessageCount > 0 || session.hasHistory;
+  }
+
+  private sessionTypeIsLocked(session: Session): boolean {
+    return isSessionTypeLocked(
+      { sessionType: session.sessionType, sessionTypeLockedAt: session.sessionTypeLockedAt },
+      this.sessionHasStarted(session),
+    );
+  }
+
+  /** Tell the webview which control to draw. */
+  private postSessionType(session: Session): void {
+    this.emit(session, {
+      type: "sessionType",
+      sessionId: session.activeSessionId ?? "",
+      sessionType: session.sessionType,
+      locked: this.sessionTypeIsLocked(session),
+    });
+  }
+
+  /**
+   * Write the type into `grok.sessionMeta`.
+   *
+   * A no-op before the CLI has named the session: the record is keyed by the
+   * provider's session id, so there is nothing to key against yet. The runtime
+   * field on `Session` is the store until then, and this runs again the moment
+   * an id exists (ST-1).
+   */
+  private persistSessionType(session: Session): void {
+    const id = session.activeSessionId;
+    if (!id) return;
+    const overrides = this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
+    const current = overrides[id] ?? {};
+    if (
+      current.sessionType === session.sessionType
+      && current.sessionTypeLockedAt === session.sessionTypeLockedAt
+    ) {
+      return;
+    }
+    void this.state.update(SESSION_META_KEY, {
+      ...overrides,
+      [id]: {
+        ...current,
+        sessionType: session.sessionType,
+        ...(session.sessionTypeLockedAt !== undefined
+          ? { sessionTypeLockedAt: session.sessionTypeLockedAt }
+          : {}),
+      },
+    });
+    this.sessionCache.delete(id);
+  }
+
+  /**
+   * Read the type back for a session restored from history (ST-3).
+   *
+   * A record with no `sessionType` is a session created before AP-15: it reads
+   * as a locked Agent session, and nothing is written to make that true.
+   */
+  private restoreSessionType(session: Session): void {
+    const meta = this.sessionTypeMetaFor(session);
+    session.sessionType = effectiveSessionType(meta);
+    if (typeof meta?.sessionTypeLockedAt === "number") {
+      session.sessionTypeLockedAt = meta.sessionTypeLockedAt;
+    }
+    this.postSessionType(session);
+  }
+
+  /**
+   * ST-2 — the lock, at the first submitted content.
+   *
+   * Idempotent, because more than one trigger can fire for a single send
+   * (text plus chips, a voice utterance that also carries an image).
+   */
+  private lockSessionTypeNow(session: Session): void {
+    if (session.sessionTypeLockedAt !== undefined) {
+      this.persistSessionType(session);
+      return;
+    }
+    const locked = lockSessionType(
+      { sessionType: session.sessionType, sessionTypeLockedAt: session.sessionTypeLockedAt },
+      Date.now(),
+    );
+    session.sessionType = locked.sessionType ?? "agent";
+    session.sessionTypeLockedAt = locked.sessionTypeLockedAt;
+    this.persistSessionType(session);
+    this.postSessionType(session);
+  }
+
+  /**
+   * ST-1 — a pre-lock switch, or the host's refusal.
+   *
+   * The refusal is the point: §5.6 requires a forged `setSessionType` to be
+   * rejected HERE, not merely hidden in the webview, so a remote or a tampered
+   * frame cannot re-type a conversation that has already started.
+   */
+  private setSessionType(session: Session, next: unknown): void {
+    const result = applySessionTypeSwitch(
+      { sessionType: session.sessionType, sessionTypeLockedAt: session.sessionTypeLockedAt },
+      next,
+      this.sessionHasStarted(session),
+    );
+    if (!result.ok) {
+      this.emit(session, {
+        type: "hostNotice",
+        level: "warning",
+        text: result.reason === "locked"
+          ? session.sessionType === "crew"
+            ? "This session is locked to Crew mode. Start a new session to use Agent."
+            : "This session is locked to Agent mode. Start a new session to use Crew."
+          : "Unknown session type.",
+      });
+      // Re-assert the truth so a webview that drew the wrong control corrects.
+      this.postSessionType(session);
+      return;
+    }
+    session.sessionType = result.meta.sessionType ?? "agent";
+    this.persistSessionType(session);
+    this.postSessionType(session);
+  }
+
+  // ---------------------------------------------------------------- AP-16 --
+  // Companion subagents. The pure decisions live in `target-eligibility.ts`
+  // (which target may run) and `companion-subagents.ts` (what state a run is
+  // in); everything here is the glue those modules deliberately refuse to own:
+  // the settings, the pipe, the child session, the card.
+
+  private companionsChannel?: CompanionsHostServer;
+
+  // Lazily created rather than field-initialised, so every construction path
+  // has them — including `Object.create(GrokSidebar.prototype)`, which the host
+  // test harnesses use and which runs no field initialisers at all. Stop must
+  // not throw because a conversation was built that way.
+  private subagentState?: {
+    /** Live subagent state for this window. Never persisted — a reopened parent
+     *  rebuilds its cards from the run directory (§6.6 point 6), not from here. */
+    registry: SubagentRegistry;
+    /** Full replies, kept for `await` with `action: "read"` (§6.4.2). */
+    reports: Map<string, string>;
+    /** Resolvers waiting on a subagent to reach a terminal state. */
+    waiters: Map<string, Array<() => void>>;
+    /** Finished runs, for the card and for the tool payload. */
+    outcomes: Map<string, Awaited<ReturnType<GrokSidebar["runAgentRole"]>>>;
+  };
+
+  private get subagents(): SubagentRegistry { return this.subagentStore().registry; }
+  private get subagentReports(): Map<string, string> { return this.subagentStore().reports; }
+  private get subagentWaiters(): Map<string, Array<() => void>> { return this.subagentStore().waiters; }
+  private get subagentOutcomes(): Map<string, Awaited<ReturnType<GrokSidebar["runAgentRole"]>>> {
+    return this.subagentStore().outcomes;
+  }
+
+  private subagentStore(): NonNullable<GrokSidebar["subagentState"]> {
+    if (!this.subagentState) {
+      this.subagentState = {
+        registry: new SubagentRegistry(),
+        reports: new Map(),
+        waiters: new Map(),
+        outcomes: new Map(),
+      };
+    }
+    return this.subagentState;
+  }
+
+  /** The delegation channel, bound lazily and shared by every session. */
+  private companions(): CompanionsHostServer {
+    if (!this.companionsChannel) {
+      this.companionsChannel = new CompanionsHostServer({
+        // From `extensionUri`, not a path relative to `out/`: the script is a
+        // packaged RESOURCE, and `.vscodeignore` has to keep `resources/mcp/**`
+        // in the VSIX or this path exists in development and nowhere else.
+        scriptPath: path.join(this.context.extensionUri.fsPath, "resources", "mcp", "companions-server.cjs"),
+        log: (message) => this.host.appendLine(message),
+        onCall: (token, call) => {
+          const session = this.sessionForCompanionsToken(token);
+          // No session owns this token any more: answer immediately so the CLI
+          // is not left blocked inside `tools/call`.
+          if (!session) {
+            call.fail("This session's delegation channel has ended. Continue alone and tell the user why.");
+            return;
+          }
+          void this.handleCompanionsCall(session, call);
+        },
+        onAbandon: (token, id) => {
+          // The parent's CLI is gone, so nothing is waiting for this result —
+          // but its children are still running and still spending a
+          // subscription. Stop means stop, and so does "the parent died".
+          const session = this.sessionForCompanionsToken(token);
+          if (!session) return;
+          this.host.appendLine(`[companions] call ${id} was abandoned; cancelling its subagents`);
+          this.cancelSubagentsOf(session, "the parent session ended");
+        },
+      });
+    }
+    return this.companionsChannel;
+  }
+
+  private sessionForCompanionsToken(token: string): Session | undefined {
+    for (const session of this.pool) {
+      if (session.companionsToken === token) return session;
+    }
+    return undefined;
+  }
+
+  private revokeCompanionsToken(session: Session): void {
+    if (!session.companionsToken) return;
+    this.companionsChannel?.revoke(session.companionsToken);
+    session.companionsToken = undefined;
+  }
+
+  /**
+   * The `mcpServers` entry for this session, or `undefined`.
+   *
+   * §6.4.1 gates it on four things, and every one of them is a "could this
+   * session ever delegate", not "is it delegating now": the server list is
+   * fixed at `session/new`, so a session started without it cannot gain it
+   * without a restart. The current switch value is enforced at SPAWN time
+   * instead, which is what makes turning a provider off take effect on the very
+   * next spawn in an already-open session.
+   */
+  private async companionsMcpServer(session: Session): Promise<AcpMcpStdioServer | undefined> {
+    if (!this.subagentsCouldBeUsedIn(session)) return undefined;
+    // Depth: a companion subagent never gets the delegation server itself.
+    // `maxDepth` is 1 and values above it are refused until P6 (§12.3).
+    if (this.sessionTypeMetaFor(session)?.hiddenReason) return undefined;
+    if (providerCapability(session.provider, "hostMcp").state !== "yes") {
+      this.host.appendLine(
+        `[companions] not offering delegation on ${session.provider}: host MCP support is unproven`,
+      );
+      return undefined;
+    }
+    const reserved = this.reservedMcpIdentityFor(session);
+    if (reserved.names.some((name) => normalizeMcpName(name) === COMPANIONS_SERVER_NAME)) {
+      this.host.appendLine(
+        `[companions] a provider MCP server is already named "${COMPANIONS_SERVER_NAME}" — not adding ours`,
+      );
+      return undefined;
+    }
+    const channel = this.companions();
+    if (!(await channel.listen())) return undefined;
+    this.revokeCompanionsToken(session);
+    session.companionsToken = channel.register();
+    return channel.spawnSpec(session.companionsToken);
+  }
+
+  /**
+   * Could this session use subagents at all?
+   *
+   * Agent sessions only (a Crew stage's own delegation is P6), and only when
+   * the master switch is on globally or was turned on for this session before
+   * its first message.
+   */
+  private subagentsCouldBeUsedIn(session: Session): boolean {
+    if (session.sessionType !== "agent") return false;
+    const stored = this.sessionTypeMetaFor(session)?.subagentsEnabled;
+    return stored ?? this.subagentsEnabledGlobally();
+  }
+
+  private subagentsEnabledGlobally(): boolean {
+    try {
+      return this.host.getConfiguration("companions").get<boolean>("subagents.enabled", true) !== false;
+    } catch {
+      // A settings provider that cannot answer must not decide the feature is
+      // off — the shipped default is on (D19).
+      return true;
+    }
+  }
+
+  private companionsSetting<T>(key: string, fallback: T): T {
+    try {
+      return this.host.getConfiguration("companions").get<T>(key, fallback) ?? fallback;
+    } catch {
+      return fallback;
+    }
+  }
+
+  /** The per-provider roster, defaulted so an untouched install just works. */
+  private subagentRoster(): Partial<Record<AcpProvider, RosterEntry>> {
+    const raw = this.companionsSetting<Record<string, unknown>>("subagents.roster", {});
+    const roster: Partial<Record<AcpProvider, RosterEntry>> = {};
+    for (const provider of ACP_PROVIDERS) {
+      const entry = (raw?.[provider] ?? {}) as Record<string, unknown>;
+      const str = (value: unknown): string | undefined => {
+        const text = typeof value === "string" ? value.trim() : "";
+        return text || undefined;
+      };
+      roster[provider] = {
+        enabled: entry.enabled !== false,
+        allowedModels: Array.isArray(entry.allowedModels)
+          ? entry.allowedModels.filter((id): id is string => typeof id === "string" && !!id.trim())
+          : [],
+        ...(str(entry.defaultModel) ? { defaultModel: str(entry.defaultModel) } : {}),
+        ...(isEffortLevel(entry.defaultEffort) ? { defaultEffort: entry.defaultEffort } : {}),
+        ...(isEffortLevel(entry.maxEffort) ? { maxEffort: entry.maxEffort } : {}),
+        ...(str(entry.notes) ? { notes: str(entry.notes) } : {}),
+        allowWrite: entry.allowWrite !== false,
+      };
+    }
+    return roster;
+  }
+
+  private subagentLimits(session: Session, turnId: string): SpawnLimits {
+    const configured = (key: string, fallback: number) =>
+      Math.max(1, Number(this.companionsSetting(`subagents.limits.${key}`, fallback)) || fallback);
+    const counts = this.subagents.counts(session.activeSessionId ?? "", turnId);
+    return {
+      ...counts,
+      maxConcurrent: configured("maxConcurrent", 3),
+      maxPerTurn: configured("maxPerTurn", 4),
+      maxPerSession: configured("maxPerSession", 20),
+      // The pool is shared with every other conversation, so its headroom is a
+      // window-wide number rather than this session's own.
+      poolHeadroom: Math.max(0, GrokSidebar.MAX_LIVE_SESSIONS - this.pool.size),
+    };
+  }
+
+  /** Everything `target-eligibility.ts` needs, gathered from live host state. */
+  private eligibilityInput(session: Session, turnId: string): EligibilityInput {
+    const cache = this.state.get<ProviderModelCache>(PROVIDER_MODEL_CACHE_KEY, {});
+    return {
+      purpose: "subagent",
+      usable: this.usableProviders(),
+      roster: this.subagentRoster(),
+      capabilities: (provider) => ({
+        companionSubagentTarget: providerCapability(provider, "companionSubagentTarget"),
+        hostMcp: providerCapability(provider, "hostMcp"),
+      }),
+      models: (provider) => {
+        const entry = cache[provider];
+        return {
+          // An absent entry means the cache was never warmed for this provider
+          // — NOT that the provider has no models (§6.3 rule 4).
+          checked: !!entry && Array.isArray(entry.models),
+          models: (entry?.models ?? []).map((model) => ({
+            id: model.modelId,
+            ...(model.name ? { label: model.name } : {}),
+            ...(model.reasoningEfforts?.length
+              ? { efforts: model.reasoningEfforts.filter(isEffortLevel) }
+              : {}),
+            ...(typeof model.totalContextTokens === "number"
+              ? { contextWindow: model.totalContextTokens }
+              : {}),
+            ...(entry?.currentModelId === model.modelId ? { isDefault: true } : {}),
+          })),
+        };
+      },
+      parent: {
+        provider: session.provider,
+        // Plan mode is the ceiling that matters; Auto accept does not raise it,
+        // and does not propagate to children unless the user asked (§6.7).
+        maxProfile: session.planActive ? "read-only" : "inherit",
+        planMode: session.planActive,
+        // The parent's live effort is not readable off `AcpClient`, so
+        // `inherit` resolves through the remembered-effort settings below
+        // rather than being invented here.
+      },
+      limits: this.subagentLimits(session, turnId),
+      // AP-06 marks a provider exhausted for a whole crew RUN; an ordinary
+      // Agent session has no such record yet, so nothing is pre-excluded and a
+      // quota error surfaces on the spawn that hits it (§6.12).
+      exhausted: new Set<AcpProvider>(),
+      displayName: providerDisplayName,
+      effortDefaults: {
+        ...(this.sessionTypeMetaFor(session)?.subagentEffortOverride
+          ? { sessionOverride: this.sessionTypeMetaFor(session)!.subagentEffortOverride }
+          : {}),
+        global: (() => {
+          const configured = this.companionsSetting<string>("subagents.defaultEffort", "inherit");
+          return configured === "inherit" || isEffortLevel(configured) ? configured : "inherit";
+        })(),
+        providerDefault: (provider) => {
+          const byProvider = this.companionsSetting<Record<string, string>>("defaultEffortByProvider", {});
+          const candidate = byProvider?.[provider] ?? this.companionsSetting<string>("defaultEffort", "");
+          return isEffortLevel(candidate) ? candidate : undefined;
+        },
+      },
+      subagentsEnabled: this.subagentsCouldBeUsedIn(session),
+      // §6.8 "no subagents for this message" — set by `@subagent:none` on the
+      // current turn, and ENFORCED here rather than merely asked for in the
+      // prompt: a spawn during that turn is refused with `forbidden-by-user`.
+      forbiddenThisTurn: session.subagentsForbiddenThisTurn === true,
+    };
+  }
+
+  /** The turn a spawn belongs to, for the per-turn limit and for D20. */
+  private currentTurnId(session: Session): string {
+    return String(session.userMessageCount);
+  }
+
+  // ---------- the three tools ----------
+
+  private async handleCompanionsCall(session: Session, call: CompanionsCall): Promise<void> {
+    try {
+      switch (call.tool) {
+        case COMPANIONS_LIST_TOOL:
+          call.resolve(this.companionsList(session, normalizeListArguments(call.args)));
+          return;
+        case COMPANIONS_SPAWN_TOOL: {
+          const parsed = normalizeSpawnArguments(call.args);
+          if (!parsed.ok) { call.fail(parsed.error); return; }
+          await this.companionsSpawn(session, parsed.value, call);
+          return;
+        }
+        case COMPANIONS_AWAIT_TOOL: {
+          const parsed = normalizeAwaitArguments(call.args);
+          if (!parsed.ok) { call.fail(parsed.error); return; }
+          await this.companionsAwait(session, parsed.value, call);
+          return;
+        }
+        default:
+          call.fail(`Unknown tool: ${call.tool}`);
+      }
+    } catch (error) {
+      // A throw here would leave the CLI blocked inside `tools/call` for ever.
+      this.host.appendLine(`[companions] ${call.tool} failed: ${(error as Error).message}`);
+      call.fail(`${call.tool} failed: ${(error as Error).message}`);
+    }
+  }
+
+  private companionsList(session: Session, args: ListArguments): unknown {
+    const input = this.eligibilityInput(session, this.currentTurnId(session));
+    const listing = listEligibleTargets(input, args);
+    return {
+      targets: listing.targets,
+      // Withheld unless asked for, because it is per-turn schema budget for
+      // information the agent usually cannot act on (§2.1 point 3).
+      ...(args.includeIneligible
+        ? { ineligible: listing.ineligible.map((entry) => ({ provider: entry.provider, reason: entry.reason })) }
+        : {}),
+      limits: {
+        ...listing.limits,
+        foregroundWaitSec: this.companionsSetting("subagents.limits.foregroundWaitSec", 40),
+        resultInlineChars: this.companionsSetting("subagents.limits.resultInlineChars", 4000),
+      },
+      ...(listing.parent
+        ? {
+            parent: {
+              ...listing.parent,
+              ...(session.client?.currentModelId ? { model: session.client.currentModelId } : {}),
+            },
+          }
+        : {}),
+    };
+  }
+
+  private async companionsSpawn(
+    session: Session,
+    args: SpawnArguments,
+    call: CompanionsCall,
+  ): Promise<void> {
+    const turnId = this.currentTurnId(session);
+    const parentSessionId = session.activeSessionId ?? "";
+    // §6.8: a `must` directive pins the target the agent left open. A directive
+    // naming a ROLE also supplies the template, so the user's `@role:inspector`
+    // reaches the child even when the agent never named the role itself.
+    const directive = this.directiveForSpawn(session, args);
+    const roleName = args.role ?? directive?.role;
+    const roleTemplate = roleName
+      ? findAgentRole(this.agentRoleSet(this.sessionCwd(session)), roleName)
+      : undefined;
+    const verdict = resolveTarget(
+      {
+        // Explicit tool arguments still win; the directive fills what the agent
+        // left open, which is the difference between constraining the worker
+        // and writing the agent's tool call for it.
+        ...(args.provider ?? directive?.provider ? { provider: args.provider ?? directive?.provider } : {}),
+        ...(args.model ?? directive?.model ? { model: args.model ?? directive?.model } : {}),
+        ...(args.effort ?? directive?.effort ? { effort: args.effort ?? directive?.effort } : {}),
+        ...(args.profile ?? directive?.profile ? { profile: args.profile ?? directive?.profile } : {}),
+        ...(roleTemplate
+          ? {
+              role: {
+                // A built-in's provider is a placeholder the host may rewrite
+                // (`agent-roles.ts`), so it is deliberately NOT passed as a
+                // pinned choice; a user-written role's provider is.
+                ...(roleTemplate.source !== "builtin" ? { provider: roleTemplate.provider } : {}),
+                ...(roleTemplate.model ? { model: roleTemplate.model } : {}),
+                ...(isEffortLevel(roleTemplate.effort) ? { effort: roleTemplate.effort } : {}),
+                ...(roleTemplate.preferDifferentProvider ? { preferDifferentProvider: true } : {}),
+              },
+            }
+          : {}),
+      },
+      this.eligibilityInput(session, turnId),
+    );
+
+    if (!verdict.ok) {
+      // A refusal is a RESULT the model reads and acts on, with the
+      // alternatives it should try instead — never a thrown error (§6.13).
+      const subagentId = `sa_${this.agentRuns.newRunId()}`;
+      this.subagents.add({
+        subagentId,
+        parentSessionId,
+        runId: "",
+        step: 0,
+        label: args.label ?? deriveSubagentLabel(args.task),
+        target: { provider: args.provider ?? session.provider },
+        profile: args.profile ?? "read-only",
+        status: "refused",
+        startedAt: Date.now(),
+        endedAt: Date.now(),
+        background: args.wait === "none",
+        spawnedInTurn: turnId,
+        errorCode: verdict.code,
+      });
+      call.resolve({
+        subagentId,
+        ...refusalPayload(verdict.code, verdict.message, verdict.alternatives),
+      });
+      return;
+    }
+
+    // §6.2 spawn policy. `auto` is the default (D15); `ask` raises a card for
+    // every spawn, `auto-read-only` only for one that can write. The card shows
+    // the FULL task, because approving a delegation you cannot read is not an
+    // approval.
+    const policy = this.companionsSetting<string>("subagents.spawnPolicy", "auto");
+    const needsApproval = policy === "ask"
+      || (policy === "auto-read-only" && verdict.profile !== "read-only");
+    if (needsApproval) {
+      const approved = await this.confirmInChat(session, {
+        title: `Start a subagent on ${providerDisplayName(verdict.target.provider)}?`,
+        body:
+          `${args.label ?? deriveSubagentLabel(args.task)} — ${verdict.profile}`
+          + `${verdict.target.model ? ` · ${verdict.target.model}` : ""}`
+          + `${verdict.target.effort ? ` · effort ${verdict.target.effort}` : ""}`
+          + `
+
+${args.task}`,
+        confirmLabel: "Start",
+      });
+      if (!approved) {
+        call.resolve({
+          subagentId: `sa_${this.agentRuns.newRunId()}`,
+          ...refusalPayload("denied-by-user", "The user did not approve this subagent.", []),
+        });
+        return;
+      }
+    }
+
+    const label = args.label ?? deriveSubagentLabel(args.task);
+    const runId = this.agentRuns.newRunId();
+    const subagentId = `sa_${runId}`;
+    const startedAt = Date.now();
+    this.subagents.add({
+      subagentId,
+      parentSessionId,
+      runId,
+      step: 1,
+      label,
+      target: verdict.target,
+      profile: verdict.profile,
+      status: "running",
+      startedAt,
+      background: args.wait === "none",
+      spawnedInTurn: turnId,
+      ...(directive ? { directiveId: directive.id } : {}),
+      ...(roleName ? { roleName } : {}),
+      modelVerified: verdict.modelVerified,
+      sameProviderAsParent: verdict.sameProviderAsParent,
+      ...(verdict.effortClamped ? { effortClamped: verdict.effortClamped } : {}),
+      ...(verdict.profileDowngraded ? { profileDowngraded: verdict.profileDowngraded } : {}),
+    });
+    this.postSubagentCard(session, subagentId);
+
+    // The run itself. Deliberately NOT awaited inline: a foreground spawn waits
+    // only up to `foregroundWaitSec` (§6.4.3) and then hands back an id, while
+    // the child keeps going regardless of how long the parent waits.
+    const running = this.runCompanionSubagent(session, subagentId, args, verdict, roleTemplate);
+
+    if (args.wait === "none") {
+      call.resolve({
+        subagentId,
+        status: "running",
+        target: this.targetPayload(verdict),
+        profile: verdict.profile,
+      });
+      void running;
+      return;
+    }
+
+    const waitSec = Math.max(1, Number(this.companionsSetting("subagents.limits.foregroundWaitSec", 40)));
+    const finished = await this.raceSubagent(subagentId, waitSec * 1000);
+    if (!finished) {
+      // Normal, and the tool description says so: the child is still working.
+      call.resolve({
+        subagentId,
+        status: "running",
+        target: this.targetPayload(verdict),
+        profile: verdict.profile,
+      });
+      return;
+    }
+    call.resolve(this.subagentResultPayload(subagentId, { markCollected: true }));
+  }
+
+  private async companionsAwait(
+    session: Session,
+    args: AwaitArguments,
+    call: CompanionsCall,
+  ): Promise<void> {
+    const parentSessionId = session.activeSessionId ?? "";
+    const mine = args.ids.filter((id) => this.subagents.get(id)?.parentSessionId === parentSessionId);
+    const unknown = args.ids.filter((id) => !mine.includes(id));
+
+    if (args.action === "cancel") {
+      const status: Record<string, string> = {};
+      for (const id of mine) {
+        this.cancelSubagent(id, args.reason ?? "the main agent cancelled it");
+        status[id] = this.subagents.get(id)?.status ?? "unknown";
+      }
+      for (const id of unknown) status[id] = "unknown";
+      call.resolve({ status });
+      return;
+    }
+
+    if (args.action === "read") {
+      const id = mine[0];
+      const text = (id && this.subagentReports.get(id)) ?? "";
+      const offset = Math.max(0, args.offset ?? 0);
+      const length = Math.max(1, args.length ?? 8000);
+      const slice = text.slice(offset, offset + length);
+      call.resolve({
+        text: slice,
+        offset,
+        nextOffset: offset + slice.length,
+        totalLength: text.length,
+        ...(unknown.length ? { unknown } : {}),
+      });
+      return;
+    }
+
+    const cap = Math.max(1, Number(this.companionsSetting("subagents.limits.foregroundWaitSec", 40)));
+    // `maxWaitSec: 0` is a status poll, and 0 has to survive the defaulting —
+    // treating it as unset would turn a poll into a 40-second block.
+    const requested = args.maxWaitSec === undefined ? cap : args.maxWaitSec;
+    const waitMs = Math.min(cap, Math.max(0, requested)) * 1000;
+    if (waitMs > 0) await this.raceSubagents(mine, waitMs, args.mode);
+
+    const completed: unknown[] = [];
+    const running: string[] = [];
+    for (const id of mine) {
+      const record = this.subagents.get(id);
+      if (record && isTerminalSubagentStatus(record.status)) {
+        completed.push(this.subagentResultPayload(id, { markCollected: true }));
+      } else {
+        running.push(id);
+      }
+    }
+    call.resolve({ completed, running, unknown });
+  }
+
+  // ---------- running one child ----------
+
+  private async runCompanionSubagent(
+    session: Session,
+    subagentId: string,
+    args: SpawnArguments,
+    verdict: Extract<EligibilityResult, { ok: true }>,
+    roleTemplate: AgentRole | undefined,
+  ): Promise<void> {
+    const record = this.subagents.get(subagentId)!;
+    const provider = verdict.target.provider;
+    // §6.5 step 4. A named role is a TEMPLATE — preamble, scope, forbidden —
+    // and the resolved target overrides its provider/model/effort.
+    const role: AgentRole = {
+      ...(roleTemplate ?? {
+        name: "subagent",
+        whenToUse: "A companion subagent started by the main agent.",
+        source: "builtin" as const,
+      }),
+      name: roleTemplate?.name ?? "subagent",
+      provider,
+      ...(verdict.target.model ? { model: verdict.target.model } : {}),
+      ...(verdict.target.effort ? { effort: verdict.target.effort } : {}),
+      // P2 ships the conservative recipe on every provider: the deny overlay is
+      // the floor, and Plan mode is an extra layer only where a probe has shown
+      // it does not stall on plan approval. No provider has that recording yet
+      // — see `research/companion-subagents.md`.
+      mode: verdict.profile === "read-only" ? "agent" : "agent",
+      ...(args.scope?.length ? { scope: args.scope } : roleTemplate?.scope ? { scope: roleTemplate.scope } : {}),
+      permissions: subagentPermissionOverlay(
+        verdict.profile,
+        args.scope ?? roleTemplate?.scope ?? [],
+        this.companionsSetting<string[]>("subagents.readOnlyCommandAllowList", []),
+      ),
+      source: roleTemplate?.source ?? "builtin",
+    };
+
+    const timeoutSec = Math.max(
+      30,
+      args.timeoutSec ?? Number(this.companionsSetting("subagents.limits.timeoutSec", 900)),
+    );
+    const timer = setTimeout(() => {
+      this.cancelSubagent(subagentId, "it ran past its time limit", "timeout");
+    }, timeoutSec * 1000);
+    timer.unref?.();
+
+    try {
+      const outcome = await this.runAgentRole(
+        role,
+        {
+          goal: session.firstUserMessageForTitle?.split("\n")[0] ?? "",
+          task: args.task,
+          ...(args.context ? { decisions: [args.context] } : {}),
+          ...(args.files?.length ? { files: args.files } : {}),
+          ...(args.acceptance ? { acceptance: args.acceptance } : {}),
+          returnFormat: subagentReturnFormat(args.deliverable),
+          forbidden: subagentForbidden(verdict.profile),
+          provenance: [
+            `Delegated by ${providerDisplayName(session.provider)}`
+            + `${session.client?.currentModelId ? ` (${session.client.currentModelId})` : ""}`
+            + ` in session ${session.activeSessionId ?? "?"}; this subagent sees only this brief.`,
+          ],
+        },
+        "subagent",
+        session,
+        "local",
+        {
+          runId: record.runId,
+          step: 1,
+          subagent: { subagentId, label: record.label, profile: verdict.profile },
+        },
+      );
+      clearTimeout(timer);
+      if (outcome.rawReply !== undefined) this.subagentReports.set(subagentId, outcome.rawReply);
+      // §6.7 file claims. Only a child that could write takes them: a read-only
+      // inspector holds nothing, and claiming on its behalf would block the
+      // parent out of files nobody is editing. A conflict raises the existing
+      // claim card rather than being silently overwritten.
+      if (verdict.profile !== "read-only") {
+        await this.claimSubagentFiles(session, record, outcome.filesObserved);
+      }
+      this.subagents.update(
+        subagentId,
+        {
+          status: outcome.outcome === "completed"
+            ? "completed"
+            : outcome.outcome === "cancelled" ? "cancelled" : "failed",
+          ...(outcome.sessionId ? { childSessionId: outcome.sessionId } : {}),
+          ...(outcome.totalTokens !== undefined ? { tokens: outcome.totalTokens } : {}),
+        },
+        Date.now(),
+      );
+      this.subagentOutcomes.set(subagentId, outcome);
+    } catch (error) {
+      clearTimeout(timer);
+      this.host.appendLine(`[companions] ${subagentId} crashed: ${(error as Error).message}`);
+      this.subagents.update(subagentId, { status: "failed", errorCode: "child-crashed" }, Date.now());
+    } finally {
+      this.postSubagentCard(session, subagentId);
+      this.releaseSubagentWaiters(subagentId);
+      this.maybeFinishSubagentTurn(session);
+    }
+  }
+
+  /**
+   * Take exclusive claims on the files a write-capable subagent changed (§6.7).
+   *
+   * The claim is the file — same store the crew chain uses, so a subagent and a
+   * crew step cannot both think they own `src/auth.ts`. A conflict raises the
+   * existing claim card rather than being overwritten quietly; the user decides,
+   * because by this point the edit has already happened and the question is
+   * whether to keep it.
+   */
+  private async claimSubagentFiles(
+    session: Session,
+    record: { runId: string; step: number; label: string },
+    files: readonly string[],
+  ): Promise<void> {
+    for (const file of files) {
+      let claim;
+      try {
+        claim = this.crewFileClaims().tryClaim({
+          path: file,
+          runId: record.runId,
+          step: record.step,
+          role: record.label,
+          at: Date.now(),
+        });
+      } catch (error) {
+        // A claim is a lock, not the run. An unwritable claim directory must
+        // not turn a finished subagent into a failed one.
+        this.host.appendLine(`[companions] could not claim ${file}: ${(error as Error).message}`);
+        continue;
+      }
+      if (claim.ok) continue;
+      await this.confirmInChat(session, {
+        title: "File already claimed",
+        body: `${file} is held by ${claim.heldBy.role} (step ${claim.heldBy.step}). `
+          + `The subagent has already changed it — review the diff before keeping it.`,
+        confirmLabel: "Understood",
+      });
+    }
+  }
+
+  // ---------- D20: the turn spans the delegation ----------
+
+  /**
+   * Hold the parent turn open while its subagents are still running (§6.10).
+   *
+   * "Background" (`wait: "none"`) only means the main agent did not block its
+   * own tool call — never that a child outlives the turn unobserved. So when
+   * the CLI ends its prompt turn with children still live, the host keeps the
+   * session `working` and defers the end to `maybeFinishSubagentTurn`, which
+   * runs as each child settles.
+   *
+   * Returns true when the turn was held.
+   */
+  private holdTurnForSubagents(session: Session, meta?: unknown): boolean {
+    const parentSessionId = session.activeSessionId ?? "";
+    const turnId = this.currentTurnId(session);
+    if (!this.subagents.turnHasLiveChildren(parentSessionId, turnId)) return false;
+    session.subagentTurnHold = { turnId, meta };
+    this.setStatus(session, "working");
+    this.postSubagentTray(session);
+    this.host.appendLine(
+      `[companions] holding turn ${turnId}: `
+      + `${this.subagents.running(parentSessionId).length} subagent(s) still running`,
+    );
+    return true;
+  }
+
+  /**
+   * The tray above the composer (§6.10 point 5).
+   *
+   * Its whole job is answering "why is this still working?" — so it lists the
+   * live children with their targets and elapsed time, and disappears the
+   * moment the last one is terminal.
+   */
+  private postSubagentTray(session: Session): void {
+    const running = this.subagents.running(session.activeSessionId ?? "");
+    this.emit(session, {
+      type: "subagentTray",
+      subagents: running.map((record) => ({
+        subagentId: record.subagentId,
+        label: record.label,
+        provider: record.target.provider,
+        providerName: providerDisplayName(record.target.provider),
+        ...(record.target.model ? { model: record.target.model } : {}),
+        startedAt: record.startedAt,
+      })),
+    });
+  }
+
+  /** Finish a turn that was held for its subagents. */
+  private releaseTurnHold(session: Session): void {
+    const hold = session.subagentTurnHold;
+    if (!hold) return;
+    session.subagentTurnHold = undefined;
+    this.postSubagentTray(session);
+    if (turnIsInFlight(session)) return;
+    this.emit(session, {
+      type: "agentEnd",
+      ...(hold.meta ? { meta: hold.meta as never } : {}),
+      ...this.turnEndFields(session, "completed"),
+    });
+    this.noteLiveTurnEnded(session);
+    this.setStatus(session, "done");
+    this.noteSessionActivity(session);
+  }
+
+  // ---------- directives (§6.8) ----------
+
+  /**
+   * Read this message's `@subagent:` / `@role:` directives, and arm the turn.
+   *
+   * Returns the text with the mention tokens removed and the block to append.
+   * Deliberately replaces whatever the last turn set, including with nothing: a
+   * directive is something the user said about THIS message, and carrying it
+   * forward would silently pin every later turn to a worker they named once.
+   */
+  private applyTurnDirectives(session: Session, text: string): { text: string; block: string } {
+    const parsed = parseSubagentMentions(text);
+    session.subagentDirectives = parsed.directives.length ? parsed.directives : undefined;
+    session.subagentsForbiddenThisTurn = parsed.directives.some((d) => d.strength === "forbid");
+    const block = renderDirectiveBlock(parsed.directives);
+    if (parsed.directives.length) {
+      this.host.appendLine(
+        `[companions] ${parsed.directives.length} directive(s) on this turn: `
+        + parsed.directives.map((d) => `${d.id}=${d.strength}${d.provider ? `:${d.provider}` : ""}${d.role ? `:${d.role}` : ""}`).join(", "),
+      );
+    }
+    return { text: parsed.text || text, block };
+  }
+
+  /**
+   * The directive a spawn should be resolved against, if any.
+   *
+   * A `must` directive PINS the target when the agent left it open — that is
+   * what "must" means. It deliberately does not override an explicit provider
+   * on the tool call: the agent may have been told to use two workers, and the
+   * host is not in a position to decide which of them this call is.
+   */
+  private directiveForSpawn(session: Session, args: SpawnArguments): SubagentDirective | undefined {
+    const directives = session.subagentDirectives ?? [];
+    if (!directives.length) return undefined;
+    if (args.provider || args.role) {
+      return directives.find(
+        (directive) =>
+          (args.provider && directive.provider === args.provider)
+          || (args.role && directive.role === args.role),
+      );
+    }
+    return directives.find((directive) => directive.strength === "must");
+  }
+
+  /**
+   * Say so when a `must` directive was not followed (§6.8).
+   *
+   * Only `must`: `prefer` is advice, and flagging it would train the user to
+   * ignore the footer. The host knows whether a matching spawn happened, which
+   * is what makes this checkable rather than a guess about intent.
+   */
+  private reportUnfollowedDirectives(session: Session, turnId: string): void {
+    const directives = session.subagentDirectives ?? [];
+    if (!directives.length) return;
+    const spawned = this.subagents
+      .all()
+      .filter(
+        (record) =>
+          record.parentSessionId === (session.activeSessionId ?? "")
+          && record.spawnedInTurn === turnId
+          && record.status !== "refused",
+      )
+      .map((record) => ({
+        provider: record.target.provider,
+        ...(record.target.model ? { model: record.target.model } : {}),
+        ...(record.roleName ? { role: record.roleName } : {}),
+      }));
+    for (const directive of unfollowedDirectives(directives, spawned)) {
+      this.emit(session, {
+        type: "hostNotice",
+        level: "warning",
+        text: `Directive ${directive.id} was not followed.`,
+      });
+    }
+  }
+
+  // ---------- child visibility, cards and waiters ----------
+
+  /**
+   * Stamp a child session hidden BEFORE its first turn (§6.6 point 1).
+   *
+   * Before, not after, because a history refresh triggered by the child's own
+   * `session/new` would otherwise race it into the list — visibly, and with a
+   * name the user never chose. The write itself has to wait until the CLI has
+   * named the session (the record is keyed by that id), so the stamp is parked
+   * on the session object and flushed the moment the id exists.
+   */
+  private markHiddenChildSession(child: Session, parent: Session, subagentId: string): void {
+    child.sessionType = "agent";
+    child.sessionTypeLockedAt = Date.now();
+    child.pendingHiddenChild = {
+      parentSessionId: parent.activeSessionId ?? "",
+      subagentId,
+      hiddenReason: "companion-subagent",
+      depth: (this.sessionTypeMetaFor(parent)?.depth ?? 0) + 1,
+    };
+  }
+
+  /** Write the parked hidden-child stamp once the CLI has named the session. */
+  private flushHiddenChildMeta(session: Session): void {
+    const pending = session.pendingHiddenChild;
+    const id = session.activeSessionId;
+    if (!pending || !id) return;
+    session.pendingHiddenChild = undefined;
+    const overrides = this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
+    void this.state.update(SESSION_META_KEY, {
+      ...overrides,
+      [id]: { ...(overrides[id] ?? {}), ...pending },
+    });
+    this.sessionCache.delete(id);
+  }
+
+  /** The target block a spawn/await payload carries (§6.4.2). */
+  private targetPayload(verdict: Extract<EligibilityResult, { ok: true }>): unknown {
+    return {
+      provider: verdict.target.provider,
+      ...(verdict.target.model ? { model: verdict.target.model } : {}),
+      ...(verdict.target.effort ? { effort: verdict.target.effort } : {}),
+      effortClamped: verdict.effortClamped ?? null,
+      modelVerified: verdict.modelVerified,
+      sameProviderAsParent: verdict.sameProviderAsParent,
+    };
+  }
+
+  /**
+   * The result payload for one finished child.
+   *
+   * Capped at `resultInlineChars` and never trimmed silently: `truncated`,
+   * `fullLength` and `resultRef` travel with it so the model can decide whether
+   * the rest is worth an `await` with `action: "read"` (§2.1 point 4).
+   */
+  private subagentResultPayload(subagentId: string, opts: { markCollected?: boolean } = {}): unknown {
+    const record = this.subagents.get(subagentId);
+    if (!record) return { subagentId, status: "unknown" };
+    if (opts.markCollected) this.subagents.update(subagentId, { collected: true }, Date.now());
+    const outcome = this.subagentOutcomes.get(subagentId);
+    const base = {
+      subagentId,
+      status: record.status,
+      target: {
+        provider: record.target.provider,
+        ...(record.target.model ? { model: record.target.model } : {}),
+        ...(record.target.effort ? { effort: record.target.effort } : {}),
+        effortClamped: record.effortClamped ?? null,
+        modelVerified: record.modelVerified ?? false,
+        sameProviderAsParent: record.sameProviderAsParent ?? false,
+      },
+      profile: record.profile,
+      ...(record.profileDowngraded ? { profileDowngraded: record.profileDowngraded } : {}),
+      durationMs: (record.endedAt ?? Date.now()) - record.startedAt,
+      ...(record.tokens !== undefined ? { usage: { tokens: record.tokens } } : {}),
+    };
+    if (record.status !== "completed" || !outcome) {
+      return { ...base, refusal: record.errorCode ? { code: record.errorCode } : null };
+    }
+    const cap = Math.max(200, Number(this.companionsSetting("subagents.limits.resultInlineChars", 4000)));
+    const summary = capInlineText(outcome.parsed?.summary ?? outcome.summary ?? "", cap);
+    return {
+      ...base,
+      result: {
+        summary: summary.text,
+        findings: outcome.parsed?.open ?? [],
+        filesReported: outcome.filesReported,
+        filesObserved: outcome.filesObserved,
+        unreported: outcome.reconciliation?.unreported ?? [],
+        claimedOnly: outcome.reconciliation?.claimedOnly ?? [],
+        openQuestions: outcome.parsed?.open ?? [],
+        truncated: summary.truncated,
+        fullLength: (this.subagentReports.get(subagentId) ?? "").length,
+        resultRef: subagentId,
+      },
+      // D20 / §2.1 point 5: the hint rides HERE, with the result the parent
+      // already has, rather than costing a second host message.
+      review: COMPANIONS_REVIEW_HINT,
+      refusal: null,
+    };
+  }
+
+  /** Push the card for one subagent into its parent's transcript. */
+  private postSubagentCard(session: Session, subagentId: string): void {
+    const record = this.subagents.get(subagentId);
+    if (!record) return;
+    const outcome = this.subagentOutcomes.get(subagentId);
+    this.emit(session, {
+      type: "companionSubagent",
+      subagentId,
+      label: record.label,
+      provider: record.target.provider,
+      providerName: providerDisplayName(record.target.provider),
+      ...(record.target.model ? { model: record.target.model } : {}),
+      ...(record.target.effort ? { effort: record.target.effort } : {}),
+      profile: record.profile,
+      profileLabel: profileBadge(record.profile),
+      status: record.status,
+      startedAt: record.startedAt,
+      ...(record.endedAt ? { endedAt: record.endedAt } : {}),
+      modelVerified: record.modelVerified ?? false,
+      sameProviderAsParent: record.sameProviderAsParent ?? false,
+      ...(record.effortClamped ? { effortClamped: record.effortClamped } : {}),
+      ...(record.profileDowngraded ? { profileDowngraded: record.profileDowngraded } : {}),
+      ...(record.errorCode ? { errorCode: record.errorCode } : {}),
+      ...(record.childSessionId ? { sessionId: record.childSessionId } : {}),
+      ...(outcome?.summary ? { summary: outcome.summary } : {}),
+      ...(outcome?.filesReported?.length ? { filesReported: outcome.filesReported } : {}),
+      ...(outcome?.filesObserved?.length ? { filesObserved: outcome.filesObserved } : {}),
+      ...(outcome?.reconciliation?.unreported.length
+        ? { unreported: outcome.reconciliation.unreported }
+        : {}),
+      ...(outcome?.reconciliation?.claimedOnly.length
+        ? { claimedOnly: outcome.reconciliation.claimedOnly }
+        : {}),
+    });
+  }
+
+  /** Resolve once this subagent is terminal, or after `ms`, whichever is first. */
+  private raceSubagent(subagentId: string, ms: number): Promise<boolean> {
+    const record = this.subagents.get(subagentId);
+    if (!record || isTerminalSubagentStatus(record.status)) return Promise.resolve(true);
+    return new Promise<boolean>((resolve) => {
+      let settled = false;
+      const done = (value: boolean) => {
+        if (settled) return;
+        settled = true;
+        resolve(value);
+      };
+      const timer = setTimeout(() => done(false), ms);
+      timer.unref?.();
+      const waiters = this.subagentWaiters.get(subagentId) ?? [];
+      waiters.push(() => { clearTimeout(timer); done(true); });
+      this.subagentWaiters.set(subagentId, waiters);
+    });
+  }
+
+  private async raceSubagents(ids: readonly string[], ms: number, mode: "all" | "any"): Promise<void> {
+    if (!ids.length) return;
+    const races = ids.map((id) => this.raceSubagent(id, ms));
+    // `any` is what makes a fan-out cheap: the parent gets the first report
+    // back and can start reading while the others are still running.
+    if (mode === "any") await Promise.race(races);
+    else await Promise.all(races);
+  }
+
+  private releaseSubagentWaiters(subagentId: string): void {
+    for (const waiter of this.subagentWaiters.get(subagentId) ?? []) waiter();
+    this.subagentWaiters.delete(subagentId);
+  }
+
+  /**
+   * Cancel one child. Every cancel path lands here (§6.5 point 8).
+   *
+   * Idempotent: the registry refuses to move a terminal record, so a timeout
+   * that fires while the child was already finishing changes nothing.
+   */
+  private cancelSubagent(subagentId: string, reason: string, code?: RefusalCode): void {
+    const record = this.subagents.get(subagentId);
+    if (!record || isTerminalSubagentStatus(record.status)) return;
+    this.host.appendLine(`[companions] cancelling ${subagentId}: ${reason}`);
+    for (const session of this.pool) {
+      const handle = session.subagentLive?.find((entry) => entry.subagentId === subagentId);
+      if (!handle) continue;
+      handle.cancelled = true;
+      void handle.roleSession.client?.cancel("companion subagent cancelled");
+      break;
+    }
+    this.subagents.update(
+      subagentId,
+      { status: "cancelled", ...(code ? { errorCode: code } : {}) },
+      Date.now(),
+    );
+    this.releaseSubagentWaiters(subagentId);
+  }
+
+  /** Stop means stop: every running child of this parent (§6.5 point 8). */
+  private cancelSubagentsOf(session: Session, reason: string): void {
+    for (const record of this.subagents.running(session.activeSessionId ?? "")) {
+      this.cancelSubagent(record.subagentId, reason);
+    }
+  }
+
+  /**
+   * D20 — the parent turn ends only after the last child is terminal.
+   *
+   * When a child finished that the parent never collected, ONE batched line
+   * says so (§6.10 point 3). A parent that already has the result gets nothing:
+   * it was told with the tool result, and a second message would be an extra
+   * turn spent repeating it.
+   */
+  private maybeFinishSubagentTurn(session: Session): void {
+    const parentSessionId = session.activeSessionId ?? "";
+    const turnId = this.currentTurnId(session);
+    // Every child settling refreshes the tray, so the user watches the count
+    // fall rather than seeing it vanish all at once at the end.
+    this.postSubagentTray(session);
+    if (this.subagents.turnHasLiveChildren(parentSessionId, turnId)) return;
+    // §6.8: said once the turn's delegation is settled, so it reflects what
+    // actually ran rather than what had run so far.
+    this.reportUnfollowedDirectives(session, turnId);
+    const uncollected = this.subagents.uncollectedFinished(parentSessionId, turnId);
+    if (!uncollected.length) return;
+    this.emit(session, {
+      type: "hostNotice",
+      level: "info",
+      text: uncollectedFollowUpText(uncollected),
+    });
+    for (const record of uncollected) {
+      this.subagents.update(record.subagentId, { collected: true }, Date.now());
+    }
+  }
+
 
   /** Snapshot of currently authorized session cwds (same set as isAuthorizedCwd). */
   private authorizedSessionCwds(): string[] {
@@ -10754,6 +12116,11 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     // `tools/call` has no timeout of its own and would wait for ever.
     this.askUserChannel?.dispose();
     this.askUserChannel = undefined;
+    // Window reload and extension deactivation both land here. Every
+    // outstanding delegation call is settled and every child cancelled — a
+    // subagent that outlives its editor is spending a subscription for nobody.
+    this.companionsChannel?.dispose();
+    this.companionsChannel = undefined;
     for (const session of this.pool) {
       session.askUserToken = undefined;
       this.dropPendingQuestions(session);
@@ -12435,6 +13802,10 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         session.activeSessionId = resumeId;
         session.titleGenerated = true; // existing session, name already in storage
         session.hasHistory = true;
+        // AP-15 / ST-3. The session now has an id, so its stored type can be
+        // read. A record without one is a pre-AP-15 conversation and reads as a
+        // locked Agent session — no migration write, the reader supplies it.
+        this.restoreSessionType(session);
 
         // Plan-gate restoration: the CLI replays its own current_mode_update
         // events during loadSession, which our modeChanged handler honors by
@@ -12478,6 +13849,13 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         clock.record("load", 0);
         clock.record("replay(post)", 0);
         session.activeSessionId = client.sessionId;
+        // AP-16 §6.6 point 1: before the child's first turn, so no history
+        // refresh can race it into the list.
+        this.flushHiddenChildMeta(session);
+        // AP-15 / ST-1. The CLI has named the session, so the type the user
+        // picked in the empty state finally has a key to be written against.
+        this.persistSessionType(session);
+        this.postSessionType(session);
         // A role that declares `mode: plan` is read-only by construction, and
         // that has to be true from its first turn — asking for it afterwards
         // would let one write through first.
@@ -13066,6 +14444,9 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       case "setMode":
         await this.setMode(msg.modeId, session, requester);
         break;
+      case "setSessionType":
+        this.setSessionType(session, msg.sessionType);
+        break;
       case "removeChip": {
         // A removed image chip's staged file has no other reference — reclaim
         // it now instead of leaving multi-MB orphans until the weekly sweep.
@@ -13542,6 +14923,48 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       }
       case "saveAgentRole": {
         await this.handleSaveAgentRole(msg);
+        break;
+      }
+      case "companionSubagentAction": {
+        const record = this.subagents.get(msg.subagentId);
+        if (!record) break;
+        if (msg.action === "cancel") {
+          this.cancelSubagent(msg.subagentId, "the user cancelled it from the tray");
+          this.postSubagentCard(session, msg.subagentId);
+          this.postSubagentTray(session);
+        } else if (msg.action === "openTranscript" && record.childSessionId) {
+          // The child is hidden from history but its transcript is readable —
+          // that is the whole reason §6.6 keeps it rather than asking the CLI
+          // not to persist.
+          await this.openSession(record.childSessionId, this.sessionCwd(session));
+        }
+        break;
+      }
+      case "setSubagentsEnabled":
+        // Global, like the other display and behaviour prefs. The config
+        // watcher re-posts it, keeping every open settings page in step.
+        await this.host.getConfiguration("companions")
+          .update("subagents.enabled", !!msg.value, "global");
+        this.postAgentRoles();
+        break;
+      case "subagentRosterSave": {
+        // A PATCH, merged into the stored object. Two settings pages open on
+        // one window must not overwrite each other's untouched rows.
+        const stored = this.companionsSetting<Record<string, unknown>>("subagents.roster", {});
+        const current = (stored?.[msg.provider] ?? {}) as Record<string, unknown>;
+        const next: Record<string, unknown> = { ...(stored ?? {}) };
+        const merged: Record<string, unknown> = { ...current };
+        for (const [key, value] of Object.entries(msg.patch ?? {})) {
+          // An empty string is a real answer here — it means "this companion's
+          // own default" / "no ceiling" — so it is stored rather than dropped.
+          if (value !== undefined) merged[key] = value;
+        }
+        next[msg.provider] = merged;
+        await this.host.getConfiguration("companions").update("subagents.roster", next, "global");
+        this.host.appendLine(
+          `[companions] roster: ${msg.provider} ${Object.keys(msg.patch ?? {}).join(", ")}`,
+        );
+        this.postAgentRoles();
         break;
       }
       case "deleteAgentRole": {
@@ -14517,6 +15940,16 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     } catch (error) {
       this.host.appendLine(`[ask_user] not offering the question tool: ${(error as Error).message}`);
     }
+    // AP-16, and guarded for the same reason as AP-05 above: `mcpServers` is
+    // resolved inside `session/new`, so a throw here would surface as a session
+    // that never opens. A pipe that cannot bind costs this session its
+    // delegation tools and nothing else (§6.4.1).
+    try {
+      const companions = await this.companionsMcpServer(session);
+      if (companions) servers.push(companions);
+    } catch (error) {
+      this.host.appendLine(`[companions] not offering delegation: ${(error as Error).message}`);
+    }
     return servers;
   }
 
@@ -15230,6 +16663,17 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       nextOffset = offset + pageIds.length;
     }
     this.annotateWorktreeLabels(pageEntries, overrides, cwd);
+    // AP-15 §5.2. Only Crew rows are badged; an Agent row is what a row has
+    // always looked like, and every pre-AP-15 session is an Agent session.
+    for (const entry of pageEntries) {
+      if (effectiveSessionType(overrides[entry.id]) === "crew") entry.sessionType = "crew";
+      // AP-16 §6.6 point 2. Carried onto the entry so the ONE filter in
+      // `sessions.ts` decides visibility for both the grok-stamped kind and
+      // our own marker — pagination keeps counting index slots exactly as it
+      // does today, so a hidden row cannot stall load-more.
+      const hidden = overrides[entry.id]?.hiddenReason;
+      if (hidden) entry.hiddenReason = hidden;
+    }
 
     // hasMore is governed purely by what's on disk (load-more pages disk-only); compute it before
     // injecting any live-only rows below so an injected entry can't be mistaken for another page.
@@ -18926,9 +20370,23 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       // when the chip was staged.
       contextChipPayload: this.contextChipPayloads(chips),
     };
+    // AP-16 §6.8. Parsed from the composer text, stripped out of it, and
+    // appended as one block AFTER the context envelope so it cannot knock a
+    // slash command off position 0 (the same reason the envelope trails one).
+    // Replaced on every send, including a send with none — which is how the
+    // previous turn's directives stop applying.
+    const directives = this.applyTurnDirectives(session, text);
+    const directiveText = directives.text;
     const { blocks: promptBlocks } = contributions
       ? buildQueuedPromptWithImages(contributions, implicitChips, promptDeps, slashCommand != null)
-      : buildPromptWithImages(text, chips, images, promptDeps, slashCommand != null);
+      : buildPromptWithImages(directiveText, chips, images, promptDeps, slashCommand != null);
+    if (directives.block) {
+      const last = promptBlocks[promptBlocks.length - 1];
+      if (last && last.type === "text") last.text = `${last.text}
+
+${directives.block}`;
+      else promptBlocks.push({ type: "text", text: directives.block });
+    }
 
     // Unlike images, document bytes are read lazily by Grok from the path in
     // the prompt. Persist ownership before consuming the chip or sending.
@@ -18994,6 +20452,10 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       session.firstUserMessageForTitle = text;
       // One `session_start` per session, on the first real user message.
       this.reportSessionStart(session, origin);
+      // ST-2. This send is the first submitted content, whatever it consists of
+      // — text, a voice utterance, or nothing but chips and images. The type is
+      // settled from here on and never comes undone, not by a rewind either.
+      this.lockSessionTypeNow(session);
     }
     const sentChips = chips.filter((c) => !c.hidden);
     session.userMessageCount += 1;
@@ -19071,6 +20533,14 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       // turn emits its own end when it really ends. (The other agentEnd site
       // needs no guard: nothing awaits between its endTurn check and its
       // emit.)
+      // AP-16 / D20. The CLI has ended its ACP prompt turn, but the HOST turn
+      // spans the whole delegation: a subagent this turn started is still
+      // running, still spending a subscription, and still owed a card. Holding
+      // here keeps the status dot, the Stop button, the pool's never-reap rule
+      // and the composer's queue-or-steer behaviour all consistent with what is
+      // actually happening. `maybeFinishSubagentTurn` ends the turn when the
+      // last child is terminal.
+      if (this.holdTurnForSubagents(session, meta)) return;
       if (!turnIsInFlight(session)) this.emit(session, { type: "agentEnd", meta, ...this.turnEndFields(session, turnStatusFromPromptResult(meta)) });
       this.noteLiveTurnEnded(session);
       // "done" only if this is still the LAST word. /compact releases its turn
@@ -20488,7 +21958,11 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     return !!id && this.focused.activeSessionId === id;
   }
   private newLocalSession(): Session {
-    return new Session();
+    const session = new Session();
+    // A brand-new session is the only moment the setting applies; everything
+    // after this is the user's own choice or a lock.
+    session.sessionType = this.configuredDefaultSessionType();
+    return session;
   }
 
   private reserveSessionLoad(
@@ -20972,6 +22446,9 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         worktreePath: override?.worktreePath,
         queuedDraft: override?.queuedDraft,
         kind: typeof raw?.session_kind === "string" ? raw.session_kind : undefined,
+        // AP-16 §6.6 point 3. A child mid-run has no user turns yet and would
+        // otherwise look exactly like an abandoned "New session".
+        hiddenReason: override?.hiddenReason,
         numMessages: typeof raw?.num_messages === "number" ? raw.num_messages : 0,
         summary: typeof raw?.session_summary === "string" ? raw.session_summary : "",
         generatedTitle: typeof raw?.generated_title === "string" ? raw.generated_title : "",
@@ -23613,6 +25090,16 @@ ${openMain}
       <span id="session-name-repo" class="session-name-repo" hidden></span>
       <button id="session-name-edit" class="session-name-edit icon-btn" type="button" hidden></button>
     </div>
+    <!-- AP-15. Two mutually exclusive controls in one slot: the segmented
+         switch while the session is empty, the locked badge afterwards. This is
+         NOT the composer's Agent/Plan/Auto-accept picker — that one decides what
+         the agent may do in a turn, this one decides what the conversation is.
+         The removed prototype's #mode-switch-bar must not come back here. -->
+    <div id="session-type-picker" class="session-type-picker" role="radiogroup" aria-label="Session type" title="Session type decides how this conversation works. The Agent/Plan picker decides what the agent may do in a turn." hidden>
+      <button id="session-type-agent" class="session-type-opt" type="button" role="radio" aria-checked="true" data-session-type="agent">Agent</button>
+      <button id="session-type-crew" class="session-type-opt" type="button" role="radio" aria-checked="false" data-session-type="crew">Crew</button>
+    </div>
+    <span id="session-type-badge" class="session-type-badge" hidden></span>
     <button id="repo-btn" class="repo-chip" type="button" title="Choose repository"></button>
     <button id="remote-btn" class="icon-btn remote-btn" title="Continue remotely" hidden></button>
     <button id="history-btn" class="icon-btn" title="Session history"></button>
@@ -23645,6 +25132,14 @@ ${fileShellOpen}
         <span id="todo-rail-count" class="todo-rail-count"></span>
       </button>
       <ol id="todo-rail-list" class="todo-rail-list"></ol>
+    </div>
+    <!-- AP-16 §6.10 point 5. Answers "why is this still working?" while a turn
+         waits on its subagents, and disappears when the last one is done. -->
+    <div id="subagent-tray" class="subagent-tray" hidden>
+      <div class="subagent-tray-head">
+        <span id="subagent-tray-title" class="subagent-tray-title"></span>
+      </div>
+      <ol id="subagent-tray-list" class="subagent-tray-list"></ol>
     </div>
     <div id="crew-run" class="crew-run" hidden>
       <div class="crew-run-head">

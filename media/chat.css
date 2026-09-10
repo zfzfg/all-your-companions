@@ -6189,3 +6189,178 @@ a.add-project-github-open {
   gap: 4px;
 }
 .onb-steps li { margin: 0; }
+
+/* AP-15 — Session type (Agent | Crew).
+   A segmented switch in the top bar while the conversation is empty, replaced
+   by a read-only badge with a lock glyph once the first message is sent. It
+   sits BESIDE the repo chip, never inside the composer's permission-mode
+   button: the two are different axes and must not read as one control. */
+.session-type-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  padding: 1px;
+  border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.35));
+  border-radius: 5px;
+  background: var(--vscode-editorWidget-background, transparent);
+  flex: 0 0 auto;
+}
+.session-type-opt {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.6;
+  padding: 0 7px;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.session-type-opt:hover {
+  color: var(--vscode-foreground);
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.15));
+}
+.session-type-opt.selected {
+  color: var(--vscode-button-foreground, var(--vscode-foreground));
+  background: var(--vscode-button-background, rgba(128, 128, 128, 0.35));
+}
+.session-type-opt:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+.session-type-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  font-size: 11px;
+  line-height: 1.6;
+  padding: 0 7px;
+  border-radius: 5px;
+  border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.35));
+  color: var(--vscode-descriptionForeground);
+  white-space: nowrap;
+}
+/* The lock is decorative: the accessible name carries "locked" in words. */
+.session-type-badge::before {
+  content: "";
+  width: 9px;
+  height: 11px;
+  flex: 0 0 auto;
+  background: currentColor;
+  -webkit-mask: var(--session-type-lock) center / contain no-repeat;
+  mask: var(--session-type-lock) center / contain no-repeat;
+  opacity: 0.75;
+  --session-type-lock: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='11' width='18' height='11' rx='2'/%3E%3Cpath d='M7 11V7a5 5 0 0 1 10 0v4'/%3E%3C/svg%3E");
+}
+
+/* AP-15 — Crew rows in the history list. Agent rows are unbadged, so the list
+   looks exactly as it always has for anyone who never opens a Crew session. */
+.history-row-type {
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 3px;
+  font-size: 9px;
+  line-height: 14px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--vscode-descriptionForeground);
+  border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.35));
+  flex: 0 0 auto;
+}
+
+/* AP-16 — companion subagent cards. The purple subagent row is reused as is
+   (§6.11); these rules only add what a host-driven delegation shows on top:
+   the permission profile, and the notices that explain a decision the host
+   made which the agent did not ask for. */
+.companion-subagent .companion-profile {
+  flex: none;
+  font-size: 10px;
+  line-height: 15px;
+  padding: 0 5px;
+  border-radius: 3px;
+  border: 1px solid currentColor;
+  opacity: 0.75;
+  white-space: nowrap;
+}
+.companion-subagent .companion-notes {
+  margin: 4px 0 0 22px;
+  font-size: 11px;
+  opacity: 0.85;
+}
+.companion-subagent .companion-note + .companion-note { margin-top: 2px; }
+.companion-subagent .companion-section { margin: 6px 0 0 22px; }
+.companion-subagent .companion-section-heading {
+  font-weight: 600;
+  font-size: 11px;
+  opacity: 0.9;
+  margin-bottom: 2px;
+}
+.companion-subagent .companion-section-line {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+/* Files the host saw change that the child never mentioned. The dangerous
+   direction, so it is the one that carries a colour. */
+.companion-subagent .companion-warn .companion-section-heading,
+.companion-subagent .companion-warn .companion-section-line {
+  color: var(--vscode-editorWarning-foreground, var(--vscode-charts-orange, #cca700));
+}
+
+/* AP-16 §6.10 — the subagent tray. It sits above the composer while a turn is
+   waiting on its children, and its only job is answering "why is this still
+   working?" — so it is a list of who, on what, with a way to stop each one. */
+.subagent-tray {
+  margin: 0 var(--pad) 4px;
+  padding: 5px 8px;
+  border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.3));
+  border-left: 2px solid var(--vscode-charts-purple, #b180d7);
+  border-radius: 0 6px 6px 0;
+  background: var(--vscode-textBlockQuote-background, rgba(177, 128, 215, 0.08));
+  font-size: 11px;
+}
+.subagent-tray-title {
+  font-weight: 600;
+  color: var(--vscode-descriptionForeground);
+}
+.subagent-tray-list {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.subagent-tray-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.subagent-tray-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.subagent-tray-target {
+  color: var(--vscode-descriptionForeground);
+  white-space: nowrap;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.subagent-tray-cancel {
+  flex: none;
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--vscode-textLink-foreground);
+  font: inherit;
+  cursor: pointer;
+  padding: 0 2px;
+}
+.subagent-tray-cancel:hover { text-decoration: underline; }

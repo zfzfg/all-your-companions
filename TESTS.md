@@ -71,6 +71,110 @@ The wire format is the highest-value test surface: ACP changes break everything 
 - **`extractPromptMeta`** — pulls token counts out of `_meta` for the donut and handles missing `_meta` gracefully
 - **Response builders** — `makePermissionResponse`, `makeExitPlanResponse`, `makeAckResponse`, `makeRequest`. These encode the exact shapes the agent expects. Bugs here are silent.
 
+### `test/session-type.test.ts` — session types, pure (AP-15, 20 tests)
+
+`agent` | `crew`, chosen before the first message and locked at it. Covers ST-1
+(pre-lock switching leaves the input untouched and preserves unrelated
+metadata), ST-2 (one stamp only, several triggers per send, and a switch after
+the stamp refused even with no history), ST-3 (a record with no type reads as a
+locked Agent session, with no migration write anywhere), and ST-4 (a rewind that
+empties the transcript does not unlock). Also pins that the removed prototype's
+vocabulary — `single`, `sessionMode` — never resolves again, and that a fork
+inherits the type and the lock but not the parent's `crewRunId` or subagent list.
+
+### `test/session-type-host.test.ts` — host authority + persistence (AP-15, 12 tests)
+
+The half neither the pure module nor the DOM can cover. A forged
+`setSessionType` after the lock is refused **by the host**, which answers with
+the copy-deck notice and re-asserts the true value. Nothing is written to
+`grok.sessionMeta` before the CLI has named the session (the record is keyed by
+that id); the type lands under it as soon as it exists, without disturbing the
+neighbouring fields. A pre-AP-15 record restores as a locked Agent session and
+is left byte-identical. An unreadable `companions.sessionType.default` falls back
+rather than throwing on the `+` button.
+
+### `test/session-type.dom.test.ts` — the header control (AP-15, 10 tests)
+
+Real `chat.js` in happy-dom, driven only by `sessionType` messages. The
+segmented switch appears with the reported option selected, posts
+`setSessionType` on the other option and nothing on the selected one, is
+replaced by a badge carrying the copy-deck lock tooltip once locked, posts
+nothing while locked, and corrects an optimistic flip when the host refuses.
+Also pins that a session-type message never touches the Agent/Plan/Auto-accept
+permission-mode button (D1) and that the Crew composer asks for an idea.
+
+### `test/target-eligibility.test.ts` — who may run as a subagent (AP-16, 80 tests)
+
+§6.3 is an ordered list of eight rules, and the ORDER is the contract: the
+caller shows the first failing reason, so a companion that is both logged out
+and disabled must read as logged out — the one the user can act on. Walks every
+refusal code against every provider and every cache state. Pins that an unwarmed
+model cache is skipped rather than read as "this companion has no models" (which
+would refuse every spawn on a cold start), that an explicitly named companion is
+refused rather than silently substituted, that a clamp is always reported, that
+a parent in Plan mode downgrades rather than refuses, and that a refused spawn
+does not spend a per-turn slot. Also pins D12: an empty world produces an empty
+list, never a built-in suggestion.
+
+### `test/companions-server.test.ts` — the delegation protocol (AP-16, 36 tests)
+
+The three tools and only three; enums generated from `ACP_PROVIDERS` and
+`EffortLevel` rather than typed out; descriptions capped at three sentences with
+the primer only in the server's `instructions`. Argument normalization is
+tolerant — an unknown provider is dropped rather than rejected, a long label is
+trimmed, a small timeout is raised — and only a missing `task` fails, as a tool
+RESULT the model can act on. The last block re-reads
+`resources/mcp/companions-server.cjs` and pins every shared constant against
+this module's copy: the script is plain CJS out of the VSIX and cannot import
+the TypeScript, so a drift would show up as a silent handshake failure on a
+user's machine and nowhere in CI.
+
+### `test/companions-mcp-ipc.test.ts` — the real pipe (AP-16, 19 tests)
+
+Sibling of `test/ask-user-ipc.test.ts`, and binary-free the same way: it spawns
+the real shipped script as a child process and speaks MCP JSON-RPC to it. The
+cases are the ones that leave something hanging when they are wrong — a revoked
+session, a disposed host, a CLI that dies mid-call, a refused token, no address
+at all. Each of those, done wrong, is a CLI blocked inside `tools/call` with no
+timeout of its own, and a subagent still spending a subscription for a parent
+that is never told. Also pins that two sessions' calls stay apart, that secrets
+travel in `env` and never in argv, and that the address cannot collide with the
+`ask_user` listener's.
+
+### `test/companion-subagents.test.ts` — the registry (AP-16, 29 tests)
+
+D20's turn boundary (a turn is not finished until every child of it is terminal,
+background children included), the §2.1.5 rule that only UNCOLLECTED children
+earn a follow-up line, and the limit arithmetic — including that a refused spawn
+spends no slot, so four typos cannot exhaust a turn's budget. A terminal record
+never moves again: a cancel arriving after completion must not rewrite a
+finished report.
+
+### `test/subagent-card.dom.test.ts` — the card (AP-16, 19 tests)
+
+Real `chat.js` in happy-dom. Pins that the purple subagent row is reused, that
+the card is replaced rather than duplicated on each update, and that every host
+decision the agent did not ask for is written on it: same-provider caution,
+unverified model, lowered effort, reduced permissions. `unreported` files are
+asserted to render FIRST — files the host watched change that the child never
+mentioned are the dangerous direction. The last block pins that
+`companions_spawn_subagent` cards and `companions_await_subagents` does not,
+while the providers' own native delegation tools still card as they always have.
+The tray block pins §6.10's "why is this still working?" panel, including that
+an empty list is the only "done" signal there is — it is replacing state, so
+there is no separate finish message to lose.
+
+### `test/subagent-directives.test.ts` — `@subagent:` in the composer (AP-16, 43 tests)
+
+The round trip is the contract: what the composer parses must serialise into the
+prompt and peel back out as the same chips, so a session reopened months later
+shows chips and never the XML. Pins the judgement calls too — a word that does
+not resolve to a companion is left in the user's own text rather than swallowed,
+an unrecognised `effort:` value is dropped rather than blocking a send, a
+`forbid` collapses the whole block rather than contradicting a target beside it,
+and validation does NOT block a send on an unwarmed model cache, which is not
+evidence that the model is gone.
+
 ### `test/chips.test.ts` — file-chip CRUD (6 tests)
 
 - Implicit chips have stable ids (so the active-editor watcher can replace them)

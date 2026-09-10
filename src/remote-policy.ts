@@ -276,6 +276,17 @@ export const INBOUND_DISPOSITION: Record<WebviewMsg["type"], InboundDisposition>
   newSession: "propose",
   cancel: "propose",
   setMode: "propose",
+  // AP-15. Host-local: the type is chosen on the machine that owns the
+  // conversation, it is irreversible once locked, and a remote has no empty
+  // session of its own to change. Remotes still SEE the badge (the outbound
+  // `sessionType` mirrors), they just cannot flip it.
+  setSessionType: "host-local",
+  // AP-16. Roster and master switch are machine-wide settings about which local
+  // CLIs may be spent — host-local, like every other settings write.
+  setSubagentsEnabled: "host-local",
+  // Acts on a live child process on this machine.
+  companionSubagentAction: "host-local",
+  subagentRosterSave: "host-local",
   setConfigOption: "propose",
   setEffort: "propose",
   setModel: "propose",
@@ -601,6 +612,11 @@ export const REMOTE_REQUIRES_BOUND_SESSION: Record<WebviewMsg["type"], boolean> 
   newSession: false,
   cancel: true,
   setMode: true,
+  // host-local, and addressed by its own `sessionId` rather than the bound one.
+  setSessionType: false,
+  setSubagentsEnabled: false,
+  companionSubagentAction: false,
+  subagentRosterSave: false,
   setConfigOption: true,
   setEffort: true,
   setModel: true,
@@ -1002,6 +1018,17 @@ export const OUTBOUND_DISPOSITION: Record<HostMsg["type"], OutboundDisposition> 
   sessionRemoved: "mirror",
   modelChanged: "mirror",
   modeChanged: "mirror",
+  // AP-15. Display-only: which kind of conversation this is, and whether that
+  // is settled. Carries no path, no prompt and no affordance a remote could
+  // act on — the inbound switch is host-local.
+  sessionType: "mirror",
+  // AP-16. Host-local: the card carries the child's task, the file paths it
+  // was given and the provider it runs on — a prompt, in other words, which
+  // §10 makes host-local by default.
+  companionSubagent: "host-local",
+  // Same class as the card it explains: it carries the children's labels and
+  // targets, which is prompt-derived text.
+  subagentTray: "host-local",
   planModeAvailability: "mirror",
   providerCapabilities: "mirror",
   // Display-only checklist of the agent's own steps; carries no path, no
@@ -1195,6 +1222,9 @@ export const OUTBOUND_PROJECT_AUTH: Record<HostMsg["type"], OutboundProjectAuth>
   chips: "scope",
   modelChanged: "scope",
   modeChanged: "scope",
+  sessionType: "scope",
+  companionSubagent: "scope",
+  subagentTray: "scope",
   planModeAvailability: "scope",
   providerCapabilities: "scope",
   planEntries: "scope",

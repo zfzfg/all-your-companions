@@ -1798,3 +1798,61 @@ a.settings-github-flow-open {
   align-self: flex-start;
   margin-top: 10px;
 }
+
+/* AP-16 — the subagent roster. One row per companion, always listed: a
+   companion you have not signed into yet is still one you may want to
+   configure ahead of time. */
+.settings-roster {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.settings-roster-row {
+  border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.25));
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+/* A companion that is off is still readable — it is a setting, not an error. */
+.settings-roster-row.is-off { opacity: 0.6; }
+.settings-roster-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.settings-roster-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+}
+.settings-roster-name { font-weight: 600; }
+.settings-roster-status {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  white-space: nowrap;
+}
+.settings-roster-status.is-usable { color: var(--vscode-charts-green, #89d185); }
+.settings-roster-status.is-needs-login { color: var(--vscode-editorWarning-foreground, #cca700); }
+.settings-roster-body {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 8px 12px;
+  margin-top: 8px;
+}
+.settings-roster-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+/* The notes field is the load-bearing one — it is what the agent reads when it
+   picks a companion — so it gets the full width wherever the grid allows. */
+.settings-roster-field-wide { grid-column: 1 / -1; }
+.settings-roster-field-label {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
+.settings-roster-select,
+.settings-roster-notes { width: 100%; min-width: 0; }
+.settings-roster-checkbox { display: inline-flex; align-items: center; height: 24px; }

@@ -148,11 +148,12 @@ describe("parseAgentRole", () => {
 });
 
 describe("loadAgentRoles", () => {
-  it("ships five working roles when there is no .companions/agents at all", () => {
+  it("ships six working roles when there is no .companions/agents at all", () => {
+    // Six since AP-16 added `inspector`, the shipped delegation role.
     const set = loadAgentRoles([]);
     expect(set.problems).toEqual([]);
     expect(set.roles.map((role) => role.name).sort())
-      .toEqual(["fixer", "implementer", "planner", "researcher", "reviewer"]);
+      .toEqual(["fixer", "implementer", "inspector", "planner", "researcher", "reviewer"]);
     for (const role of set.roles) {
       expect(role.source).toBe("builtin");
       expect(role.whenToUse.length).toBeGreaterThan(0);
@@ -254,10 +255,12 @@ describe("validateRoleModel", () => {
 });
 
 describe("preferDifferentProvider", () => {
-  it("is set on the shipped reviewer and on nothing else", () => {
+  it("is set on the shipped reviewer and inspector, and on nothing else", () => {
+    // The reviewer needs an outside opinion; the inspector needs a second pair
+    // of eyes that is not already spending the parent's context (§6.14).
     const set = loadAgentRoles([]);
-    const flagged = set.roles.filter((role) => role.preferDifferentProvider).map((role) => role.name);
-    expect(flagged).toEqual(["reviewer"]);
+    const flagged = set.roles.filter((role) => role.preferDifferentProvider).map((role) => role.name).sort();
+    expect(flagged).toEqual(["inspector", "reviewer"]);
   });
 
   it("can be declared by a project role", () => {

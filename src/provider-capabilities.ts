@@ -20,7 +20,10 @@ export type ProviderCapability =
   | "questionRpc"    // x.ai/ask_user_question (NOT the host-MCP server in AP-05)
   | "feedback"       // _x.ai/feedback (thumbs rating)
   | "subagents"      // Subagent delegation & lifecycle rail
-  | "structuredPlan"; // ACP `plan` update carries entries[], not prose (AP-02)
+  | "structuredPlan" // ACP `plan` update carries entries[], not prose (AP-02)
+  | "hostMcp"        // Consumes host-supplied MCP servers via session/new (AP-16)
+  | "companionSubagentTarget" // May be started as a companion subagent (AP-16)
+  | "delegationShim"; // Needs the fenced-block delegation shim instead of host MCP (§6.4.4)
 
 export type CapabilitySupport =
   | { state: "yes" }
@@ -40,6 +43,9 @@ export const PROVIDER_CAPABILITY_NAMES: readonly ProviderCapability[] = [
   "feedback",
   "subagents",
   "structuredPlan",
+  "hostMcp",
+  "companionSubagentTarget",
+  "delegationShim",
 ] as const;
 
 /**
@@ -80,6 +86,13 @@ export const PROVIDER_CAPABILITIES: Record<
       state: "no",
       reason: "Grok reports plans as prose, not as a step list, so there is no checklist to read.",
     },
+    // Host-supplied `mcpServers` on session/new are consumed and called
+    // (research/mcp-shapes.md: grok routes them through search_tool/use_tool).
+    hostMcp: { state: "yes" },
+    // Any provider this host can start as a fresh session can be a child.
+    companionSubagentTarget: { state: "yes" },
+    // Not needed: the MCP channel works.
+    delegationShim: { state: "no", reason: "Grok consumes host MCP servers, so the shim is unnecessary." },
   },
   codex: {
     // Steer not implemented by OpenAI Codex ACP adapter; answers -32601 (media/chat.js:4150)
@@ -125,6 +138,11 @@ export const PROVIDER_CAPABILITIES: Record<
     },
     // Codex sends the entries[] shape of the ACP plan update (plan-entries.ts)
     structuredPlan: { state: "yes" },
+    // Host-supplied `mcpServers` on session/new are consumed and called
+    // (research/mcp-shapes.md: `_meta.is_mcp_tool_call`).
+    hostMcp: { state: "yes" },
+    companionSubagentTarget: { state: "yes" },
+    delegationShim: { state: "no", reason: "Codex consumes host MCP servers, so the shim is unnecessary." },
   },
   claude: {
     // Claude Code has no interjection RPC; queued send is used instead (media/chat.js:4151)
@@ -170,6 +188,12 @@ export const PROVIDER_CAPABILITIES: Record<
     },
     // Claude sends the entries[] shape of the ACP plan update (plan-entries.ts)
     structuredPlan: { state: "yes" },
+    // Host-supplied `mcpServers` on session/new are consumed and called
+    // (research/mcp-shapes.md: `mcp__<server>__<tool>`), and AP-05 ask_user
+    // already rides this path in production.
+    hostMcp: { state: "yes" },
+    companionSubagentTarget: { state: "yes" },
+    delegationShim: { state: "no", reason: "Claude consumes host MCP servers, so the shim is unnecessary." },
   },
   gemini: {
     // Steer not supported by Gemini / Antigravity (media/chat.js:4158)
@@ -223,6 +247,20 @@ export const PROVIDER_CAPABILITIES: Record<
     structuredPlan: {
       state: "probe",
       reason: "Gemini CLI reports a step list; Antigravity reports plans as prose.",
+    },
+    // Not covered by research/mcp-shapes.md (that probe ran grok/codex/claude
+    // only). Antigravity and Gemini CLI share this provider id and may differ,
+    // so the cell stays a probe until `research/probe-acp-mcp.cjs gemini` has
+    // run on this machine. A probe cell is spawnable (§6.3 rule 3 refuses only
+    // "no") but does not get the host `companions` server until it is proven.
+    hostMcp: {
+      state: "probe",
+      reason: "Whether Antigravity consumes host MCP servers over ACP is unprobed — run research/probe-acp-mcp.cjs gemini.",
+    },
+    companionSubagentTarget: { state: "yes" },
+    delegationShim: {
+      state: "probe",
+      reason: "Depends on the hostMcp probe: the shim is only needed if host MCP servers are not consumed.",
     },
   },
 };

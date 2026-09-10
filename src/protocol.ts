@@ -22,6 +22,7 @@
 // test can import it without a VS Code environment.
 
 import type { ModelInfo, PromptResultMeta, PromptUsage, PermissionRequest, ExitPlanRequest, QuestionRequest } from "./acp";
+import type { SessionType } from "./session-type";
 import type { TurnEndStatus } from "./acp-dispatch";
 export type { TurnEndStatus };
 import type { ContextChip } from "./context-chips";
@@ -107,6 +108,24 @@ export interface CrewFlowView {
  * cold, not that the provider has no models, so the page offers free text
  * instead of an empty dropdown.
  */
+/** One companion's row in the subagent roster (AP-16 §6.2). */
+export interface SubagentRosterRow {
+  id: AcpProvider;
+  label: string;
+  /** Live, from the same state `usableProviderIds` reads. */
+  status: "usable" | "needs-login" | "not-connected";
+  enabled: boolean;
+  allowWrite: boolean;
+  /** Empty means every model this companion has. */
+  allowedModels: string[];
+  defaultModel: string;
+  defaultEffort: string;
+  maxEffort: string;
+  /** What the main agent is told this companion is good at. The user's words,
+   *  which is the whole point — there is no hardcoded strengths table. */
+  notes: string;
+}
+
 export interface RoleProviderOption {
   id: AcpProvider;
   label: string;
@@ -625,6 +644,17 @@ export type HostMsg =
       roles: AgentRoleView[];
       flows: CrewFlowView[];
       providers: RoleProviderOption[];
+      /**
+       * AP-16 §6.2 — the per-companion subagent roster, one row per provider
+       * whether or not it is connected. Always listed: a companion you have not
+       * signed into yet is still one you may want to configure ahead of time,
+       * and hiding the row makes the roster look shorter than it is.
+       */
+      subagentRoster?: SubagentRosterRow[];
+      /** The master switch, so the roster can grey itself out when it is off. */
+      subagentsEnabled?: boolean;
+      /** Effort levels, generated from `EffortLevel` — never typed out (D12). */
+      efforts?: string[];
       problems: string[];
       /** The project these project-scoped files belong to. Empty when no
        *  folder is open, which is what `hasProject: false` tells the page. */
@@ -690,6 +720,65 @@ export type HostMsg =
   // Optional and additive: a client that never sees it keeps its old fallback.
   | { type: "sessionName"; sessionId: string; name: string; cwd: string; repoCwd?: string }
   | { type: "modelChanged"; modelId: string }
+  // AP-15. `locked` is the whole point: the webview swaps the segmented
+  // control for a read-only badge, and the host refuses a switch either way.
+  | { type: "sessionType"; sessionId: string; sessionType: SessionType; locked: boolean }
+  /**
+   * AP-16. One companion subagent's card, keyed by `subagentId`.
+   *
+   * Replacing state: the host re-sends the whole card on every state change
+   * rather than patching it, so a card that arrives after a reload is complete
+   * on its own and the webview needs no merge rules. Host-local — it carries
+   * the child's task, files and provider.
+   */
+  | {
+      type: "companionSubagent";
+      subagentId: string;
+      label: string;
+      provider: AcpProvider;
+      providerName: string;
+      model?: string;
+      effort?: string;
+      profile: "read-only" | "scoped-edit" | "inherit";
+      /** The copy-deck badge text for `profile`. */
+      profileLabel: string;
+      status: "pending-approval" | "running" | "completed" | "failed" | "cancelled" | "refused";
+      startedAt: number;
+      endedAt?: number;
+      /** False when the provider's model list had not been loaded yet. */
+      modelVerified: boolean;
+      sameProviderAsParent: boolean;
+      effortClamped?: { requested: string; applied: string };
+      profileDowngraded?: string;
+      errorCode?: string;
+      /** The child's own session id, for "Open transcript". */
+      sessionId?: string;
+      summary?: string;
+      filesReported?: string[];
+      filesObserved?: string[];
+      /** Files the host saw change that the child did not report. Shown first:
+       *  it is the dangerous direction. */
+      unreported?: string[];
+      claimedOnly?: string[];
+    }
+  /**
+   * AP-16 §6.10 point 5 — the tray above the composer.
+   *
+   * Its whole job is answering "why is this conversation still working?", so it
+   * lists the live children and disappears the moment the last one is terminal.
+   * Replacing state: an empty list IS the instruction to hide it.
+   */
+  | {
+      type: "subagentTray";
+      subagents: {
+        subagentId: string;
+        label: string;
+        provider: AcpProvider;
+        providerName: string;
+        model?: string;
+        startedAt: number;
+      }[];
+    }
   | { type: "modeChanged"; modeId: string }
   | { type: "openModePopover" }
   | { type: "voiceState"; status: "listening" | "transcribing" | "idle" }
@@ -963,7 +1052,7 @@ export type HostMsg =
        * user typed it, the other two mean the host derived it from the
        * conversation — and a reader judging the result should know which.
        */
-      origin?: "command" | "handoff" | "second-opinion" | "crew-step";
+      origin?: "command" | "handoff" | "second-opinion" | "crew-step" | "subagent" | "workflow-stage";
       /** The role session, for "Open session". Absent if it never got an id. */
       sessionId?: string;
       cwd?: string;
@@ -1210,6 +1299,43 @@ export type WebviewMsg =
   | { type: "cancel" }
   | { type: "pickModel" }
   | { type: "setMode"; modeId: "agent" | "plan" | "yolo" }
+  // AP-15. A DIFFERENT axis from `setMode` above: that one is the per-turn
+  // permission mode, this one is what kind of conversation the session is.
+  // Host-local and host-authoritative — a locked session rejects it (ST-2).
+  | { type: "setSessionType"; sessionId: string; sessionType: SessionType }
+  /**
+   * AP-16 — an action on one companion subagent's card or tray row.
+   *
+   * `cancel` is the one the tray offers; the rest belong to the card. Host-local:
+   * it acts on a live child process on this machine.
+   */
+  | {
+      type: "companionSubagentAction";
+      subagentId: string;
+      action: "cancel" | "openTranscript" | "approve" | "deny";
+    }
+  /** AP-16 §6.2 master switch. Host-local; writes `companions.subagents.enabled`. */
+  | { type: "setSubagentsEnabled"; value: boolean }
+  /**
+   * AP-16 §6.2 — one companion's roster row.
+   *
+   * A PATCH rather than the whole roster, deliberately: two settings pages open
+   * on one window would otherwise overwrite each other's untouched rows on
+   * every keystroke.
+   */
+  | {
+      type: "subagentRosterSave";
+      provider: AcpProvider;
+      patch: {
+        enabled?: boolean;
+        allowWrite?: boolean;
+        allowedModels?: string[];
+        defaultModel?: string;
+        defaultEffort?: string;
+        maxEffort?: string;
+        notes?: string;
+      };
+    }
   | { type: "setConfigOption"; configId: string; value: unknown }
   | { type: "removeChip"; id: string }
   | { type: "toggleChip"; id: string }
@@ -1706,7 +1832,7 @@ export type WebviewMsg =
 const HOST_MESSAGE_TYPE_MAP: Record<HostMsg["type"], true> = {
   initialState: true, moveViewHint: true, welcomeTips: true, projectSetup: true, githubState: true, githubRepos: true, providerState: true, mcpServers: true, mcpConnectors: true, mcpConnectorAuthorization: true, routines: true, codexInstallProgress: true, planModeAvailability: true, showThinking: true, appPurpose: true, fontScale: true, grokUpdateStatus: true, updateAvailable: true, updateReady: true, telemetryEnabled: true, thumbsFeedback: true,
   initialized: true, cliUpdating: true, session: true, sessionName: true, modelChanged: true,
-  modeChanged: true, openModePopover: true, voiceState: true, voiceConfigured: true,
+  modeChanged: true, sessionType: true, companionSubagent: true, subagentTray: true, openModePopover: true, voiceState: true, voiceConfigured: true,
   voicePartial: true, voiceSubmit: true, voiceTranscript: true, voiceError: true,
   chips: true, commandsUpdate: true, mentionResults: true, projectDirListing: true, projectFileContent: true, projectFileWriteResult: true, userMessage: true, agentStart: true,
   thoughtChunk: true, messageChunk: true, media: true, userMessageChunk: true,
@@ -1725,7 +1851,7 @@ const HOST_MESSAGE_TYPE_MAP: Record<HostMsg["type"], true> = {
 
 const WEBVIEW_MESSAGE_TYPE_MAP: Record<WebviewMsg["type"], true> = {
   ready: true, remotePreferences: true, send: true, newSession: true, cancel: true, pickModel: true,
-  setMode: true, setConfigOption: true, removeChip: true, toggleChip: true, openFile: true, showInFolder: true, openUrl: true,
+  setMode: true, setSessionType: true, setSubagentsEnabled: true, subagentRosterSave: true, companionSubagentAction: true, setConfigOption: true, removeChip: true, toggleChip: true, openFile: true, showInFolder: true, openUrl: true,
   openText: true, openDiff: true, revertToolEdit: true, reviewRevertFile: true, reviewRevertAll: true, exportExpr: true, setEffort: true, openGlobalConfig: true,
   addProjectFolder: true, removeProjectFolder: true, createProject: true, cloneProject: true, setupGithubCli: true, listGithubRepos: true, githubSignOut: true, githubLoginWithToken: true,
   openProjectConfig: true, listRuleFiles: true, openRuleFile: true, appendRuleFile: true,

@@ -9,11 +9,13 @@ import {
 } from "../src/provider-capabilities";
 
 describe("provider-capabilities (AP-01)", () => {
-  it("defines all 12 capabilities explicitly across all 4 ACP providers with no missing cells", () => {
-    // 12 since AP-11 added `structuredPlan`. The number is asserted rather
-    // than derived so that adding a capability is a deliberate act: every
-    // new cell is a claim about a provider that someone has to substantiate.
-    expect(PROVIDER_CAPABILITY_NAMES).toHaveLength(12);
+  it("defines all 15 capabilities explicitly across all 4 ACP providers with no missing cells", () => {
+    // 15 since AP-16 added `hostMcp`, `companionSubagentTarget` and
+    // `delegationShim` on top of AP-11's `structuredPlan`. The number is
+    // asserted rather than derived so that adding a capability is a deliberate
+    // act: every new cell is a claim about a provider that someone has to
+    // substantiate.
+    expect(PROVIDER_CAPABILITY_NAMES).toHaveLength(15);
     expect(ACP_PROVIDERS).toHaveLength(4);
 
     for (const provider of ACP_PROVIDERS) {
@@ -138,7 +140,7 @@ describe("provider-capabilities (AP-01)", () => {
     });
   });
 
-  it("allProviderCapabilities returns a complete map of all 11 dimensions", () => {
+  it("allProviderCapabilities returns a complete map of every dimension", () => {
     const caps = allProviderCapabilities("codex");
     expect(Object.keys(caps).sort()).toEqual([...PROVIDER_CAPABILITY_NAMES].sort());
     expect(caps.steer.state).toBe("no");

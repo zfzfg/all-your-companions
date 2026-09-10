@@ -317,6 +317,65 @@
   const micBtn = $("mic-btn");
   const inputHighlight = $("input-highlight");
   const newBtn = $("new-btn");
+  // AP-15 session type. Deliberately NOT named "mode" anything: the composer's
+  // mode button below is the permission axis (Agent/Plan/Auto accept) and the
+  // two must stay distinguishable in code as well as on screen.
+  const sessionTypePicker = $("session-type-picker");
+  const sessionTypeBadge = $("session-type-badge");
+
+  // ------------------------------------------------------------- AP-15 ----
+  // Session type control. Two states in one header slot: a segmented switch
+  // while the conversation is empty, a locked badge once it has started.
+  //
+  // The host is the authority. This code never decides that a session is
+  // locked; it draws whatever the last `sessionType` message said, and a
+  // refused switch arrives as a corrected `sessionType` plus a notice.
+
+  const SESSION_TYPE_LABELS = { agent: "Agent", crew: "Crew" };
+  const SESSION_TYPE_LOCK_TOOLTIPS = {
+    agent: "This session is locked to Agent mode. Start a new session to use Crew.",
+    crew: "This session is locked to Crew mode. Start a new session to use Agent.",
+  };
+
+  function renderSessionType() {
+    if (!sessionTypePicker || !sessionTypeBadge) return;
+    const type = state.sessionType === "crew" ? "crew" : "agent";
+    const locked = !!state.sessionTypeLocked;
+    sessionTypePicker.hidden = locked;
+    sessionTypeBadge.hidden = !locked;
+    for (const opt of sessionTypePicker.querySelectorAll(".session-type-opt")) {
+      const selected = opt.dataset.sessionType === type;
+      opt.classList.toggle("selected", selected);
+      opt.setAttribute("aria-checked", selected ? "true" : "false");
+    }
+    if (locked) {
+      // The glyph is part of the label rather than a pseudo-element so that a
+      // screen reader and a copied string both carry "locked".
+      sessionTypeBadge.textContent = SESSION_TYPE_LABELS[type];
+      sessionTypeBadge.dataset.sessionType = type;
+      sessionTypeBadge.title = SESSION_TYPE_LOCK_TOOLTIPS[type];
+      sessionTypeBadge.setAttribute("aria-label", SESSION_TYPE_LOCK_TOOLTIPS[type]);
+    }
+  }
+
+  function requestSessionType(next) {
+    if (state.sessionTypeLocked) return;
+    if (next !== "agent" && next !== "crew") return;
+    if (state.sessionType === next) return;
+    // Optimistic, and safe to be: a host refusal answers with the true value.
+    state.sessionType = next;
+    renderSessionType();
+    syncProviderVoice();
+    vscode.postMessage({ type: "setSessionType", sessionId: state.sessionTypeId || "", sessionType: next });
+  }
+
+  if (sessionTypePicker) {
+    sessionTypePicker.addEventListener("click", (event) => {
+      const opt = event.target && event.target.closest ? event.target.closest(".session-type-opt") : null;
+      if (opt) requestSessionType(opt.dataset.sessionType);
+    });
+  }
+
   const historyBtn = $("history-btn");
   const remoteBtn = $("remote-btn");
   const repoBtn = $("repo-btn");
@@ -455,6 +514,10 @@
     codexInstall: { phase: "idle", receivedBytes: 0, totalBytes: 0, reason: "" },
     availableModels: [],
     currentModeId: "agent",
+    // AP-15. Mirrors the host's last `sessionType` message; never decided here.
+    sessionType: "agent",
+    sessionTypeLocked: false,
+    sessionTypeId: "",
     effort: "",
     cwd: "",
     contextWindow: 200000,
@@ -741,6 +804,8 @@
     // tool_call_update finds its row (title refinement, duration, result)
     // instead of leaking into the generic tool group.
     subagentCards: new Map(),
+    /** AP-16 companion subagent cards, keyed by subagentId. */
+    companionSubagentCards: new Map(),
     // Deep Research / Workflow / Goal progress cards (P2-10) — keyed by run/goal id.
     runProgressCards: new Map(),
     // The current turn's agent-message footer (copy + timestamp). Only the
@@ -4771,6 +4836,16 @@
         txt.className = "history-row-txt";
         txt.textContent = displayName;
         name.appendChild(txt);
+        // AP-15 §5.2. Crew rows carry a compact type badge; Agent rows stay
+        // exactly as they look today, which is also how every session created
+        // before AP-15 renders.
+        if (s.sessionType === "crew") {
+          const type = document.createElement("span");
+          type.className = "history-row-type";
+          type.textContent = "Crew";
+          type.title = "Crew session";
+          name.appendChild(type);
+        }
         main.appendChild(name);
 
         const meta = document.createElement("div");
@@ -9239,6 +9314,7 @@
     state.toolFailuresById.clear();
     state.mediaGenCallIds.clear();
     state.subagentCards.clear();
+    state.companionSubagentCards.clear();
     state.runProgressCards.clear();
     // Question/restored-card maps too, or a new session's tool updates could
     // attach to the previous session's (now-detached) cards by toolCallId.
@@ -12793,6 +12869,203 @@
     if (hasChildStreamContent(el)) wireSubagentExpand(el, "Show the subagent's activity");
   }
 
+
+  // ---------------------------------------------------------------- AP-16 --
+  // Companion subagent cards.
+  //
+  // The purple subagent row is reused verbatim (§6.11) — a delegation looks
+  // like a delegation whether the provider's own tool made it or the host did.
+  // What differs is the header (target, profile, cautions) and the body, which
+  // shows the host's own file evidence rather than the child's word for it.
+  //
+  // `companionSubagent` is REPLACING state: the host re-sends the whole card on
+  // every change, so this never has to merge two partial updates and a card
+  // that arrives after a reload is complete on its own.
+
+  const COMPANION_STATUS_WORDS = {
+    "pending-approval": "waiting for approval",
+    running: "",
+    completed: "",
+    failed: "failed",
+    cancelled: "cancelled",
+    refused: "refused",
+  };
+
+  function companionCardFor(subagentId) {
+    let el = state.companionSubagentCards.get(subagentId);
+    if (el && el.isConnected) return el;
+    closeToolGroup();
+    clearWelcome();
+    hideGrokking();
+    el = document.createElement("div");
+    el.className = "subagent-card companion-subagent";
+    el.dataset.companionSubagentId = subagentId;
+    el.innerHTML =
+      `<div class="subagent-row">` +
+        `<span class="subagent-badge">${ICON.bot || "🤖"}</span>` +
+        `<span class="subagent-label">Subagent</span>` +
+        `<span class="subagent-sep">·</span>` +
+        `<span class="subagent-title"></span>` +
+        `<span class="companion-profile"></span>` +
+        BLINK_DOTS +
+        `<span class="subagent-time"></span>` +
+      `</div>` +
+      `<div class="companion-notes"></div>` +
+      `<div class="subagent-stream" hidden></div>` +
+      `<div class="subagent-result" hidden></div>`;
+    appendTranscriptChild(el);
+    state.companionSubagentCards.set(subagentId, el);
+    return el;
+  }
+
+  /**
+   * The tray above the composer (§6.10 point 5).
+   *
+   * Replacing state: an empty list IS the instruction to hide it, so there is
+   * no separate "the tray is done" message to lose.
+   */
+  function renderSubagentTray(msg) {
+    const tray = $("subagent-tray");
+    const list = $("subagent-tray-list");
+    const title = $("subagent-tray-title");
+    if (!tray || !list) return;
+    const running = Array.isArray(msg.subagents) ? msg.subagents : [];
+    tray.hidden = running.length === 0;
+    if (!running.length) { list.textContent = ""; return; }
+    if (title) title.textContent = `Waiting for ${running.length} subagent(s)`;
+    list.textContent = "";
+    for (const entry of running) {
+      const row = document.createElement("li");
+      row.className = "subagent-tray-row";
+      row.dataset.subagentId = entry.subagentId;
+      const name = document.createElement("span");
+      name.className = "subagent-tray-name";
+      name.textContent = entry.label;
+      row.appendChild(name);
+      const target = document.createElement("span");
+      target.className = "subagent-tray-target";
+      target.textContent = [entry.providerName || entry.provider, entry.model].filter(Boolean).join(" ");
+      row.appendChild(target);
+      const cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.className = "subagent-tray-cancel";
+      cancel.textContent = "Cancel";
+      cancel.addEventListener("click", () => {
+        vscode.postMessage({
+          type: "companionSubagentAction",
+          subagentId: entry.subagentId,
+          action: "cancel",
+        });
+      });
+      row.appendChild(cancel);
+      list.appendChild(row);
+    }
+  }
+
+  function renderCompanionSubagent(msg) {
+    const el = companionCardFor(msg.subagentId);
+    const target = [msg.providerName || msg.provider, msg.model].filter(Boolean).join(" ");
+    const title = el.querySelector(".subagent-title");
+    if (title) {
+      title.textContent = [msg.label, target, msg.effort ? `effort ${msg.effort}` : ""]
+        .filter(Boolean).join(" · ");
+      title.title = title.textContent;
+    }
+    const profile = el.querySelector(".companion-profile");
+    if (profile) profile.textContent = msg.profileLabel || msg.profile || "";
+
+    // Everything the user is owed an explanation for. Each of these is a
+    // decision the host made that the agent did not ask for, so none of them
+    // may be silent (§12.5).
+    const notes = [];
+    if (msg.sameProviderAsParent) {
+      notes.push("Same provider as the main agent — not an outside opinion.");
+    }
+    if (msg.modelVerified === false) {
+      notes.push("Model not verified (model list not loaded yet).");
+    }
+    if (msg.effortClamped) {
+      notes.push(
+        `Effort lowered from ${msg.effortClamped.requested} to ${msg.effortClamped.applied} `
+        + `(your limit for ${msg.providerName || msg.provider}).`,
+      );
+    }
+    if (msg.profileDowngraded) {
+      notes.push(`Permissions reduced to read-only: ${msg.profileDowngraded}.`);
+    }
+    if (msg.errorCode) notes.push(`Refused: ${msg.errorCode}.`);
+    const notesEl = el.querySelector(".companion-notes");
+    if (notesEl) {
+      notesEl.textContent = "";
+      notesEl.hidden = notes.length === 0;
+      for (const note of notes) {
+        const line = document.createElement("div");
+        line.className = "companion-note";
+        line.textContent = note;
+        notesEl.appendChild(line);
+      }
+    }
+
+    const terminal = msg.status === "completed" || msg.status === "failed"
+      || msg.status === "cancelled" || msg.status === "refused";
+    el.classList.toggle("subagent-failed", msg.status === "failed" || msg.status === "refused");
+    el.classList.toggle("subagent-cancelled", msg.status === "cancelled");
+    const timeEl = el.querySelector(".subagent-time");
+    if (timeEl) {
+      const word = COMPANION_STATUS_WORDS[msg.status] || "";
+      const ms = terminal && msg.endedAt ? msg.endedAt - msg.startedAt : null;
+      const dur = ms != null ? `${Math.max(1, Math.round(ms / 1000))}s` : "";
+      timeEl.textContent = [word, dur].filter(Boolean).join(" ");
+    }
+    if (terminal) {
+      el.classList.add("subagent-done");
+      renderCompanionResult(el, msg);
+    }
+    scrollToBottom();
+  }
+
+  function renderCompanionResult(el, msg) {
+    const result = el.querySelector(".subagent-result");
+    if (!result) return;
+    const sections = [];
+    if (msg.summary) sections.push({ heading: "", lines: [msg.summary] });
+    // `unreported` FIRST, deliberately: files the host saw change that the
+    // child did not mention are the dangerous direction, and burying them
+    // under the child's own list is how they get missed (§6.11).
+    if (msg.unreported && msg.unreported.length) {
+      sections.push({ heading: "Changed but not reported", lines: msg.unreported, warn: true });
+    }
+    if (msg.claimedOnly && msg.claimedOnly.length) {
+      sections.push({ heading: "Reported but not observed", lines: msg.claimedOnly, warn: true });
+    }
+    if (msg.filesObserved && msg.filesObserved.length) {
+      sections.push({ heading: "Files changed", lines: msg.filesObserved });
+    }
+    if (!sections.length) {
+      result.hidden = true;
+      return;
+    }
+    result.textContent = "";
+    for (const section of sections) {
+      const block = document.createElement("div");
+      block.className = section.warn ? "companion-section companion-warn" : "companion-section";
+      if (section.heading) {
+        const heading = document.createElement("div");
+        heading.className = "companion-section-heading";
+        heading.textContent = section.heading;
+        block.appendChild(heading);
+      }
+      for (const line of section.lines) {
+        const row = document.createElement("div");
+        row.className = "companion-section-line";
+        row.textContent = line;
+        block.appendChild(row);
+      }
+      result.appendChild(block);
+    }
+    result.hidden = false;
+  }
+
   function addSubagentCard(call) {
     closeToolGroup();
     clearWelcome();
@@ -13702,7 +13975,11 @@
   }
 
   function syncProviderVoice() {
-    input.placeholder = COMPOSER_PLACEHOLDER[state.activeProvider] || COMPOSER_PLACEHOLDER.grok;
+    // AP-15. A Crew session asks for an idea, not for a message to a companion:
+    // the workflow, not a chat partner, is what takes it from here. Copy deck.
+    input.placeholder = state.sessionType === "crew"
+      ? "Describe your idea — the crew takes it from here."
+      : COMPOSER_PLACEHOLDER[state.activeProvider] || COMPOSER_PLACEHOLDER.grok;
     if (!state.grokkingEl) return;
     const label = state.grokkingEl.querySelector(".grokking-label");
     if (label) label.textContent = activityVerb();
@@ -17616,6 +17893,15 @@
         state.currentModeId = msg.modeId;
         updateModeBtn(msg.modeId);
         break;
+      case "sessionType":
+        state.sessionType = msg.sessionType;
+        state.sessionTypeLocked = !!msg.locked;
+        state.sessionTypeId = msg.sessionId || "";
+        renderSessionType();
+        // The composer speaks for the session type too, so a pre-lock switch
+        // has to be visible in more than the header.
+        syncProviderVoice();
+        break;
       case "openModePopover":
         openModePopover();
         break;
@@ -18052,6 +18338,12 @@
         applyToolDiffs(msg.call);
         break;
       }
+      case "companionSubagent":
+        renderCompanionSubagent(msg);
+        break;
+      case "subagentTray":
+        renderSubagentTray(msg);
+        break;
       case "subagentUpdate": {
         // Lifecycle stream (method _x.ai/session/update): subagent_spawned tags
         // the card with the child id; subagent_finished carries duration_ms +

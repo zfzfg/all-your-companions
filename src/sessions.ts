@@ -1,4 +1,5 @@
 import * as nodeFs from "node:fs";
+import type { SessionTypeMeta } from "./session-type";
 import { homedir } from "node:os";
 import * as path from "node:path";
 import { isPrimerText, isPrimerSummary } from "./grok-primer";
@@ -35,6 +36,14 @@ export interface SessionListEntry {
   kind?: "subagent" | "headless";
   /** Worktree label when this session's cwd is an isolated git worktree (P2-8). */
   worktreeLabel?: string;
+  /** AP-16/AP-17. Set when this session belongs to another one — a companion
+   *  subagent, a crew stage, a generator run. Such a row is never shown: the
+   *  parent is the only history row (D3, D5). */
+  hiddenReason?: string;
+  /** AP-15 session type, from `grok.sessionMeta`. Only ever `"crew"` on the
+   *  wire: Agent is the default and stays unbadged so today's list is
+   *  unchanged for everyone who never opens a Crew session (§5.2). */
+  sessionType?: "crew";
   /** When the user pinned this conversation, from `SessionMetaOverride`. Drives
    *  the projects rail's Pinned group; absent means unpinned. */
   pinnedAt?: number;
@@ -42,7 +51,7 @@ export interface SessionListEntry {
   provider?: "grok" | "codex" | "claude" | "gemini";
 }
 
-export interface SessionMetaOverride {
+export interface SessionMetaOverride extends SessionTypeMeta {
   /** Agent that owns the session. Existing records omit it and therefore mean Grok. */
   provider?: "grok" | "codex" | "claude" | "gemini";
   /** Provider-reported cwd for stores that are not laid out under the Grok home. */
@@ -274,7 +283,8 @@ export function capSessionMetaAutoNames<T extends Record<string, { autoName?: un
 /** Pick the newest user-visible session from an already-scoped history list. */
 export function mostRecentSession(entries: readonly SessionListEntry[]): SessionListEntry | undefined {
   return entries
-    .filter((entry) => entry.kind !== "subagent")
+    // Hidden by kind (grok stamps it) or by our own metadata (§6.6 point 2).
+    .filter((entry) => entry.kind !== "subagent" && !entry.hiddenReason)
     .reduce<SessionListEntry | undefined>(
       (recent, entry) => !recent || entry.updatedAt > recent.updatedAt ? entry : recent,
       undefined,
@@ -1495,6 +1505,12 @@ export interface EmptySessionInput {
   /** grok's `session_kind`. A `subagent` directory is a delegation's own
    *  transcript — never a conversation the user started, and not ours to remove. */
   kind?: string;
+  /** AP-16/AP-17. Our OWN marker for a session the host started on behalf of
+   *  another one — a companion subagent, a crew stage, a workflow generator.
+   *  Set for providers that do not stamp `session_kind`, which is all of them
+   *  but grok, and it means the same thing: not the user's conversation, not
+   *  ours to sweep, and never a history row (§6.6 points 2-3). */
+  hiddenReason?: string;
   /** `num_messages` from summary.json (the cheap gate; a primer-only session is ~4). */
   numMessages: number;
   /** `session_summary` from summary.json (fallback signal when no chat history). */
@@ -1542,6 +1558,10 @@ export function isEmptySession(
   // conversation the user can resume — its emptiness is decided by content,
   // exactly like a desk session's.
   if (inp.kind === "subagent") return false;
+  // The host-side equivalent, for the three providers that stamp no kind of
+  // their own. A child mid-run has no user turns yet and would otherwise look
+  // exactly like an abandoned "New session".
+  if (inp.hiddenReason) return false;
   if (inp.historyUnreadable) return false;
   if ((inp.chatHistory ?? "").trim()) {
     // Read it, or refuse to judge it. A file we cannot parse is not an empty

@@ -1,4 +1,6 @@
 import { AcpClient } from "./acp";
+import type { SubagentDirective } from "./subagent-directives";
+import { isSessionTypeLocked, type SessionType } from "./session-type";
 import type { HostMsg } from "./protocol";
 import type { ContextChip } from "./context-chips";
 import { permissionOptionsForPlan } from "./plan-gate";
@@ -306,6 +308,69 @@ export class Session {
   }[];
 
   /**
+   * In-flight companion subagents this session started (AP-16).
+   *
+   * A separate list from {@link crewLive} even though the shape matches, and
+   * deliberately so: crew state is a crew RUN's state, and a subagent belongs
+   * to a turn of an ordinary Agent session. Sharing the array would make Stop
+   * on a crew cancel this session's inspectors and vice versa.
+   *
+   * Several at once by design (`companions.subagents.limits.maxConcurrent`),
+   * which is why this is an array and {@link agentRun} — one `/agent` at a
+   * time — is not.
+   */
+  subagentLive?: {
+    subagentId: string;
+    roleSession: Session;
+    cancelled: boolean;
+  }[];
+
+  /** Per-session token for the AP-16 delegation pipe. Revoked on restart. */
+  companionsToken?: string;
+
+  /**
+   * The `@subagent:` / `@role:` directives on the CURRENT turn (AP-16 §6.8).
+   *
+   * Per turn, not per session: a directive is something the user said about
+   * this message, and carrying it forward would silently pin every later turn
+   * to a worker they named once. Replaced on every send, including a send that
+   * carries none — which is how the previous turn's directives stop applying.
+   */
+  subagentDirectives?: SubagentDirective[];
+
+  /**
+   * The user asked for no subagents on this message (`@subagent:none`).
+   *
+   * Enforced by the host, not merely requested in the prompt: spawns during
+   * this turn are refused with `forbidden-by-user` (§6.8).
+   */
+  subagentsForbiddenThisTurn?: boolean;
+
+  /**
+   * This turn ended on the CLI but is being held open for its subagents (D20).
+   *
+   * The host turn spans the whole delegation, so the `agentEnd` the CLI's
+   * result would have produced is parked here and emitted when the last child
+   * reaches a terminal state.
+   */
+  subagentTurnHold?: { turnId: string; meta?: unknown };
+
+  /**
+   * Hidden-child metadata parked until the CLI names this session (§6.6).
+   *
+   * `grok.sessionMeta` is keyed by the provider's session id, which does not
+   * exist when a child is created — but the stamp has to be written BEFORE the
+   * child's first turn or a history refresh races it into the list. So the host
+   * decides it here and flushes it the instant an id appears.
+   */
+  pendingHiddenChild?: {
+    parentSessionId: string;
+    subagentId: string;
+    hiddenReason: "companion-subagent" | "crew-stage" | "workflow-generator";
+    depth: number;
+  };
+
+  /**
    * Live crew chain this session is driving (AP-12). Transient replacing
    * state — `sessionUiSnapshot` re-sends it; it is never buffered.
    */
@@ -468,6 +533,30 @@ export class Session {
 
   /** grok's id for this session (set on session/new or session/load). */
   activeSessionId?: string;
+
+  /**
+   * AP-15 session type: is this an Agent conversation or a Crew run?
+   *
+   * Runtime home for the value, because an empty session has no provider id yet
+   * and `grok.sessionMeta` is keyed by that id — there is nothing to write
+   * against until the CLI names the session. The host persists this into the
+   * metadata record the moment {@link activeSessionId} exists and again at the
+   * lock, so a reload reads it back (ST-1, ST-3).
+   *
+   * NOT the composer's permission mode. That axis is Agent/Plan/Auto accept and
+   * lives in `runMode`/`autoApprove`; this one decides what kind of conversation
+   * this is, once, and never changes afterwards (§3 naming collision warning).
+   */
+  sessionType: SessionType = "agent";
+
+  /**
+   * When the type stopped being changeable (ST-2), ms epoch.
+   *
+   * Stamped once, at the first submitted content, and never cleared — not by a
+   * rewind either (D2): it records that the conversation started, not what is
+   * currently on screen.
+   */
+  sessionTypeLockedAt?: number;
 
   /**
    * Effective working directory for this session's `grok agent stdio` process.
@@ -853,6 +942,23 @@ export function sessionUiSnapshot(
     messages.push({ type: "modelChanged", modelId: session.client.currentModelId });
   }
   messages.push({ type: "modeChanged", modeId });
+  // AP-15. Replacing state like the mode badge beside it: the webview needs it
+  // back after a focus switch, a reload or a remote attach, and the `locked`
+  // flag is what decides between the segmented control and the read-only badge.
+  {
+    // `sessionId` is empty until the CLI names the session. That is exactly the
+    // state in which the control must be VISIBLE and switchable, so the message
+    // is sent regardless rather than withheld until an id exists.
+    messages.push({
+      type: "sessionType",
+      sessionId: session.activeSessionId ?? "",
+      sessionType: session.sessionType,
+      locked: isSessionTypeLocked(
+        { sessionType: session.sessionType, sessionTypeLockedAt: session.sessionTypeLockedAt },
+        session.userMessageCount > 0,
+      ),
+    });
+  }
   messages.push({
     type: "planModeAvailability",
     available: session.planModeAvailable,

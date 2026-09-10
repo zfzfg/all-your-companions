@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+**Every session now says what kind of session it is.** A new conversation opens with a **Session type** switch — **Agent** or **Crew** — sitting in the top bar next to the repository chip. Agent is what conversations have always been. Crew is the new stage-gated workflow home, arriving in a later release; picking it today changes the empty state and the composer, and the run machinery follows.
+
+### Added
+
+- **Session type (AP-15).** Chosen before the first message and switchable freely until then; the first thing you send locks it, and the switch becomes a small badge with a lock. The lock is enforced by the extension host, not just hidden in the UI, so it holds for remote clients too. Forking a conversation inherits its type. Crew conversations get a compact badge in the history list; Agent conversations look exactly as they always have.
+- **`companions.sessionType.default`** decides what new conversations start as. It defaults to `agent`, so nothing changes unless you ask it to.
+- **Every conversation you already have opens as a locked Agent session**, with nothing written to disk to make that true.
+
+- **Companion subagents (AP-16).** In an Agent session, the companion you are chatting with can now launch a **subagent on any of your other connected companions** — a fast, cheap model to map a module while a stronger one keeps planning, or a second opinion from a different provider entirely. It picks the companion, the model, the effort and what the subagent may do, within limits you set. Each subagent runs as its own session that never sees your conversation: it gets a written brief with file paths, and hands back a report. It shows up as a card in the thread with what it was asked, what it did, and — importantly — which files the extension *watched* it change, next to the ones it says it changed.
+- **Subagents are read-only unless the agent asks for more**, never get more permission than the session that started them, and are forced to read-only outright while you are in Plan mode. Every clamp, downgrade and refusal is written on the card rather than applied quietly.
+- **Settings → Agents & Crew → Subagents** lists every companion with a switch, a default model, an effort ceiling, whether it may edit files, and a **Notes** field. The notes are what the agent reads when it chooses — there is no built-in table of which model is good at what.
+- **A new built-in role, `inspector`** — read-only, low effort, prefers a different companion from the one that called it. For exactly the "map this for me while I keep working" job.
+- **Tell it which companion to use, per message.** Type `@subagent:gemini`, `@subagent:claude effort:low`, `@role:inspector` — or `@subagent:none` to keep a message to yourself. A chip whose target has gone (logged out, turned off, model gone) turns red and blocks the send with the fix, rather than failing halfway through the turn. If the agent ignores a directive you marked as required, the turn says so.
+- **The conversation stays "working" until its subagents are done**, even after the companion itself has stopped talking — with a small tray above the composer listing who is still running, on what, and a way to cancel each one. A subagent that finishes without the agent having read it produces one short line, not one per subagent.
+- **Subagent sessions never appear in your history**, are never swept as empty conversations, and are cancelled when you press Stop, close the window, or the conversation that started them ends.
+
+### Internal
+
+- New capability dimensions `hostMcp`, `companionSubagentTarget` and `delegationShim` in the provider matrix, and three research probes (`research/probe-acp-mcp.cjs`, `research/probe-read-only.cjs`, `research/probe-child-persistence.cjs`) that fill them. Findings and open questions in `research/companion-subagents.md`.
+
 ## 4.1.8 — 2026-09-05
 
 **Opening a conversation no longer freezes the app when you have a lot of them.** One shortcut on the way *out* of an untouched conversation was doing two expensive things nobody asked for, and both got worse the more conversations you had on disk.

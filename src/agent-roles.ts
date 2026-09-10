@@ -234,6 +234,32 @@ export const BUILTIN_ROLES: readonly AgentRole[] = [
     source: "builtin",
   },
   {
+    // AP-16 §6.14 — the shipped delegation role. `effort: low` is the point:
+    // an inspector is a fast, cheap read of part of a codebase for ANOTHER
+    // agent, and letting the parent's effort flow through would spend a
+    // subscription's strongest model on a repo scan (§6.3.1).
+    name: "inspector",
+    provider: "claude",
+    mode: "plan",
+    effort: "low",
+    preferDifferentProvider: true,
+    whenToUse:
+      "A fast, cheap, read-only overview of part of a codebase, produced for another AI agent rather than "
+      + "for a person — call sites, a module map, where a flow is wired.",
+    whenNotToUse:
+      "Anything that needs edits or a judgement call. An inspector reports what is there; it does not decide "
+      + "what to do about it.",
+    // Tone only. It deliberately does NOT name headings: the machine channel is
+    // the shared `companions-result` block, and a role that invents its own
+    // heading set is a second schema for the same answer (§2.1 point 1).
+    systemPreamble:
+      "You are a read-only inspector working for another AI agent, not for a human. "
+      + "Be fast and factual. Do not edit files or run commands that change anything. "
+      + "Put map entries, risks and the suggested next action in the companions-result block "
+      + "(findings, openQuestions). Do not invent extra markdown headings.",
+    source: "builtin",
+  },
+  {
     name: "fixer",
     provider: "claude",
     mode: "agent",

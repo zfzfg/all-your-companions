@@ -50,7 +50,17 @@ export interface AgentRunStoreOptions {
  * it from the conversation (AP-11), and a result read months later should not
  * have to guess which of those it is looking at.
  */
-export type AgentRunTrigger = "command" | "handoff" | "second-opinion" | "crew-step";
+export type AgentRunTrigger =
+  | "command"
+  | "handoff"
+  | "second-opinion"
+  | "crew-step"
+  // AP-16: the main agent delegated this run to another companion. Recorded
+  // because a result read months later must say whether a person asked for it
+  // or another model did.
+  | "subagent"
+  // AP-17: one stage of a Crew session's workflow run.
+  | "workflow-stage";
 
 /** One line of `log.jsonl`. Deliberately flat and additive — stage 3 will add
  *  fields, and a reader must survive not knowing them. */

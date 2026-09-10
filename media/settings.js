@@ -1024,6 +1024,29 @@
       hostLocal: true,
     },
     {
+      id: "subagentsEnabled",
+      category: "agents",
+      title: "Agent can use subagents in non-crew mode",
+      description:
+        "Let the companion you are chatting with launch subagents on your other connected companions. Each subagent is a "
+        + "separate run on the companion it uses and counts against that companion's subscription usage limits.",
+      kind: "toggle",
+      defaultValue: true,
+      get: (s) => s && s.subagentsEnabled !== false,
+      message: (value) => ({ type: "setSubagentsEnabled", value }),
+      hostLocal: true,
+    },
+    {
+      id: "subagentRoster",
+      category: "agents",
+      title: "Subagents",
+      description:
+        "Which companions may be used as subagents, what they may do, and what the agent is told each one is good at. "
+        + "The notes are what it reads when it picks one — there is no built-in table of model strengths.",
+      kind: "subagentRoster",
+      hostLocal: true,
+    },
+    {
       id: "crewFlows",
       category: "agents",
       title: "Crew flows",
@@ -1375,7 +1398,8 @@
         ].join(" ")
       : "";
     const extraRoles = row.kind === "agentRoles" || row.kind === "crewFlows"
-      ? "planner implementer reviewer researcher fixer crew multi-agent persona roles agents /agent /crew rules "
+      ? "planner implementer reviewer researcher fixer inspector crew multi-agent persona roles agents /agent /crew rules "
+        + "subagent subagents delegate delegation roster companion "
         + "provider model companion claude codex gemini grok verify review every parallel worktree scope budget permissions"
       : "";
     const section = connectorSection(row);
@@ -3362,6 +3386,172 @@
     return el;
   }
 
+  // ------------------------------------------------------- subagent roster --
+  //
+  // AP-16 §6.2. One table, one row per companion, listed whether or not it is
+  // connected — a companion you have not signed into yet is still one you may
+  // want to configure ahead of time, and hiding the row makes the roster look
+  // shorter than it is.
+  //
+  // The Notes field is the load-bearing one: it is what the main agent reads
+  // when it chooses a subagent, and it is the reason there is no hardcoded
+  // "model strengths" table anywhere in this feature (D12).
+
+  const ROSTER_STATUS_LABELS = {
+    usable: "Usable",
+    "needs-login": "Needs login",
+    "not-connected": "Not connected",
+  };
+
+  function subagentRosterOf(snapshot) {
+    return Array.isArray(snapshot && snapshot.subagentRoster) ? snapshot.subagentRoster : null;
+  }
+
+  function rosterPatch(providerId, patch) {
+    post({ type: "subagentRosterSave", provider: providerId, patch });
+  }
+
+  function rosterField(labelText, control, hint) {
+    const field = document.createElement("label");
+    field.className = "settings-roster-field";
+    const label = document.createElement("span");
+    label.className = "settings-roster-field-label";
+    label.textContent = labelText;
+    field.appendChild(label);
+    field.appendChild(control);
+    if (hint) {
+      const note = document.createElement("span");
+      note.className = "settings-agent-field-hint";
+      note.textContent = hint;
+      field.appendChild(note);
+    }
+    return field;
+  }
+
+  function rosterSelect(value, options, onChange) {
+    const select = document.createElement("select");
+    select.className = "settings-input settings-roster-select";
+    for (const option of options) {
+      const el = document.createElement("option");
+      el.value = option.value;
+      el.textContent = option.label;
+      if (option.value === value) el.selected = true;
+      select.appendChild(el);
+    }
+    select.addEventListener("change", () => onChange(select.value));
+    return select;
+  }
+
+  function renderRosterRow(row, snapshot) {
+    const card = document.createElement("div");
+    card.className = "settings-roster-row";
+    card.dataset.provider = row.id;
+    if (!row.enabled) card.classList.add("is-off");
+
+    const head = document.createElement("div");
+    head.className = "settings-roster-head";
+
+    const toggle = document.createElement("input");
+    toggle.type = "checkbox";
+    toggle.checked = row.enabled !== false;
+    toggle.addEventListener("change", () => rosterPatch(row.id, { enabled: toggle.checked }));
+    const toggleLabel = document.createElement("label");
+    toggleLabel.className = "settings-roster-toggle";
+    toggleLabel.appendChild(toggle);
+    const name = document.createElement("span");
+    name.className = "settings-roster-name";
+    name.textContent = row.label;
+    toggleLabel.appendChild(name);
+    head.appendChild(toggleLabel);
+
+    const status = document.createElement("span");
+    status.className = "settings-roster-status is-" + row.status;
+    status.textContent = ROSTER_STATUS_LABELS[row.status] || row.status;
+    head.appendChild(status);
+    card.appendChild(head);
+
+    const body = document.createElement("div");
+    body.className = "settings-roster-body";
+
+    // Models come from this companion's own cache. A cold cache offers only
+    // "the companion's default", which is a real, working choice — never a
+    // free-text box, so a model id can never be typed that does not exist.
+    const provider = (snapshot.agentRoleProviders || []).find((p) => p.id === row.id);
+    const models = (provider && provider.models) || [];
+    const modelOptions = [{ value: "", label: models.length ? "Its own default" : "Its own default (model list not loaded)" }];
+    for (const model of models) {
+      modelOptions.push({ value: model.modelId, label: model.name || model.modelId });
+    }
+    body.appendChild(rosterField(
+      "Default model",
+      rosterSelect(row.defaultModel || "", modelOptions, (value) => rosterPatch(row.id, { defaultModel: value })),
+      "Used when the agent does not name one.",
+    ));
+
+    const efforts = Array.isArray(snapshot.efforts) ? snapshot.efforts : [];
+    const effortOptions = [{ value: "", label: "No ceiling" }]
+      .concat(efforts.map((level) => ({ value: level, label: level })));
+    body.appendChild(rosterField(
+      "Max effort",
+      rosterSelect(row.maxEffort || "", effortOptions, (value) => rosterPatch(row.id, { maxEffort: value })),
+      "A higher request is lowered, and the agent is told.",
+    ));
+
+    const writeToggle = document.createElement("input");
+    writeToggle.type = "checkbox";
+    writeToggle.checked = row.allowWrite !== false;
+    writeToggle.addEventListener("change", () => rosterPatch(row.id, { allowWrite: writeToggle.checked }));
+    const writeWrap = document.createElement("span");
+    writeWrap.className = "settings-roster-checkbox";
+    writeWrap.appendChild(writeToggle);
+    body.appendChild(rosterField(
+      "May edit files",
+      writeWrap,
+      "Off restricts this companion to read-only subagents.",
+    ));
+
+    const notes = document.createElement("input");
+    notes.type = "text";
+    notes.className = "settings-input settings-roster-notes";
+    notes.value = row.notes || "";
+    notes.placeholder = "fast and cheap, good for repo scans; weak at large refactors";
+    // On blur, not on every keystroke: each save is a settings write, and a
+    // write per character would fight the user's own typing.
+    notes.addEventListener("blur", () => {
+      if (notes.value !== (row.notes || "")) rosterPatch(row.id, { notes: notes.value });
+    });
+    const notesField = rosterField(
+      "Notes for the agent",
+      notes,
+      "What this companion is good at. The agent reads this when it chooses.",
+    );
+    notesField.classList.add("settings-roster-field-wide");
+    body.appendChild(notesField);
+
+    card.appendChild(body);
+    return card;
+  }
+
+  function renderSubagentRoster(snapshot, env) {
+    const el = document.createElement("div");
+    el.className = "settings-roster";
+    el.dataset.id = "subagentRoster";
+
+    const rows = subagentRosterOf(snapshot);
+    if (!rows) {
+      el.appendChild(settingsState("Reading the roster…"));
+      return el;
+    }
+    if (snapshot.subagentsEnabled === false) {
+      const off = document.createElement("p");
+      off.className = "settings-agent-field-hint";
+      off.textContent = "Subagents are turned off, so nothing here is used yet.";
+      el.appendChild(off);
+    }
+    for (const row of rows) el.appendChild(renderRosterRow(row, snapshot));
+    return el;
+  }
+
   // ---------------------------------------------------------------- flows --
 
   function renderFlowRolePool(draft, snapshot) {
@@ -3759,6 +3949,7 @@
     if (row.kind === "connectors") return renderConnectorsCatalog(snapshot, env, keyForm);
     if (row.kind === "routines") return renderRoutines(snapshot, env);
     if (row.kind === "agentRoles") return renderAgentRoles(snapshot, env);
+    if (row.kind === "subagentRoster") return renderSubagentRoster(snapshot, env);
     if (row.kind === "crewFlows") return renderCrewFlows(snapshot, env);
     if (row.kind === "permissionRules") return renderPermissionRules(snapshot, env);
     if (row.kind === "ruleFiles") return renderRuleFiles(snapshot, env);

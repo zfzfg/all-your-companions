@@ -27,6 +27,11 @@ export const BODY = `
       <span id="session-name-repo" class="session-name-repo" hidden></span>
       <button id="session-name-edit" class="session-name-edit icon-btn" type="button" hidden></button>
     </div>
+    <div id="session-type-picker" class="session-type-picker" role="radiogroup" aria-label="Session type" hidden>
+      <button id="session-type-agent" class="session-type-opt" type="button" role="radio" aria-checked="true" data-session-type="agent">Agent</button>
+      <button id="session-type-crew" class="session-type-opt" type="button" role="radio" aria-checked="false" data-session-type="crew">Crew</button>
+    </div>
+    <span id="session-type-badge" class="session-type-badge" hidden></span>
     <button id="repo-btn" type="button"></button>
     <button id="remote-btn" hidden></button>
     <button id="history-btn"></button>
@@ -35,6 +40,10 @@ export const BODY = `
     <div id="repo-popover" hidden></div>
     <div id="history-popover" hidden></div>
   </header>
+  <div id="subagent-tray" hidden>
+    <div class="subagent-tray-head"><span id="subagent-tray-title"></span></div>
+    <ol id="subagent-tray-list"></ol>
+  </div>
   <div id="session-head">
     <div id="session-head-main"><span id="session-head-title"></span><span id="session-head-sub"></span></div>
   </div>
