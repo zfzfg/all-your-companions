@@ -47,6 +47,26 @@ const briefing: Briefing = makeBriefing({
   forbidden: ["Do not edit any file."],
 });
 
+describe("parseResult prefers companions-result", () => {
+  it("lets the JSON block win over headings", () => {
+    const md = [
+      "## Summary",
+      "heading",
+      "## Files touched",
+      "- heading.ts",
+      "```companions-result",
+      JSON.stringify({ summary: "from json", filesChanged: ["json.ts"], openQuestions: ["q"] }),
+      "```",
+    ].join("\n");
+    expect(parseResult(md)).toEqual({
+      summary: "from json",
+      files: ["json.ts"],
+      open: ["q"],
+      failed: [],
+    });
+  });
+});
+
 describe("renderBriefing is deterministic", () => {
   it("produces identical bytes on repeated renders", () => {
     expect(renderBriefing(briefing, role)).toBe(renderBriefing(briefing, role));

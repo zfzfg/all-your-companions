@@ -1,7 +1,7 @@
 import { AcpClient } from "./acp";
 import type { SubagentDirective } from "./subagent-directives";
 import { isSessionTypeLocked, type SessionType } from "./session-type";
-import type { HostMsg } from "./protocol";
+import type { HostMsg, WorkflowRunView } from "./protocol";
 import type { ContextChip } from "./context-chips";
 import { permissionOptionsForPlan } from "./plan-gate";
 import type { AcpProvider } from "./acp-backend";
@@ -375,6 +375,16 @@ export class Session {
    * state — `sessionUiSnapshot` re-sends it; it is never buffered.
    */
   crewRun?: CrewRun;
+
+  /**
+   * Live Crew-session workflow run (AP-17). Distinct from {@link crewRun},
+   * which is the in-thread `/crew` step-walker. Gate/pause/snapshot state
+   * lives here and is persisted to `run.json`.
+   */
+  workflowRun?: import("./workflow-run").WorkflowRun;
+
+  /** Last view posted for {@link workflowRun}. Replacing state for the snapshot. */
+  workflowView?: WorkflowRunView;
 
   /**
    * AP-07 overlay for a role session (18.5). Concatenated after user rules
@@ -996,6 +1006,9 @@ export function sessionUiSnapshot(
   }
   if (session.crewRun) {
     messages.push({ type: "crewRun", run: session.crewRun });
+  }
+  if (session.workflowView) {
+    messages.push({ type: "workflowRun", run: session.workflowView });
   }
   messages.push({ type: "feedbackAvailability", available: session.feedbackAvailable });
   if (session.liveFeedbackEligible) {

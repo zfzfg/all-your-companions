@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  BUILTIN_IDEA_TO_DONE_PRESET,
   BUILTIN_PRESET,
   findCrewPreset,
   loadCrewPresets,
   parseCrewPreset,
   presetReviewRole,
   presetRoles,
+  presetToStageGraph,
 } from "../src/crew-preset";
 import { loadAgentRoles } from "../src/agent-roles";
 
@@ -50,8 +52,21 @@ describe("parseCrewPreset", () => {
 describe("loadCrewPresets", () => {
   it("falls back to the built-in when the directory is empty", () => {
     const set = loadCrewPresets([]);
-    expect(set.presets).toEqual([{ ...BUILTIN_PRESET }]);
+    expect(set.presets.map((p) => p.name).sort()).toEqual(["default", "idea-to-done"]);
+    expect(set.presets.find((p) => p.name === "default")).toEqual({ ...BUILTIN_PRESET });
+    expect(set.presets.find((p) => p.name === "idea-to-done")?.source).toBe("builtin");
     expect(set.problems).toEqual([]);
+  });
+
+  it("does not rewrite a project flow without a stages block, and still offers idea-to-done", () => {
+    const set = loadCrewPresets([{
+      path: ".companions/crews/fast.md",
+      stem: "fast",
+      text: "---\nname: fast\nroles: [implementer]\n---\nGo.",
+    }]);
+    expect(set.presets.find((p) => p.name === "fast")?.stages).toBeUndefined();
+    expect(set.presets.find((p) => p.name === "idea-to-done")?.name).toBe("idea-to-done");
+    expect(set.presets.find((p) => p.name === "default")).toBeUndefined();
   });
 
   it("skips duplicates and keeps the first", () => {
@@ -61,8 +76,8 @@ describe("loadCrewPresets", () => {
       text: `---\nname: ship\n${extra}\n---\n`,
     });
     const set = loadCrewPresets([file("a", "verify: npm test"), file("b", "verify: cargo test")]);
-    expect(set.presets).toHaveLength(1);
-    expect(set.presets[0].verify).toBe("npm test");
+    expect(set.presets.filter((p) => p.name === "ship")).toHaveLength(1);
+    expect(set.presets.find((p) => p.name === "ship")?.verify).toBe("npm test");
     expect(set.problems[0].message).toMatch(/duplicate/);
   });
 });
@@ -77,6 +92,93 @@ describe("findCrewPreset", () => {
     expect(findCrewPreset(set, "fast").name).toBe("fast");
     expect(findCrewPreset(set, "missing").name).toBe("fast");
     expect(findCrewPreset(set, undefined).name).toBe("fast");
+  });
+});
+
+describe("stages block and presetToStageGraph", () => {
+  it("parses a companions:stages block and extra frontmatter keys", () => {
+    const { preset, problem } = parseCrewPreset({
+      path: ".companions/crews/ship.md",
+      stem: "ship",
+      text: [
+        "---",
+        "name: ship",
+        "title: Ship it",
+        "when_to_use: Small changes.",
+        "roles: [planner, implementer]",
+        "default_gate: manual",
+        "worktree: true",
+        "---",
+        "Go.",
+        "",
+        "<!-- companions:stages v1 -->",
+        "```json",
+        JSON.stringify({
+          schemaVersion: 1,
+          name: "ship",
+          title: "Ship it",
+          whenToUse: "Small changes.",
+          defaults: { gate: "manual", worktree: true, allowSubagents: false },
+          roles: { planner: { ref: "planner" }, implementer: { ref: "implementer" } },
+          stages: [
+            {
+              id: "plan",
+              title: "Plan",
+              role: "planner",
+              profile: "read-only",
+              contract: { $ref: "#/contracts/plan" },
+              next: [{ to: "$done" }],
+            },
+          ],
+          contracts: {
+            plan: {
+              purpose: "Plan.",
+              inputs: [{ from: "idea", as: "Goal" }],
+              output: { sections: ["Summary"], resultBlock: { required: ["planSteps"] } },
+            },
+          },
+          start: ["plan"],
+        }),
+        "```",
+      ].join("\n"),
+    });
+    expect(problem).toBeUndefined();
+    expect(preset?.title).toBe("Ship it");
+    expect(preset?.worktree).toBe(true);
+    expect(preset?.stages).toMatchObject({ name: "ship" });
+    const graph = presetToStageGraph(preset!);
+    expect(graph.stages).toHaveLength(1);
+    expect(graph.stages[0].id).toBe("plan");
+  });
+
+  it("converts a preset without a stages block into the default graph without rewriting it", () => {
+    const { preset } = parseCrewPreset({
+      path: ".companions/crews/legacy.md",
+      stem: "legacy",
+      text: "---\nname: legacy\nroles: [planner, implementer, reviewer, fixer]\nparallel: true\nverify: npm test\n---\nGo.",
+    });
+    expect(preset?.stages).toBeUndefined();
+    const graph = presetToStageGraph(preset!);
+    expect(graph.stages.map((s) => s.id)).toEqual(["plan", "implement", "review", "fix"]);
+    expect(graph.stages.find((s) => s.id === "implement")?.strategy).toBe("per-plan-step");
+    expect(graph.defaults.verify).toBe("npm test");
+    expect(preset?.stages).toBeUndefined();
+  });
+
+  it("reports a broken stages block instead of half-applying it", () => {
+    const { preset, problem } = parseCrewPreset({
+      path: ".companions/crews/broken.md",
+      stem: "broken",
+      text: "---\nname: broken\n---\n<!-- companions:stages v1 -->\n```json\n{nope}\n```\n",
+    });
+    expect(preset).toBeUndefined();
+    expect(problem?.message).toMatch(/not valid/);
+  });
+
+  it("the builtin idea-to-done preset converts to the shipped graph", () => {
+    const graph = presetToStageGraph(BUILTIN_IDEA_TO_DONE_PRESET);
+    expect(graph.name).toBe("idea-to-done");
+    expect(graph.stages.find((s) => s.id === "clarify")?.enabled).toBe(false);
   });
 });
 
@@ -144,10 +246,10 @@ describe("crew flow scopes", () => {
       { path: ".companions/crews/ship.md", stem: "ship", text: "---\nname: ship\nroles: [reviewer]\n---\n" },
     ]);
     expect(set.problems).toEqual([]);
-    expect(set.presets).toHaveLength(1);
-    expect(set.presets[0].roles).toEqual(["reviewer"]);
-    expect(set.presets[0].source).toBe("project");
-    expect(set.presets[0].overrides).toBe("global");
+    const ship = set.presets.find((p) => p.name === "ship");
+    expect(ship?.roles).toEqual(["reviewer"]);
+    expect(ship?.source).toBe("project");
+    expect(ship?.overrides).toBe("global");
   });
 
   it("still reports two files of the same scope claiming one name", () => {
@@ -156,6 +258,6 @@ describe("crew flow scopes", () => {
       { path: ".companions/crews/b.md", stem: "b", text: "---\nname: dup\n---\n" },
     ]);
     expect(set.problems).toHaveLength(1);
-    expect(set.presets).toHaveLength(1);
+    expect(set.presets.filter((p) => p.name === "dup")).toHaveLength(1);
   });
 });

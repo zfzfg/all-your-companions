@@ -55,7 +55,13 @@ describe("parallel crew roles", () => {
       },
       join: (...parts: string[]) => nodePath.join(...parts),
     });
-    sidebar.host = { appendLine: () => {} };
+    sidebar.host = {
+      appendLine: () => {},
+      // This test is the legacy in-thread `/crew` path, which now lives
+      // behind companions.crew.inThreadCommand (D8).
+      getConfiguration: () => ({ get: (key: string, fallback: unknown) =>
+        key === "crew.inThreadCommand" ? true : fallback }),
+    };
     sidebar.emit = (_s: Session, message: unknown) => { posted.push(message); };
     sidebar.setStatus = (session: Session, status: string) => { session.status = status as any; };
     sidebar.sessionCwd = (s: Session) => s.cwd || workspace;

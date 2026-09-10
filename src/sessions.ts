@@ -44,6 +44,8 @@ export interface SessionListEntry {
    *  wire: Agent is the default and stays unbadged so today's list is
    *  unchanged for everyone who never opens a Crew session (§5.2). */
   sessionType?: "crew";
+  /** AP-17. History-row subtitle for a Crew session, copy-deck shape. */
+  crewStatus?: string;
   /** When the user pinned this conversation, from `SessionMetaOverride`. Drives
    *  the projects rail's Pinned group; absent means unpinned. */
   pinnedAt?: number;

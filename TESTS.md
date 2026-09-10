@@ -103,6 +103,53 @@ nothing while locked, and corrects an optimistic flip when the host refuses.
 Also pins that a session-type message never touches the Agent/Plan/Auto-accept
 permission-mode button (D1) and that the Crew composer asks for an idea.
 
+### `test/workflow.test.ts` — workflow definitions (AP-17, 9 tests)
+
+The shipped `idea-to-done` graph matches §7.3 (Clarify disabled, Plan first,
+single-session Implement, Fix `maxVisits` 2). The Markdown in
+`resources/crews/idea-to-done.md` re-parses to the same stages. A missing
+stages block is absence, not an error; a present-but-broken block is reported
+so it cannot silently become the default graph. Snapshot hashes are stable
+and change when a stage does.
+
+### `test/workflow-run.test.ts` — Crew-session orchestrator (AP-17, 14 tests)
+
+Walks `idea-to-done` with a gate after every stage, ending on Done after a
+passing review. Review → Fix → Review stops after `maxVisits` with the
+copy-deck fixer-limit reason and the three options. Pause serialises to
+`run.json` and Start continues at the same gate. An interrupted stage is
+never skipped. Verify failure, unreadable verdict, unreported edits and
+quota force a manual gate even under `autoStartNextStage`. Staleness
+triggers on a changed HEAD or edited observed file; a deleted worktree is
+unresumable; a later edit of the workflow file does not change a
+snapshotted run. Atomic write is temp + rename.
+
+### `test/workflow-persistence.test.ts` — `run.json` and snapshots (AP-17, 2 tests)
+
+Named home for the §7.7 promises: temp+rename so a crash cannot leave a
+half-written `run.json`, and a paused run's snapshot hash does not match a
+later edit of the live workflow file.
+
+### `test/workflow-handoff.test.ts` — packets and caps (AP-17, 7 tests)
+
+`companions-result` wins over `RESULT_FORMAT` headings. Summary / findings /
+verify tail are hard-capped; path lists are not. The next briefing is built
+from the contract's `inputs[]` only and never inlines `stage-NN.result.md`.
+A missing verdict is provenance, not a guessed transition (D17 prose-plan
+fallback is separate).
+
+### `test/workflow-gate.dom.test.ts` — gate card (AP-17, 7 tests)
+
+Real `chat.js`. Copy-deck strings for Gate N, Gate 0, fixer-limit and
+staleness. Start posts `workflowGateAction`. D8's hostNotice button posts
+`openCrewWithGoal`. Empty Crew **Start workflow** posts `workflowStart`.
+
+### `test/workflow-crew-host.test.ts` — D8 and Start workflow (AP-17, 4 tests)
+
+`/crew` in an Agent session is the copy-deck card, not a chain, unless
+`companions.crew.inThreadCommand` is on. `/crew` in a Crew session is
+refused. An empty idea on Start locks the session and shows "Idea required."
+
 ### `test/target-eligibility.test.ts` — who may run as a subagent (AP-16, 80 tests)
 
 §6.3 is an ordered list of eight rules, and the ORDER is the contract: the

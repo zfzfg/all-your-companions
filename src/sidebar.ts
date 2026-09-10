@@ -14,7 +14,7 @@ import { isCanonicallyInsideRoot } from "./file-tree";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { AcpClient, EffortLevel, ExitPlanRequest, PermissionRequest, QuestionRequest } from "./acp";
 import type { AcpProvider, BackendSessionListEntry } from "./acp-backend";
 import { isAdapterProvider, isAcpProvider, ACP_PROVIDERS } from "./acp-backend";
@@ -338,10 +338,46 @@ import {
   loadCrewPresets,
   presetReviewRole,
   presetRoles,
+  presetToStageGraph,
   type CrewPreset,
   type CrewPresetFile,
   type CrewPresetSet,
 } from "./crew-preset";
+import {
+  applyMaxFixerPasses,
+  findStage,
+  IDEA_TO_DONE,
+  isReservedTarget,
+  workflowSnapshotHash,
+  workflowSnapshotPayload,
+  type WorkflowDefinition,
+} from "./workflow";
+import {
+  appendGateNotes,
+  applyGateAction,
+  applySnapshotDrift,
+  applyStaleness,
+  applyStageOutcome,
+  bindStageSession,
+  historySubtitle,
+  makeWorkflowRun,
+  markExhausted,
+  observedFilesHash,
+  parseGateMessage,
+  resumeStaleness,
+  snapshotDrift,
+  startStage as startWorkflowStage,
+  toWorkflowView,
+  withSnapshotHash,
+  WorkflowRunStore,
+  type GateAction,
+  type WorkflowRun,
+} from "./workflow-run";
+import {
+  briefingFromContract,
+  buildHandoffPacket,
+  type HandoffPacket,
+} from "./workflow-handoff";
 import { applyReviewCadence, briefingForCrewStep, fixerTitle, verifyInsertsFixer } from "./crew-run";
 import {
   presetToDraft,
@@ -542,6 +578,7 @@ import {
   isSessionTypeLocked,
   forkedSessionTypeMeta,
   lockSessionType,
+  type HiddenReason,
   type SessionType,
   type SessionTypeMeta,
 } from "./session-type";
@@ -1916,6 +1953,12 @@ export class GrokSidebar {
        * child session is stamped hidden before its first turn.
        */
       subagent?: { subagentId: string; label: string; profile: string };
+      /**
+       * AP-17. A crew-stage child. Same hidden-session treatment as a
+       * subagent, writes `stage-NN` artefacts, and does not emit an
+       * `/agent` result card — the gate card is the one card for the stage.
+       */
+      stage?: { stageId: string };
     },
   ): Promise<{
     outcome: "completed" | "failed" | "cancelled";
@@ -1948,8 +1991,9 @@ export class GrokSidebar {
     const briefing: Briefing = makeBriefing({ ...brief, runId, step });
     const briefMarkdown = renderBriefing(briefing, role);
 
+    const artifactKind = coords?.stage ? "stage" as const : "step" as const;
     try {
-      this.agentRuns.writeBrief(runId, step, briefMarkdown);
+      this.agentRuns.writeBrief(runId, step, briefMarkdown, artifactKind);
     } catch (error) {
       // The brief IS the run. Without it on disk there is nothing to read back
       // and nothing for a later step to build on, so this is where it stops.
@@ -2000,13 +2044,22 @@ export class GrokSidebar {
     if (overlay.length) roleSession.rolePermissionRules = overlay;
     this.pool.add(roleSession);
     const subagentCoords = coords?.subagent;
-    // AP-16 §6.6 point 1: stamped BEFORE the first turn, so no history refresh
-    // can race the child into the list.
+    const stageCoords = coords?.stage;
+    // AP-16 §6.6 point 1 / AP-17 D5: stamped BEFORE the first turn, so no
+    // history refresh can race the child into the list.
     if (subagentCoords) this.markHiddenChildSession(roleSession, caller, subagentCoords.subagentId);
+    if (stageCoords) {
+      this.markHiddenChildSession(
+        roleSession,
+        caller,
+        `${coords?.runId ?? runId}:${stageCoords.stageId}`,
+        "crew-stage",
+      );
+    }
     const subagentHandle = subagentCoords
       ? { subagentId: subagentCoords.subagentId, roleSession, cancelled: false }
       : undefined;
-    const liveHandle = coords?.live && !subagentCoords
+    const liveHandle = (coords?.live || stageCoords) && !subagentCoords
       ? { runId, step, roleName: role.name, roleSession, cancelled: false }
       : undefined;
     if (subagentHandle) {
@@ -2029,7 +2082,7 @@ export class GrokSidebar {
     // A subagent announces itself on its own card, not as a line in the
     // parent's transcript — §6.11 is explicit that a child's output never
     // reaches the parent's own transcript text.
-    if (!subagentCoords) {
+    if (!subagentCoords && !stageCoords) {
       this.agentNotice(
         caller,
         "info",
@@ -2085,7 +2138,7 @@ export class GrokSidebar {
       this.discardAgentRoleSession(roleSession);
     } else {
       try {
-        const resultPath = this.agentRuns.writeResult(runId, step, renderResult(result, reply, reconciliation));
+        const resultPath = this.agentRuns.writeResult(runId, step, renderResult(result, reply, reconciliation), artifactKind);
         this.host.appendLine(`[agent] run ${runId} step ${step}: ${resultPath}`);
       } catch (error) {
         this.host.appendLine(`[agent] could not write the result for run ${runId}: ${(error as Error).message}`);
@@ -2109,7 +2162,7 @@ export class GrokSidebar {
     }
     // A companion subagent renders as its own card (§6.11) and must not also
     // produce an `/agent` result card — one run, one card.
-    if (subagentCoords) {
+    if (subagentCoords || stageCoords) {
       return {
         outcome,
         filesReported: result.files,
@@ -2246,6 +2299,668 @@ export class GrokSidebar {
     this.emit(session, { type: "crewRun", run: session.crewRun ?? null });
   }
 
+  // ---------------------------------------------------------------- AP-17 --
+  // Crew-session workflow runs. The pure state machine is `workflow-run.ts`;
+  // this is the glue: persistence, `runAgentRole` with `coords.stage`, the
+  // gate's target picker, and the D8 `/crew` intercept.
+
+  private workflowState?: {
+    store: WorkflowRunStore;
+    packets: Map<string, HandoffPacket>;
+    defs: Map<string, WorkflowDefinition>;
+  };
+
+  private workflowStore(): NonNullable<GrokSidebar["workflowState"]> {
+    if (!this.workflowState) {
+      this.workflowState = {
+        store: new WorkflowRunStore({
+          root: path.join(this.context.globalStorageUri.fsPath, "runs"),
+          fs: {
+            mkdirSync: (dir, options) => { fs.mkdirSync(dir, options); },
+            writeFileSync: (file, data) => fs.writeFileSync(file, data, "utf8"),
+            readFileSync: (file, encoding) => fs.readFileSync(file, encoding),
+            renameSync: (from, to) => fs.renameSync(from, to),
+            existsSync: (target) => fs.existsSync(target),
+          },
+          join: (...parts) => path.join(...parts),
+        }),
+        packets: new Map(),
+        defs: new Map(),
+      };
+    }
+    return this.workflowState;
+  }
+
+  private workflowRuns(): WorkflowRunStore { return this.workflowStore().store; }
+
+  private inThreadCrewCommand(): boolean {
+    try {
+      return this.host.getConfiguration("companions").get<boolean>("crew.inThreadCommand", false) === true;
+    } catch {
+      return false;
+    }
+  }
+
+  private defaultWorkflowName(): string {
+    try {
+      const name = this.host.getConfiguration("companions").get<string>("crew.defaultWorkflow", "idea-to-done");
+      return (name ?? "idea-to-done").trim() || "idea-to-done";
+    } catch {
+      return "idea-to-done";
+    }
+  }
+
+  private autoStartNextStage(): boolean {
+    try {
+      return this.host.getConfiguration("companions").get<boolean>("crew.autoStartNextStage", false) === true;
+    } catch {
+      return false;
+    }
+  }
+
+  private maxFixerPasses(): number {
+    try {
+      const n = this.host.getConfiguration("companions").get<number>("crew.maxFixerPasses", 2);
+      return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 2;
+    } catch {
+      return 2;
+    }
+  }
+
+  private resolveWorkflow(session: Session, name?: string): WorkflowDefinition {
+    const cwd = this.sessionCwd(session);
+    const presets = this.crewPresetSet(cwd);
+    const wanted = (name ?? this.defaultWorkflowName()).trim() || this.defaultWorkflowName();
+    const preset = findCrewPreset(presets, wanted === "idea-to-done" ? "idea-to-done" : wanted);
+    if (preset.name === "idea-to-done" && !preset.stages && wanted === "idea-to-done") {
+      return applyMaxFixerPasses(IDEA_TO_DONE, this.maxFixerPasses());
+    }
+    const named = presets.presets.find((p) => p.name === wanted) ?? preset;
+    return applyMaxFixerPasses(presetToStageGraph(named), this.maxFixerPasses());
+  }
+
+  private postWorkflowList(session: Session): void {
+    try {
+      let cwd = session.cwd || "";
+      try {
+        if (!cwd) cwd = this.sessionCwd(session);
+      } catch {
+        cwd = "";
+      }
+      const presets = this.crewPresetSet(cwd);
+      const defaultName = this.defaultWorkflowName();
+      const workflows = presets.presets.map((preset) => ({
+        name: preset.name,
+        title: preset.title || preset.name,
+        whenToUse: preset.whenToUse || "",
+        source: preset.source,
+        ...(preset.stages === undefined && preset.name !== "idea-to-done" ? { defaultGraph: true } : {}),
+      }));
+      this.emit(session, { type: "workflowList", workflows, defaultWorkflow: defaultName });
+    } catch (error) {
+      this.emit(session, {
+        type: "workflowList",
+        workflows: [{
+          name: IDEA_TO_DONE.name,
+          title: IDEA_TO_DONE.title,
+          whenToUse: IDEA_TO_DONE.whenToUse,
+          source: "builtin",
+        }],
+        defaultWorkflow: "idea-to-done",
+      });
+      this.host.appendLine?.(`[workflow] could not list workflows: ${(error as Error).message}`);
+    }
+  }
+
+  private emitWorkflowRun(session: Session, extra?: { staleDetails?: string[] }): void {
+    const run = session.workflowRun;
+    if (!run) {
+      session.workflowView = undefined;
+      this.emit(session, { type: "workflowRun", run: null });
+      return;
+    }
+    const def = this.workflowStore().defs.get(run.runId) ?? this.resolveWorkflow(session, run.workflowName);
+    this.workflowStore().defs.set(run.runId, def);
+    const last = [...this.workflowStore().packets.values()]
+      .filter((p) => p.runId === run.runId)
+      .sort((a, b) => b.stageOrdinal - a.stageOrdinal)[0];
+    const listing = listEligibleTargets(this.crewEligibilityInput(session), { includeIneligible: true, expand: undefined });
+    const expanded = listEligibleTargets(this.crewEligibilityInput(session), {
+      includeIneligible: true,
+      expand: listing.targets[0]?.provider,
+    });
+    session.workflowView = toWorkflowView({
+      run,
+      def,
+      lastPacket: last,
+      listing: {
+        targets: listing.targets.map((t) => {
+          const full = t.provider === expanded.targets.find((x) => x.provider === t.provider)?.provider
+            ? expanded.targets.find((x) => x.provider === t.provider)
+            : t;
+          return {
+            provider: t.provider,
+            displayName: t.displayName,
+            ...(t.defaultModel ? { defaultModel: t.defaultModel } : {}),
+            ...(t.defaultEffort ? { defaultEffort: t.defaultEffort } : {}),
+            ...(full?.models ? { models: full.models } : {}),
+          };
+        }),
+        ineligible: listing.ineligible.map((row) => ({ provider: row.provider, message: row.message })),
+      },
+      ...(extra?.staleDetails ? { staleDetails: extra.staleDetails } : {}),
+    });
+    this.emit(session, { type: "workflowRun", run: session.workflowView });
+  }
+
+  private persistWorkflowRun(session: Session): void {
+    const run = session.workflowRun;
+    if (!run) return;
+    try {
+      this.workflowRuns().writeRun(run);
+    } catch (error) {
+      this.host.appendLine(`[workflow] could not write run.json: ${(error as Error).message}`);
+    }
+    this.persistSessionType(session);
+  }
+
+  private crewEligibilityInput(session: Session): EligibilityInput {
+    const base = this.eligibilityInput(session, this.currentTurnId(session));
+    const overrides = this.companionsSetting<Record<string, { enabled?: boolean }>>("crew.providers", {});
+    const roster = { ...base.roster };
+    for (const provider of ACP_PROVIDERS) {
+      const enabled = overrides?.[provider]?.enabled;
+      if (typeof enabled !== "boolean") continue;
+      roster[provider] = { ...(roster[provider] ?? { enabled: true, allowedModels: [], allowWrite: true }), enabled };
+    }
+    return {
+      ...base,
+      purpose: "crew-stage",
+      parent: undefined,
+      roster,
+      exhausted: new Set(session.workflowRun?.exhausted ?? []),
+      subagentsEnabled: true,
+      forbiddenThisTurn: false,
+    };
+  }
+
+  private restoreWorkflowRun(session: Session, runId: string): void {
+    const run = this.workflowRuns().readRun(runId);
+    if (!run) return;
+    session.workflowRun = run;
+    const snap = this.workflowRuns().readSnapshot(runId);
+    if (snap) {
+      try {
+        const parsed = JSON.parse(snap);
+        const fromSnap = presetToStageGraph({
+          name: run.workflowName,
+          roles: [],
+          body: "",
+          source: "builtin",
+          stages: parsed,
+        });
+        this.workflowStore().defs.set(runId, fromSnap);
+      } catch {
+        this.workflowStore().defs.set(runId, this.resolveWorkflow(session, run.workflowName));
+      }
+    } else {
+      this.workflowStore().defs.set(runId, this.resolveWorkflow(session, run.workflowName));
+    }
+    const def = this.workflowStore().defs.get(runId)!;
+    const liveHash = workflowSnapshotHash(this.resolveWorkflow(session, run.workflowName));
+    let next = run;
+    const stale = resumeStaleness(run.pausedAt, this.currentWorkspaceStamp(run));
+    if (!stale.ok) next = applyStaleness(next, stale);
+    if (snapshotDrift(next, liveHash)) next = applySnapshotDrift(next);
+    session.workflowRun = next;
+    this.emitWorkflowRun(session, !stale.ok && stale.code === "stale" ? { staleDetails: stale.details } : undefined);
+  }
+
+  private currentWorkspaceStamp(run: WorkflowRun): {
+    gitHead?: string;
+    observedHash?: string;
+    worktreeExists?: boolean;
+    worktree?: string;
+  } {
+    const cwd = run.worktree || run.cwd;
+    let gitHead: string | undefined;
+    try {
+      const headPath = path.join(cwd, ".git");
+      if (fs.existsSync(headPath)) {
+        gitHead = execFileSync("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf8" }).trim();
+      }
+    } catch { /* not a git checkout, or git missing — staleness then relies on file hashes */ }
+    const packets = [...this.workflowStore().packets.values()].filter((p) => p.runId === run.runId);
+    const files = packets.flatMap((p) => p.filesObserved);
+    const hashed = files.map((file) => {
+      const abs = path.isAbsolute(file) ? file : path.join(cwd, file);
+      try {
+        const buf = fs.readFileSync(abs);
+        let h = 0x811c9dc5;
+        for (let i = 0; i < buf.length; i += 1) {
+          h ^= buf[i]!;
+          h = Math.imul(h, 0x01000193);
+        }
+        return { path: file, hash: (h >>> 0).toString(16) };
+      } catch {
+        return { path: file, hash: "missing" };
+      }
+    });
+    return {
+      ...(gitHead ? { gitHead } : {}),
+      ...(hashed.length ? { observedHash: observedFilesHash(hashed) } : {}),
+      ...(run.worktree ? { worktree: run.worktree, worktreeExists: fs.existsSync(run.worktree) } : {}),
+    };
+  }
+
+  private async startWorkflowRun(
+    session: Session,
+    origin: MsgOrigin,
+    idea: string,
+    workflowName: string,
+    options?: {
+      worktree?: boolean;
+      verify?: string;
+      gatePolicy?: "ask" | "workflow";
+      firstTarget?: { provider: AcpProvider; model?: string; effort?: string };
+    },
+  ): Promise<void> {
+    const trimmed = idea.trim();
+    this.lockSessionTypeNow(session);
+    if (!trimmed) {
+      this.emit(session, { type: "hostNotice", level: "warning", text: "Idea required." });
+      return;
+    }
+    await this.waitForSessionStart(session);
+    const def = this.resolveWorkflow(session, workflowName);
+    const runId = this.agentRuns.newRunId();
+    const cwd = this.sessionCwd(session);
+    let worktree: string | undefined;
+    if (options?.worktree) {
+      const created = await this.createCrewWorktree(cwd, `crew-${runId}`);
+      if ("error" in created) {
+        this.agentNotice(session, "warning", created.error);
+      } else {
+        worktree = created.path;
+      }
+    }
+    const verify = options?.verify ?? def.defaults.verify;
+    let run = makeWorkflowRun({
+      runId,
+      sessionId: session.activeSessionId ?? "",
+      workflow: def,
+      idea: trimmed,
+      cwd,
+      ...(worktree ? { worktree } : {}),
+      ...(verify ? { verify } : {}),
+      checkpointTurnId: String(session.userMessageCount),
+      attachedFiles: explicitVisibleChips(session.chips).filter((c) => "path" in c).map((c) => (c as { path: string }).path),
+      ...(options?.firstTarget ? { firstTarget: { provider: options.firstTarget.provider, ...(options.firstTarget.model ? { model: options.firstTarget.model } : {}), ...(options.firstTarget.effort ? { effort: options.firstTarget.effort as never } : {}) } } : {}),
+    });
+    const hash = workflowSnapshotHash(def);
+    run = withSnapshotHash(run, hash);
+    this.workflowStore().defs.set(runId, def);
+    try {
+      this.workflowRuns().writeSnapshot(runId, workflowSnapshotPayload(def));
+    } catch (error) {
+      this.host.appendLine(`[workflow] could not write snapshot: ${(error as Error).message}`);
+    }
+    session.workflowRun = run;
+    session.firstUserMessageForTitle = trimmed;
+    this.emit(session, { type: "userMessage", text: trimmed, chips: [] });
+    this.persistWorkflowRun(session);
+    this.emitWorkflowRun(session);
+    if (options?.firstTarget) {
+      await this.handleWorkflowGateAction(session, origin, {
+        type: "start",
+        nextStageId: run.gate?.nextStageId,
+        target: options.firstTarget as never,
+      });
+    }
+  }
+
+  private async handleWorkflowGateAction(
+    session: Session,
+    origin: MsgOrigin,
+    action: GateAction,
+  ): Promise<void> {
+    const run = session.workflowRun;
+    if (!run) return;
+    const def = this.workflowStore().defs.get(run.runId) ?? this.resolveWorkflow(session, run.workflowName);
+    if (action.type === "revertAll") {
+      await this.revertWorkflowRun(session);
+      return;
+    }
+    if (action.type === "keepChanges") {
+      session.workflowRun = applyGateAction(run, def, { type: "cancel", reason: "Cancelled, changes kept." }, Date.now());
+      this.persistWorkflowRun(session);
+      this.emitWorkflowRun(session);
+      return;
+    }
+    if (action.type === "changeWorkflow") {
+      this.postWorkflowList(session);
+      return;
+    }
+    if (action.type === "pause") {
+      const stamp = this.currentWorkspaceStamp(run);
+      session.workflowRun = applyGateAction(run, def, {
+        type: "pause",
+        at: Date.now(),
+        ...(stamp.gitHead ? { gitHead: stamp.gitHead } : {}),
+        ...(stamp.observedHash ? { observedHash: stamp.observedHash } : {}),
+        ...(stamp.worktree ? { worktree: stamp.worktree } : {}),
+      }, Date.now());
+      this.persistWorkflowRun(session);
+      this.emitWorkflowRun(session);
+      return;
+    }
+    if (action.type === "start" || action.type === "restart" || action.type === "rerun" || action.type === "anotherRound") {
+      const next = applyGateAction(run, def, action, Date.now());
+      session.workflowRun = next;
+      this.persistWorkflowRun(session);
+      this.emitWorkflowRun(session);
+      if (next.status === "running" && next.current) {
+        await this.executeWorkflowStage(session, origin, def, next, action.target);
+      }
+      return;
+    }
+    session.workflowRun = applyGateAction(run, def, action, Date.now());
+    if (action.type === "skip" && session.workflowRun.status === "at-gate" && session.workflowRun.gate?.autoProceed) {
+      /* skip never auto-proceeds */
+    }
+    this.persistWorkflowRun(session);
+    this.emitWorkflowRun(session);
+    if (session.workflowRun.status === "done") this.emitReviewCenter(session);
+  }
+
+  private async executeWorkflowStage(
+    session: Session,
+    origin: MsgOrigin,
+    def: WorkflowDefinition,
+    run: WorkflowRun,
+    targetHint?: { provider: AcpProvider; model?: string; effort?: string },
+  ): Promise<void> {
+    const current = run.current;
+    if (!current) return;
+    const stage = findStage(def, current.stageId);
+    if (!stage) return;
+    const roles = this.agentRoleSet(this.sessionCwd(session));
+    const roleRef = def.roles[stage.role];
+    const named = "ref" in (roleRef ?? {}) ? (roleRef as { ref: string }).ref : stage.role;
+    const template = findAgentRole(roles, named);
+    const input = this.crewEligibilityInput(session);
+    const requested = {
+      provider: targetHint?.provider ?? stage.target?.provider ?? template?.provider ?? session.provider,
+      ...(targetHint?.model || stage.target?.model || template?.model
+        ? { model: targetHint?.model ?? stage.target?.model ?? template?.model }
+        : {}),
+      ...(targetHint?.effort || stage.target?.effort || template?.effort
+        ? { effort: (targetHint?.effort ?? stage.target?.effort ?? template?.effort) as never }
+        : {}),
+      profile: stage.profile,
+      runMode: stage.runMode ?? (stage.profile === "read-only" ? "plan" : "agent"),
+    };
+    const verdict = resolveTarget(requested, input);
+    if (!verdict.ok) {
+      this.emit(session, { type: "hostNotice", level: "warning", text: verdict.message });
+      session.workflowRun = applyStageOutcome(
+        run,
+        def,
+        buildHandoffPacket({
+          runId: run.runId,
+          stageId: stage.id,
+          stageOrdinal: current.ordinal,
+          visit: current.visit,
+          role: stage.role,
+          target: { provider: requested.provider, modelVerified: false },
+          status: "failed",
+          rawReply: verdict.message,
+          durationMs: 0,
+          resultPath: this.agentRuns.resultPath(run.runId, current.ordinal, "stage"),
+        }),
+        this.packetsFor(run.runId),
+        { autoStartNextStage: this.autoStartNextStage() },
+      );
+      this.persistWorkflowRun(session);
+      this.emitWorkflowRun(session);
+      return;
+    }
+    const role: AgentRole = {
+      ...(template ?? {
+        name: stage.role,
+        whenToUse: stage.title,
+        source: "builtin" as const,
+      }),
+      name: stage.role,
+      provider: verdict.target.provider,
+      ...(verdict.target.model ? { model: verdict.target.model } : {}),
+      ...(verdict.target.effort ? { effort: verdict.target.effort } : {}),
+      mode: stage.runMode ?? (stage.profile === "read-only" ? "plan" : "agent"),
+    };
+    const packets = this.packetMap(run.runId);
+    const brief = briefingFromContract({
+      runId: run.runId,
+      step: current.ordinal,
+      idea: run.idea,
+      stage,
+      def,
+      packets,
+      userNotes: run.gate?.userNotes,
+      attachedFiles: run.attachedFiles,
+      verifyCommand: run.verify,
+    });
+    this.setStatus(session, "working");
+    const started = Date.now();
+    let outcome = await this.runAgentRole(
+      role,
+      brief,
+      "workflow-stage",
+      session,
+      origin,
+      {
+        runId: run.runId,
+        step: current.ordinal,
+        cwd: run.worktree ?? run.cwd,
+        stage: { stageId: stage.id },
+      },
+    );
+    if (
+      outcome.outcome === "failed"
+      && (classifyLimitError(role.provider, outcome.detail || "") === "quota"
+        || classifyLimitError(role.provider, outcome.detail || "") === "rate")
+    ) {
+      session.workflowRun = markExhausted(session.workflowRun ?? run, role.provider);
+      const next = nextFailoverProvider(
+        session.workflowRun.exhausted,
+        this.usableProviders(),
+      );
+      if (next) {
+        outcome = await this.runAgentRole(
+          { ...role, provider: next },
+          brief,
+          "workflow-stage",
+          session,
+          origin,
+          {
+            runId: run.runId,
+            step: current.ordinal,
+            cwd: run.worktree ?? run.cwd,
+            stage: { stageId: stage.id },
+          },
+        );
+      }
+    }
+    const live = session.workflowRun ?? run;
+    if (outcome.sessionId) {
+      session.workflowRun = bindStageSession(live, outcome.sessionId);
+    }
+    let verify: { command: string; exitCode: number; output: string } | undefined;
+    if (run.verify && (stage.profile === "scoped-edit" || stage.profile === "inherit") && outcome.outcome === "completed") {
+      const result = await this.runCrewVerify(run.verify, run.worktree ?? run.cwd);
+      verify = { command: run.verify, exitCode: result.code, output: result.output };
+    }
+    const status =
+      outcome.outcome === "cancelled" ? "interrupted" as const
+        : outcome.outcome === "failed" ? "failed" as const
+          : "done" as const;
+    const packet = buildHandoffPacket({
+      runId: run.runId,
+      stageId: stage.id,
+      stageOrdinal: current.ordinal,
+      visit: current.visit,
+      role: stage.role,
+      target: {
+        provider: role.provider,
+        ...(role.model ? { model: role.model } : {}),
+        ...(role.effort ? { effort: role.effort } : {}),
+        modelVerified: verdict.ok ? verdict.modelVerified : false,
+      },
+      status,
+      rawReply: outcome.rawReply ?? outcome.summary,
+      filesReported: outcome.filesReported,
+      filesObserved: outcome.filesObserved,
+      reconciliation: outcome.reconciliation,
+      ...(verify ? { verify } : {}),
+      userNotes: live.gate?.userNotes,
+      tokens: outcome.totalTokens,
+      durationMs: outcome.durationMs || (Date.now() - started),
+      resultPath: this.agentRuns.resultPath(run.runId, current.ordinal, "stage"),
+      contract: def.contracts[stage.contract],
+    });
+    try {
+      this.workflowRuns().writeHandoff(run.runId, current.ordinal, packet);
+    } catch (error) {
+      this.host.appendLine(`[workflow] could not write handoff: ${(error as Error).message}`);
+    }
+    this.workflowStore().packets.set(`${run.runId}:${current.ordinal}`, packet);
+    const after = applyStageOutcome(
+      session.workflowRun ?? live,
+      def,
+      packet,
+      this.packetsFor(run.runId),
+      { autoStartNextStage: this.autoStartNextStage() },
+    );
+    session.workflowRun = after;
+    this.persistWorkflowRun(session);
+    this.emitWorkflowRun(session);
+    if (after.status === "done") this.emitReviewCenter(session);
+    if (after.gate?.autoProceed && after.status === "at-gate" && after.gate.nextStageId && !isReservedTarget(after.gate.nextStageId)) {
+      await this.handleWorkflowGateAction(session, origin, { type: "start", nextStageId: after.gate.nextStageId });
+    }
+  }
+
+  private packetMap(runId: string): Map<string, HandoffPacket> {
+    const map = new Map<string, HandoffPacket>();
+    for (const packet of this.packetsFor(runId)) map.set(packet.stageId, packet);
+    return map;
+  }
+
+  private packetsFor(runId: string): HandoffPacket[] {
+    return [...this.workflowStore().packets.values()]
+      .filter((p) => p.runId === runId)
+      .sort((a, b) => a.stageOrdinal - b.stageOrdinal);
+  }
+
+  private async revertWorkflowRun(session: Session): Promise<void> {
+    const run = session.workflowRun;
+    if (!run) return;
+    try {
+      await this.reviewRevertAll(session, "session");
+    } catch (error) {
+      this.host.appendLine(`[workflow] revert failed: ${(error as Error).message}`);
+    }
+    session.workflowRun = applyGateAction(run, this.workflowStore().defs.get(run.runId) ?? IDEA_TO_DONE, {
+      type: "cancel",
+      reason: "Cancelled; changes reverted.",
+    }, Date.now());
+    this.persistWorkflowRun(session);
+    this.emitWorkflowRun(session);
+  }
+
+  private async handleCrewSessionInput(text: string, session: Session, origin: MsgOrigin): Promise<void> {
+    const run = session.workflowRun;
+    if (!run || run.status === "done" || run.status === "cancelled" || run.status === "failed") {
+      const name = this.defaultWorkflowName();
+      await this.startWorkflowRun(session, origin, text, name);
+      return;
+    }
+    if (run.status === "running") {
+      const live = (session.crewLive ?? [])[0];
+      if (live?.roleSession) {
+        await this.handleSend(text, false, live.roleSession, origin);
+      }
+      return;
+    }
+    const parsed = parseGateMessage(text);
+    if (parsed.kind === "command") {
+      const map: Record<string, GateAction> = {
+        pause: { type: "pause", at: Date.now() },
+        cancel: { type: "cancel" },
+        skip: { type: "skip" },
+        rerun: { type: "rerun" },
+        restart: { type: "restart" },
+        continueAnyway: { type: "continueAnyway" },
+        start: { type: "start" },
+      };
+      const action = map[parsed.command];
+      if (action) await this.handleWorkflowGateAction(session, origin, action);
+      return;
+    }
+    session.workflowRun = appendGateNotes(run, parsed.text);
+    this.persistWorkflowRun(session);
+    this.emitWorkflowRun(session);
+  }
+
+  private gateActionFromMsg(msg: {
+    action: string;
+    nextStageId?: string;
+    target?: { provider: AcpProvider; model?: string; effort?: string };
+    notes?: string;
+  }): GateAction | undefined {
+    if (msg.action === "pause") return { type: "pause", at: Date.now() };
+    if (msg.action === "cancel") return { type: "cancel" };
+    if (msg.action === "skip") return { type: "skip", ...(msg.notes ? { notes: msg.notes } : {}) };
+    if (msg.action === "rerun") return { type: "rerun", ...(msg.target ? { target: msg.target as never } : {}) };
+    if (msg.action === "restart") return { type: "restart", ...(msg.target ? { target: msg.target as never } : {}) };
+    if (msg.action === "finish") return { type: "finish" };
+    if (msg.action === "continueAnyway") return { type: "continueAnyway" };
+    if (msg.action === "acceptAsIs") return { type: "acceptAsIs" };
+    if (msg.action === "anotherRound") return { type: "anotherRound", ...(msg.target ? { target: msg.target as never } : {}) };
+    if (msg.action === "changeWorkflow") return { type: "changeWorkflow" };
+    if (msg.action === "revertAll") return { type: "revertAll" };
+    if (msg.action === "keepChanges") return { type: "keepChanges" };
+    if (msg.action === "start") {
+      return {
+        type: "start",
+        ...(msg.nextStageId ? { nextStageId: msg.nextStageId } : {}),
+        ...(msg.target ? { target: msg.target as never } : {}),
+        ...(msg.notes ? { notes: msg.notes } : {}),
+      };
+    }
+    return undefined;
+  }
+
+  private async openNewCrewSession(
+    origin: MsgOrigin,
+    idea: string,
+    workflowName: string,
+    options?: {
+      worktree?: boolean;
+      verify?: string;
+      gatePolicy?: "ask" | "workflow";
+      firstTarget?: { provider: AcpProvider; model?: string; effort?: string };
+    },
+  ): Promise<void> {
+    await this.newFocusedSession(origin);
+    this.focused.sessionType = "crew";
+    this.persistSessionType(this.focused);
+    this.postSessionType(this.focused);
+    this.postWorkflowList(this.focused);
+    if (idea.trim()) {
+      await this.startWorkflowRun(this.focused, origin, idea, workflowName, options);
+    }
+  }
+
   private crewPresetSet(cwd: string): CrewPresetSet {
     return loadCrewPresets([
       ...this.readCompanionFiles(this.companionsRoot("global"), CREW_PRESETS_DIR, "global", "crew"),
@@ -2268,6 +2983,27 @@ export class GrokSidebar {
     if (parsed.kind === "none") return false;
     if (parsed.kind === "error") {
       this.agentNotice(session, "warning", parsed.message);
+      return true;
+    }
+    // D8: `/crew` in an Agent session is not the in-thread chain unless the
+    // user turned that legacy path back on. A Crew session does not run `/crew`
+    // at all — the session IS the run.
+    if (session.sessionType === "crew") {
+      this.agentNotice(session, "warning", "This is already a Crew session. Describe the idea in the composer, or use the gate.");
+      return true;
+    }
+    if (!this.inThreadCrewCommand()) {
+      const goal = parsed.kind === "run" ? parsed.goal : undefined;
+      this.emit(session, {
+        type: "hostNotice",
+        level: "warning",
+        text: "Crew runs live in their own session.",
+        action: {
+          id: "openCrewWithGoal",
+          label: "Open a new Crew session with this goal",
+          ...(goal ? { goal } : {}),
+        },
+      });
       return true;
     }
     if (session.crewRun && (session.crewRun.status === "running" || session.crewRun.status === "assigning" || session.crewRun.status === "planning")) {
@@ -8579,9 +9315,13 @@ Only continue if you trust this code.`,
     if (!id) return;
     const overrides = this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
     const current = overrides[id] ?? {};
+    const crewRunId = session.workflowRun?.runId;
+    const workflowName = session.workflowRun?.workflowName;
     if (
       current.sessionType === session.sessionType
       && current.sessionTypeLockedAt === session.sessionTypeLockedAt
+      && current.crewRunId === crewRunId
+      && current.workflowName === workflowName
     ) {
       return;
     }
@@ -8593,6 +9333,8 @@ Only continue if you trust this code.`,
         ...(session.sessionTypeLockedAt !== undefined
           ? { sessionTypeLockedAt: session.sessionTypeLockedAt }
           : {}),
+        ...(crewRunId ? { crewRunId } : {}),
+        ...(workflowName ? { workflowName } : {}),
       },
     });
     this.sessionCache.delete(id);
@@ -8611,6 +9353,14 @@ Only continue if you trust this code.`,
       session.sessionTypeLockedAt = meta.sessionTypeLockedAt;
     }
     this.postSessionType(session);
+    if (session.sessionType === "crew") this.postWorkflowList(session);
+    if (meta?.crewRunId && !session.workflowRun) {
+      try {
+        this.restoreWorkflowRun(session, meta.crewRunId);
+      } catch (error) {
+        this.host.appendLine?.(`[workflow] could not restore run ${meta.crewRunId}: ${(error as Error).message}`);
+      }
+    }
   }
 
   /**
@@ -8664,6 +9414,7 @@ Only continue if you trust this code.`,
     session.sessionType = result.meta.sessionType ?? "agent";
     this.persistSessionType(session);
     this.postSessionType(session);
+    if (session.sessionType === "crew") this.postWorkflowList(session);
   }
 
   // ---------------------------------------------------------------- AP-16 --
@@ -8767,6 +9518,10 @@ Only continue if you trust this code.`,
    */
   private async companionsMcpServer(session: Session): Promise<AcpMcpStdioServer | undefined> {
     if (!this.subagentsCouldBeUsedIn(session)) return undefined;
+    // A Crew session is the orchestrator, not a chatting agent that delegates.
+    // Stage children are hidden; P4–P5 ignore stagesMayUseSubagents (§7.9).
+    if (session.sessionType === "crew") return undefined;
+    if (session.pendingHiddenChild?.hiddenReason) return undefined;
     // Depth: a companion subagent never gets the delegation server itself.
     // `maxDepth` is 1 and values above it are refused until P6 (§12.3).
     if (this.sessionTypeMetaFor(session)?.hiddenReason) return undefined;
@@ -9495,13 +10250,18 @@ ${args.task}`,
    * named the session (the record is keyed by that id), so the stamp is parked
    * on the session object and flushed the moment the id exists.
    */
-  private markHiddenChildSession(child: Session, parent: Session, subagentId: string): void {
+  private markHiddenChildSession(
+    child: Session,
+    parent: Session,
+    subagentId: string,
+    hiddenReason: HiddenReason = "companion-subagent",
+  ): void {
     child.sessionType = "agent";
     child.sessionTypeLockedAt = Date.now();
     child.pendingHiddenChild = {
       parentSessionId: parent.activeSessionId ?? "",
       subagentId,
-      hiddenReason: "companion-subagent",
+      hiddenReason,
       depth: (this.sessionTypeMetaFor(parent)?.depth ?? 0) + 1,
     };
   }
@@ -14940,6 +15700,23 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         }
         break;
       }
+      case "workflowStart": {
+        const target = [...this.pool].find((s) => s.activeSessionId === msg.sessionId) ?? session;
+        if (msg.openNew) {
+          await this.openNewCrewSession(origin, msg.idea, msg.workflowName, msg.options);
+          break;
+        }
+        await this.startWorkflowRun(target, origin, msg.idea, msg.workflowName, msg.options);
+        break;
+      }
+      case "workflowGateAction": {
+        const action = this.gateActionFromMsg(msg);
+        if (action) await this.handleWorkflowGateAction(session, origin, action);
+        break;
+      }
+      case "openCrewWithGoal":
+        await this.openNewCrewSession(origin, msg.goal, this.defaultWorkflowName());
+        break;
       case "setSubagentsEnabled":
         // Global, like the other display and behaviour prefs. The config
         // watcher re-posts it, keeping every open settings page in step.
@@ -16666,7 +17443,22 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     // AP-15 §5.2. Only Crew rows are badged; an Agent row is what a row has
     // always looked like, and every pre-AP-15 session is an Agent session.
     for (const entry of pageEntries) {
-      if (effectiveSessionType(overrides[entry.id]) === "crew") entry.sessionType = "crew";
+      if (effectiveSessionType(overrides[entry.id]) === "crew") {
+        entry.sessionType = "crew";
+        const runId = overrides[entry.id]?.crewRunId;
+        const live = [...this.pool].find((s) => s.workflowRun?.runId === runId);
+        if (live?.workflowRun) {
+          const def = this.workflowStore().defs.get(live.workflowRun.runId)
+            ?? this.resolveWorkflow(live, live.workflowRun.workflowName);
+          entry.crewStatus = historySubtitle(live.workflowRun, def);
+        } else if (runId) {
+          const stored = this.workflowRuns().readRun(runId);
+          if (stored) {
+            const def = this.resolveWorkflow(this.focused, stored.workflowName);
+            entry.crewStatus = historySubtitle(stored, def);
+          }
+        }
+      }
       // AP-16 §6.6 point 2. Carried onto the entry so the ONE filter in
       // `sessions.ts` decides visibility for both the grok-stamped kind and
       // our own marker — pagination keeps counting index slots exactly as it
@@ -20253,6 +21045,10 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       await this.handleCrewCommand(text, session, origin);
       return;
     }
+    if (session.sessionType === "crew" && !session.pendingHiddenChild) {
+      await this.handleCrewSessionInput(text, session, origin);
+      return;
+    }
     await this.waitForSessionStart(session);
     // Desk↔remote co-attach: the OTHER view only learns `busy` once the
     // mirrored agentStart crosses the relay, so a send can race through that
@@ -21061,6 +21857,7 @@ ${directives.block}`;
     )) {
       void wv.postMessage(m);
     }
+    if (session.sessionType === "crew") this.postWorkflowList(session);
     // Restore turn chrome the buffer does not carry (busy is event-sourced live).
     // During priming the client exists but has no session id yet — keep the
     // startup lock so a reload cannot unlock the composer into a lost prompt.
@@ -21177,6 +21974,8 @@ ${directives.block}`;
     // Same replacing-state as the review panel: N step updates would replay
     // N stale crews on every focus switch. sessionUiSnapshot re-sends it.
     "crewRun",
+    "workflowRun",
+    "workflowList",
   ]);
   /**
    * Host→rail catalog surface. Everything else stays chat-only so a user who

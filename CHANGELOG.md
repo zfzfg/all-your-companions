@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+**Crew sessions now run a stage-gated workflow.** Pick **Crew**, describe an idea, and the default **Idea to done** pipeline plans, implements, reviews and (if needed) fixes — stopping after every stage so you choose the next companion, pause and come back later, or cancel. `/crew` typed in an Agent session no longer starts a chain in that thread; it offers to open a Crew session with that goal instead.
+
+### Added
+
+- **Crew sessions (AP-17).** A Crew conversation is a workflow runner, not a chat. The empty state is an idea composer plus a workflow picker (default `idea-to-done`). After each stage a gate shows what happened and asks which companion should run next: **Start**, **Stop & resume later**, or **Cancel run**. Pause writes `run.json` atomically; reopening the conversation restores the gate. A changed git HEAD or an edited file since pause requires **Continue anyway**; a deleted worktree cannot be resumed.
+- **The built-in `idea-to-done` workflow.** Plan (read-only) → Implement (one session for the whole plan) → Review (prefers a different companion) → Fix if the review asks, looping at most twice. Planner and reviewer never edit; the fixer does.
+- **Handoffs are structured, not transcripts.** Each stage gets a briefing of paths and the previous stage's packet, never the previous `result.md` body. Summaries, findings and verify output are capped so the next stage does not inherit a 120k conversation.
+- **`/crew` in an Agent session** shows "Crew runs live in their own session." with a button to open a new Crew session with that goal. The old in-thread chain remains behind `companions.crew.inThreadCommand`.
+
+### Added (settings)
+
+- `companions.crew.defaultWorkflow` (default `idea-to-done`)
+- `companions.crew.autoStartNextStage` (default off; failed stages still pause)
+- `companions.crew.maxFixerPasses` (default 2)
+- `companions.crew.inThreadCommand` (default off)
+- `companions.crew.providers` — optional per-companion enable override; otherwise the crew inherits the subagent roster
+
 **Every session now says what kind of session it is.** A new conversation opens with a **Session type** switch — **Agent** or **Crew** — sitting in the top bar next to the repository chip. Agent is what conversations have always been. Crew is the new stage-gated workflow home, arriving in a later release; picking it today changes the empty state and the composer, and the run machinery follows.
 
 ### Added

@@ -25,7 +25,7 @@
   // directions (and that chat.js actually handles every host type).
   const HOST_MESSAGE_TYPES = [
     "initialState", "moveViewHint", "welcomeTips", "projectSetup", "githubState", "githubRepos", "providerState", "providerCapabilities", "mcpServers", "mcpConnectors", "mcpConnectorAuthorization", "routines", "codexInstallProgress", "planModeAvailability", "showThinking", "appPurpose", "fontScale", "grokUpdateStatus", "updateAvailable", "updateReady", "telemetryEnabled", "thumbsFeedback", "initialized",
-    "cliUpdating", "session", "sessionName", "sessionRemoved", "modelChanged", "modeChanged", "sessionType", "companionSubagent", "subagentTray", "openModePopover",
+    "cliUpdating", "session", "sessionName", "sessionRemoved", "modelChanged", "modeChanged", "sessionType", "companionSubagent", "subagentTray", "workflowRun", "workflowList", "openModePopover",
     "voiceState", "voiceConfigured", "voicePartial", "voiceSubmit", "voiceTranscript",
     "voiceError", "chips", "commandsUpdate", "mentionResults", "projectDirListing", "projectFileContent", "projectFileWriteResult", "userMessage", "agentStart", "thoughtChunk",
     "messageChunk", "media", "userMessageChunk", "historyReplay", "historyBatch", "permissionHistoryQueue",
@@ -37,7 +37,7 @@
     "remoteStatus", "ruleFiles", "permissionRules", "agentRoles",
   ];
   const WEBVIEW_MESSAGE_TYPES = [
-    "ready", "remotePreferences", "send", "newSession", "cancel", "pickModel", "setMode", "setSessionType", "setSubagentsEnabled", "subagentRosterSave", "companionSubagentAction", "setConfigOption", "removeChip",
+    "ready", "remotePreferences", "send", "newSession", "cancel", "pickModel", "setMode", "setSessionType", "setSubagentsEnabled", "subagentRosterSave", "companionSubagentAction", "workflowStart", "workflowGateAction", "openCrewWithGoal", "setConfigOption", "removeChip",
     "toggleChip", "openFile", "showInFolder", "openUrl", "openText", "openDiff", "revertToolEdit", "reviewRevertFile", "reviewRevertAll", "exportExpr", "setEffort",
     "addProjectFolder", "removeProjectFolder", "createProject", "cloneProject", "setupGithubCli", "listGithubRepos", "githubSignOut", "githubLoginWithToken",
     "openGlobalConfig", "openProjectConfig", "listRuleFiles", "openRuleFile", "appendRuleFile", "listAgentRoles", "saveAgentRole", "deleteAgentRole", "saveCrewFlow", "deleteCrewFlow", "listPermissionRules", "deletePermissionRule", "adoptPermissionRules", "listMcpServers", "connectMcpConnector", "disconnectMcpConnector", "completeMcpConnectorOAuth", "showLogs", "toggleDevTools", "openSettings", "openSettingsSurface", "closeSettingsSurface", "dismissWelcomeTip", "welcomeTipShown", "moveView",

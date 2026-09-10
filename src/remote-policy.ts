@@ -287,6 +287,11 @@ export const INBOUND_DISPOSITION: Record<WebviewMsg["type"], InboundDisposition>
   // Acts on a live child process on this machine.
   companionSubagentAction: "host-local",
   subagentRosterSave: "host-local",
+  // AP-17. Starts a billed multi-stage run on this machine; the idea and
+  // target pickers are prompts.
+  workflowStart: "host-local",
+  workflowGateAction: "host-local",
+  openCrewWithGoal: "host-local",
   setConfigOption: "propose",
   setEffort: "propose",
   setModel: "propose",
@@ -617,6 +622,9 @@ export const REMOTE_REQUIRES_BOUND_SESSION: Record<WebviewMsg["type"], boolean> 
   setSubagentsEnabled: false,
   companionSubagentAction: false,
   subagentRosterSave: false,
+  workflowStart: false,
+  workflowGateAction: false,
+  openCrewWithGoal: false,
   setConfigOption: true,
   setEffort: true,
   setModel: true,
@@ -1029,6 +1037,9 @@ export const OUTBOUND_DISPOSITION: Record<HostMsg["type"], OutboundDisposition> 
   // Same class as the card it explains: it carries the children's labels and
   // targets, which is prompt-derived text.
   subagentTray: "host-local",
+  // AP-17. The idea, notes, packets and target pickers are prompts.
+  workflowRun: "host-local",
+  workflowList: "host-local",
   planModeAvailability: "mirror",
   providerCapabilities: "mirror",
   // Display-only checklist of the agent's own steps; carries no path, no
@@ -1225,6 +1236,8 @@ export const OUTBOUND_PROJECT_AUTH: Record<HostMsg["type"], OutboundProjectAuth>
   sessionType: "scope",
   companionSubagent: "scope",
   subagentTray: "scope",
+  workflowRun: "scope",
+  workflowList: "scope",
   planModeAvailability: "scope",
   providerCapabilities: "scope",
   planEntries: "scope",

@@ -6258,6 +6258,78 @@ a.add-project-github-open {
 
 /* AP-15 — Crew rows in the history list. Agent rows are unbadged, so the list
    looks exactly as it always has for anyone who never opens a Crew session. */
+body.crew-session #mode-btn { display: none; }
+
+.crew-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px var(--pad) 0;
+}
+.crew-empty[hidden] { display: none; }
+.crew-empty-label {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
+.crew-workflow {
+  width: 100%;
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  border: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.35));
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+.crew-start {
+  align-self: flex-start;
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+  border: none;
+  border-radius: 6px;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+.workflow-gate-card {
+  margin: 8px var(--pad);
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.35));
+  background: var(--vscode-editorWidget-background, var(--vscode-sideBar-background));
+}
+.workflow-gate-card .gate-header {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.workflow-gate-card .gate-unreported {
+  color: var(--vscode-errorForeground);
+}
+.workflow-gate-card .gate-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.workflow-gate-card .gate-actions button,
+.plan-notice-action {
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+  border: none;
+  border-radius: 6px;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+.workflow-gate-card .gate-notes {
+  width: 100%;
+  margin-top: 8px;
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  border: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.35));
+  border-radius: 6px;
+  padding: 6px;
+}
+.workflow-gate-card .gate-stale {
+  color: var(--vscode-editorWarning-foreground, var(--vscode-errorForeground));
+}
+
 .history-row-type {
   margin-left: 6px;
   padding: 0 5px;

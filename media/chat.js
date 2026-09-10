@@ -356,6 +356,8 @@
       sessionTypeBadge.title = SESSION_TYPE_LOCK_TOOLTIPS[type];
       sessionTypeBadge.setAttribute("aria-label", SESSION_TYPE_LOCK_TOOLTIPS[type]);
     }
+    document.body.classList.toggle("crew-session", type === "crew");
+    renderCrewChrome();
   }
 
   function requestSessionType(next) {
@@ -518,6 +520,10 @@
     sessionType: "agent",
     sessionTypeLocked: false,
     sessionTypeId: "",
+    workflowRun: null,
+    workflows: [],
+    defaultWorkflow: "idea-to-done",
+    selectedWorkflow: "",
     effort: "",
     cwd: "",
     contextWindow: 200000,
@@ -4851,7 +4857,8 @@
         const meta = document.createElement("div");
         meta.className = "history-row-meta";
         const parts = [];
-        if (s.numMessages) parts.push(`${s.numMessages} msg`);
+        if (s.sessionType === "crew" && s.crewStatus) parts.push(s.crewStatus);
+        else if (s.numMessages) parts.push(`${s.numMessages} msg`);
         // Step progress exists only for the conversation this webview is
         // showing — the checklist is live session state, not something the
         // history index stores, so other rows correctly say nothing.
@@ -9218,6 +9225,194 @@
     }
   }
 
+  function ensureCrewEmpty() {
+    let el = $("crew-empty");
+    if (el) return el;
+    el = document.createElement("div");
+    el.id = "crew-empty";
+    el.className = "crew-empty";
+    el.hidden = true;
+    el.innerHTML =
+      '<label class="crew-empty-label">Workflow</label>' +
+      '<select id="crew-workflow" class="crew-workflow"></select>' +
+      '<p id="crew-workflow-when" class="crew-workflow-when muted"></p>' +
+      '<button id="crew-start" class="crew-start" type="button">Start workflow</button>';
+    const footer = document.querySelector("footer.composer");
+    if (footer) footer.insertBefore(el, footer.firstChild);
+    else document.body.appendChild(el);
+    const start = el.querySelector("#crew-start");
+    if (start) start.addEventListener("click", () => startCrewWorkflow());
+    const select = el.querySelector("#crew-workflow");
+    if (select) select.addEventListener("change", () => {
+      state.selectedWorkflow = select.value;
+      renderCrewEmpty();
+    });
+    return el;
+  }
+
+  function startCrewWorkflow() {
+    const idea = (input && input.value ? input.value : "").trim();
+    vscode.postMessage({
+      type: "workflowStart",
+      sessionId: state.sessionTypeId || "",
+      idea,
+      workflowName: state.selectedWorkflow || state.defaultWorkflow || "idea-to-done",
+    });
+    if (input) {
+      input.value = "";
+      renderInputHighlight();
+    }
+  }
+
+  function renderCrewEmpty() {
+    const el = ensureCrewEmpty();
+    const show = state.sessionType === "crew" && !state.sessionTypeLocked && !state.workflowRun;
+    el.hidden = !show;
+    const select = $("crew-workflow");
+    if (!select) return;
+    const workflows = state.workflows || [];
+    const current = state.selectedWorkflow || state.defaultWorkflow || "idea-to-done";
+    select.textContent = "";
+    for (const wf of workflows) {
+      const opt = document.createElement("option");
+      opt.value = wf.name;
+      opt.textContent = wf.title || wf.name;
+      if (wf.defaultGraph) opt.textContent += " (default graph)";
+      if (wf.name === current) opt.selected = true;
+      select.appendChild(opt);
+    }
+    const when = $("crew-workflow-when");
+    const selected = workflows.find((w) => w.name === (select.value || current));
+    if (when) when.textContent = selected && selected.whenToUse ? selected.whenToUse : "";
+  }
+
+  function renderWorkflowGate(run) {
+    let el = document.querySelector(".workflow-gate-card");
+    if (!run || !run.gate) {
+      if (el) el.remove();
+      return;
+    }
+    const gate = run.gate;
+    if (!el) {
+      el = document.createElement("div");
+      el.className = "workflow-gate-card";
+      appendTranscriptChild(el);
+    }
+    el.dataset.kind = gate.kind || "";
+    const next = (gate.proposedNext || [])[0];
+    const startLabel = gate.kind === "gate-0"
+      ? "Start stage"
+      : (next && next.id && next.id.charAt(0) !== "$"
+        ? ("Start " + (next.title || next.id))
+        : "Start");
+    const files = (gate.filesObserved || []).map((p) => escapeHtml(p)).join(", ");
+    const unreported = (gate.unreported || []).map((p) => '<span class="gate-unreported">' + escapeHtml(p) + "</span>").join(", ");
+    const findings = (gate.findings || []).map((f) =>
+      "<li>[" + escapeHtml(f.severity) + "] " + escapeHtml(f.text) + "</li>"
+    ).join("");
+    const nextOptions = (gate.proposedNext || []).map((n) =>
+      '<option value="' + escapeHtml(n.id) + '"' + (n.id === gate.nextStageId ? " selected" : "") + ">" +
+      escapeHtml(n.title || n.id) + "</option>"
+    ).join("");
+    const eligible = (gate.eligible || []).map((t) =>
+      '<option value="' + escapeHtml(t.provider) + '"' +
+      (gate.preselected && gate.preselected.provider === t.provider ? " selected" : "") + ">" +
+      escapeHtml(t.displayName || t.provider) + "</option>"
+    ).join("");
+    const stale = (gate.staleDetails || []).map((d) => "<li>" + escapeHtml(d) + "</li>").join("");
+    el.innerHTML =
+      '<div class="gate-header">' + escapeHtml(gate.title || "") + "</div>" +
+      (gate.reason ? '<p class="gate-reason">' + escapeHtml(gate.reason) + "</p>" : "") +
+      (gate.summary ? '<p class="gate-summary">' + escapeHtml(gate.summary) + "</p>" : "") +
+      (files ? '<p class="gate-files">Files: ' + files + "</p>" : "") +
+      (unreported ? '<p class="gate-files">Unreported: ' + unreported + "</p>" : "") +
+      (gate.verdict ? '<p class="gate-verdict">Verdict: ' + escapeHtml(gate.verdict) + "</p>" : "") +
+      (findings ? "<ul class=\"gate-findings\">" + findings + "</ul>" : "") +
+      (stale ? '<p class="gate-stale">The workspace changed since this run paused.</p><ul>' + stale + "</ul>" : "") +
+      (nextOptions ? '<label class="gate-next-label">Next <select class="gate-next">' + nextOptions + "</select></label>" : "") +
+      (eligible ? '<label class="gate-target-label">Target <select class="gate-provider">' + eligible + "</select></label>" : "") +
+      '<textarea class="gate-notes" rows="2" placeholder="Notes for the next stage">' +
+        escapeHtml(gate.userNotes || "") + "</textarea>" +
+      '<div class="gate-actions"></div>';
+    const actions = el.querySelector(".gate-actions");
+    const addBtn = (action, label, extra) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = label;
+      btn.dataset.action = action;
+      btn.addEventListener("click", () => postGateAction(action, extra));
+      actions.appendChild(btn);
+    };
+    if (gate.kind === "stale") addBtn("continueAnyway", "Continue anyway");
+    if (gate.kind === "fixer-limit") {
+      addBtn("anotherRound", "Another round");
+      addBtn("acceptAsIs", "Accept as is");
+      addBtn("cancel", "Cancel run");
+    } else if (gate.kind === "gate-0") {
+      addBtn("start", startLabel);
+      addBtn("changeWorkflow", "Change workflow");
+      addBtn("pause", "Stop & resume later");
+    } else if (gate.kind === "unresumable") {
+      addBtn("cancel", "Cancel run");
+    } else {
+      addBtn("start", startLabel);
+      const pick = document.createElement("button");
+      pick.type = "button";
+      pick.textContent = "Pick another model";
+      pick.addEventListener("click", () => {
+        const sel = el.querySelector(".gate-provider");
+        if (sel && sel.focus) sel.focus();
+      });
+      actions.appendChild(pick);
+      addBtn("skip", "Skip this stage");
+      addBtn("pause", "Stop & resume later");
+      addBtn("cancel", "Cancel run");
+      if (run.status === "done" || (next && next.id === "$done")) addBtn("finish", "Finish");
+    }
+    if (gate.kind === "interrupted") {
+      addBtn("restart", "Restart stage");
+    }
+  }
+
+  function postGateAction(action, extra) {
+    const run = state.workflowRun;
+    if (!run) return;
+    const card = document.querySelector(".workflow-gate-card");
+    const nextSel = card && card.querySelector(".gate-next");
+    const providerSel = card && card.querySelector(".gate-provider");
+    const notes = card && card.querySelector(".gate-notes");
+    const payload = {
+      type: "workflowGateAction",
+      runId: run.runId,
+      action,
+      ...(nextSel && nextSel.value ? { nextStageId: nextSel.value } : {}),
+      ...(providerSel && providerSel.value ? { target: { provider: providerSel.value } } : {}),
+      ...(notes && notes.value.trim() ? { notes: notes.value.trim() } : {}),
+      ...(extra || {}),
+    };
+    vscode.postMessage(payload);
+  }
+
+  function renderCrewChrome() {
+    renderCrewEmpty();
+    renderWorkflowGate(state.workflowRun);
+    if (state.workflowRun && crewRunEl) {
+      // Pipeline rides the existing crew rail so Stop still stops the run.
+      const run = state.workflowRun;
+      crewRunEl.hidden = false;
+      if (crewRunCount) crewRunCount.textContent = run.subtitle || run.status;
+      if (crewRunList) {
+        crewRunList.textContent = "";
+        for (const stage of run.stages || []) {
+          const li = document.createElement("li");
+          li.className = "crew-step crew-step-" + (stage.status || "pending");
+          li.textContent = (stage.title || stage.id) + " · " + (stage.status || "");
+          crewRunList.appendChild(li);
+        }
+      }
+    }
+  }
+
   if (crewRunToggle) {
     crewRunToggle.onclick = () => {
       if (!crewRunEl) return;
@@ -9315,6 +9510,8 @@
     state.mediaGenCallIds.clear();
     state.subagentCards.clear();
     state.companionSubagentCards.clear();
+    state.workflowRun = null;
+    renderCrewChrome();
     state.runProgressCards.clear();
     // Question/restored-card maps too, or a new session's tool updates could
     // attach to the previous session's (now-detached) cards by toolCallId.
@@ -13312,7 +13509,7 @@
     scrollToBottom();
   }
 
-  function addPlanNotice(text) {
+  function addPlanNotice(text, action) {
     clearWelcome();
     hideGrokking();
     const el = document.createElement("div");
@@ -13340,6 +13537,16 @@
       el.appendChild(body);
     } else {
       el.innerHTML = `${ICON.listTree}<span>${escapeHtml(str)}</span>`;
+    }
+    if (action && action.id === "openCrewWithGoal") {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "plan-notice-action";
+      btn.textContent = action.label || "Open a new Crew session with this goal";
+      btn.addEventListener("click", () => {
+        vscode.postMessage({ type: "openCrewWithGoal", goal: action.goal || "" });
+      });
+      el.appendChild(btn);
     }
     appendTranscriptChild(el);
     scrollToBottom();
@@ -15744,6 +15951,10 @@
     // Sendable = typed text or any visible chip (file or image alike — image
     // chips render as remove-only attachment rows, so they're never hidden).
     if (!text && state.chips.every((c) => c.hidden)) return;
+    if (state.sessionType === "crew" && !state.workflowRun) {
+      startCrewWorkflow();
+      return;
+    }
     let sendText = text;
     stopVoiceForManualSend();
     state.busy = true;
@@ -18344,6 +18555,16 @@
       case "subagentTray":
         renderSubagentTray(msg);
         break;
+      case "workflowRun":
+        state.workflowRun = msg.run || null;
+        renderCrewChrome();
+        break;
+      case "workflowList":
+        state.workflows = Array.isArray(msg.workflows) ? msg.workflows : [];
+        state.defaultWorkflow = msg.defaultWorkflow || "idea-to-done";
+        if (!state.selectedWorkflow) state.selectedWorkflow = state.defaultWorkflow;
+        renderCrewChrome();
+        break;
       case "subagentUpdate": {
         // Lifecycle stream (method _x.ai/session/update): subagent_spawned tags
         // the card with the child id; subagent_finished carries duration_ms +
@@ -18964,7 +19185,7 @@
         addError(msg.text, msg.code);
         break;
       case "hostNotice":
-        addPlanNotice(msg.text);
+        addPlanNotice(msg.text, msg.action);
         break;
       case "xaiNotification":
         break;

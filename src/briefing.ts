@@ -394,7 +394,52 @@ function bulletText(line: string): string {
  * before the first recognised heading becomes the summary, so a role that
  * answers in plain prose still produces a usable card.
  */
+const COMPANIONS_RESULT_RE = /```companions-result\s*\r?\n([\s\S]*?)```/i;
+
+/**
+ * The machine channel (§2.1 point 1). `parseResult` prefers this block when
+ * it is present and well-formed JSON; headings remain the fallback so `/agent`
+ * without a block still parses.
+ */
+export function extractCompanionsResultJson(markdown: string): Record<string, unknown> | undefined {
+  const match = COMPANIONS_RESULT_RE.exec(String(markdown ?? ""));
+  if (!match) return undefined;
+  try {
+    const parsed = JSON.parse(match[1]);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+    return parsed as Record<string, unknown>;
+  } catch {
+    return undefined;
+  }
+}
+
+function stringListFromUnknown(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    const one = typeof value === "string" ? value.trim() : "";
+    return one ? [one] : [];
+  }
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const entry of value) {
+    const text = typeof entry === "string" ? entry.trim() : "";
+    if (!text || seen.has(text)) continue;
+    seen.add(text);
+    out.push(text);
+  }
+  return out;
+}
+
 export function parseResult(markdown: string): AgentResult {
+  const block = extractCompanionsResultJson(markdown);
+  if (block) {
+    const summary = typeof block.summary === "string" ? block.summary.trim() : "";
+    const files = stringListFromUnknown(block.filesChanged ?? block.files);
+    const open = stringListFromUnknown(block.openQuestions ?? block.open);
+    const failed = stringListFromUnknown(block.failed);
+    // A JSON block that names nothing still wins over headings: asking for two
+    // shapes of the same answer is how a child writes both badly (§2.1).
+    return { summary, files, open, failed };
+  }
   const text = String(markdown ?? "").replace(/\r\n/g, "\n");
   const buckets: Record<ResultSection, string[]> = { summary: [], files: [], open: [], failed: [] };
   const preamble: string[] = [];

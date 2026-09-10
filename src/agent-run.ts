@@ -87,6 +87,18 @@ export function stepSlug(step: number): string {
   return `step-${String(n).padStart(2, "0")}`;
 }
 
+/** Crew-stage artefacts use `stage-NN` so a listing of mixed runs stays legible. */
+export function stageSlug(step: number): string {
+  const n = Number.isFinite(step) && step > 0 ? Math.floor(step) : 1;
+  return `stage-${String(n).padStart(2, "0")}`;
+}
+
+export type ArtifactKind = "step" | "stage";
+
+function artifactSlug(kind: ArtifactKind, step: number): string {
+  return kind === "stage" ? stageSlug(step) : stepSlug(step);
+}
+
 /**
  * `run-20260908-141233-a3f1` — sortable, unique, and readable in a directory
  * listing. The suffix exists because two runs started inside the same second
@@ -128,27 +140,27 @@ export class AgentRunStore {
     return this.join(this.root, runId);
   }
 
-  briefPath(runId: string, step: number): string {
-    return this.join(this.runDir(runId), `${stepSlug(step)}.brief.md`);
+  briefPath(runId: string, step: number, kind: ArtifactKind = "step"): string {
+    return this.join(this.runDir(runId), `${artifactSlug(kind, step)}.brief.md`);
   }
 
-  resultPath(runId: string, step: number): string {
-    return this.join(this.runDir(runId), `${stepSlug(step)}.result.md`);
+  resultPath(runId: string, step: number, kind: ArtifactKind = "step"): string {
+    return this.join(this.runDir(runId), `${artifactSlug(kind, step)}.result.md`);
   }
 
   logPath(runId: string): string {
     return this.join(this.runDir(runId), "log.jsonl");
   }
 
-  writeBrief(runId: string, step: number, markdown: string): string {
-    const target = this.briefPath(runId, step);
+  writeBrief(runId: string, step: number, markdown: string, kind: ArtifactKind = "step"): string {
+    const target = this.briefPath(runId, step, kind);
     this.fs.mkdirSync(this.runDir(runId), { recursive: true });
     this.fs.writeFileSync(target, markdown);
     return target;
   }
 
-  writeResult(runId: string, step: number, markdown: string): string {
-    const target = this.resultPath(runId, step);
+  writeResult(runId: string, step: number, markdown: string, kind: ArtifactKind = "step"): string {
+    const target = this.resultPath(runId, step, kind);
     this.fs.mkdirSync(this.runDir(runId), { recursive: true });
     this.fs.writeFileSync(target, markdown);
     return target;

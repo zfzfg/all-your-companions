@@ -433,6 +433,63 @@ export type QueuedSend = {
   chips?: ContextChip[];
 };
 
+/** AP-17. One workflow the Crew empty-state picker can show. */
+export interface WorkflowPickerItem {
+  name: string;
+  title: string;
+  whenToUse: string;
+  source: "builtin" | "global" | "project";
+  /** True when this is a `/crew` preset with no stages block, shown as the default graph. */
+  defaultGraph?: boolean;
+}
+
+/** AP-17. Replacing view of a Crew session's run, rebuilt from `run.json` + packets. */
+export interface WorkflowRunView {
+  runId: string;
+  idea: string;
+  workflowName: string;
+  workflowTitle: string;
+  status: string;
+  subtitle: string;
+  stages: Array<{
+    id: string;
+    title: string;
+    status: string;
+    ordinal?: number;
+    sessionId?: string;
+  }>;
+  currentStageId?: string;
+  gate?: {
+    kind: string;
+    title: string;
+    reason: string;
+    summary?: string;
+    filesObserved?: string[];
+    unreported?: string[];
+    claimedOnly?: string[];
+    verify?: { command: string; exitCode: number; outputTail: string };
+    verdict?: string;
+    findings?: Array<{ id: string; severity: string; file?: string; line?: number; text: string }>;
+    openQuestions?: string[];
+    proposedNext: Array<{ id: string; title: string }>;
+    nextStageId?: string;
+    userNotes?: string;
+    forcedManual?: string[];
+    staleDetails?: string[];
+    durationMs?: number;
+    targetLabel?: string;
+    eligible: Array<{
+      provider: AcpProvider;
+      displayName: string;
+      defaultModel?: string;
+      defaultEffort?: string;
+      models?: Array<{ id: string; label?: string; efforts?: string[] }>;
+    }>;
+    ineligible: Array<{ provider: AcpProvider; message: string }>;
+    preselected?: { provider: AcpProvider; model?: string; effort?: string };
+  };
+}
+
 export type HostMsg =
   | { type: "initialState"; effort: string; cwd: string; useCtrlEnter: boolean; extVersion: string; showThinking: boolean; expandCommandOutputs: boolean; steerByDefault: boolean; soundNotifications: boolean; processingSound: boolean; readRepliesAloud: boolean; /** Global "Use this app for" — absent on older hosts means Knowledge work. */ appPurpose?: "knowledge" | "coding";
       /** VS Code language id for command View all, from the host shell dialect.
@@ -778,6 +835,18 @@ export type HostMsg =
         model?: string;
         startedAt: number;
       }[];
+    }
+  /**
+   * AP-17. Replacing state for a Crew session's workflow run: the pipeline,
+   * the current gate, and enough of the last packet to rebuild the card after
+   * a reload. Host-local — it carries the idea, notes and target pickers.
+   */
+  | { type: "workflowRun"; run: WorkflowRunView | null }
+  /** AP-17. Workflows the Crew empty-state picker may offer. */
+  | {
+      type: "workflowList";
+      workflows: WorkflowPickerItem[];
+      defaultWorkflow: string;
     }
   | { type: "modeChanged"; modeId: string }
   | { type: "openModePopover" }
@@ -1128,7 +1197,13 @@ export type HostMsg =
   // "session-superseded" is a tab that lost (or failed to restore) a
   // conversation another tab now holds — see resumeSession.claim.
   | { type: "error"; text: string; resumeFailed?: { id: string }; code?: HostErrorCode }
-  | { type: "hostNotice"; level: "info" | "warning"; text: string }
+  | {
+      type: "hostNotice";
+      level: "info" | "warning";
+      text: string;
+      /** Copy-deck action, e.g. D8's "Open a new Crew session with this goal". */
+      action?: { id: "openCrewWithGoal"; label: string; goal?: string };
+    }
   | { type: "xaiNotification"; update?: unknown }
   // Persisted xAI lifecycle (method _x.ai/session/update): subagent spawn/finish
   // plus replayed turn_completed, whose timestamp finalizes the agent footer.
@@ -1314,6 +1389,47 @@ export type WebviewMsg =
       subagentId: string;
       action: "cancel" | "openTranscript" | "approve" | "deny";
     }
+  /**
+   * AP-17. Start a workflow in this Crew session (or, with `openNew`, in a
+   * freshly created one — D8's button).
+   */
+  | {
+      type: "workflowStart";
+      sessionId: string;
+      idea: string;
+      workflowName: string;
+      openNew?: boolean;
+      options?: {
+        worktree?: boolean;
+        verify?: string;
+        gatePolicy?: "ask" | "workflow";
+        firstTarget?: { provider: AcpProvider; model?: string; effort?: string };
+      };
+    }
+  /** AP-17. A click on a stage-gate button. */
+  | {
+      type: "workflowGateAction";
+      runId: string;
+      action:
+        | "start"
+        | "pause"
+        | "cancel"
+        | "rerun"
+        | "skip"
+        | "restart"
+        | "finish"
+        | "continueAnyway"
+        | "acceptAsIs"
+        | "anotherRound"
+        | "changeWorkflow"
+        | "revertAll"
+        | "keepChanges";
+      nextStageId?: string;
+      target?: { provider: AcpProvider; model?: string; effort?: string };
+      notes?: string;
+    }
+  /** AP-17 D8. Open a new Crew session, optionally with this idea already in it. */
+  | { type: "openCrewWithGoal"; goal: string }
   /** AP-16 §6.2 master switch. Host-local; writes `companions.subagents.enabled`. */
   | { type: "setSubagentsEnabled"; value: boolean }
   /**
@@ -1832,7 +1948,7 @@ export type WebviewMsg =
 const HOST_MESSAGE_TYPE_MAP: Record<HostMsg["type"], true> = {
   initialState: true, moveViewHint: true, welcomeTips: true, projectSetup: true, githubState: true, githubRepos: true, providerState: true, mcpServers: true, mcpConnectors: true, mcpConnectorAuthorization: true, routines: true, codexInstallProgress: true, planModeAvailability: true, showThinking: true, appPurpose: true, fontScale: true, grokUpdateStatus: true, updateAvailable: true, updateReady: true, telemetryEnabled: true, thumbsFeedback: true,
   initialized: true, cliUpdating: true, session: true, sessionName: true, modelChanged: true,
-  modeChanged: true, sessionType: true, companionSubagent: true, subagentTray: true, openModePopover: true, voiceState: true, voiceConfigured: true,
+  modeChanged: true, sessionType: true, companionSubagent: true, subagentTray: true, workflowRun: true, workflowList: true, openModePopover: true, voiceState: true, voiceConfigured: true,
   voicePartial: true, voiceSubmit: true, voiceTranscript: true, voiceError: true,
   chips: true, commandsUpdate: true, mentionResults: true, projectDirListing: true, projectFileContent: true, projectFileWriteResult: true, userMessage: true, agentStart: true,
   thoughtChunk: true, messageChunk: true, media: true, userMessageChunk: true,
@@ -1851,7 +1967,7 @@ const HOST_MESSAGE_TYPE_MAP: Record<HostMsg["type"], true> = {
 
 const WEBVIEW_MESSAGE_TYPE_MAP: Record<WebviewMsg["type"], true> = {
   ready: true, remotePreferences: true, send: true, newSession: true, cancel: true, pickModel: true,
-  setMode: true, setSessionType: true, setSubagentsEnabled: true, subagentRosterSave: true, companionSubagentAction: true, setConfigOption: true, removeChip: true, toggleChip: true, openFile: true, showInFolder: true, openUrl: true,
+  setMode: true, setSessionType: true, setSubagentsEnabled: true, subagentRosterSave: true, companionSubagentAction: true, workflowStart: true, workflowGateAction: true, openCrewWithGoal: true, setConfigOption: true, removeChip: true, toggleChip: true, openFile: true, showInFolder: true, openUrl: true,
   openText: true, openDiff: true, revertToolEdit: true, reviewRevertFile: true, reviewRevertAll: true, exportExpr: true, setEffort: true, openGlobalConfig: true,
   addProjectFolder: true, removeProjectFolder: true, createProject: true, cloneProject: true, setupGithubCli: true, listGithubRepos: true, githubSignOut: true, githubLoginWithToken: true,
   openProjectConfig: true, listRuleFiles: true, openRuleFile: true, appendRuleFile: true,

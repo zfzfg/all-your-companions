@@ -661,6 +661,41 @@
           "default": false,
           "description": "Reserved: let crew stages start subagents of their own. Not read yet."
         },
+        "companions.crew.defaultWorkflow": {
+          "type": "string",
+          "default": "idea-to-done",
+          "description": "Workflow a new Crew session starts with. Must match a crew preset name."
+        },
+        "companions.crew.autoStartNextStage": {
+          "type": "boolean",
+          "default": false,
+          "description": "Start the next stage without asking when the workflow marks that gate auto. A failed stage, a red verify, an unreadable verdict, unreported edits or a usage-limit error still pause."
+        },
+        "companions.crew.maxFixerPasses": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 2,
+          "description": "How many times the fixer may run in idea-to-done before the run pauses and asks."
+        },
+        "companions.crew.inThreadCommand": {
+          "type": "boolean",
+          "default": false,
+          "description": "Let /crew still walk a step list inside an Agent session. Off: /crew in an Agent session offers to open a Crew session instead."
+        },
+        "companions.crew.providers": {
+          "type": "object",
+          "default": {},
+          "description": "Per-companion override for crew stages. Each entry may set enabled. When omitted, the stage inherits the subagent roster row.",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean",
+                "description": "Offer this companion as a crew-stage target. When omitted, inherit the subagent roster."
+              }
+            }
+          }
+        },
         "companions.defaultEffort": {
           "type": "string",
           "enum": [
