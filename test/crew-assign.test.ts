@@ -70,3 +70,30 @@ describe("assignStep (18.4)", () => {
     expect(a.kind).toBe("none");
   });
 });
+
+/**
+ * Past the rank, the CALLER's order decides — so a crew flow that lists
+ * `implementer` before `researcher` is answered in that order rather than
+ * alphabetically.
+ */
+describe("candidate order", () => {
+  const two = (order: string[]): AgentRole[] =>
+    order.map((name) => ({
+      ...roles.find((r) => r.name === "implementer")!,
+      name,
+      whenToUse: "Carrying out a refactoring of the storage layer.",
+    }));
+
+  it("answers an ambiguous step in the order the caller passed", () => {
+    const forward = assignStep({ title: "Refactoring the storage layer", files: [] }, two(["zeta", "alpha"]));
+    expect(forward.kind).toBe("ambiguous");
+    if (forward.kind === "ambiguous") expect(forward.candidates).toEqual(["zeta", "alpha"]);
+  });
+
+  it("still reads alphabetically for the default, name-sorted role set", () => {
+    // loadAgentRoles returns roles name-sorted, so nothing about the plain
+    // `/agent` path changes — this is the guard on that claim.
+    const reversed = assignStep({ title: "Refactoring the storage layer", files: [] }, two(["alpha", "zeta"]));
+    if (reversed.kind === "ambiguous") expect(reversed.candidates).toEqual(["alpha", "zeta"]);
+  });
+});

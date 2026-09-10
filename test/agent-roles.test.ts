@@ -279,3 +279,57 @@ describe("preferDifferentProvider", () => {
     expect(role?.preferDifferentProvider).toBeUndefined();
   });
 });
+
+/**
+ * Three scopes, narrowing: built-in → global (`~/.companions`) → project.
+ *
+ * The point of the global set is that a role you rely on everywhere does not
+ * have to be copied into every repo; the point of project winning is that a
+ * repo can still pin its own. Both halves have to be visible in the result,
+ * because "which file is actually in force" is the question a user opens the
+ * settings page to answer.
+ */
+describe("role scopes", () => {
+  const globalFile = (stem: string, text: string): AgentRoleFile =>
+    ({ path: `~/.companions/agents/${stem}.md`, stem, text, scope: "global" });
+
+  it("lets a global file replace a built-in and says what it displaced", () => {
+    const set = loadAgentRoles([globalFile("reviewer", "---\nprovider: gemini\nwhen_to_use: audit\n---\n")]);
+    const reviewer = findAgentRole(set, "reviewer")!;
+    expect(reviewer.source).toBe("global");
+    expect(reviewer.provider).toBe("gemini");
+    expect(reviewer.overrides).toBe("builtin");
+    expect(set.problems).toEqual([]);
+  });
+
+  it("lets a project file replace a global one WITHOUT calling it a conflict", () => {
+    // The regression this guards: treating the pair as "defined twice" would
+    // report a problem on every project that customises a global role, and
+    // keep the global one — the opposite of what the user asked for.
+    const set = loadAgentRoles([
+      globalFile("reviewer", "---\nprovider: gemini\nwhen_to_use: global audit\n---\n"),
+      file("reviewer", "---\nprovider: claude\nwhen_to_use: project audit\n---\n"),
+    ]);
+    const reviewer = findAgentRole(set, "reviewer")!;
+    expect(reviewer.source).toBe("project");
+    expect(reviewer.provider).toBe("claude");
+    expect(reviewer.overrides).toBe("global");
+    expect(set.problems).toEqual([]);
+    expect(set.roles.filter((role) => role.name === "reviewer")).toHaveLength(1);
+  });
+
+  it("still reports two files of the SAME scope claiming one name", () => {
+    const set = loadAgentRoles([
+      { path: ".companions/agents/a.md", stem: "a", text: "---\nname: dup\nprovider: grok\nwhen_to_use: x\n---\n" },
+      { path: ".companions/agents/b.md", stem: "b", text: "---\nname: dup\nprovider: claude\nwhen_to_use: y\n---\n" },
+    ]);
+    expect(set.problems).toHaveLength(1);
+    expect(set.problems[0].message).toContain("defined twice");
+    expect(findAgentRole(set, "dup")!.provider).toBe("grok");
+  });
+
+  it("defaults a file with no scope to project, so older callers are unchanged", () => {
+    const set = loadAgentRoles([file("auditor", "---\nprovider: grok\nwhen_to_use: x\n---\n")]);
+    expect(findAgentRole(set, "auditor")!.source).toBe("project");
+  });
+});

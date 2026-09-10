@@ -132,8 +132,14 @@ export function assignStep(
     return { kind: "assigned", role: hits[0].role, why: hits[0].why };
   }
   if (hits.length > 1) {
-    // Stable order so the same step is always the same question.
-    hits.sort((a, b) => a.rank - b.rank || a.role.localeCompare(b.role));
+    // Stable order so the same step is always the same question — and, past
+    // the rank, the CALLER's order rather than the alphabet, so a crew flow
+    // that lists `implementer` before `researcher` is answered in that order.
+    // No change for the plain `/agent` path: `loadAgentRoles` already returns
+    // roles name-sorted, so the index order there IS the alphabetical one.
+    const order = new Map(roles.map((role, index) => [role.name, index]));
+    const rank = (name: string) => order.get(name) ?? Number.MAX_SAFE_INTEGER;
+    hits.sort((a, b) => a.rank - b.rank || rank(a.role) - rank(b.role) || a.role.localeCompare(b.role));
     return {
       kind: "ambiguous",
       candidates: hits.map((h) => h.role),

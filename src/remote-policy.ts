@@ -276,6 +276,7 @@ export const INBOUND_DISPOSITION: Record<WebviewMsg["type"], InboundDisposition>
   newSession: "propose",
   cancel: "propose",
   setMode: "propose",
+  setSessionMode: "propose",
   setConfigOption: "propose",
   setEffort: "propose",
   setModel: "propose",
@@ -465,6 +466,16 @@ export const INBOUND_DISPOSITION: Record<WebviewMsg["type"], InboundDisposition>
   listRuleFiles: "host-local",
   openRuleFile: "host-local",
   appendRuleFile: "host-local",
+  // Settings → Agents & Crew. Same class as the rule-file messages above and
+  // for the same three reasons: the list names the LOCAL home directory
+  // (`~/.companions`), every write lands on the machine running the host, and
+  // a role file is a project standard — a borrowed session must not be able to
+  // rewrite which model reviews this repo's code.
+  listAgentRoles: "host-local",
+  saveAgentRole: "host-local",
+  deleteAgentRole: "host-local",
+  saveCrewFlow: "host-local",
+  deleteCrewFlow: "host-local",
   // AP-07: listing is observation of a security surface the remote already
   // shares (permission cards, Auto accept). Delete/adopt change what is
   // auto-granted, same class as permissionAnswer.
@@ -591,6 +602,7 @@ export const REMOTE_REQUIRES_BOUND_SESSION: Record<WebviewMsg["type"], boolean> 
   newSession: false,
   cancel: true,
   setMode: true,
+  setSessionMode: true,
   setConfigOption: true,
   setEffort: true,
   setModel: true,
@@ -662,6 +674,11 @@ export const REMOTE_REQUIRES_BOUND_SESSION: Record<WebviewMsg["type"], boolean> 
   listRuleFiles: false,
   openRuleFile: false,
   appendRuleFile: false,
+  listAgentRoles: false,
+  saveAgentRole: false,
+  deleteAgentRole: false,
+  saveCrewFlow: false,
+  deleteCrewFlow: false,
   listPermissionRules: true,
   deletePermissionRule: true,
   adoptPermissionRules: true,
@@ -946,6 +963,9 @@ export const OUTBOUND_DISPOSITION: Record<HostMsg["type"], OutboundDisposition> 
   // are meaningless off the machine running the host — same reasoning as
   // codexInstallProgress/moveViewHint just above.
   ruleFiles: "host-local",
+  // Names `~/.companions` and writes to it — host-local for exactly the
+  // reasons ruleFiles is, so it is suppressed before it can cross.
+  agentRoles: "host-local",
   // AP-07: the list is the security surface — invisible rules are the
   // failure mode. No home-path leakage (workspace paths are project-scoped).
   permissionRules: "mirror",
@@ -984,6 +1004,7 @@ export const OUTBOUND_DISPOSITION: Record<HostMsg["type"], OutboundDisposition> 
   sessionRemoved: "mirror",
   modelChanged: "mirror",
   modeChanged: "mirror",
+  sessionMode: "mirror",
   planModeAvailability: "mirror",
   providerCapabilities: "mirror",
   // Display-only checklist of the agent's own steps; carries no path, no
@@ -1129,6 +1150,7 @@ export const OUTBOUND_PROJECT_AUTH: Record<HostMsg["type"], OutboundProjectAuth>
   // Suppressed before crossing (host-local, see OUTBOUND_DISPOSITION) — no
   // project auth question ever applies to it.
   ruleFiles: "none",
+  agentRoles: "none",
   permissionRules: "none",
   routines: "entries",
   codexInstallProgress: "none",
@@ -1176,6 +1198,7 @@ export const OUTBOUND_PROJECT_AUTH: Record<HostMsg["type"], OutboundProjectAuth>
   chips: "scope",
   modelChanged: "scope",
   modeChanged: "scope",
+  sessionMode: "scope",
   planModeAvailability: "scope",
   providerCapabilities: "scope",
   planEntries: "scope",

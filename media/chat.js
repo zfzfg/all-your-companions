@@ -362,6 +362,18 @@
   const crewRunList = $("crew-run-list");
   const crewRunStop = $("crew-run-stop");
 
+  const modeSwitchBar = $("mode-switch-bar");
+  const modeSwitch = $("mode-switch");
+  const msOptSingle = $("ms-opt-single");
+  const msOptCrew = $("ms-opt-crew");
+  const msLock = $("ms-lock");
+  const msNewSession = $("ms-new-session");
+  const crewBar = $("crew-bar");
+  const crewPresetName = $("crew-preset-name");
+  const btnViewRoles = $("btn-view-roles");
+  const crewCost = $("crew-cost");
+  const crewRolesEl = $("crew-roles");
+
   // Canonical low→high ORDER for known effort ids, and the FALLBACK ladder when a
   // model advertises no menu (`max` is not a real grok level — see #3/#4).
   const GROK_EFFORT_LEVELS = ["none", "minimal", "low", "medium", "high", "xhigh"];
@@ -455,6 +467,10 @@
     codexInstall: { phase: "idle", receivedBytes: 0, totalBytes: 0, reason: "" },
     availableModels: [],
     currentModeId: "agent",
+    sessionMode: "single",
+    sessionStarted: false,
+    crewPreset: "default",
+    crewRoles: null,
     effort: "",
     cwd: "",
     contextWindow: 200000,
@@ -808,6 +824,17 @@
     // NULL, not [] — "no rule file locations" and "haven't asked yet" render
     // differently in Settings → Advanced (renderRuleFiles).
     ruleFiles: null,
+    // Settings → Agents & Crew. NULL for the same reason as ruleFiles: a
+    // project genuinely can have no custom roles, and "none yet" must not look
+    // like "still loading".
+    agentRoles: null,
+    crewFlows: null,
+    agentRoleProviders: [],
+    agentRoleProblems: [],
+    agentRolesCwd: "",
+    agentRolesHasProject: false,
+    agentRolesError: "",
+    agentRolesErrorId: "",
     // AP-07: null until the host answers listPermissionRules. The answered
     // list always includes the two safety-floor rows, so [] is not a loading
     // state.
@@ -2930,6 +2957,14 @@
       mcpError: state.mcpError,
       mcpWarning: state.mcpWarning,
       ruleFiles: state.ruleFiles,
+      agentRoles: state.agentRoles,
+      crewFlows: state.crewFlows,
+      agentRoleProviders: state.agentRoleProviders,
+      agentRoleProblems: state.agentRoleProblems,
+      agentRolesCwd: state.agentRolesCwd,
+      agentRolesHasProject: state.agentRolesHasProject,
+      agentRolesError: state.agentRolesError,
+      agentRolesErrorId: state.agentRolesErrorId,
       permissionRules: state.permissionRules,
       permissionRulesOrderCopy: state.permissionRulesOrderCopy,
       permissionRulesPending: state.permissionRulesPending,
@@ -7223,6 +7258,106 @@
     ensureVisibleNewSession();
   }
 
+  function renderSessionMode() {
+    const isCrew = state.sessionMode === "crew";
+    if (msOptSingle) msOptSingle.setAttribute("aria-pressed", isCrew ? "false" : "true");
+    if (msOptCrew) msOptCrew.setAttribute("aria-pressed", isCrew ? "true" : "false");
+    if (modeSwitch) modeSwitch.classList.toggle("locked", !!state.sessionStarted);
+    if (crewBar) crewBar.hidden = !isCrew;
+    if (msLock && !state.sessionStarted) msLock.hidden = true;
+
+    if (input) {
+      if (isCrew) {
+        input.placeholder = "Task a crew… (Planner → Implementer → Reviewer)";
+      } else {
+        const p = state.activeProvider ? capitalize(state.activeProvider) : "Assistant";
+        input.placeholder = COMPOSER_PLACEHOLDER[state.activeProvider] || `Ask ${p}…`;
+      }
+    }
+    if (modeBtn) {
+      if (isCrew) {
+        modeBtn.innerHTML = `${ICON.bot} Crew`;
+        modeBtn.title = "Crew mode (multi-agent execution)";
+      } else {
+        modeBtn.title = modeButtonTitle(state.currentModeId);
+        const meta = MODE_META[state.currentModeId] || MODE_META.agent;
+        modeBtn.innerHTML = `${meta.icon} ${meta.label}`;
+      }
+    }
+
+    if (isCrew) renderCrewBar();
+  }
+
+  function renderCrewBar() {
+    if (!crewRolesEl) return;
+    if (crewPresetName) crewPresetName.textContent = `Preset: ${state.crewPreset || "default"}`;
+    crewRolesEl.textContent = "";
+    const roles = Array.isArray(state.crewRoles) && state.crewRoles.length ? state.crewRoles : [
+      { role: "planner", provider: "grok", label: "Planner" },
+      { role: "implementer", provider: "claude", label: "Implementer" },
+      { role: "reviewer", provider: "codex", label: "Reviewer" },
+      { role: "fixer", provider: "gemini", label: "Fixer" },
+    ];
+    for (const r of roles) {
+      const pill = document.createElement("span");
+      pill.className = "rolepill";
+      const dot = document.createElement("span");
+      dot.className = `dot ${r.provider || "grok"}`;
+      pill.appendChild(dot);
+      const text = document.createElement("span");
+      text.textContent = r.label || r.role;
+      pill.appendChild(text);
+      crewRolesEl.appendChild(pill);
+    }
+  }
+
+  function wireModeSwitch() {
+    if (msOptSingle && !msOptSingle.dataset.wired) {
+      msOptSingle.dataset.wired = "1";
+      msOptSingle.onclick = () => {
+        if (state.sessionStarted) {
+          if (state.sessionMode !== "single" && msLock) msLock.hidden = false;
+          return;
+        }
+        state.sessionMode = "single";
+        if (msLock) msLock.hidden = true;
+        vscode.postMessage({ type: "setSessionMode", mode: "single" });
+        renderSessionMode();
+      };
+    }
+    if (msOptCrew && !msOptCrew.dataset.wired) {
+      msOptCrew.dataset.wired = "1";
+      msOptCrew.onclick = () => {
+        if (state.sessionStarted) {
+          if (state.sessionMode !== "crew" && msLock) msLock.hidden = false;
+          return;
+        }
+        state.sessionMode = "crew";
+        if (msLock) msLock.hidden = true;
+        vscode.postMessage({ type: "setSessionMode", mode: "crew" });
+        renderSessionMode();
+      };
+    }
+    if (msNewSession && !msNewSession.dataset.wired) {
+      msNewSession.dataset.wired = "1";
+      msNewSession.onclick = () => {
+        const targetMode = state.sessionMode === "crew" ? "single" : "crew";
+        if (msLock) msLock.hidden = true;
+        state.sessionStarted = false;
+        state.sessionMode = targetMode;
+        vscode.postMessage({ type: "newSession", mode: targetMode });
+        vscode.postMessage({ type: "setSessionMode", mode: targetMode });
+        renderSessionMode();
+      };
+    }
+    if (btnViewRoles && !btnViewRoles.dataset.wired) {
+      btnViewRoles.dataset.wired = "1";
+      btnViewRoles.onclick = () => {
+        openSettingsCategory("rules");
+      };
+    }
+  }
+
   function renderRailRepo(repo, inArchive) {
     const key = cwdKey(repo.cwd);
     const selected = sameCwd(repo.cwd, state.selectedRepoCwd);
@@ -9261,6 +9396,10 @@
     renderReviewCenter();
     state.crewRun = null;
     renderCrewRun();
+    state.sessionStarted = false;
+    if (msLock) msLock.hidden = true;
+    if (modeSwitch) modeSwitch.classList.remove("locked");
+    renderSessionMode();
     state.pendingDiffByToolCallId.clear();
     state.revertedEdits.clear();
     state.toolItemsByToolCallId.clear();
@@ -15495,6 +15634,13 @@
     // Sendable = typed text or any visible chip (file or image alike — image
     // chips render as remove-only attachment rows, so they're never hidden).
     if (!text && state.chips.every((c) => c.hidden)) return;
+    state.sessionStarted = true;
+    if (msLock) msLock.hidden = true;
+    if (modeSwitch) modeSwitch.classList.add("locked");
+    let sendText = text;
+    if (state.sessionMode === "crew" && sendText && !sendText.trim().startsWith("/")) {
+      sendText = "/crew " + sendText;
+    }
     stopVoiceForManualSend();
     state.busy = true;
     updateSendButton();
@@ -15508,14 +15654,14 @@
     if (IS_REMOTE) {
       const visibleChips = state.chips.filter((c) => !c.hidden);
       submissionId = newRemoteTabToken();
-      state.pendingSubmissionText = text;
+      state.pendingSubmissionText = sendText;
       state.pendingSubmissionId = submissionId;
       state.pendingSubmissionChipIds = visibleChipIds(visibleChips);
-      showOptimisticSend(text, visibleChips);
+      showOptimisticSend(sendText, visibleChips);
     }
     // Chips are host-owned state (every mutation routes through the host and
     // comes back via postChips) — the host snapshots its own copy on send.
-    vscode.postMessage({ type: "send", text, ...(submissionId ? { submissionId } : {}) });
+    vscode.postMessage({ type: "send", text: sendText, ...(submissionId ? { submissionId } : {}) });
     input.value = "";
     renderInputHighlight();
     slashPopover.hidden = true;
@@ -17019,7 +17165,7 @@
     "initialState", "showThinking", "appPurpose", "expandCommandOutputs",
     "steerByDefault", "steerUnavailable", "soundNotifications", "processingSound",
     "readRepliesAloud", "summarizeRepliesAloud", "fontScale", "voiceConfigured",
-    "providerState", "githubState", "mcpServers", "mcpConnectors", "remoteStatus", "telemetryEnabled", "thumbsFeedback", "grokUpdateStatus", "initialized", "ruleFiles", "permissionRules",
+    "providerState", "githubState", "mcpServers", "mcpConnectors", "remoteStatus", "telemetryEnabled", "thumbsFeedback", "grokUpdateStatus", "initialized", "ruleFiles", "permissionRules", "agentRoles",
   ]);
 
   function handleHostMessage(msg) {
@@ -17210,6 +17356,18 @@
       case "ruleFiles":
         // Always the full candidate list (never a delta) — see protocol.ts.
         state.ruleFiles = Array.isArray(msg.files) ? msg.files : [];
+        refreshSettingsOverlay();
+        break;
+      case "agentRoles":
+        // Replacing state, never a delta — see protocol.ts.
+        state.agentRoles = Array.isArray(msg.roles) ? msg.roles : [];
+        state.crewFlows = Array.isArray(msg.flows) ? msg.flows : [];
+        state.agentRoleProviders = Array.isArray(msg.providers) ? msg.providers : [];
+        state.agentRoleProblems = Array.isArray(msg.problems) ? msg.problems : [];
+        state.agentRolesCwd = typeof msg.cwd === "string" ? msg.cwd : "";
+        state.agentRolesHasProject = msg.hasProject === true;
+        state.agentRolesError = msg.error || "";
+        state.agentRolesErrorId = msg.errorId || "";
         refreshSettingsOverlay();
         break;
       case "permissionRules":
@@ -17570,6 +17728,15 @@
         state.contextBreakdown = null;
         updateDonut(0);
         reportRemotePreferences();
+        if (msg.sessionMode) state.sessionMode = msg.mode || msg.sessionMode;
+        if (msg.crewPreset) state.crewPreset = msg.crewPreset;
+        if (msg.crewRoles) state.crewRoles = msg.crewRoles;
+        renderSessionMode();
+        break;
+      }
+      case "sessionMode": {
+        state.sessionMode = msg.mode === "crew" ? "crew" : "single";
+        renderSessionMode();
         break;
       }
       case "sessionName": {
@@ -19835,6 +20002,8 @@
     });
   }
   syncProviderVoice();
+  wireModeSwitch();
+  renderSessionMode();
   initMermaid();
   initMathJax();
   claimRemoteTabIdentity((finalToken) => {

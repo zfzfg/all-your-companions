@@ -133,7 +133,7 @@ describe("settings catalog", () => {
     });
     const local = api.visibleCategories(snapshot, api.defaultEnv(withMcpSettings()));
     expect(local.map((c) => c.id)).toEqual([
-      "general", "voice", "notifications", "providers", "routines", "connectors", "advanced", "about",
+      "general", "voice", "notifications", "providers", "routines", "agents", "connectors", "advanced", "about",
     ]);
     const remoteRows = api.visibleRows(snapshot, api.defaultEnv(withMcpSettings({ isRemote: true })));
     expect(remoteRows.some((row) => row.hostLocal)).toBe(false);
@@ -159,7 +159,7 @@ describe("settings catalog", () => {
     expect(api.visibleCategories(snapshot, env).map((c) => c.id)).toEqual([
       // Routines stays — it is not gated on mcpSettings, and a host without
       // connectors still schedules perfectly well.
-      "general", "voice", "notifications", "providers", "routines", "advanced", "about",
+      "general", "voice", "notifications", "providers", "routines", "agents", "advanced", "about",
     ]);
     const rows = api.visibleRows(snapshot, env);
     expect(rows.some((row) => row.id === "routinesList")).toBe(true);
@@ -172,7 +172,7 @@ describe("settings catalog", () => {
     const snapshot = api.defaultSnapshot({ appPurpose: "coding" });
     const env = api.defaultEnv(withMcpSettings());
     expect(api.visibleCategories(snapshot, env).map((c) => c.id)).toEqual([
-      "general", "voice", "notifications", "providers", "routines", "connectors", "advanced", "about",
+      "general", "voice", "notifications", "providers", "routines", "agents", "connectors", "advanced", "about",
     ]);
     expect(api.CATEGORIES.some((c: { id: string }) => c.id === "mcp")).toBe(false);
     expect(api.NAV_ICONS.mcp).toBeUndefined();
@@ -285,7 +285,7 @@ describe("settings overlay (chat.js)", () => {
     expect(overlay).toBeTruthy();
     const nav = settingsNav(h).map((el) => (el.textContent || "").trim());
     expect(nav).toEqual([
-      "General", "Voice", "Notifications", "Providers", "Routines", "Advanced", "About",
+      "General", "Voice", "Notifications", "Providers", "Routines", "Agents & Crew", "Advanced", "About",
     ]);
     expect(nav).not.toContain("Connectors");
     expect(nav).not.toContain("MCP servers");
@@ -330,7 +330,7 @@ describe("settings overlay (chat.js)", () => {
     openSettings(h);
     const nav = settingsNav(h).map((el) => (el.textContent || "").trim());
     expect(nav).toEqual([
-      "General", "Voice", "Notifications", "Providers", "Routines", "Connectors", "Advanced", "About",
+      "General", "Voice", "Notifications", "Providers", "Routines", "Agents & Crew", "Connectors", "Advanced", "About",
     ]);
     expect(nav.filter((label) => label === "Connectors")).toHaveLength(1);
     expect(nav).not.toContain("MCP servers");

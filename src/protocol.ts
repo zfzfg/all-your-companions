@@ -41,6 +41,7 @@ export type { ReviewCenterFileView, ReviewScope };
 import type { CrewRun } from "./crew";
 export type { CrewRun };
 import type { RuleFile } from "./rules-files";
+import type { AgentRoleDraft, CrewFlowDraft, RoleScope } from "./agent-role-write";
 export type { RuleFile };
 import type { LimitOfferAction, LimitOfferRecommended, LimitOfferTarget } from "./limit-errors";
 export type { LimitOfferAction };
@@ -49,6 +50,69 @@ import type {
   PermissionRuleSuggestion,
   PermissionRuleView,
 } from "./permission-rules";
+
+/**
+ * One role as the Settings → Agents & Crew page paints it (AP-10/AP-12).
+ *
+ * A VIEW, not the role: it carries the resolved labels the page would
+ * otherwise have to re-derive (which provider, which model, which file is
+ * actually in force) plus the `draft` the editor binds to, so the page never
+ * has to know the frontmatter format.
+ */
+export interface AgentRoleView {
+  name: string;
+  provider: AcpProvider;
+  providerLabel: string;
+  model?: string;
+  mode: "agent" | "plan";
+  /**
+   * False for a built-in, whose `provider` is a placeholder the host resolves
+   * at run time — so `provider` above is then what WOULD answer on this
+   * machine right now, not a pin. Painting a placeholder as a pin is the
+   * exact lie this feature exists to remove: "reviewer runs on Claude" while
+   * Claude is not connected and Gemini actually answers.
+   */
+  providerPinned: boolean;
+  /** built-in / this machine / this project — the answer to "which file wins". */
+  scope: "builtin" | "global" | "project";
+  /** Set when this role replaced one of the same name from a wider scope. */
+  overrides?: "builtin" | "global";
+  /** Source file, relative to its own root. Absent for a built-in. */
+  path?: string;
+  whenToUse: string;
+  /** Editing a built-in materialises a file; the page says so before it does. */
+  editable: boolean;
+  draft: AgentRoleDraft;
+}
+
+export interface CrewFlowView {
+  name: string;
+  roles: string[];
+  verify?: string;
+  reviewEvery?: number;
+  parallel?: boolean;
+  scope: "builtin" | "global" | "project";
+  overrides?: "builtin" | "global";
+  path?: string;
+  draft: CrewFlowDraft;
+}
+
+/**
+ * A companion the role editor may point a role at.
+ *
+ * `connected` is shown rather than used as a filter: a role pinned to a
+ * companion you have not signed into yet is a perfectly reasonable thing to
+ * write down, and hiding the option would make the file look impossible to
+ * author. `models` is that provider's cached list — EMPTY means the cache is
+ * cold, not that the provider has no models, so the page offers free text
+ * instead of an empty dropdown.
+ */
+export interface RoleProviderOption {
+  id: AcpProvider;
+  label: string;
+  connected: boolean;
+  models: { modelId: string; name?: string }[];
+}
 export type { PermissionRuleMatch, PermissionRuleSuggestion, PermissionRuleView };
 
 /** grok's tool-call payload as it comes off the wire (acp emits it untyped). The
@@ -541,6 +605,38 @@ export type HostMsg =
    *  (see OUTBOUND_DISPOSITION). Always the FULL candidate list, never a delta. */
   | { type: "ruleFiles"; files: RuleFile[] }
   /**
+   * Settings → Agents & Crew, whole (AP-10/AP-12).
+   *
+   * REPLACING state, like `routines`: the host sends the full set and the page
+   * swaps, because a delta over a list assembled from three scopes on two
+   * roots is a synchronisation problem with no upside.
+   *
+   * Host-local for the same reason as `ruleFiles`: the writes land in the
+   * local home directory and the open project, and the page's actions are
+   * meaningless off the machine running the host.
+   *
+   * `problems` is the parser's complaints about role/flow files. It is on the
+   * page rather than only in chat because today a broken role file is visible
+   * only if you happen to run `/agent` — which is exactly when you least want
+   * to discover it.
+   */
+  | {
+      type: "agentRoles";
+      roles: AgentRoleView[];
+      flows: CrewFlowView[];
+      providers: RoleProviderOption[];
+      problems: string[];
+      /** The project these project-scoped files belong to. Empty when no
+       *  folder is open, which is what `hasProject: false` tells the page. */
+      cwd: string;
+      hasProject: boolean;
+      /** Last save/delete refusal, cleared by the next successful write. */
+      error?: string;
+      /** Which card the refusal belongs to, so it lands on the draft that
+       *  caused it rather than on the top of the page. */
+      errorId?: string;
+    }
+  /**
    * AP-07 permission-rule list (Settings → Advanced). Always the FULL list,
    * never a delta. `pendingAdoption` is set when a checked-in
    * `.grok/permissions.json` has not been explicitly adopted — those rules
@@ -582,7 +678,8 @@ export type HostMsg =
   | { type: "initialized"; info: { cliPath: string; cwd: string; version: string | null; provider?: "grok" | "codex" | "claude" | "gemini"; init: { protocolVersion?: unknown } } }
   | { type: "cliUpdating" }
   // `worktree` gates the gear's Apply/Remove worktree items to worktree sessions.
-  | { type: "session"; sessionId: string; models: ModelInfo[]; currentModelId: string | undefined; worktree?: boolean; provider?: "grok" | "codex" | "claude" | "gemini" }
+  | { type: "session"; sessionId: string; models: ModelInfo[]; currentModelId: string | undefined; worktree?: boolean; provider?: "grok" | "codex" | "claude" | "gemini"; sessionMode?: "single" | "crew" }
+  | { type: "sessionMode"; mode: "single" | "crew" }
   // The focused conversation's display name, using the same precedence as a
   // history row. It is separate from `sessions` because VS Code does not keep
   // that browser-only list populated while the history popover is closed.
@@ -1114,6 +1211,7 @@ export type WebviewMsg =
   | { type: "cancel" }
   | { type: "pickModel" }
   | { type: "setMode"; modeId: "agent" | "plan" | "yolo" }
+  | { type: "setSessionMode"; mode: "single" | "crew" }
   | { type: "setConfigOption"; configId: string; value: unknown }
   | { type: "removeChip"; id: string }
   | { type: "toggleChip"; id: string }
@@ -1188,6 +1286,37 @@ export type WebviewMsg =
    *  a target the user picks via a native QuickPick the host shows itself —
    *  the message carries no path, only the text to append. */
   | { type: "appendRuleFile"; text: string }
+  /** Settings → Agents & Crew: (re-)read the role and flow files for the
+   *  active project plus this machine, and answer with an `agentRoles` frame. */
+  | { type: "listAgentRoles" }
+  /**
+   * Create or replace one role file. `originalName` present means an edit, and
+   * a changed name moves the file rather than leaving two.
+   *
+   * `scope` picks the root: `project` writes into the open project (versionable,
+   * shareable), `global` into `~/.companions` (this machine, every project).
+   * Saving a built-in NAME is how a shipped role is materialised for editing.
+   */
+  | {
+      type: "saveAgentRole";
+      scope: RoleScope;
+      originalName?: string;
+      /**
+       * Where the role being edited currently lives, when that is a file.
+       *
+       * Without it a scope MOVE silently does nothing visible: writing the
+       * global copy while the project file stays put leaves the project file
+       * winning, so the user's edit appears to have been discarded. The host
+       * removes the old file only when this says the scope actually changed.
+       */
+      originalScope?: RoleScope;
+      draft: AgentRoleDraft;
+    }
+  /** Remove a role file. For a built-in name this is "reset to built-in": the
+   *  file goes, the shipped role comes back. */
+  | { type: "deleteAgentRole"; scope: RoleScope; name: string }
+  | { type: "saveCrewFlow"; scope: RoleScope; originalName?: string; originalScope?: RoleScope; draft: CrewFlowDraft }
+  | { type: "deleteCrewFlow"; scope: RoleScope; name: string }
   | { type: "listMcpServers" }
   /** Open the Routines page — the host answers with a `routines` frame. */
   | { type: "listRoutines" }
@@ -1593,15 +1722,17 @@ const HOST_MESSAGE_TYPE_MAP: Record<HostMsg["type"], true> = {
   soundNotifications: true, processingSound: true, readRepliesAloud: true, summarizeRepliesAloud: true, speechSummary: true, imageFull: true, moveComposerCaret: true, remoteStatus: true,
   setAllToolDetails: true, focusInput: true, findInSession: true, restoreComposer: true, truncateMessages: true, uiConfirmRequest: true,
   sessions: true, sessionRemoved: true, repoSessions: true, pinnedSessions: true, repos: true, sessionDot: true, queuedSends: true, submitQueuedSend: true,
-  steerUnavailable: true, feedbackAvailability: true, turnFeedbackAck: true, usage: true, providerCapabilities: true, planEntries: true, reviewCenter: true, crewRun: true, ruleFiles: true, permissionRules: true,
+  steerUnavailable: true, feedbackAvailability: true, turnFeedbackAck: true, usage: true, providerCapabilities: true, planEntries: true, reviewCenter: true, crewRun: true, ruleFiles: true, permissionRules: true, agentRoles: true,
+  sessionMode: true,
 };
 
 const WEBVIEW_MESSAGE_TYPE_MAP: Record<WebviewMsg["type"], true> = {
   ready: true, remotePreferences: true, send: true, newSession: true, cancel: true, pickModel: true,
-  setMode: true, setConfigOption: true, removeChip: true, toggleChip: true, openFile: true, showInFolder: true, openUrl: true,
+  setMode: true, setSessionMode: true, setConfigOption: true, removeChip: true, toggleChip: true, openFile: true, showInFolder: true, openUrl: true,
   openText: true, openDiff: true, revertToolEdit: true, reviewRevertFile: true, reviewRevertAll: true, exportExpr: true, setEffort: true, openGlobalConfig: true,
   addProjectFolder: true, removeProjectFolder: true, createProject: true, cloneProject: true, setupGithubCli: true, listGithubRepos: true, githubSignOut: true, githubLoginWithToken: true,
-  openProjectConfig: true, listRuleFiles: true, openRuleFile: true, appendRuleFile: true, listMcpServers: true, connectMcpConnector: true, disconnectMcpConnector: true, completeMcpConnectorOAuth: true,
+  openProjectConfig: true, listRuleFiles: true, openRuleFile: true, appendRuleFile: true,
+  listAgentRoles: true, saveAgentRole: true, deleteAgentRole: true, saveCrewFlow: true, deleteCrewFlow: true, listMcpServers: true, connectMcpConnector: true, disconnectMcpConnector: true, completeMcpConnectorOAuth: true,
   listRoutines: true, saveRoutine: true, deleteRoutine: true, setRoutinePaused: true, runRoutineNow: true, showLogs: true, toggleDevTools: true, openSettings: true, openSettingsSurface: true, closeSettingsSurface: true, dismissWelcomeTip: true, welcomeTipShown: true, moveView: true,
   setShowThinking: true, setAppPurpose: true, setExpandCommandOutputs: true, setSteerByDefault: true,
   setSoundNotifications: true, setProcessingSound: true, setReadRepliesAloud: true, setSummarizeRepliesAloud: true, setVoiceSendPhrase: true, setVoiceKeyterms: true, setTelemetryEnabled: true, setThumbsFeedback: true, summarizeSpeech: true, requestImageFull: true, composerFocus: true,

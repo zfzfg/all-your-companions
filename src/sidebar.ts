@@ -90,6 +90,7 @@ import {
   parseCodexVersionOutput,
   projectProviderKey,
   providerDisplayName,
+  PROVIDER_ORDER,
   providerLoginState,
   versionIsOlder,
   type ProjectProviderDefaults,
@@ -332,14 +333,33 @@ import {
   type CrewStep,
 } from "./crew";
 import { assignStep } from "./crew-assign";
-import { CREW_PRESETS_DIR, findCrewPreset, loadCrewPresets, type CrewPresetFile } from "./crew-preset";
-import { briefingForCrewStep, fixerTitle, verifyInsertsFixer } from "./crew-run";
+import {
+  CREW_PRESETS_DIR,
+  findCrewPreset,
+  loadCrewPresets,
+  presetReviewRole,
+  presetRoles,
+  type CrewPreset,
+  type CrewPresetFile,
+  type CrewPresetSet,
+} from "./crew-preset";
+import { applyReviewCadence, briefingForCrewStep, fixerTitle, verifyInsertsFixer } from "./crew-run";
+import {
+  presetToDraft,
+  roleToDraft,
+  validateAgentRoleDraft,
+  validateCrewFlowDraft,
+  type AgentRoleDraft,
+  type CrewFlowDraft,
+  type RoleScope,
+} from "./agent-role-write";
 import { nextIndependentSteps } from "./crew-parallel";
 import { FileClaimStore } from "./file-claims";
 import { checkBudget, countUnreapable, nextFailoverProvider, parallelSlotCap, repeatedFailingTool } from "./crew-budget";
 import {
   AGENT_ROLES_DIR,
   findAgentRole,
+  isValidRoleName,
   loadAgentRoles,
   rolePermissionsToRules,
   validateRoleModel,
@@ -1122,6 +1142,14 @@ export class GrokSidebar {
     "deleteRoutine",
     "setRoutinePaused",
     "runRoutineNow",
+    // Agents & Crew is a settings-tab page in exactly the same way, and
+    // without these five it posts `listAgentRoles`, gets "[settings] ignored",
+    // and shows an empty page with no way to create anything.
+    "listAgentRoles",
+    "saveAgentRole",
+    "deleteAgentRole",
+    "saveCrewFlow",
+    "deleteCrewFlow",
     "setShowThinking",
     "setAppPurpose",
     "setExpandCommandOutputs",
@@ -1568,28 +1596,65 @@ export class GrokSidebar {
    * files, so the read is cheaper than the surprise.
    */
   private agentRoleSet(cwd: string): AgentRoleSet {
-    const dir = path.join(cwd, ".companions", "agents");
-    const files: AgentRoleFile[] = [];
+    return loadAgentRoles([
+      ...this.readCompanionFiles(this.companionsRoot("global"), AGENT_ROLES_DIR, "global", "agent"),
+      ...this.readCompanionFiles(this.companionsRoot("project", cwd), AGENT_ROLES_DIR, "project", "agent"),
+    ]);
+  }
+
+  /**
+   * Where one scope's `.companions/` lives.
+   *
+   * `global` is this MACHINE's set (`~/.companions`), so a role you rely on
+   * everywhere does not have to be copied into every repo; `project` is the
+   * open project's own, which stays the versionable, shareable, reviewable
+   * thing decision 18.1 asks for. Returns empty when there is no project, and
+   * every caller treats that as "this scope contributes nothing" rather than
+   * reaching for a default that would put files somewhere surprising.
+   */
+  private companionsRoot(scope: RoleScope, cwd?: string): string {
+    if (scope === "global") return path.join(this.resolvedUserHome(), ".companions");
+    const project = (cwd ?? "").trim();
+    return project ? path.join(project, ".companions") : "";
+  }
+
+  /**
+   * Read one `.companions/<kind>/*.md` directory into parser input.
+   *
+   * A missing directory is the normal case, not an error — the built-ins are
+   * the whole point of shipping five of them — but a directory that exists and
+   * cannot be READ is logged, because that one is a real problem wearing the
+   * same shape as the ordinary one.
+   */
+  private readCompanionFiles(
+    root: string,
+    relDir: string,
+    scope: RoleScope,
+    tag: "agent" | "crew",
+  ): { path: string; stem: string; text: string; scope: RoleScope }[] {
+    if (!root) return [];
+    const dir = path.join(root, path.basename(relDir));
+    const files: { path: string; stem: string; text: string; scope: RoleScope }[] = [];
     let names: string[] = [];
     try {
       names = fs.readdirSync(dir).filter((name) => name.toLowerCase().endsWith(".md")).sort();
     } catch {
-      // No directory is the normal case, not an error — the built-ins are the
-      // whole point of shipping five of them.
-      return loadAgentRoles([]);
+      return [];
     }
+    const prefix = scope === "global" ? `~/${relDir}` : relDir;
     for (const name of names) {
       try {
         files.push({
-          path: `${AGENT_ROLES_DIR}/${name}`,
+          path: `${prefix}/${name}`,
           stem: name.replace(/\.md$/i, ""),
           text: fs.readFileSync(path.join(dir, name), "utf8"),
+          scope,
         });
       } catch (error) {
-        this.host.appendLine(`[agent] could not read ${AGENT_ROLES_DIR}/${name}: ${(error as Error).message}`);
+        this.host.appendLine(`[${tag}] could not read ${prefix}/${name}: ${(error as Error).message}`);
       }
     }
-    return loadAgentRoles(files);
+    return files;
   }
 
   /**
@@ -1624,11 +1689,15 @@ export class GrokSidebar {
       if (elsewhere) return { provider: elsewhere };
     }
     if (usable.includes(role.provider)) return { provider: role.provider };
-    if (role.source === "project") {
+    // A role from a FILE — project or global — named its provider on purpose,
+    // and only a built-in's is a placeholder. Swapping either of the first two
+    // would defeat the point of pinning a reviewer to a second opinion.
+    if (role.source !== "builtin") {
       return {
         error:
           `Role \`${role.name}\` runs on ${providerDisplayName(role.provider)}, which is not connected. `
-          + `Connect it, or change \`provider:\` in \`${role.path ?? AGENT_ROLES_DIR}\`.`,
+          + `Connect it, or change its companion in Settings → Agents & Crew `
+          + `(\`${role.path ?? AGENT_ROLES_DIR}\`).`,
       };
     }
     return { provider: usable.includes(caller.provider) ? caller.provider : usable[0] };
@@ -1666,7 +1735,9 @@ export class GrokSidebar {
 
     if (parsed.kind === "list") {
       const lines = set.roles.map((role) => {
-        const where = role.source === "builtin" ? "built-in" : role.path ?? "project";
+        const where = role.source === "builtin"
+          ? "built-in"
+          : `${role.path ?? role.source}${role.overrides ? `, overrides ${role.overrides}` : ""}`;
         const mode = role.mode === "plan" ? "Plan mode" : "Agent mode";
         return `- \`/agent ${role.name}\` — **${role.name}** (${mode}, ${where})\n  ${role.whenToUse}`;
       });
@@ -1680,7 +1751,8 @@ export class GrokSidebar {
           ...lines,
           ``,
           `---`,
-          `**Configuring Roles:** Define custom roles as \`${AGENT_ROLES_DIR}/<name>.md\` or open **Settings (⚙) → Rules & Agents**.`,
+          `**Configuring Roles:** Open **Settings (⚙) → Agents & Crew** to set each role's companion, model and scope — `
+          + `or write the file yourself as \`${AGENT_ROLES_DIR}/<name>.md\` (this project) or \`~/${AGENT_ROLES_DIR}/<name>.md\` (every project).`,
         ].join("\n"),
       );
       return true;
@@ -2056,27 +2128,11 @@ export class GrokSidebar {
     this.emit(session, { type: "crewRun", run: session.crewRun ?? null });
   }
 
-  private crewPresetSet(cwd: string) {
-    const dir = path.join(cwd, ".companions", "crews");
-    const files: CrewPresetFile[] = [];
-    let names: string[] = [];
-    try {
-      names = fs.readdirSync(dir).filter((name) => name.toLowerCase().endsWith(".md")).sort();
-    } catch {
-      return loadCrewPresets([]);
-    }
-    for (const name of names) {
-      try {
-        files.push({
-          path: `${CREW_PRESETS_DIR}/${name}`,
-          stem: name.replace(/\.md$/i, ""),
-          text: fs.readFileSync(path.join(dir, name), "utf8"),
-        });
-      } catch (error) {
-        this.host.appendLine(`[crew] could not read ${CREW_PRESETS_DIR}/${name}: ${(error as Error).message}`);
-      }
-    }
-    return loadCrewPresets(files);
+  private crewPresetSet(cwd: string): CrewPresetSet {
+    return loadCrewPresets([
+      ...this.readCompanionFiles(this.companionsRoot("global"), CREW_PRESETS_DIR, "global", "crew"),
+      ...this.readCompanionFiles(this.companionsRoot("project", cwd), CREW_PRESETS_DIR, "project", "crew"),
+    ]);
   }
 
   /**
@@ -2186,8 +2242,15 @@ export class GrokSidebar {
       detail: `preset=${preset.name} steps=${steps.length}`,
     });
 
+    // The flow's `roles:` is the candidate POOL, in the flow's own order —
+    // until now it was parsed and ignored, so a flow saying
+    // `roles: [planner, implementer]` still let a `researcher` take a step.
+    // A name that resolves to nothing is reported rather than dropped.
+    const pool = presetRoles(preset, roles);
+    for (const problem of pool.problems) this.agentNotice(session, "warning", problem.message);
+
     for (const step of run.steps) {
-      const assignment = assignStep({ title: step.title, files: [] }, roles.roles);
+      const assignment = assignStep({ title: step.title, files: [] }, pool.roles);
       if (assignment.kind === "assigned") {
         run = assignStepRole(run, step.index, assignment.role, assignment.why);
         this.logAgentRun({
@@ -2195,7 +2258,7 @@ export class GrokSidebar {
           provider: session.provider, event: "briefed", detail: assignment.why,
         });
       } else {
-        const candidates = assignment.kind === "ambiguous" ? assignment.candidates : roles.roles.map((r) => r.name);
+        const candidates = assignment.kind === "ambiguous" ? assignment.candidates : pool.roles.map((r) => r.name);
         const picked = await this.askCrewAssignment(session, step.title, candidates, assignment.why);
         if (!picked) {
           run = cancelCrewRun(run, "Assignment cancelled.");
@@ -2208,6 +2271,30 @@ export class GrokSidebar {
           at: Date.now(), runId, step: step.index, role: picked,
           provider: session.provider, event: "briefed", detail: `user chose ${picked}`,
         });
+      }
+    }
+
+    // `review_every:` was the other decorative field: a flow asking to be
+    // reviewed every two steps was reviewed only at the end, which finds a
+    // wrong decision from step 2 after step 9 has been built on it. Applied
+    // AFTER assignment so the cadence counts the steps that actually write.
+    if (preset.reviewEvery) {
+      const reviewRole = presetReviewRole(preset, roles);
+      if (reviewRole) {
+        const before = run.steps.length;
+        run = applyReviewCadence(run, preset.reviewEvery, reviewRole);
+        if (run.steps.length !== before) {
+          this.logAgentRun({
+            at: Date.now(), runId, step: 0, role: reviewRole, provider: session.provider,
+            event: "briefed", detail: `review cadence every ${preset.reviewEvery} inserted ${run.steps.length - before} step(s)`,
+          });
+        }
+      } else {
+        this.agentNotice(
+          session,
+          "warning",
+          `Crew flow \`${preset.name}\` asks for a review every ${preset.reviewEvery} steps, but no review role is loaded.`,
+        );
       }
     }
 
@@ -2875,6 +2962,287 @@ export class GrokSidebar {
   }
 
   /** Remote routines omit projects outside the host's current trusted set. */
+  /* --------------------------------------- Settings → Agents & Crew (AP-10) */
+
+  /** Last save/delete refusal, shown on the card that caused it. Cleared by
+   *  the next successful write, exactly like `routineError`. */
+  private agentRolesError?: { id?: string; message: string };
+
+  /**
+   * The whole Agents & Crew page: roles, flows, the companions a role may be
+   * pointed at, and the parser's complaints about both file sets.
+   *
+   * Read fresh rather than cached, for the same reason `/agent` re-reads its
+   * role files: they are edited in the window that runs them, and a cache
+   * would hand the user yesterday's definition of a role they just fixed.
+   */
+  private buildAgentRolesMessage(): Extract<HostMsg, { type: "agentRoles" }> {
+    const cwd = this.sessionCwd();
+    const roleSet = this.agentRoleSet(cwd);
+    const flowSet = this.crewPresetSet(cwd);
+    const cache = this.state.get<ProviderModelCache>(PROVIDER_MODEL_CACHE_KEY, {});
+    const connected = new Set(this.connectedProviders());
+    return {
+      type: "agentRoles",
+      roles: roleSet.roles.map((role) => {
+        // A built-in's `provider` is a PLACEHOLDER the host rewrites at run
+        // time, so painting it would tell the user a role runs on a companion
+        // that is not even connected. Show what would actually answer, and say
+        // it is not a pin.
+        const effective = role.source === "builtin" ? this.effectiveRoleProvider(role) : role.provider;
+        return {
+        name: role.name,
+        provider: effective,
+        providerLabel: providerDisplayName(effective),
+        providerPinned: role.source !== "builtin",
+        ...(role.model ? { model: role.model } : {}),
+        mode: role.mode ?? "agent",
+        scope: role.source,
+        ...(role.overrides ? { overrides: role.overrides } : {}),
+        ...(role.path ? { path: role.path } : {}),
+        whenToUse: role.whenToUse,
+        // Everything is editable — a built-in is edited by materialising it as
+        // a file, which is the only way to pin a companion to one of the five
+        // shipped roles at all.
+        editable: true,
+        // The draft carries the EFFECTIVE provider too: opening a built-in and
+        // pressing Save must pin what the row promised, not the placeholder.
+        draft: { ...roleToDraft(role), provider: effective },
+      };
+      }),
+      flows: flowSet.presets.map((preset) => ({
+        name: preset.name,
+        roles: [...preset.roles],
+        ...(preset.verify ? { verify: preset.verify } : {}),
+        ...(preset.reviewEvery ? { reviewEvery: preset.reviewEvery } : {}),
+        ...(preset.parallel ? { parallel: true } : {}),
+        scope: preset.source,
+        ...(preset.overrides ? { overrides: preset.overrides } : {}),
+        ...(preset.path ? { path: preset.path } : {}),
+        draft: presetToDraft(preset),
+      })),
+      providers: PROVIDER_ORDER.map((id) => ({
+        id,
+        label: providerDisplayName(id),
+        // Shown, never used as a filter: a role pinned to a companion you have
+        // not signed into yet is a reasonable thing to write down, and hiding
+        // the option would make the file look impossible to author.
+        connected: connected.has(id),
+        models: (cache[id]?.models ?? []).map((model) => ({
+          modelId: model.modelId,
+          ...(model.name ? { name: model.name } : {}),
+        })),
+      })),
+      problems: [
+        ...roleSet.problems.map((problem) => problem.message),
+        ...flowSet.problems.map((problem) => problem.message),
+      ],
+      cwd,
+      hasProject: !!cwd,
+      ...(this.agentRolesError ? { error: this.agentRolesError.message } : {}),
+      ...(this.agentRolesError?.id ? { errorId: this.agentRolesError.id } : {}),
+    };
+  }
+
+  /**
+   * Which companion a BUILT-IN role would actually run on right now.
+   *
+   * Mirrors `resolveRoleProvider`'s built-in branch — including the steer away
+   * from the calling companion for a role that wants a fresh pair of eyes —
+   * without needing a session to commission it from. Falls back to the
+   * placeholder when nothing is connected, because with no usable companion
+   * there is no truer answer to give.
+   */
+  private effectiveRoleProvider(role: AgentRole): AcpProvider {
+    const usable = this.usableProviders();
+    if (!usable.length) return role.provider;
+    const caller = this.focused?.provider;
+    if (role.preferDifferentProvider) {
+      const elsewhere = usable.find((candidate) => candidate !== caller);
+      if (elsewhere) return elsewhere;
+    }
+    if (caller && usable.includes(caller)) return caller;
+    return usable[0]!;
+  }
+
+  /** Local webview + the settings TAB, like `postRoutines`. Never crosses to a
+   *  remote: the frame names `~/.companions` (OUTBOUND_DISPOSITION host-local). */
+  private postAgentRoles(): void {
+    const message = this.buildAgentRolesMessage();
+    this.postLocal(message);
+    void this.settingsEditor?.webview.postMessage(message);
+  }
+
+  /**
+   * The directory one scope's files are written into.
+   *
+   * Returns undefined when the scope has no root — the only real case being
+   * `project` with no folder open, where the honest answer is "there is
+   * nowhere to put this", not a guess at a directory.
+   *
+   * Does NOT create anything: a refused draft must leave no trace, and an
+   * empty `.companions/agents/` appearing in a repo after a validation error
+   * is a change the user did not ask for. {@link companionsEnsureDir} is the
+   * half that writes, called only once a draft is known to be good.
+   */
+  private companionsWriteDir(scope: RoleScope, kind: "agents" | "crews"): string | undefined {
+    const root = this.companionsRoot(scope, this.sessionCwd());
+    return root ? path.join(root, kind) : undefined;
+  }
+
+  /** Record a refusal against one card and repaint. The page keeps the draft,
+   *  so the reason lands on the text that caused it rather than a blank form. */
+  private refuseAgentRoles(id: string | undefined, message: string): void {
+    this.agentRolesError = { ...(id ? { id } : {}), message };
+    this.postAgentRoles();
+  }
+
+  /** Names already taken in one scope — what a save is checked against. A
+   *  built-in name is NOT taken: writing it is how you override the built-in. */
+  private agentRoleNamesInScope(scope: RoleScope, kind: "agents" | "crews"): string[] {
+    const root = this.companionsRoot(scope, this.sessionCwd());
+    if (!root) return [];
+    try {
+      return fs
+        .readdirSync(path.join(root, kind))
+        .filter((name) => name.toLowerCase().endsWith(".md"))
+        .map((name) => name.replace(/\.md$/i, "").toLowerCase());
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Remove the file a save has just superseded.
+   *
+   * Two cases, and missing either one makes a save look like it did nothing:
+   * a RENAME (the old name would keep answering alongside the new one) and a
+   * SCOPE MOVE (writing the global copy while the project file stays put
+   * leaves the project file winning, so the edit appears discarded).
+   */
+  private dropSupersededCompanionFile(opts: {
+    kind: "agents" | "crews";
+    savedName: string;
+    savedScope: RoleScope;
+    originalName?: string;
+    originalScope?: RoleScope;
+  }): void {
+    const previousName = (opts.originalName ?? "").trim().toLowerCase();
+    if (!previousName || !isValidRoleName(previousName)) return;
+    const previousScope = opts.originalScope ?? opts.savedScope;
+    if (previousName === opts.savedName && previousScope === opts.savedScope) return;
+    const root = this.companionsRoot(previousScope, this.sessionCwd());
+    if (!root) return;
+    try {
+      fs.rmSync(path.join(root, opts.kind, `${previousName}.md`), { force: true });
+    } catch {
+      /* the file is already gone, which is the end state this wanted */
+    }
+  }
+
+  private async handleSaveAgentRole(
+    msg: { scope: RoleScope; originalName?: string; originalScope?: RoleScope; draft: AgentRoleDraft },
+  ): Promise<void> {
+    const id = msg.originalName || msg.draft?.name || "new";
+    const dir = this.companionsWriteDir(msg.scope, "agents");
+    if (!dir) {
+      this.refuseAgentRoles(id, "Open a project folder first — a project role needs somewhere to live.");
+      return;
+    }
+    const cache = this.state.get<ProviderModelCache>(PROVIDER_MODEL_CACHE_KEY, {});
+    const result = validateAgentRoleDraft(msg.draft ?? ({} as AgentRoleDraft), {
+      providers: PROVIDER_ORDER,
+      knownModels: Object.fromEntries(PROVIDER_ORDER.map((id2) => [id2, cache[id2]?.models ?? []])),
+      providerLabel: (provider) => providerDisplayName(provider as AcpProvider),
+      existingNames: this.agentRoleNamesInScope(msg.scope, "agents"),
+      ...(msg.originalName ? { originalName: msg.originalName } : {}),
+    });
+    if (!result.ok) {
+      this.refuseAgentRoles(id, result.error);
+      return;
+    }
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, `${result.value.name}.md`), result.text, "utf8");
+      this.dropSupersededCompanionFile({
+        kind: "agents",
+        savedName: result.value.name,
+        savedScope: msg.scope,
+        ...(msg.originalName ? { originalName: msg.originalName } : {}),
+        ...(msg.originalScope ? { originalScope: msg.originalScope } : {}),
+      });
+    } catch (error) {
+      this.refuseAgentRoles(id, `Could not write the role file — ${(error as Error).message}`);
+      return;
+    }
+    this.agentRolesError = undefined;
+    this.postAgentRoles();
+  }
+
+  private async handleSaveCrewFlow(
+    msg: { scope: RoleScope; originalName?: string; originalScope?: RoleScope; draft: CrewFlowDraft },
+  ): Promise<void> {
+    const id = msg.originalName || msg.draft?.name || "new";
+    const dir = this.companionsWriteDir(msg.scope, "crews");
+    if (!dir) {
+      this.refuseAgentRoles(id, "Open a project folder first — a project crew flow needs somewhere to live.");
+      return;
+    }
+    const result = validateCrewFlowDraft(msg.draft ?? ({} as CrewFlowDraft), {
+      roleNames: this.agentRoleSet(this.sessionCwd()).roles.map((role) => role.name),
+      existingNames: this.agentRoleNamesInScope(msg.scope, "crews"),
+      ...(msg.originalName ? { originalName: msg.originalName } : {}),
+    });
+    if (!result.ok) {
+      this.refuseAgentRoles(id, result.error);
+      return;
+    }
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, `${result.value.name}.md`), result.text, "utf8");
+      this.dropSupersededCompanionFile({
+        kind: "crews",
+        savedName: result.value.name,
+        savedScope: msg.scope,
+        ...(msg.originalName ? { originalName: msg.originalName } : {}),
+        ...(msg.originalScope ? { originalScope: msg.originalScope } : {}),
+      });
+    } catch (error) {
+      this.refuseAgentRoles(id, `Could not write the crew flow file — ${(error as Error).message}`);
+      return;
+    }
+    this.agentRolesError = undefined;
+    this.postAgentRoles();
+  }
+
+  /**
+   * Delete one role or flow file.
+   *
+   * For a built-in NAME this is "reset to built-in": the file goes and the
+   * shipped role comes back, which is why a missing file is a success rather
+   * than an error — the end state the user asked for already holds.
+   */
+  private handleDeleteCompanionFile(scope: RoleScope, kind: "agents" | "crews", rawName: string): void {
+    const name = String(rawName ?? "").trim().toLowerCase();
+    if (!isValidRoleName(name)) {
+      this.refuseAgentRoles(rawName, "That is not a name this can delete.");
+      return;
+    }
+    const root = this.companionsRoot(scope, this.sessionCwd());
+    if (!root) {
+      this.refuseAgentRoles(name, "There is no project open, so there is no project file to remove.");
+      return;
+    }
+    try {
+      fs.rmSync(path.join(root, kind, `${name}.md`), { force: true });
+    } catch (error) {
+      this.refuseAgentRoles(name, `Could not remove the file — ${(error as Error).message}`);
+      return;
+    }
+    this.agentRolesError = undefined;
+    this.postAgentRoles();
+  }
+
   private postRoutines(): void {
     const message = this.buildRoutinesMessage();
     this.postLocal(message);
@@ -4025,6 +4393,7 @@ export class GrokSidebar {
       currentModelId: client.currentModelId,
       worktree: !!session.worktree,
       provider: session.provider,
+      sessionMode: session.sessionMode ?? "single",
     };
   }
 
@@ -4041,6 +4410,7 @@ export class GrokSidebar {
       currentModelId: client.currentModelId,
       worktree: !!session.worktree,
       provider: session.provider,
+      sessionMode: session.sessionMode ?? "single",
     });
   }
 
@@ -12481,6 +12851,10 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
           await this.handleCrewCommand(msg.text, session, origin);
           break;
         }
+        if (session.sessionMode === "crew" && !msg.text.trim().startsWith("/")) {
+          await this.handleCrewCommand(msg.text, session, origin);
+          break;
+        }
         let queuedSendCommit: { text: string; items: QueuedSendEntry[] } | undefined;
         if (origin === "remote" && msg.queuedSendId) {
           if (session.completedQueuedSendIds.includes(msg.queuedSendId)) {
@@ -12701,6 +13075,15 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       case "setMode":
         await this.setMode(msg.modeId, session, requester);
         break;
+      case "setSessionMode": {
+        const mode = msg.mode === "crew" ? "crew" : "single";
+        session.sessionMode = mode;
+        this.emit(session, {
+          type: "sessionMode",
+          mode,
+        });
+        break;
+      }
       case "removeChip": {
         // A removed image chip's staged file has no other reference — reclaim
         // it now instead of leaving multi-MB orphans until the weekly sweep.
@@ -13165,6 +13548,30 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       }
       case "listRuleFiles": {
         await this.refreshRuleFiles(session);
+        break;
+      }
+      case "listAgentRoles": {
+        // Opening the page is the request. Clearing the last refusal first, so
+        // a reopened page does not greet the user with an error they already
+        // fixed — same rule as `listRoutines`.
+        this.agentRolesError = undefined;
+        this.postAgentRoles();
+        break;
+      }
+      case "saveAgentRole": {
+        await this.handleSaveAgentRole(msg);
+        break;
+      }
+      case "deleteAgentRole": {
+        this.handleDeleteCompanionFile(msg.scope, "agents", msg.name);
+        break;
+      }
+      case "saveCrewFlow": {
+        await this.handleSaveCrewFlow(msg);
+        break;
+      }
+      case "deleteCrewFlow": {
+        this.handleDeleteCompanionFile(msg.scope, "crews", msg.name);
         break;
       }
       case "listPermissionRules": {
@@ -22995,6 +23402,11 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         mcpError: "",
         mcpWarning: MCP_GLOBAL_SCOPE_WARNING,
         mcpConnectors: this.mcpConnectorsMessage().connectors,
+        // `null` rather than `[]`: the page distinguishes "not asked yet"
+        // (which paints a loading line) from "asked, and there are none".
+        agentRoles: null,
+        crewFlows: null,
+        agentRoleProviders: [],
       },
       category: opts.category || "general",
       env: {
@@ -23070,6 +23482,18 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         if (msg.type === "mcpConnectors") {
           surface.update({
             mcpConnectors: Array.isArray(msg.connectors) ? msg.connectors : [],
+          });
+        }
+        if (msg.type === "agentRoles") {
+          surface.update({
+            agentRoles: Array.isArray(msg.roles) ? msg.roles : [],
+            crewFlows: Array.isArray(msg.flows) ? msg.flows : [],
+            agentRoleProviders: Array.isArray(msg.providers) ? msg.providers : [],
+            agentRoleProblems: Array.isArray(msg.problems) ? msg.problems : [],
+            agentRolesCwd: msg.cwd || "",
+            agentRolesHasProject: msg.hasProject === true,
+            agentRolesError: msg.error || "",
+            agentRolesErrorId: msg.errorId || ""
           });
         }
         if (msg.type === "routines") {
@@ -23216,6 +23640,32 @@ ${openMain}
     <div id="repo-popover" class="toolbar-popover repo-popover" hidden></div>
     <div id="history-popover" class="toolbar-popover history-popover" hidden></div>
   </header>
+  <div id="mode-switch-bar" class="mode-switch-bar">
+    <div class="modeswitch" id="mode-switch" role="group" aria-label="Session mode">
+      <button class="ms-opt" id="ms-opt-single" data-mode="single" type="button" aria-pressed="true">
+        <span class="ms-t">Single Agent</span>
+        <span class="ms-d">one companion, subagents available</span>
+      </button>
+      <button class="ms-opt" id="ms-opt-crew" data-mode="crew" type="button" aria-pressed="false">
+        <span class="ms-t">Crew</span>
+        <span class="ms-d">multi-agent roles, sequential steps, review</span>
+      </button>
+      <div class="ms-lock" id="ms-lock" hidden>
+        <span class="lockicon">🔒</span>
+        <span class="lockmsg">The mode is bound to this session — locked after the first message.</span>
+        <button class="lnk" id="ms-new-session" type="button">New session in other mode</button>
+      </div>
+    </div>
+    <div class="crewbar" id="crew-bar" hidden>
+      <div class="cb-line">
+        <strong id="crew-preset-name">Preset: default</strong>
+        <button class="lnk" id="btn-view-roles" type="button">View roles</button>
+        <span class="sp"></span>
+        <span class="cb-cost" id="crew-cost"></span>
+      </div>
+      <div class="cb-roles" id="crew-roles"></div>
+    </div>
+  </div>
 ${fileShellOpen}
   <main id="messages" class="messages">
     <div class="welcome" id="welcome">

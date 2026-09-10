@@ -97,11 +97,26 @@ Switch from the bottom toolbar — even mid-turn, so you can flip to **Auto acce
 </details>
 
 <details>
+<summary><strong>Agents &amp; Crew</strong> — pick who answers for each role, and how a crew walks a plan</summary>
+
+**Settings → Agents & Crew** is where roles and crew flows are configured; you no longer have to hand-write YAML for either.
+
+A **role** is a session recipe — which companion answers, on which model, at which effort, in which mode, and the prose saying when to reach for it. `/agent <role> <task>` runs one in its own session. The five shipped roles (`planner`, `implementer`, `reviewer`, `researcher`, `fixer`) work out of the box; editing one writes a file that takes over from it.
+
+Pointing each role at its own companion is the point rather than a detail: a `reviewer` on a different model from the `implementer` is what makes a review worth having, and a review by the same model in the same thread finds nothing while looking like it did. A model the chosen companion does not carry is refused rather than quietly replaced with its default.
+
+A **crew flow** is how `/crew` walks a plan: which roles may be assigned and in what order, a command to run after each writing step (a red check splices in a `fixer`), how often to stop and review, and whether independent steps may run at once in their own worktrees.
+
+Both are stored as plain Markdown files you can read, diff and review — **this project** (`.companions/`, versionable and shared with your team) or **all projects** (`~/.companions/`, this machine only). A project file wins over an all-projects one of the same name, and the page says which file is actually in force.
+
+</details>
+
+<details>
 <summary><strong>Worktree sessions</strong> — isolate code edits in a git worktree</summary>
 
 **Companions: New Worktree Session** creates an isolated git worktree under `~/.grok/worktrees/` and opens a fresh session whose cwd is that checkout — so agent edits don't touch your main tree until you **Apply worktree**. Works for all four companions: a live Grok session uses Grok's worktree RPCs (including clone mode); otherwise the host runs `git worktree add` itself (linked worktrees only). **Apply worktree** copies files back with a conflict check — a file you changed in the main checkout since the worktree branched is never overwritten silently.
 
-`/crew [preset]` walks a step list as a team: each step is a fresh session with a compact briefing, assigned to a role by host rules (you are asked when that is unclear). Sequential is the default; `parallel: true` on the preset runs independent writers at the same time, each in its own worktree. The Crew panel above the composer shows every step's role, status, duration and cost. **Companions: Run Crew** is the same action from the Command Palette.
+`/crew [flow]` walks a step list as a team: each step is a fresh session with a compact briefing, assigned to a role by host rules (you are asked when that is unclear). Sequential is the default; a flow can run independent writers at the same time, each in its own worktree. The Crew panel above the composer shows every step's role, status, duration and cost. **Companions: Run Crew** is the same action from the Command Palette.
 
 </details>
 

@@ -12,7 +12,7 @@
  */
 
 import { reconcileFiles, type BriefingInput } from "./briefing";
-import type { CrewRun, CrewStep } from "./crew";
+import { insertCrewStep, type CrewRun, type CrewStep } from "./crew";
 
 export function briefingForCrewStep(opts: {
   run: CrewRun;
@@ -55,6 +55,50 @@ export function briefingForCrewStep(opts: {
       opts.run.verify ? `Verify command after writing steps: \`${opts.run.verify}\`.` : "No verify command configured.",
     ],
   };
+}
+
+/**
+ * Splice a review step after every `every` working steps (`review_every:`).
+ *
+ * Like `roles:`, this field was parsed and then never read, so a flow that
+ * asked to be reviewed every two steps was reviewed only at the end — the
+ * failure mode being that a wrong decision in step 2 is found after step 9 has
+ * built on it.
+ *
+ * Steps ALREADY assigned to the review role do not count towards the cadence
+ * and never earn a review of their own; neither does a `planner`, which writes
+ * nothing there is anything to review. A trailing review is not added, because
+ * the run's own `review` state already ends every crew with the combined diff.
+ *
+ * Pure, and built on `insertCrewStep` so re-indexing stays in one place. Walks
+ * from the back so the indexes it inserts at are still the ones it measured.
+ */
+export function applyReviewCadence(run: CrewRun, every: number, reviewRole: string): CrewRun {
+  const cadence = Number.isFinite(every) ? Math.floor(every) : 0;
+  if (cadence < 1 || !reviewRole) return run;
+  const counts = (step: CrewStep) => step.role !== reviewRole && step.role !== "planner";
+  const boundaries: number[] = [];
+  let since = 0;
+  for (const step of run.steps) {
+    if (!counts(step)) continue;
+    since += 1;
+    if (since === cadence) {
+      boundaries.push(step.index);
+      since = 0;
+    }
+  }
+  // Never a review as the very last step: the run already ends in `review`.
+  const last = run.steps[run.steps.length - 1]?.index;
+  let next = run;
+  for (const at of [...boundaries].reverse()) {
+    if (at === last) continue;
+    next = insertCrewStep(next, at, {
+      title: `[${reviewRole}] Review the work of the previous ${cadence} step${cadence === 1 ? "" : "s"}.`,
+      role: reviewRole,
+      assignWhy: `review cadence — every ${cadence} step${cadence === 1 ? "" : "s"}`,
+    });
+  }
+  return next;
 }
 
 export function verifyInsertsFixer(verify: { code: number; output: string } | undefined): boolean {

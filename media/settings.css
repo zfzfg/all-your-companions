@@ -1578,3 +1578,223 @@ a.settings-github-flow-open {
   flex-wrap: wrap;
   gap: 8px;
 }
+
+/* ---------------------------------------------------------------------------
+   Settings → Agents & Crew (AP-10 / AP-12)
+
+   Card list of roles and crew flows, each opening into an editor. Follows the
+   `.settings-routine-*` block above rather than inventing a second card
+   language: same border, same tinted ground, same collapsed-row grid.
+   --------------------------------------------------------------------------- */
+
+.settings-agent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-agent-card {
+  border: 1px solid var(--vscode-editorWidget-border, var(--vscode-panel-border));
+  border-radius: 5px;
+  background: color-mix(in oklab, var(--vscode-foreground) 3%, transparent);
+  overflow: hidden;
+}
+
+.settings-agent-card.is-new {
+  border-style: dashed;
+}
+
+.settings-agent-toggle,
+.settings-flow-toggle {
+  display: block;
+  width: 100%;
+  padding: 12px 14px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.settings-agent-toggle:hover,
+.settings-flow-toggle:hover {
+  background: color-mix(in oklab, var(--vscode-foreground) 5%, transparent);
+}
+
+.settings-agent-copy {
+  min-width: 0;
+}
+
+.settings-agent-copy .settings-row-desc {
+  overflow-wrap: anywhere;
+}
+
+.settings-agent-name {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.settings-agent-badge {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 10px;
+  border: 1px solid var(--vscode-widget-border, rgba(127, 127, 127, .3));
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.6;
+}
+
+/* Scope is the answer to "which file actually wins", so it reads differently
+   from the neutral badges rather than blending into them. */
+.settings-agent-badge.is-scope-project {
+  border-color: color-mix(in oklab, var(--vscode-textLink-foreground) 45%, transparent);
+  color: var(--vscode-textLink-foreground);
+}
+
+.settings-agent-badge.is-override {
+  border-style: dashed;
+}
+
+.settings-agent-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0 14px 14px;
+  border-top: 1px solid var(--vscode-widget-border, rgba(127, 127, 127, .2));
+  padding-top: 14px;
+}
+
+.settings-agent-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.settings-agent-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.settings-agent-field-label {
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.settings-agent-field-hint {
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.settings-agent-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 4px 6px;
+  border: 1px solid var(--vscode-input-border, var(--vscode-widget-border, rgba(127, 127, 127, .3)));
+  border-radius: 3px;
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  font: inherit;
+}
+
+.settings-agent-textarea {
+  resize: vertical;
+  min-height: 44px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 12px;
+}
+
+.settings-agent-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.settings-agent-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Second click of a two-click delete. Colour is not the only signal — the
+   label already says what it is about to remove. */
+.settings-agent-remove.is-confirming,
+.settings-flow-remove.is-confirming {
+  border-color: var(--vscode-inputValidation-errorBorder, #be1100);
+  color: var(--vscode-errorForeground, #f48771);
+}
+
+.settings-agent-error {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--vscode-inputValidation-errorBorder, #be1100);
+  border-radius: 4px;
+  background: var(--vscode-inputValidation-errorBackground, transparent);
+  color: var(--vscode-errorForeground, inherit);
+  font-size: 12px;
+}
+
+/* A role file that will not parse. Visible on the page rather than only as a
+   chat notice when you happen to run /agent. */
+.settings-agent-problems {
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--vscode-inputValidation-warningBorder, #b89500);
+  border-radius: 4px;
+  background: var(--vscode-inputValidation-warningBackground, transparent);
+  font-size: 12px;
+}
+
+.settings-agent-problems-head {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.settings-agent-problems-list {
+  margin: 0;
+  padding-left: 18px;
+  overflow-wrap: anywhere;
+}
+
+.settings-agent-pool {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings-agent-pool-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.settings-agent-pool-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.settings-agent-pool-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.settings-agent-pool-add {
+  align-self: flex-start;
+  max-width: 240px;
+}
+
+.settings-agent-new,
+.settings-flow-new {
+  align-self: flex-start;
+  margin-top: 10px;
+}

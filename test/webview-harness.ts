@@ -35,6 +35,32 @@ export const BODY = `
     <div id="repo-popover" hidden></div>
     <div id="history-popover" hidden></div>
   </header>
+  <div id="mode-switch-bar" class="mode-switch-bar">
+    <div class="modeswitch" id="mode-switch" role="group" aria-label="Session mode">
+      <button class="ms-opt" id="ms-opt-single" data-mode="single" type="button" aria-pressed="true">
+        <span class="ms-t">Single Agent</span>
+        <span class="ms-d">one companion, subagents available</span>
+      </button>
+      <button class="ms-opt" id="ms-opt-crew" data-mode="crew" type="button" aria-pressed="false">
+        <span class="ms-t">Crew</span>
+        <span class="ms-d">multi-agent roles, sequential steps, review</span>
+      </button>
+      <div class="ms-lock" id="ms-lock" hidden>
+        <span class="lockicon">🔒</span>
+        <span class="lockmsg">The mode is bound to this session — locked after the first message.</span>
+        <button class="lnk" id="ms-new-session" type="button">New session in other mode</button>
+      </div>
+    </div>
+    <div class="crewbar" id="crew-bar" hidden>
+      <div class="cb-line">
+        <strong id="crew-preset-name">Preset: default</strong>
+        <button class="lnk" id="btn-view-roles" type="button">View roles</button>
+        <span class="sp"></span>
+        <span class="cb-cost" id="crew-cost"></span>
+      </div>
+      <div class="cb-roles" id="crew-roles"></div>
+    </div>
+  </div>
   <div id="session-head">
     <div id="session-head-main"><span id="session-head-title"></span><span id="session-head-sub"></span></div>
   </div>

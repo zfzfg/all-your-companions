@@ -101,10 +101,23 @@ export interface AgentRole {
    * so, so nobody reads a same-provider pass as an independent one.
    */
   preferDifferentProvider?: boolean;
-  /** Where this role came from. Built-ins are the fallback set below. */
-  source: "builtin" | "project";
-  /** Source file, relative to the project root, when `source` is `project`. */
+  /**
+   * Where this role came from. Built-ins are the fallback set below; `global`
+   * is `~/.companions/agents/` (this machine, every project); `project` is the
+   * open project's own `.companions/agents/`.
+   *
+   * Only `builtin` is special to the runtime: its `provider` is a placeholder
+   * the host may rewrite. A `global` role was written by the user with a
+   * provider they meant, exactly like a `project` one, so nothing may swap it.
+   */
+  source: "builtin" | "global" | "project";
+  /** Source file — relative to the project root for `project`, to the home
+   *  directory for `global`. Absent for a built-in. */
   path?: string;
+  /** Set when this role replaced one of the same name from a wider scope, so
+   *  the settings page can say so rather than showing two rows or one silent
+   *  winner. */
+  overrides?: "builtin" | "global";
 }
 
 export interface AgentRoleProblem {
@@ -120,6 +133,9 @@ export interface AgentRoleFile {
   /** File stem — the fallback name when the frontmatter omits one. */
   stem: string;
   text: string;
+  /** Which set this file belongs to. Absent means `project`, so a caller that
+   *  predates the global set keeps its old meaning. */
+  scope?: "global" | "project";
 }
 
 export interface AgentRoleSet {
@@ -246,7 +262,15 @@ function builtinCopy(): AgentRole[] {
 
 /**
  * A deliberately small YAML subset — `key: scalar`, `key: [a, b]`, `- item`
- * block lists, and one level of nesting for `budget:`.
+ * block lists, one level of nesting for `budget:`, and `key: |` / `key: >`
+ * block scalars.
+ *
+ * The block scalars exist for the prose keys (`when_not_to_use`,
+ * `system_preamble`): those are paragraphs, and the settings editor has to be
+ * able to write one back without inventing a quoting scheme that this parser
+ * would then have to un-invent. `|` keeps the line breaks, `>` folds them into
+ * spaces; a trailing `-` (`|-`) is accepted and means the same thing here,
+ * because nothing downstream cares about a final newline.
  *
  * Written by hand rather than pulled in as a dependency: production deps are
  * exactly four (plan §1.3) and a role file is a fixed, documented handful of
@@ -291,6 +315,36 @@ export function parseFrontmatter(text: string): Frontmatter {
     }
     listKey = undefined;
     mapKey = undefined;
+    if (rest === "|" || rest === ">" || rest === "|-" || rest === ">-") {
+      const collected: string[] = [];
+      let cursor = index + 1;
+      for (; cursor < lines.length; cursor += 1) {
+        const candidate = lines[cursor];
+        const candidateIndent = candidate.length - candidate.trimStart().length;
+        // A blank line inside a block is part of it (paragraph break); a blank
+        // line that turns out to be the last thing in the block is trimmed off
+        // below, so trailing whitespace cannot leak into the value.
+        if (!candidate.trim()) {
+          collected.push("");
+          continue;
+        }
+        if (candidateIndent <= indent) break;
+        collected.push(candidate);
+      }
+      while (collected.length && !collected[collected.length - 1]!.trim()) collected.pop();
+      const base = collected.reduce(
+        (least, candidate) =>
+          candidate.trim() ? Math.min(least, candidate.length - candidate.trimStart().length) : least,
+        Number.POSITIVE_INFINITY,
+      );
+      const dedented = collected.map((candidate) =>
+        (candidate.trim() && Number.isFinite(base) ? candidate.slice(base) : "").replace(/\s+$/, ""));
+      fields[key] = rest.startsWith(">")
+        ? dedented.join(" ").replace(/\s+/g, " ").trim()
+        : dedented.join("\n");
+      index = cursor - 1;
+      continue;
+    }
     if (rest === "") {
       // Either a block list or a nested map follows; peek at the next
       // meaningful line rather than guessing from the key's name.
@@ -453,7 +507,7 @@ export function parseAgentRole(file: AgentRoleFile): { role?: AgentRole; problem
       ...(whenNotToUse ? { whenNotToUse } : {}),
       ...(systemPreamble ? { systemPreamble } : {}),
       ...(preferDifferent ? { preferDifferentProvider: true } : {}),
-      source: "project",
+      source: file.scope === "global" ? "global" : "project",
       path: file.path,
     },
   };
@@ -508,18 +562,33 @@ export function rolePermissionsToRules(role: AgentRole, now = 0): PermissionRule
 /**
  * Fold role files into the usable set.
  *
- * A project file REPLACES the built-in of the same name rather than merging
- * with it — a half-overridden role is the kind of thing that reads as working
- * and is not. A file that fails to parse does not silently fall back to the
- * built-in either: it is reported, and the built-in remains only because it
- * was never removed. Ordering is by name so a listing is stable.
+ * A file REPLACES the role of the same name from a wider scope rather than
+ * merging with it — a half-overridden role is the kind of thing that reads as
+ * working and is not. The three scopes narrow in order: built-in, then
+ * `global` (`~/.companions/agents`, this machine), then `project`. So a
+ * project may pin a reviewer for the repo without disturbing the one you use
+ * everywhere else, and the winner records what it displaced (`overrides`) so
+ * the settings page can say which file is actually in force.
+ *
+ * Two files of the SAME scope claiming one name is still a conflict, because
+ * neither is more specific than the other and picking one would be arbitrary:
+ * it is reported and the first path wins.
+ *
+ * A file that fails to parse does not silently fall back to the wider scope
+ * either: it is reported, and the wider role remains only because it was never
+ * removed. Ordering is by name so a listing is stable.
  */
 export function loadAgentRoles(files: readonly AgentRoleFile[]): AgentRoleSet {
   const byName = new Map<string, AgentRole>();
   for (const role of builtinCopy()) byName.set(role.name, role);
   const problems: AgentRoleProblem[] = [];
-  const seen = new Map<string, string>();
-  for (const file of [...files].sort((a, b) => a.path.localeCompare(b.path))) {
+  const seen = new Map<string, { path: string; scope: "global" | "project" }>();
+  const ordered = [...files].sort((a, b) => {
+    const rank = (file: AgentRoleFile) => (file.scope === "global" ? 0 : 1);
+    return rank(a) - rank(b) || a.path.localeCompare(b.path);
+  });
+  for (const file of ordered) {
+    const scope = file.scope === "global" ? "global" : "project";
     const { role, problem } = parseAgentRole(file);
     if (problem) {
       problems.push(problem);
@@ -527,15 +596,16 @@ export function loadAgentRoles(files: readonly AgentRoleFile[]): AgentRoleSet {
     }
     if (!role) continue;
     const previous = seen.get(role.name);
-    if (previous) {
+    if (previous && previous.scope === scope) {
       problems.push({
         role: role.name,
-        message: `Role \`${role.name}\` is defined twice — \`${previous}\` and \`${file.path}\`. Using \`${previous}\`.`,
+        message: `Role \`${role.name}\` is defined twice — \`${previous.path}\` and \`${file.path}\`. Using \`${previous.path}\`.`,
       });
       continue;
     }
-    seen.set(role.name, file.path);
-    byName.set(role.name, role);
+    const displaced = byName.get(role.name);
+    seen.set(role.name, { path: file.path, scope });
+    byName.set(role.name, displaced ? { ...role, overrides: displaced.source as "builtin" | "global" } : role);
   }
   return {
     roles: [...byName.values()].sort((a, b) => a.name.localeCompare(b.name)),

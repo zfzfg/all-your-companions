@@ -16,6 +16,9 @@
     // Things you have SET UP, next to the other things you have set up —
     // apart from General/Voice/Notifications, which are preferences.
     { id: "routines", title: "Routines", restore: false },
+    // Roles and crew flows are things you have SET UP too, and they had
+    // outgrown the single read-only row they used to occupy in Advanced.
+    { id: "agents", title: "Agents & Crew", restore: false },
     { id: "connectors", title: "Connectors", restore: false },
     { id: "advanced", title: "Advanced", restore: false },
     { id: "about", title: "About", restore: false },
@@ -34,6 +37,7 @@
     connectors: '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22v-5"/><path d="M9 8V2"/><path d="M15 8V2"/><path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"/></svg>',
     // Lucide "refresh-cw" — a cycle, which is what a routine is. Deliberately
     // not a clock: the page is about repetition, not time of day.
+    agents: '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 21a8 8 0 0 0-12 0"/><circle cx="12" cy="11" r="4"/><rect x="3" y="3" width="18" height="18" rx="2"/></svg>',
     routines: '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>',
     advanced: '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>',
     about: '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>',
@@ -1011,10 +1015,23 @@
     },
     {
       id: "agentRoles",
-      category: "advanced",
-      title: "Agent Roles & Personas",
-      description: "Roles for crew and individual agents: planner, implementer, reviewer, researcher, fixer. Stored in .companions/agents/<role>.md or project root.",
+      category: "agents",
+      title: "Roles",
+      description:
+        "Who answers when you run /agent <role>, and who a crew hands each step to. Each role pins its own companion, model and mode — "
+        + "a reviewer on a different model from the implementer is the whole point, and the one thing a same-model review cannot give you.",
       kind: "agentRoles",
+      hostLocal: true,
+    },
+    {
+      id: "crewFlows",
+      category: "agents",
+      title: "Crew flows",
+      description:
+        "How /crew walks a plan: which roles may be assigned and in what order, a check to run after each writing step, "
+        + "how often to stop and review, and whether independent steps may run at once.",
+      kind: "crewFlows",
+      hostLocal: true,
     },
     {
       id: "routinesList",
@@ -1357,8 +1374,9 @@
           ...snapshot.mcpServers.map((s) => [s.displayName, s.name, s.scopeName, s.configFile].filter(Boolean).join(" ")),
         ].join(" ")
       : "";
-    const extraRoles = row.kind === "agentRoles"
-      ? "planner implementer reviewer researcher fixer crew multi-agent persona roles agents /agent /crew rules"
+    const extraRoles = row.kind === "agentRoles" || row.kind === "crewFlows"
+      ? "planner implementer reviewer researcher fixer crew multi-agent persona roles agents /agent /crew rules "
+        + "provider model companion claude codex gemini grok verify review every parallel worktree scope budget permissions"
       : "";
     const section = connectorSection(row);
     return [
@@ -1535,6 +1553,16 @@
       // list ("no rule file locations to check") and "the host has not
       // answered yet" render differently (see renderRuleFiles).
       ruleFiles: null,
+      // NULL for the same reason: a project can genuinely have no custom
+      // roles, and "none yet" must not paint like "still loading".
+      agentRoles: null,
+      crewFlows: null,
+      agentRoleProviders: [],
+      agentRoleProblems: [],
+      agentRolesCwd: "",
+      agentRolesHasProject: false,
+      agentRolesError: "",
+      agentRolesErrorId: "",
       permissionRules: null,
       permissionRulesOrderCopy: "",
       permissionRulesPending: null,
@@ -2858,63 +2886,699 @@
     return el;
   }
 
+  // -------------------------------------------------------------------------
+  // Agents & Crew (AP-10 / AP-12)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Open card + live draft for the roles and flows panels.
+   *
+   * One module-level object rather than per-card state because only one card
+   * is ever open: a second open editor would need a second unsaved draft, and
+   * "which of these two is the one I am typing into" is a question the page
+   * should never make the user answer.
+   */
+  const NEW_ROLE = "*new-role*";
+  const NEW_FLOW = "*new-flow*";
+  const AGENT_UI = { openRole: "", openFlow: "", draft: null, scope: "project", originScope: "", confirmRemove: "", pendingSave: false };
+
+  const ROLE_EFFORTS = ["", "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultracode"];
+
+  function agentRolesOf(snapshot) {
+    return Array.isArray(snapshot && snapshot.agentRoles) ? snapshot.agentRoles : null;
+  }
+
+  function crewFlowsOf(snapshot) {
+    return Array.isArray(snapshot && snapshot.crewFlows) ? snapshot.crewFlows : null;
+  }
+
+  function roleProvidersOf(snapshot) {
+    return Array.isArray(snapshot && snapshot.agentRoleProviders) ? snapshot.agentRoleProviders : [];
+  }
+
+  function providerOptionFor(snapshot, id) {
+    return roleProvidersOf(snapshot).find((entry) => entry && entry.id === id) || null;
+  }
+
+  /** "Claude" / "Claude · not connected". Shown rather than filtered: a role
+   *  pinned to a companion you have not signed into yet is a reasonable thing
+   *  to write down, and hiding it would make the file look unauthorable. */
+  function providerOptionLabel(option) {
+    if (!option) return "";
+    return option.connected ? option.label : option.label + " · not connected";
+  }
+
+  const SCOPE_BADGE = {
+    builtin: "built-in",
+    global: "all projects",
+    project: "this project",
+  };
+
+  function blankRoleDraft(snapshot) {
+    const first = roleProvidersOf(snapshot).find((entry) => entry && entry.connected)
+      || roleProvidersOf(snapshot)[0];
+    return {
+      name: "",
+      provider: first ? first.id : "claude",
+      model: "",
+      effort: "",
+      mode: "agent",
+      scope: [],
+      budget: {},
+      permissions: [],
+      whenToUse: "",
+      whenNotToUse: "",
+      systemPreamble: "",
+      preferDifferentProvider: false,
+    };
+  }
+
+  function blankFlowDraft() {
+    return { name: "", roles: [], verify: "", reviewEvery: "", parallel: false, notes: "" };
+  }
+
+  /** A draft is edited in place; this only fills the gaps a host view omits,
+   *  so a role with no budget still has somewhere for the inputs to write. */
+  function roleDraftFrom(view) {
+    const draft = Object.assign({}, view && view.draft);
+    draft.name = draft.name || "";
+    draft.model = draft.model || "";
+    draft.effort = draft.effort || "";
+    draft.mode = draft.mode || "agent";
+    draft.scope = Array.isArray(draft.scope) ? draft.scope.slice() : [];
+    draft.permissions = Array.isArray(draft.permissions) ? draft.permissions.slice() : [];
+    draft.budget = Object.assign({}, draft.budget);
+    draft.whenToUse = draft.whenToUse || "";
+    draft.whenNotToUse = draft.whenNotToUse || "";
+    draft.systemPreamble = draft.systemPreamble || "";
+    return draft;
+  }
+
+  function flowDraftFrom(view) {
+    const draft = Object.assign({}, view && view.draft);
+    draft.name = draft.name || "";
+    draft.roles = Array.isArray(draft.roles) ? draft.roles.slice() : [];
+    draft.verify = draft.verify || "";
+    draft.reviewEvery = draft.reviewEvery === undefined || draft.reviewEvery === null ? "" : draft.reviewEvery;
+    draft.notes = draft.notes || "";
+    return draft;
+  }
+
+  function settingsState(text) {
+    const el = document.createElement("div");
+    el.className = "settings-mcp-state";
+    el.setAttribute("aria-live", "polite");
+    el.textContent = text;
+    return el;
+  }
+
+  function labelledField(labelText, control, hint) {
+    const wrap = document.createElement("label");
+    wrap.className = "settings-agent-field";
+    const label = document.createElement("span");
+    label.className = "settings-agent-field-label";
+    label.textContent = labelText;
+    wrap.appendChild(label);
+    wrap.appendChild(control);
+    if (hint) {
+      const note = document.createElement("span");
+      note.className = "settings-agent-field-hint";
+      note.textContent = hint;
+      wrap.appendChild(note);
+    }
+    return wrap;
+  }
+
+  function selectControl(field, options, value) {
+    const select = document.createElement("select");
+    select.className = "settings-select settings-agent-input";
+    select.dataset.field = field;
+    for (const option of options) {
+      const el = document.createElement("option");
+      el.value = option.value;
+      el.textContent = option.label;
+      if (option.value === (value || "")) el.selected = true;
+      select.appendChild(el);
+    }
+    return select;
+  }
+
+  function textControl(field, value, placeholder, multiline) {
+    const el = document.createElement(multiline ? "textarea" : "input");
+    el.className = "settings-agent-input" + (multiline ? " settings-agent-textarea" : "");
+    el.dataset.field = field;
+    el.value = value == null ? "" : String(value);
+    if (placeholder) el.placeholder = placeholder;
+    if (multiline) el.rows = multiline;
+    else el.type = "text";
+    el.spellcheck = false;
+    return el;
+  }
+
+  /** The problem strip. Broken role files used to be visible ONLY as a chat
+   *  notice when you happened to run /agent — which is exactly when you least
+   *  want to find out. */
+  function renderAgentProblems(problems) {
+    if (!Array.isArray(problems) || !problems.length) return null;
+    const box = document.createElement("div");
+    box.className = "settings-agent-problems";
+    const head = document.createElement("div");
+    head.className = "settings-agent-problems-head";
+    head.textContent = problems.length === 1
+      ? "One file could not be read:"
+      : problems.length + " files could not be read:";
+    box.appendChild(head);
+    const list = document.createElement("ul");
+    list.className = "settings-agent-problems-list";
+    for (const problem of problems) {
+      const item = document.createElement("li");
+      item.textContent = String(problem);
+      list.appendChild(item);
+    }
+    box.appendChild(list);
+    return box;
+  }
+
+  function renderAgentError(snapshot, id) {
+    if (!snapshot.agentRolesError) return null;
+    const errorId = snapshot.agentRolesErrorId || "";
+    if (errorId && errorId !== id) return null;
+    const el = document.createElement("p");
+    el.className = "settings-agent-error";
+    el.setAttribute("role", "alert");
+    el.textContent = snapshot.agentRolesError;
+    return el;
+  }
+
+  /** Which scope this card writes to. A built-in has no file yet, so the
+   *  toggle is how the user says where the materialised one should go. */
+  function renderScopeChoice(value, disabled) {
+    const control = selectControl("cardScope", [
+      { value: "project", label: "This project (.companions)" },
+      { value: "global", label: "All projects (~/.companions)" },
+    ], value);
+    control.dataset.field = "cardScope";
+    if (disabled) control.disabled = true;
+    return labelledField(
+      "Stored in",
+      control,
+      disabled
+        ? "No project folder is open, so this can only be saved for all projects."
+        : "A project file is versionable and shared with the team; an all-projects file follows you but is not in git.",
+    );
+  }
+
+  function renderRoleEditor(view, snapshot, env) {
+    const draft = AGENT_UI.draft;
+    const form = document.createElement("div");
+    form.className = "settings-agent-form";
+
+    const grid = document.createElement("div");
+    grid.className = "settings-agent-grid";
+
+    grid.appendChild(labelledField(
+      "Name",
+      textControl("name", draft.name, "reviewer"),
+      "What follows /agent. Lowercase letters, digits and dashes.",
+    ));
+
+    const providers = roleProvidersOf(snapshot);
+    grid.appendChild(labelledField(
+      "Companion",
+      selectControl("provider", providers.map((option) => ({ value: option.id, label: providerOptionLabel(option) })), draft.provider),
+      view && view.providerPinned === false
+        ? "This shipped role is not pinned to a companion — saving pins it to the one you pick here."
+        : "Which companion answers for this role.",
+    ));
+
+    const option = providerOptionFor(snapshot, draft.provider);
+    const models = (option && Array.isArray(option.models) ? option.models : []);
+    if (models.length) {
+      grid.appendChild(labelledField(
+        "Model",
+        selectControl(
+          "model",
+          [{ value: "", label: "That companion's default" }].concat(
+            models.map((model) => ({ value: model.modelId, label: model.name || model.modelId })),
+          ),
+          draft.model,
+        ),
+        "A reviewer on a different model from the implementer is what makes the review worth having.",
+      ));
+    } else {
+      // An EMPTY model list means the cache is cold, not that the companion
+      // has no models — so free text, never an empty dropdown that looks like
+      // the answer is "none".
+      grid.appendChild(labelledField(
+        "Model",
+        textControl("model", draft.model, "leave empty for that companion's default"),
+        "This companion's model list has not been loaded yet, so it cannot be checked here. Leave empty for its default.",
+      ));
+    }
+
+    grid.appendChild(labelledField(
+      "Mode",
+      selectControl("mode", [
+        { value: "agent", label: "Agent — may edit files" },
+        { value: "plan", label: "Plan — writes nothing" },
+      ], draft.mode),
+      "",
+    ));
+
+    grid.appendChild(labelledField(
+      "Effort",
+      selectControl("effort", ROLE_EFFORTS.map((value) => ({ value, label: value || "That companion's default" })), draft.effort),
+      "",
+    ));
+
+    grid.appendChild(renderScopeChoice(AGENT_UI.scope, !snapshot.agentRolesHasProject));
+    form.appendChild(grid);
+
+    form.appendChild(labelledField(
+      "When to use it",
+      textControl("whenToUse", draft.whenToUse, "Checking finished work against its briefing, in a fresh session.", 3),
+      "Required. This is also the text a crew reads to decide which step belongs to this role.",
+    ));
+    form.appendChild(labelledField(
+      "When not to use it",
+      textControl("whenNotToUse", draft.whenNotToUse, "", 2),
+      "",
+    ));
+    form.appendChild(labelledField(
+      "Standing instruction",
+      textControl("systemPreamble", draft.systemPreamble, "You are reviewing, not fixing. Do not edit any file.", 3),
+      "Put ahead of everything else in the briefing this role receives.",
+    ));
+
+    const advanced = document.createElement("div");
+    advanced.className = "settings-agent-grid";
+    advanced.appendChild(labelledField(
+      "Files it may touch",
+      textControl("scopeGlobs", (draft.scope || []).join("\n"), "src/**", 2),
+      "One glob per line. Empty means the whole project.",
+    ));
+    advanced.appendChild(labelledField(
+      "Permission rules",
+      textControl("permissions", (draft.permissions || []).join("\n"), "allow edit src/**", 2),
+      "One per line: allow|ask|deny, then read|edit|execute|other, then a glob or command prefix. Deny always wins.",
+    ));
+    advanced.appendChild(labelledField(
+      "Budget — tool calls",
+      textControl("budgetToolCalls", draft.budget.toolCalls, "no limit"),
+      "",
+    ));
+    advanced.appendChild(labelledField("Budget — tokens", textControl("budgetTokens", draft.budget.tokens, "no limit"), ""));
+    advanced.appendChild(labelledField("Budget — US$", textControl("budgetUsd", draft.budget.usd, "no limit"), ""));
+    form.appendChild(advanced);
+
+    const prefer = document.createElement("label");
+    prefer.className = "settings-agent-check";
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.dataset.field = "preferDifferentProvider";
+    box.checked = !!draft.preferDifferentProvider;
+    prefer.appendChild(box);
+    const preferCopy = document.createElement("span");
+    preferCopy.textContent = "Prefer a companion other than the one that did the work";
+    prefer.appendChild(preferCopy);
+    form.appendChild(prefer);
+
+    const error = renderAgentError(snapshot, view ? view.name : NEW_ROLE);
+    if (error) form.appendChild(error);
+
+    const actions = document.createElement("div");
+    actions.className = "settings-agent-actions";
+    const save = document.createElement("button");
+    save.type = "button";
+    save.className = "settings-action settings-agent-save";
+    save.textContent = view ? "Save role" : "Create role";
+    actions.appendChild(save);
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "settings-action settings-agent-cancel";
+    cancel.textContent = "Cancel";
+    actions.appendChild(cancel);
+    if (view && view.scope !== "builtin") {
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "settings-action settings-agent-remove";
+      remove.dataset.name = view.name;
+      remove.dataset.scope = view.scope;
+      const confirming = AGENT_UI.confirmRemove === "role:" + view.name;
+      // Two clicks, and the second one says what it does. A role file may be
+      // the only record of why a companion was chosen.
+      remove.textContent = confirming
+        ? (isBuiltinName(snapshot, view.name) ? "Delete the file and restore the built-in" : "Delete " + view.name + ".md")
+        : (isBuiltinName(snapshot, view.name) ? "Reset to built-in" : "Delete");
+      if (confirming) remove.classList.add("is-confirming");
+      actions.appendChild(remove);
+    }
+    form.appendChild(actions);
+    return form;
+  }
+
+  /** True when this name is one the extension ships, so deleting the file is
+   *  a RESET rather than a removal. */
+  function isBuiltinName(snapshot, name) {
+    const roles = agentRolesOf(snapshot) || [];
+    const row = roles.find((entry) => entry && entry.name === name);
+    return !!(row && row.overrides === "builtin");
+  }
+
+  function renderRoleCard(view, snapshot, env) {
+    const card = document.createElement("div");
+    card.className = "settings-agent-card";
+    card.dataset.role = view.name;
+
+    const head = document.createElement("button");
+    head.type = "button";
+    head.className = "settings-agent-toggle";
+    head.setAttribute("aria-expanded", AGENT_UI.openRole === view.name ? "true" : "false");
+
+    const title = document.createElement("div");
+    title.className = "settings-agent-name settings-row-title";
+    const label = document.createElement("span");
+    label.textContent = view.name;
+    title.appendChild(label);
+
+    const command = document.createElement("span");
+    command.className = "settings-agent-badge";
+    command.textContent = "/agent " + view.name;
+    title.appendChild(command);
+
+    const scope = document.createElement("span");
+    scope.className = "settings-agent-badge is-scope-" + view.scope;
+    scope.textContent = SCOPE_BADGE[view.scope] || view.scope;
+    title.appendChild(scope);
+
+    if (view.overrides) {
+      const over = document.createElement("span");
+      over.className = "settings-agent-badge is-override";
+      over.textContent = "overrides " + (SCOPE_BADGE[view.overrides] || view.overrides);
+      over.title = view.path ? view.path + " is the file in force." : "";
+      title.appendChild(over);
+    }
+
+    const detail = document.createElement("div");
+    detail.className = "settings-row-desc";
+    // A built-in is not pinned to a companion: the host picks one when the
+    // role runs. Saying so is the difference between reporting and promising.
+    const who = view.providerPinned === false
+      ? view.providerLabel + " (chosen when it runs)"
+      : view.providerLabel + (view.model ? " · " + view.model : " · default model");
+    const mode = view.mode === "plan" ? "plan mode" : "agent mode";
+    detail.textContent = who + " · " + mode + " — " + view.whenToUse;
+
+    const copy = document.createElement("div");
+    copy.className = "settings-agent-copy";
+    copy.append(title, detail);
+    head.appendChild(copy);
+    card.appendChild(head);
+
+    if (AGENT_UI.openRole === view.name && AGENT_UI.draft) {
+      card.appendChild(renderRoleEditor(view, snapshot, env));
+    }
+    return card;
+  }
+
+  /**
+   * Resolve a save that is waiting on the host's answer.
+   *
+   * The host answers every write with a fresh frame. One carrying no error is
+   * a confirmed save, so the editor has done its job and must close — left
+   * open with the same text it reads as "that did not work", and a second
+   * press would write it again. Closing on ANY confirmed save, not only a
+   * new one, because a save may have RENAMED the role: the open card's key no
+   * longer names anything in the list the host just sent.
+   *
+   * Called from `update` on the arrival of an `agentRoles` frame — the only
+   * moment that is genuinely the host's answer.
+   */
+  function resolveAgentPendingSave(snapshot) {
+    if (!AGENT_UI.pendingSave) return;
+    AGENT_UI.pendingSave = false;
+    if (snapshot.agentRolesError) return;
+    AGENT_UI.openRole = "";
+    AGENT_UI.openFlow = "";
+    AGENT_UI.draft = null;
+    AGENT_UI.originScope = "";
+    AGENT_UI.confirmRemove = "";
+  }
+
   function renderAgentRoles(snapshot, env) {
     const el = document.createElement("div");
     el.className = "settings-agent-roles";
     el.dataset.id = "agentRoles";
 
-    const intro = document.createElement("div");
-    intro.className = "settings-row-desc";
-    intro.style.marginBottom = "12px";
-    intro.textContent =
-      "Built-in agent personas. In chat, run /agent <role> to switch persona, or /crew <task> to execute a multi-agent workflow (Planner → Implementer → Reviewer). Roles can be extended with custom instructions in .companions/agents/<role>.md or project rule files.";
-    el.appendChild(intro);
-
-    const ROLES = [
-      { name: "planner", label: "Planner", desc: "Formulates step-by-step implementation plans, identifies risks, and blueprints architecture before coding." },
-      { name: "implementer", label: "Implementer", desc: "Writes clean, modular code, implements planned changes, and creates or updates files." },
-      { name: "reviewer", label: "Reviewer", desc: "Inspects code diffs, verifies adherence to requirements, tests edge cases, and flags bugs." },
-      { name: "researcher", label: "Researcher", desc: "Conducts deep code exploration, inspects APIs and patterns across the workspace." },
-      { name: "fixer", label: "Fixer", desc: "Diagnoses compile errors, test failures, and broken builds with minimal targeted fixes." },
-    ];
-
-    const list = document.createElement("div");
-    list.className = "settings-agent-roles-list";
-
-    for (const r of ROLES) {
-      const row = document.createElement("div");
-      row.className = "settings-agent-roles-row";
-
-      const copy = document.createElement("div");
-      copy.className = "settings-agent-roles-copy";
-
-      const name = document.createElement("div");
-      name.className = "settings-agent-roles-name settings-row-title";
-
-      const label = document.createElement("span");
-      label.textContent = r.label;
-      name.appendChild(label);
-
-      const badge = document.createElement("span");
-      badge.className = "settings-agent-roles-badge";
-      badge.textContent = "built-in";
-      name.appendChild(badge);
-
-      const commandBadge = document.createElement("span");
-      commandBadge.className = "settings-agent-roles-badge";
-      commandBadge.textContent = "/agent " + r.name;
-      name.appendChild(commandBadge);
-
-      const detail = document.createElement("div");
-      detail.className = "settings-row-desc";
-      detail.textContent = r.desc;
-
-      copy.append(name, detail);
-      row.appendChild(copy);
-      list.appendChild(row);
+    const roles = agentRolesOf(snapshot);
+    if (!roles) {
+      el.appendChild(settingsState("Reading roles…"));
+      return el;
     }
 
+    const problems = renderAgentProblems(snapshot.agentRoleProblems);
+    if (problems) el.appendChild(problems);
+
+    const list = document.createElement("div");
+    list.className = "settings-agent-list";
+    for (const view of roles) list.appendChild(renderRoleCard(view, snapshot, env));
     el.appendChild(list);
+
+    if (AGENT_UI.openRole === NEW_ROLE && AGENT_UI.draft) {
+      const card = document.createElement("div");
+      card.className = "settings-agent-card is-new";
+      card.dataset.role = NEW_ROLE;
+      card.appendChild(renderRoleEditor(null, snapshot, env));
+      el.appendChild(card);
+    } else {
+      const add = document.createElement("button");
+      add.type = "button";
+      add.className = "settings-action settings-agent-new";
+      add.textContent = "New role";
+      el.appendChild(add);
+    }
+
+    const general = renderAgentError(snapshot, "");
+    if (general) el.appendChild(general);
+    return el;
+  }
+
+  // ---------------------------------------------------------------- flows --
+
+  function renderFlowRolePool(draft, snapshot) {
+    const wrap = document.createElement("div");
+    wrap.className = "settings-agent-pool";
+
+    const chosen = document.createElement("div");
+    chosen.className = "settings-agent-pool-list";
+    if (!draft.roles.length) {
+      const empty = document.createElement("p");
+      empty.className = "settings-agent-field-hint";
+      empty.textContent = "No roles listed, so every role may be assigned. Add roles to restrict the flow — the order also decides who wins a tie.";
+      chosen.appendChild(empty);
+    }
+    draft.roles.forEach((name, index) => {
+      const row = document.createElement("div");
+      row.className = "settings-agent-pool-row";
+      const position = document.createElement("span");
+      position.className = "settings-agent-badge";
+      position.textContent = String(index + 1);
+      const label = document.createElement("span");
+      label.className = "settings-agent-pool-name";
+      label.textContent = name;
+      row.append(position, label);
+
+      const up = document.createElement("button");
+      up.type = "button";
+      up.className = "settings-action settings-agent-pool-up";
+      up.dataset.index = String(index);
+      up.textContent = "↑";
+      up.setAttribute("aria-label", "Move " + name + " earlier");
+      up.disabled = index === 0;
+
+      const down = document.createElement("button");
+      down.type = "button";
+      down.className = "settings-action settings-agent-pool-down";
+      down.dataset.index = String(index);
+      down.textContent = "↓";
+      down.setAttribute("aria-label", "Move " + name + " later");
+      down.disabled = index === draft.roles.length - 1;
+
+      const drop = document.createElement("button");
+      drop.type = "button";
+      drop.className = "settings-action settings-agent-pool-remove";
+      drop.dataset.index = String(index);
+      drop.textContent = "Remove";
+      drop.setAttribute("aria-label", "Remove " + name + " from this flow");
+
+      row.append(up, down, drop);
+      chosen.appendChild(row);
+    });
+    wrap.appendChild(chosen);
+
+    const available = (agentRolesOf(snapshot) || [])
+      .map((view) => view.name)
+      .filter((name) => draft.roles.indexOf(name) < 0);
+    if (available.length) {
+      const add = selectControl("addRole", [{ value: "", label: "Add a role…" }].concat(
+        available.map((name) => ({ value: name, label: name })),
+      ), "");
+      add.classList.add("settings-agent-pool-add");
+      wrap.appendChild(add);
+    }
+    return wrap;
+  }
+
+  function renderFlowEditor(view, snapshot, env) {
+    const draft = AGENT_UI.draft;
+    const form = document.createElement("div");
+    form.className = "settings-agent-form";
+
+    const grid = document.createElement("div");
+    grid.className = "settings-agent-grid";
+    grid.appendChild(labelledField(
+      "Name",
+      textControl("name", draft.name, "audit"),
+      "What follows /crew. A flow called `default` is the one a plain /crew uses.",
+    ));
+    grid.appendChild(labelledField(
+      "Check after each writing step",
+      textControl("verify", draft.verify, "npm test"),
+      "Run after a step that writes. When it fails, a fixer step is spliced in.",
+    ));
+    grid.appendChild(labelledField(
+      "Review every",
+      textControl("reviewEvery", draft.reviewEvery, "steps — empty means only at the end"),
+      "A review step is inserted after this many working steps, so a wrong decision is caught before the run builds on it.",
+    ));
+    grid.appendChild(renderScopeChoice(AGENT_UI.scope, !snapshot.agentRolesHasProject));
+    form.appendChild(grid);
+
+    form.appendChild(labelledField("Roles this flow may assign", renderFlowRolePool(draft, snapshot), ""));
+
+    const parallel = document.createElement("label");
+    parallel.className = "settings-agent-check";
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.dataset.field = "parallel";
+    box.checked = !!draft.parallel;
+    parallel.appendChild(box);
+    const parallelCopy = document.createElement("span");
+    parallelCopy.textContent = "Run independent steps at the same time, each in its own worktree";
+    parallel.appendChild(parallelCopy);
+    form.appendChild(parallel);
+
+    form.appendChild(labelledField("Notes", textControl("notes", draft.notes, "", 2), ""));
+
+    const error = renderAgentError(snapshot, view ? "flow:" + view.name : NEW_FLOW);
+    if (error) form.appendChild(error);
+
+    const actions = document.createElement("div");
+    actions.className = "settings-agent-actions";
+    const save = document.createElement("button");
+    save.type = "button";
+    save.className = "settings-action settings-flow-save";
+    save.textContent = view ? "Save flow" : "Create flow";
+    actions.appendChild(save);
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "settings-action settings-agent-cancel";
+    cancel.textContent = "Cancel";
+    actions.appendChild(cancel);
+    if (view && view.scope !== "builtin") {
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "settings-action settings-flow-remove";
+      remove.dataset.name = view.name;
+      remove.dataset.scope = view.scope;
+      const confirming = AGENT_UI.confirmRemove === "flow:" + view.name;
+      remove.textContent = confirming ? "Delete " + view.name + ".md" : "Delete";
+      if (confirming) remove.classList.add("is-confirming");
+      actions.appendChild(remove);
+    }
+    form.appendChild(actions);
+    return form;
+  }
+
+  function renderFlowCard(view, snapshot, env) {
+    const card = document.createElement("div");
+    card.className = "settings-agent-card";
+    card.dataset.flow = view.name;
+
+    const head = document.createElement("button");
+    head.type = "button";
+    head.className = "settings-flow-toggle";
+    head.setAttribute("aria-expanded", AGENT_UI.openFlow === view.name ? "true" : "false");
+
+    const title = document.createElement("div");
+    title.className = "settings-agent-name settings-row-title";
+    const label = document.createElement("span");
+    label.textContent = view.name;
+    title.appendChild(label);
+    const command = document.createElement("span");
+    command.className = "settings-agent-badge";
+    command.textContent = "/crew " + view.name;
+    title.appendChild(command);
+    const scope = document.createElement("span");
+    scope.className = "settings-agent-badge is-scope-" + view.scope;
+    scope.textContent = SCOPE_BADGE[view.scope] || view.scope;
+    title.appendChild(scope);
+    if (view.parallel) {
+      const par = document.createElement("span");
+      par.className = "settings-agent-badge";
+      par.textContent = "parallel";
+      title.appendChild(par);
+    }
+
+    const detail = document.createElement("div");
+    detail.className = "settings-row-desc";
+    const parts = [];
+    parts.push(view.roles && view.roles.length ? view.roles.join(" → ") : "every role");
+    if (view.reviewEvery) parts.push("review every " + view.reviewEvery);
+    if (view.verify) parts.push("checks with " + view.verify);
+    detail.textContent = parts.join(" · ");
+
+    const copy = document.createElement("div");
+    copy.className = "settings-agent-copy";
+    copy.append(title, detail);
+    head.appendChild(copy);
+    card.appendChild(head);
+
+    if (AGENT_UI.openFlow === view.name && AGENT_UI.draft) {
+      card.appendChild(renderFlowEditor(view, snapshot, env));
+    }
+    return card;
+  }
+
+  function renderCrewFlows(snapshot, env) {
+    const el = document.createElement("div");
+    el.className = "settings-agent-flows";
+    el.dataset.id = "crewFlows";
+
+    const flows = crewFlowsOf(snapshot);
+    if (!flows) {
+      el.appendChild(settingsState("Reading crew flows…"));
+      return el;
+    }
+
+    const list = document.createElement("div");
+    list.className = "settings-agent-list";
+    for (const view of flows) list.appendChild(renderFlowCard(view, snapshot, env));
+    el.appendChild(list);
+
+    if (AGENT_UI.openFlow === NEW_FLOW && AGENT_UI.draft) {
+      const card = document.createElement("div");
+      card.className = "settings-agent-card is-new";
+      card.dataset.flow = NEW_FLOW;
+      card.appendChild(renderFlowEditor(null, snapshot, env));
+      el.appendChild(card);
+    } else {
+      const add = document.createElement("button");
+      add.type = "button";
+      add.className = "settings-action settings-flow-new";
+      add.textContent = "New crew flow";
+      el.appendChild(add);
+    }
     return el;
   }
 
@@ -3096,6 +3760,7 @@
     if (row.kind === "connectors") return renderConnectorsCatalog(snapshot, env, keyForm);
     if (row.kind === "routines") return renderRoutines(snapshot, env);
     if (row.kind === "agentRoles") return renderAgentRoles(snapshot, env);
+    if (row.kind === "crewFlows") return renderCrewFlows(snapshot, env);
     if (row.kind === "permissionRules") return renderPermissionRules(snapshot, env);
     if (row.kind === "ruleFiles") return renderRuleFiles(snapshot, env);
     const el = document.createElement("div");
@@ -3290,6 +3955,7 @@
     let mcpChecked = false;
     let routinesChecked = false;
     let ruleFilesChecked = false;
+    let agentRolesChecked = false;
     let permissionRulesChecked = false;
     let lastPaintedCategory = "";
     let lastPaintedQuery = "";
@@ -3436,6 +4102,12 @@
       post({ type: "listRuleFiles" });
     }
 
+    function maybeRefreshAgentRoles() {
+      if (agentRolesChecked || categoryId !== "agents" || query.trim()) return;
+      agentRolesChecked = true;
+      post({ type: "listAgentRoles" });
+    }
+
     function maybeRefreshPermissionRules() {
       if (permissionRulesChecked || categoryId !== "advanced" || query.trim()) return;
       permissionRulesChecked = true;
@@ -3511,6 +4183,18 @@
         routineDraft: ROUTINE_UI.draft
           ? [ROUTINE_UI.draft.unit, ROUTINE_UI.draft.cwd, ROUTINE_UI.draft.provider, ROUTINE_UI.draft.model].join(" ")
           : "",
+        // Agents & Crew, same rule as the routines entries above: which card
+        // is open, which delete is armed, and the draft fields that change the
+        // DOM STRUCTURE — the companion (which re-fills the model list), and
+        // the flow's role pool (which is a list of rows). Deliberately NOT the
+        // prose fields: those change per keystroke, and repainting would
+        // rebuild the textarea under the caret.
+        agentOpen: AGENT_UI.openRole + "|" + AGENT_UI.openFlow,
+        agentConfirm: AGENT_UI.confirmRemove,
+        agentScope: AGENT_UI.scope,
+        agentDraft: AGENT_UI.draft
+          ? [AGENT_UI.draft.provider || "", (AGENT_UI.draft.roles || []).join(",")].join(" ")
+          : "",
         // Which row is waiting on the host: local state that changes a label
         // and a disabled attribute, so the key has to carry it.
         providerPending: PROVIDER_PENDING.id + ":" + PROVIDER_PENDING.label,
@@ -3528,6 +4212,7 @@
       maybeRefreshMcp();
       maybeRefreshRoutines();
       maybeRefreshRuleFiles();
+      maybeRefreshAgentRoles();
       maybeRefreshPermissionRules();
       const key = paintKey();
       if (key === lastPaintedKey && container.firstChild) {
@@ -4197,6 +4882,228 @@
           post({ type: "openGlobalConfig" });
         });
       });
+      // ------------------------------------------- Agents & Crew wiring --
+
+      /** Read one editor control into the open draft. Every field writes to
+       *  the SAME draft object, so Save posts what is on screen rather than
+       *  what the host last sent. */
+      function applyAgentField(el) {
+        const draft = AGENT_UI.draft;
+        if (!draft) return false;
+        const field = el.dataset.field;
+        if (!field) return false;
+        const value = el.type === "checkbox" ? el.checked : el.value;
+        if (field === "cardScope") {
+          AGENT_UI.scope = value;
+          return false;
+        }
+        if (field === "scopeGlobs") {
+          draft.scope = String(value).split("\n").map((line) => line.trim()).filter(Boolean);
+          return false;
+        }
+        if (field === "permissions") {
+          draft.permissions = String(value).split("\n").map((line) => line.trim()).filter(Boolean);
+          return false;
+        }
+        if (field === "budgetToolCalls") { draft.budget.toolCalls = value; return false; }
+        if (field === "budgetTokens") { draft.budget.tokens = value; return false; }
+        if (field === "budgetUsd") { draft.budget.usd = value; return false; }
+        if (field === "addRole") {
+          if (!value) return false;
+          draft.roles = draft.roles.concat([value]);
+          return true;
+        }
+        draft[field] = value;
+        // The model list belongs to the companion, so changing the companion
+        // has to redraw it — and the model that was selected for the old one
+        // is not a model of the new one.
+        if (field === "provider") {
+          draft.model = "";
+          return true;
+        }
+        return false;
+      }
+
+      body.querySelectorAll(".settings-agent-form [data-field]").forEach((el) => {
+        const eventName = el.tagName === "SELECT" || el.type === "checkbox" ? "change" : "input";
+        el.addEventListener(eventName, () => {
+          if (applyAgentField(el)) paint();
+        });
+      });
+
+      body.querySelectorAll(".settings-agent-toggle").forEach((head) => {
+        head.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const card = head.closest(".settings-agent-card");
+          const name = card && card.dataset.role;
+          if (!name) return;
+          const roles = agentRolesOf(snapshot) || [];
+          const view = roles.find((entry) => entry && entry.name === name);
+          const closing = AGENT_UI.openRole === name;
+          AGENT_UI.openRole = closing ? "" : name;
+          AGENT_UI.openFlow = "";
+          AGENT_UI.confirmRemove = "";
+          AGENT_UI.draft = closing || !view ? null : roleDraftFrom(view);
+          // A built-in has no file yet, so opening it offers to materialise
+          // one; anything else edits where it already lives. `originScope` is
+          // what a scope MOVE has to clean up — without it the old file stays
+          // and keeps winning, so the save looks like it did nothing.
+          AGENT_UI.originScope = view && view.scope !== "builtin" ? view.scope : "";
+          AGENT_UI.scope = view && view.scope === "global" ? "global"
+            : snapshot.agentRolesHasProject ? "project" : "global";
+          paint();
+        });
+      });
+
+      body.querySelectorAll(".settings-flow-toggle").forEach((head) => {
+        head.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const card = head.closest(".settings-agent-card");
+          const name = card && card.dataset.flow;
+          if (!name) return;
+          const flows = crewFlowsOf(snapshot) || [];
+          const view = flows.find((entry) => entry && entry.name === name);
+          const closing = AGENT_UI.openFlow === name;
+          AGENT_UI.openFlow = closing ? "" : name;
+          AGENT_UI.openRole = "";
+          AGENT_UI.confirmRemove = "";
+          AGENT_UI.draft = closing || !view ? null : flowDraftFrom(view);
+          AGENT_UI.originScope = view && view.scope !== "builtin" ? view.scope : "";
+          AGENT_UI.scope = view && view.scope === "global" ? "global"
+            : snapshot.agentRolesHasProject ? "project" : "global";
+          paint();
+        });
+      });
+
+      body.querySelectorAll(".settings-agent-new").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          AGENT_UI.openRole = NEW_ROLE;
+          AGENT_UI.openFlow = "";
+          AGENT_UI.confirmRemove = "";
+          AGENT_UI.draft = blankRoleDraft(snapshot);
+          AGENT_UI.originScope = "";
+          AGENT_UI.scope = snapshot.agentRolesHasProject ? "project" : "global";
+          paint();
+        });
+      });
+
+      body.querySelectorAll(".settings-flow-new").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          AGENT_UI.openFlow = NEW_FLOW;
+          AGENT_UI.openRole = "";
+          AGENT_UI.confirmRemove = "";
+          AGENT_UI.draft = blankFlowDraft();
+          AGENT_UI.originScope = "";
+          AGENT_UI.scope = snapshot.agentRolesHasProject ? "project" : "global";
+          paint();
+        });
+      });
+
+      body.querySelectorAll(".settings-agent-cancel").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          AGENT_UI.openRole = "";
+          AGENT_UI.openFlow = "";
+          AGENT_UI.draft = null;
+          AGENT_UI.originScope = "";
+          AGENT_UI.confirmRemove = "";
+          paint();
+        });
+      });
+
+      body.querySelectorAll(".settings-agent-save").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          if (!AGENT_UI.draft) return;
+          const editing = AGENT_UI.openRole && AGENT_UI.openRole !== NEW_ROLE ? AGENT_UI.openRole : "";
+          AGENT_UI.pendingSave = true;
+          // The draft stays put: the host answers with a fresh frame, and a
+          // refusal must land on the text that caused it, not a blank form.
+          post({
+            type: "saveAgentRole",
+            scope: AGENT_UI.scope,
+            draft: AGENT_UI.draft,
+            ...(editing ? { originalName: editing } : {}),
+            ...(AGENT_UI.originScope ? { originalScope: AGENT_UI.originScope } : {}),
+          });
+        });
+      });
+
+      body.querySelectorAll(".settings-flow-save").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          if (!AGENT_UI.draft) return;
+          const editing = AGENT_UI.openFlow && AGENT_UI.openFlow !== NEW_FLOW ? AGENT_UI.openFlow : "";
+          AGENT_UI.pendingSave = true;
+          post({
+            type: "saveCrewFlow",
+            scope: AGENT_UI.scope,
+            draft: AGENT_UI.draft,
+            ...(editing ? { originalName: editing } : {}),
+            ...(AGENT_UI.originScope ? { originalScope: AGENT_UI.originScope } : {}),
+          });
+        });
+      });
+
+      body.querySelectorAll(".settings-agent-remove").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const name = btn.dataset.name;
+          if (!name) return;
+          // Two clicks, and the second one already says what it deletes.
+          if (AGENT_UI.confirmRemove !== "role:" + name) {
+            AGENT_UI.confirmRemove = "role:" + name;
+            paint();
+            return;
+          }
+          AGENT_UI.confirmRemove = "";
+          AGENT_UI.openRole = "";
+          AGENT_UI.draft = null;
+          post({ type: "deleteAgentRole", scope: btn.dataset.scope || "project", name });
+        });
+      });
+
+      body.querySelectorAll(".settings-flow-remove").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const name = btn.dataset.name;
+          if (!name) return;
+          if (AGENT_UI.confirmRemove !== "flow:" + name) {
+            AGENT_UI.confirmRemove = "flow:" + name;
+            paint();
+            return;
+          }
+          AGENT_UI.confirmRemove = "";
+          AGENT_UI.openFlow = "";
+          AGENT_UI.draft = null;
+          post({ type: "deleteCrewFlow", scope: btn.dataset.scope || "project", name });
+        });
+      });
+
+      body.querySelectorAll(".settings-agent-pool-up, .settings-agent-pool-down, .settings-agent-pool-remove").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const draft = AGENT_UI.draft;
+          if (!draft || !Array.isArray(draft.roles)) return;
+          const index = Number(btn.dataset.index);
+          if (!Number.isFinite(index) || index < 0 || index >= draft.roles.length) return;
+          const roles = draft.roles.slice();
+          if (btn.classList.contains("settings-agent-pool-remove")) {
+            roles.splice(index, 1);
+          } else {
+            const to = btn.classList.contains("settings-agent-pool-up") ? index - 1 : index + 1;
+            if (to < 0 || to >= roles.length) return;
+            const moved = roles[index];
+            roles[index] = roles[to];
+            roles[to] = moved;
+          }
+          draft.roles = roles;
+          paint();
+        });
+      });
+
       body.querySelectorAll(".settings-rules-open").forEach((btn) => {
         btn.addEventListener("click", (e) => {
           e.stopPropagation();
@@ -4334,6 +5241,14 @@
         // snapshot, and a stale "Disconnecting…" left in the key would make
         // the repaint that clears it look like a no-op.
         reconcileProviderPending(snapshot);
+        // Same rule for a role/flow save. It has to be the ARRIVAL of the
+        // frame that resolves it, not the render: saving a role without
+        // changing a field produces a frame identical to the one on screen,
+        // the key does not move, and a resolve that lived in the renderer
+        // would never run — leaving the editor open over a save that worked.
+        if (nextSnapshot && Object.prototype.hasOwnProperty.call(nextSnapshot, "agentRoles")) {
+          resolveAgentPendingSave(snapshot);
+        }
         if (container.firstChild && paintKey() === lastPaintedKey) return;
         if (describeChrome(container).navMenuOpen) {
           paintDeferred = true;
