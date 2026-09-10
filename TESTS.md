@@ -242,6 +242,42 @@ an unrecognised `effort:` value is dropped rather than blocking a send, a
 and validation does NOT block a send on an unwarmed model cache, which is not
 evidence that the model is gone.
 
+### `test/host-pipe-mux.test.ts` — one pipe, two protocols (P6, 14 tests)
+
+The mux's own decisions in isolation: what it reads out of a handshake (the
+token, and deliberately not the protocol version — that is the owner's to
+check), who it hands a socket to, and what it does with a peer that never says
+anything usable. Pins that bytes arriving in the same chunk as the hello are
+passed on rather than dropped — a client writing its hello and its first frame
+in one `write` is legal, and losing that frame would hang the call it belongs
+to. Also pins that a failed bind comes back as a value rather than a throw: the
+callers treat it as "no question cards and no delegation", never as a session
+that cannot start.
+
+### `test/subagent-depth-promote-host.test.ts` — depth, stages and promote (P6, 18 tests)
+
+Which sessions actually get the delegation server, which is the one thing only
+the host can answer. A user's Agent session yes; a Crew session no; a subagent
+no at the shipped `maxDepth: 1` and yes at 2; a depth-2 grandchild never,
+because there is no depth 3. A crew stage needs BOTH `companions.crew.
+stagesMayUseSubagents` and the workflow's own `allowSubagents`, and depth still
+overrules both. A generator session gets its authoring tools even with subagents
+switched off. The promote half pins that the four hiding fields really are
+removed, that a running child is refused (the parent is still driving it and
+Stop still owns it), that the live session object's own marker is cleared too,
+and that the card stays — the delegation still happened.
+
+### `test/subagent-routing-settings.dom.test.ts` — routing rules and the roster (P6, 15 tests)
+
+Real `settings.js` in happy-dom. Routing: keywords save on blur rather than per
+keystroke, changing the companion drops a model that belonged to the old one,
+the move-up control reorders because order is precedence, and the hint states
+both limits a rule has. The roster block exists because P2 shipped that table
+with its listeners attached during render — where `post` is not in scope and a
+repaint throws them away, so no edit ever reached the host. Nothing covered it
+until this file; both tables now emit markup and are wired in `mount`, like
+every other control on the page.
+
 ### `test/chips.test.ts` — file-chip CRUD (6 tests)
 
 - Implicit chips have stable ids (so the active-editor watcher can replace them)

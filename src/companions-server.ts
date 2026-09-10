@@ -29,6 +29,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { randomBytes, randomUUID } from "node:crypto";
 import type { AcpMcpStdioServer } from "./mcp-connectors";
+import { HostPipeMux, type PipeProtocol } from "./host-pipe-mux";
 import {
   COMPANIONS_ADDRESS_ENV,
   COMPANIONS_IPC_VERSION,
@@ -77,6 +78,8 @@ export interface CompanionsServerOptions {
   uuid?: () => string;
   /** Injected in tests. Defaults to a 256-bit `randomBytes` hex string. */
   mintToken?: () => string;
+  /** The window's shared pipe (P6). Omitted, this server binds one of its own. */
+  mux?: HostPipeMux;
 }
 
 interface Outstanding {
@@ -107,10 +110,17 @@ export function companionsPipeAddress(
     : path.join(tmp, `companions-delegate-${id}.sock`);
 }
 
-export class CompanionsHostServer {
-  private server?: net.Server;
-  private address?: string;
-  private listening?: Promise<string | undefined>;
+export class CompanionsHostServer implements PipeProtocol {
+  /**
+   * The shared window pipe (P6).
+   *
+   * Created here when the caller supplies none, so a standalone
+   * `new CompanionsHostServer(...)` — which every existing test does — still
+   * binds its own pipe. When the sidebar passes the window's mux, this shares
+   * one listener with the AP-05 question channel and the token routes.
+   */
+  private readonly mux: HostPipeMux;
+  private readonly ownsMux: boolean;
   /** Tokens currently valid. One per live session; revoked on restart. */
   private readonly tokens = new Set<string>();
   /** Which tool set a token's handshake advertises. Default is delegate. */
@@ -122,7 +132,17 @@ export class CompanionsHostServer {
   private readonly sockets = new Map<string, Set<net.Socket>>();
   private disposed = false;
 
-  constructor(private readonly opts: CompanionsServerOptions) {}
+  constructor(private readonly opts: CompanionsServerOptions) {
+    this.mux = opts.mux ?? new HostPipeMux({ log: opts.log, ...(opts.uuid ? { uuid: opts.uuid } : {}) });
+    this.ownsMux = !opts.mux;
+    this.mux.add(this);
+  }
+
+  readonly protocolName = "companions";
+
+  ownsToken(token: string): boolean {
+    return this.tokens.has(token);
+  }
 
   /**
    * Bind the pipe. Idempotent and safe to call concurrently — the promise is
@@ -135,34 +155,7 @@ export class CompanionsHostServer {
    */
   async listen(): Promise<string | undefined> {
     if (this.disposed) return undefined;
-    if (this.address) return this.address;
-    if (this.listening) return this.listening;
-    this.listening = new Promise<string | undefined>((resolve) => {
-      const uuid = this.opts.uuid ?? randomUUID;
-      const address = companionsPipeAddress(uuid());
-      const server = net.createServer((socket) => this.accept(socket));
-      const fail = (error: Error) => {
-        this.opts.log(`[companions] could not listen on ${address}: ${error.message}`);
-        try { server.close(); } catch { /* never bound */ }
-        this.server = undefined;
-        this.listening = undefined;
-        resolve(undefined);
-      };
-      server.once("error", fail);
-      server.listen(address, () => {
-        server.removeListener("error", fail);
-        // A later error on a bound server (EPIPE from a dead peer) is noise, not
-        // a reason to take the channel down for every other session.
-        server.on("error", (error) => this.opts.log(`[companions] server error: ${error.message}`));
-        this.server = server;
-        this.address = address;
-        this.opts.log(`[companions] listening on ${address}`);
-        resolve(address);
-      });
-      // Never hold the host process open on our account.
-      server.unref?.();
-    });
-    return this.listening;
+    return this.mux.listen();
   }
 
   /** Mint a token for one session. The caller keeps it to revoke later. */
@@ -183,7 +176,8 @@ export class CompanionsHostServer {
    * block is not. §12.1: a token for session A can never spawn on behalf of B.
    */
   spawnSpec(token: string): AcpMcpStdioServer | undefined {
-    if (!this.address || !this.tokens.has(token)) return undefined;
+    const address = this.mux.boundAddress;
+    if (!address || !this.tokens.has(token)) return undefined;
     return {
       name: COMPANIONS_SERVER_NAME,
       // Same pattern as claude-backend.ts: the Electron binary re-entered as a
@@ -192,7 +186,7 @@ export class CompanionsHostServer {
       args: [this.opts.scriptPath],
       env: [
         { name: "ELECTRON_RUN_AS_NODE", value: "1" },
-        { name: COMPANIONS_ADDRESS_ENV, value: this.address },
+        { name: COMPANIONS_ADDRESS_ENV, value: address },
         { name: COMPANIONS_TOKEN_ENV, value: token },
       ],
     };
@@ -235,10 +229,11 @@ export class CompanionsHostServer {
       this.writeResult(entry, { error: "The editor closed while this subagent was running." });
       this.opts.onAbandon(entry.token, id);
     }
-    try { this.server?.close(); } catch { /* not listening */ }
-    this.server = undefined;
-    this.address = undefined;
-    this.listening = undefined;
+    this.mux.remove(this);
+    // Only when this instance made the pipe. A mux the sidebar owns is shared
+    // with the question channel, and closing it here would take that down with
+    // a teardown that has nothing to do with it.
+    if (this.ownsMux) this.mux.dispose();
   }
 
   /** Open call count. Tests and the reaper read it; nothing else should. */
@@ -249,52 +244,36 @@ export class CompanionsHostServer {
 
   // ---------- internals ----------
 
-  private accept(socket: net.Socket): void {
-    socket.setEncoding("utf8");
-    let token: string | undefined;
-    let buffered = "";
-    // A connection that never says hello is an unknown peer holding a handle on
-    // our pipe. Give it one second, then drop it.
-    const helloTimer = setTimeout(() => {
-      if (!token) {
-        this.opts.log("[companions] dropping a connection that never sent hello");
-        try { socket.destroy(); } catch { /* already gone */ }
-      }
-    }, 1000);
-    helloTimer.unref?.();
+  /**
+   * Take over a socket the mux has already authenticated (P6).
+   *
+   * Everything from here down is unchanged from when this class owned its own
+   * listener: the handshake moved, the settle rules did not.
+   */
+  onAuthenticated(socket: net.Socket, token: string, leftover: string): void {
+    let peers = this.sockets.get(token);
+    if (!peers) this.sockets.set(token, (peers = new Set()));
+    peers.add(socket);
+    // Which tool set this token was minted for (P5): delegation, or the
+    // workflow generator's authoring tools. Never both.
+    const mode = this.tokenModes.get(token) ?? "delegate";
+    try {
+      // The generated schemas and the primer travel with the handshake —
+      // see CompanionsReadyFrame for why they cannot live in the script.
+      socket.write(encodeFrame({
+        t: "ready",
+        v: COMPANIONS_IPC_VERSION,
+        tools: (mode === "generator" ? GENERATOR_TOOLS : COMPANIONS_TOOLS) as unknown as unknown[],
+        instructions: mode === "generator" ? GENERATOR_PRIMER : COMPANIONS_PRIMER,
+      }));
+    } catch { /* going away */ }
 
-    socket.on("data", (chunk: string) => {
-      buffered += chunk;
+    let buffered = leftover;
+    const drain = () => {
       let cut: number;
       while ((cut = buffered.indexOf("\n")) >= 0) {
         const line = buffered.slice(0, cut);
         buffered = buffered.slice(cut + 1);
-        if (!token) {
-          const verdict = checkHello(parseClientFrame(line), (candidate) => this.tokens.has(candidate));
-          if (!verdict.ok) {
-            this.opts.log(`[companions] handshake refused: ${verdict.reason}`);
-            try { socket.write(encodeFrame({ t: "denied", reason: verdict.reason })); } catch { /* going away */ }
-            socket.end();
-            return;
-          }
-          token = verdict.token;
-          clearTimeout(helloTimer);
-          let peers = this.sockets.get(token);
-          if (!peers) this.sockets.set(token, (peers = new Set()));
-          peers.add(socket);
-          try {
-            // The generated schemas and the primer travel with the handshake —
-            // see CompanionsReadyFrame for why they cannot live in the script.
-            const mode = this.tokenModes.get(token) ?? "delegate";
-            socket.write(encodeFrame({
-              t: "ready",
-              v: COMPANIONS_IPC_VERSION,
-              tools: (mode === "generator" ? GENERATOR_TOOLS : COMPANIONS_TOOLS) as unknown as unknown[],
-              instructions: mode === "generator" ? GENERATOR_PRIMER : COMPANIONS_PRIMER,
-            }));
-          } catch { /* going away */ }
-          continue;
-        }
         this.handleFrame(token, socket, line);
       }
       // A peer that floods us without newlines would grow this string without
@@ -304,11 +283,14 @@ export class CompanionsHostServer {
         this.opts.log("[companions] dropping a connection that sent an oversized frame");
         try { socket.destroy(); } catch { /* already gone */ }
       }
-    });
+    };
+    // A client may write its hello and its first call in one chunk, so whatever
+    // arrived with the handshake is drained before the next read.
+    drain();
+    socket.on("data", (chunk: string) => { buffered += chunk; drain(); });
 
     const teardown = () => {
-      clearTimeout(helloTimer);
-      if (token) this.sockets.get(token)?.delete(socket);
+      this.sockets.get(token)?.delete(socket);
       // The child died mid-call: the CLI is gone, so nothing is waiting for this
       // result any more. Tell the sidebar so the children it started are
       // cancelled rather than left running for a parent that no longer exists.

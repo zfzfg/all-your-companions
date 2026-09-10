@@ -130,6 +130,17 @@ can simply do without — §6.4.1's rule is that losing the channel costs the
 session its delegation tools and nothing else. Every later call answers "could
 not reach the editor; continue alone and tell the user why".
 
+**One pipe, two protocols (P6).** v1 shipped a listener per protocol and said so
+deliberately — the question channel is question-shaped and the delegation
+channel is call-shaped, and refactoring the first under the second's deadline
+was the wrong trade. P6 collapsed the transport into `src/host-pipe-mux.ts`
+without touching either wire format, because the **token turns out to be the
+routing**: tokens are 256-bit values minted per protocol, so one side's token is
+by construction not the other's. Both shipped `.cjs` scripts are byte-identical
+to before; both env vars keep their names and now carry the same address. Two
+entries remain in `mcpServers`, because the CLI needs two stdio servers to
+advertise two tool sets — the transport was multiplexed, not the MCP surface.
+
 **Read-only ships as deny-overlay-only on all four providers.** §6.5 step 4
 allows Plan mode as an extra layer where `planMode` is `yes` AND this note says
 Plan does not stall on approval. No provider has that recording yet, so P2 takes

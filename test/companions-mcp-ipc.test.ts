@@ -27,11 +27,19 @@ import {
   COMPANIONS_TOOL_NAMES,
 } from "../src/companions-protocol";
 import { CompanionsHostServer, type CompanionsCall } from "../src/companions-server";
+import { AskUserServer } from "../src/ask-user-server";
+import { HostPipeMux } from "../src/host-pipe-mux";
+import * as net from "node:net";
+
+const ASK_USER_SCRIPT = path.join(__dirname, "..", "resources", "mcp", "ask-user-server.cjs");
 import { GENERATOR_PRIMER, GENERATOR_TOOL_NAMES } from "../src/workflow-generator";
 
 const SCRIPT = path.join(__dirname, "..", "resources", "mcp", "companions-server.cjs");
 
-const started: Array<{ server?: CompanionsHostServer; child?: ChildProcessWithoutNullStreams }> = [];
+const started: Array<{
+  server?: { dispose(): void };
+  child?: ChildProcessWithoutNullStreams;
+}> = [];
 
 afterEach(() => {
   for (const { server, child } of started.splice(0)) {
@@ -363,13 +371,160 @@ describe("companions MCP server over a real pipe", () => {
     expect(h.server.spawnSpec(h.token)).toBeUndefined();
   });
 
-  it("uses a pipe address distinct from the ask_user listener", async () => {
-    // Two listeners in v1 (§6.4.1). Sharing an address would make one of them
-    // fail to bind, silently, on the second session of the window.
+  it("binds a window pipe rather than one of its own (P6)", async () => {
+    // v1 shipped two listeners (§6.4.1) and P6 multiplexes them. The address is
+    // the shared one, and the token — not the address — is what routes a
+    // connection to the right protocol.
     const h = await boot();
     const spec = h.server.spawnSpec(h.token)!;
     const address = spec.env.find((e) => e.name.endsWith("ADDRESS"))!.value;
-    expect(address).toContain("companions-delegate");
-    expect(address).not.toContain("companions-ask");
+    expect(address).toContain("companions-host");
+  });
+});
+
+describe("one pipe, two protocols (P6, §16)", () => {
+  it("routes each connection to the protocol that minted its token", async () => {
+    // The whole multiplex rests on this: tokens are 256 bits of randomness
+    // minted per server, so a token one side knows is by construction not one
+    // the other knows. Nothing in either wire format had to change.
+    const mux = new HostPipeMux({ log: () => {} });
+    const questions: string[] = [];
+    const calls: string[] = [];
+
+    const askUser = new AskUserServer({
+      scriptPath: ASK_USER_SCRIPT,
+      log: () => {},
+      mux,
+      onRequest: (_token, request) => { questions.push(request.questions[0].question); request.cancel(); },
+      onWithdraw: () => {},
+    });
+    const companions = new CompanionsHostServer({
+      scriptPath: SCRIPT,
+      log: () => {},
+      mux,
+      onCall: (_token, call) => { calls.push(call.tool); call.resolve({ ok: true }); },
+      onAbandon: () => {},
+    });
+    started.push({ server: askUser }, { server: companions });
+
+    const address = await askUser.listen();
+    expect(address, "the shared pipe must bind").toBeTruthy();
+    // Both protocols answer with the SAME address — that is the point.
+    expect(await companions.listen()).toBe(address);
+
+    const askSpec = askUser.spawnSpec(askUser.register())!;
+    const delegateSpec = companions.spawnSpec(companions.register("delegate"))!;
+    const addressOf = (spec: { env: { name: string; value: string }[] }) =>
+      spec.env.find((entry) => entry.name.endsWith("ADDRESS"))!.value;
+    expect(addressOf(askSpec)).toBe(addressOf(delegateSpec));
+    // Two entries in `mcpServers` still, because the CLI needs two stdio
+    // servers — one pipe underneath them, not one server.
+    expect(askSpec.name).not.toBe(delegateSpec.name);
+
+    const spawnChild = (spec: { args: string[]; env: { name: string; value: string }[] }) => {
+      const env: NodeJS.ProcessEnv = { ...process.env };
+      for (const entry of spec.env) env[entry.name] = entry.value;
+      const child = spawn(process.execPath, spec.args, { env, stdio: ["pipe", "pipe", "pipe"] });
+      started.push({ child });
+      return child;
+    };
+    const askChild = spawnChild(askSpec);
+    const delegateChild = spawnChild(delegateSpec);
+
+    askChild.stdin.write(JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "ask_user", arguments: { questions: [{ question: "Which one?" }] } },
+    }) + "\n");
+    delegateChild.stdin.write(JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: COMPANIONS_SPAWN_TOOL, arguments: { task: "map the callers" } },
+    }) + "\n");
+
+    const deadline = Date.now() + 10_000;
+    while (!questions.length || !calls.length) {
+      if (Date.now() > deadline) {
+        throw new Error("routing failed: " + questions.length + " question(s), " + calls.length + " call(s)");
+      }
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    // Each side got its own traffic and none of the other's.
+    expect(questions).toEqual(["Which one?"]);
+    expect(calls).toEqual([COMPANIONS_SPAWN_TOOL]);
+    mux.dispose();
+  });
+
+  it("refuses a token neither protocol minted, and the client keeps serving", async () => {
+    const mux = new HostPipeMux({ log: () => {} });
+    const companions = new CompanionsHostServer({
+      scriptPath: SCRIPT,
+      log: () => {},
+      mux,
+      onCall: () => {},
+      onAbandon: () => {},
+    });
+    started.push({ server: companions });
+    const address = await companions.listen();
+    expect(address).toBeTruthy();
+    const spec = companions.spawnSpec(companions.register())!;
+    const env: NodeJS.ProcessEnv = { ...process.env };
+    for (const entry of spec.env) env[entry.name] = entry.value;
+    env[COMPANIONS_TOKEN_ENV] = "not-a-real-token";
+    const child = spawn(process.execPath, spec.args, { env, stdio: ["pipe", "pipe", "pipe"] });
+    started.push({ child });
+
+    const replies: any[] = [];
+    readline.createInterface({ input: child.stdout }).on("line", (line) => {
+      try { replies.push(JSON.parse(line)); } catch { /* not ours */ }
+    });
+    child.stdin.write(JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: COMPANIONS_SPAWN_TOOL, arguments: { task: "anything" } },
+    }) + "\n");
+
+    const deadline = Date.now() + 10_000;
+    while (!replies.length) {
+      if (Date.now() > deadline) throw new Error("the refused client never answered its CLI");
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    // Refused, and still answering its CLI rather than leaving `tools/call`
+    // hanging — the same rule as before the multiplex.
+    expect(replies[0].result.content[0].text).toContain("Continue alone and tell the user why");
+    mux.dispose();
+  });
+
+  it("answers a bad handshake with denied and stops talking to the peer", async () => {
+    // An unknown peer holding a handle on the window's pipe. Before the
+    // handshake there is nothing to settle, so the only correct answer is to
+    // refuse it and hang up.
+    const mux = new HostPipeMux({ log: () => {} });
+    const companions = new CompanionsHostServer({
+      scriptPath: SCRIPT,
+      log: () => {},
+      mux,
+      onCall: () => {},
+      onAbandon: () => {},
+    });
+    started.push({ server: companions });
+    const address = (await companions.listen())!;
+    const socket = net.createConnection(address);
+    const seen: string[] = [];
+    socket.setEncoding("utf8");
+    socket.on("data", (chunk: string) => seen.push(chunk));
+    socket.write(JSON.stringify({ t: "hello", v: 1, token: "wrong" }) + "\n");
+
+    const deadline = Date.now() + 10_000;
+    while (!seen.length) {
+      if (Date.now() > deadline) throw new Error("the mux never answered a bad handshake");
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    expect(seen.join("")).toContain('"denied"');
+    socket.destroy();
+    mux.dispose();
   });
 });

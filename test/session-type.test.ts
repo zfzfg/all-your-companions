@@ -11,6 +11,8 @@ import {
   isSessionType,
   isSessionTypeLocked,
   lockSessionType,
+  promoteHiddenChild,
+  promotedSessionName,
   type SessionTypeMeta,
 } from "../src/session-type";
 
@@ -134,6 +136,74 @@ describe("session-type (AP-15)", () => {
       );
       expect(fork.crewRunId).toBeUndefined();
       expect(fork.subagents).toBeUndefined();
+    });
+  });
+
+  describe("promote to a session of its own (§6.6 point 8, P6)", () => {
+    it("drops exactly the four fields that made it belong to someone else", () => {
+      // The child was always a real session for its provider — it was only
+      // hidden by OUR metadata, so promoting is a deletion, not a construction.
+      const result = promoteHiddenChild({
+        sessionType: "agent",
+        sessionTypeLockedAt: 5,
+        hiddenReason: "companion-subagent",
+        parentSessionId: "parent-1",
+        subagentId: "sa_1",
+        depth: 1,
+        subagentsEnabled: true,
+      });
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.meta).toEqual({
+        sessionType: "agent",
+        sessionTypeLockedAt: 5,
+        subagentsEnabled: true,
+      });
+    });
+
+    it("makes the session visible to the history filter", () => {
+      // isHostManagedChild is what both the history filter and the sweep read.
+      const result = promoteHiddenChild({ hiddenReason: "companion-subagent", depth: 1 });
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(isHostManagedChild(result.meta)).toBe(false);
+    });
+
+    it("resets the depth, so a promoted grandchild is not barred from delegating", () => {
+      const result = promoteHiddenChild({ hiddenReason: "companion-subagent", depth: 2 });
+      expect(result.ok && result.meta.depth).toBeUndefined();
+    });
+
+    it("promotes a crew stage too — it is the same kind of hidden child", () => {
+      expect(promoteHiddenChild({ hiddenReason: "crew-stage" }).ok).toBe(true);
+    });
+
+    it("refuses a generator session", () => {
+      // A transient the host drives through validate-and-submit, carrying a
+      // tool set no user session should have (§8.6).
+      expect(promoteHiddenChild({ hiddenReason: "workflow-generator" }))
+        .toEqual({ ok: false, reason: "generator" });
+    });
+
+    it("refuses a session that was never a child", () => {
+      expect(promoteHiddenChild({ sessionType: "agent" }))
+        .toEqual({ ok: false, reason: "not-a-child" });
+      expect(promoteHiddenChild(undefined)).toEqual({ ok: false, reason: "not-a-child" });
+    });
+
+    it("names the promoted session after its label and its parent", () => {
+      expect(promotedSessionName("Auth inspector", "Refactor auth"))
+        .toBe("Auth inspector (from Refactor auth)");
+    });
+
+    it("does not stack the suffix when promoting something already named", () => {
+      expect(promotedSessionName("Auth inspector (from Refactor auth)", "Refactor auth"))
+        .toBe("Auth inspector (from Refactor auth)");
+    });
+
+    it("falls back to a usable name rather than an empty one", () => {
+      expect(promotedSessionName("", "Refactor auth")).toBe("Subagent (from Refactor auth)");
+      expect(promotedSessionName("Auth inspector", "")).toBe("Auth inspector");
     });
   });
 

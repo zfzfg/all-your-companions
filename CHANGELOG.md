@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+**Subagents you can keep, route and nest.** A subagent that turned out to be worth keeping can become a conversation of its own; a few keywords can steer which companion gets which kind of job; and — if you ask for it — a workflow stage or a subagent can delegate one level further.
+
+### Added
+
+- **Keep a subagent as its own conversation.** A finished subagent's card now offers **Keep as a session** — it has been a real conversation with its provider all along, it was only hidden from your history. Keeping it drops the "belongs to another session" marker and gives it a name that says where it came from. Its card stays in the original thread, because the delegation still happened.
+- **Route work by keyword.** Settings → Agents & Crew → **Routing rules**: when a task mentions "grep" or "overview", prefer the fast companion; when it mentions "review", prefer a different one. Advice only — what the agent asks for explicitly still wins, and a rule pointing at a companion you are signed out of is simply skipped. Earlier rules win, and you can reorder them.
+- **Workflow stages can delegate too**, when you want them to. Off by default, and it needs two switches to agree: **Crew stages may use subagents** in Settings, and the workflow's own stage asking for it. A subagent a stage starts shows up in the Crew conversation, labelled with the stage that started it, rather than in a hidden transcript nobody reads.
+- **Two levels of delegation, if you want them.** `companions.subagents.maxDepth` now accepts `2`, letting a subagent delegate once more. Anything deeper is capped by design. A delegating subagent spends a share of its parent's remaining allowance rather than a fresh copy of it, so turning this on cannot multiply what a turn costs.
+
+### Fixed
+
+- **The subagent roster in Settings now actually saves.** Its controls were wired up in a place where the save function is not in scope, and every repaint discarded the handlers anyway — so switching a companion off, choosing a default model or writing notes changed nothing. Both it and the new routing table are now wired the way every other control on that page is, and there are tests for it.
+
 **You can write and generate Crew workflows.** Settings → Agents & Crew has a **Workflows** section: every crew preset is listed with its stage graph, a default radio for new Crew sessions, and Validate / Save / Delete. **Generate workflow…** describes the pipeline in plain language; the extension drafts stages and contracts, shows a preview, and writes nothing until you press Save.
 
 ### Added
@@ -49,6 +62,7 @@
 
 ### Internal
 
+- Both host IPC protocols — the question channel and the delegation channel — now share **one** named pipe per window instead of binding two. The token routes a connection to the right protocol, so neither wire format changed and both shipped MCP scripts are untouched.
 - New capability dimensions `hostMcp`, `companionSubagentTarget` and `delegationShim` in the provider matrix, and three research probes (`research/probe-acp-mcp.cjs`, `research/probe-read-only.cjs`, `research/probe-child-persistence.cjs`) that fill them. Findings and open questions in `research/companion-subagents.md`.
 
 ## 4.1.8 — 2026-09-05

@@ -329,6 +329,18 @@ export class Session {
   companionsToken?: string;
 
   /**
+   * This session is a crew stage whose workflow set `allowSubagents` (§7.9, P6).
+   *
+   * Carried here rather than looked up from the run when the CLI asks for
+   * `mcpServers`: the stage is already running by then, and re-deriving which
+   * stage this is from run state would be a second source of truth for
+   * something already decided. It is only half the answer — the user's
+   * `companions.crew.stagesMayUseSubagents` is the other half, and both must
+   * be true.
+   */
+  stageAllowsSubagents?: boolean;
+
+  /**
    * The `@subagent:` / `@role:` directives on the CURRENT turn (AP-16 §6.8).
    *
    * Per turn, not per session: a directive is something the user said about

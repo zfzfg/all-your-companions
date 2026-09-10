@@ -161,3 +161,58 @@ export function isHostManagedChild(meta: SessionTypeMeta | undefined): boolean {
 export function forkedSessionTypeMeta(source: SessionTypeMeta | undefined, now: number): SessionTypeMeta {
   return lockSessionType({ sessionType: effectiveSessionType(source) }, now);
 }
+
+/** Why a host-managed child could not be promoted to a session of its own. */
+export type PromotionRefusal = "not-a-child" | "generator";
+
+export type PromotionResult =
+  | { ok: true; meta: SessionTypeMeta }
+  | { ok: false; reason: PromotionRefusal };
+
+/**
+ * Promote a hidden child to an ordinary session (§6.6 point 8, P6).
+ *
+ * The child was always a real session for its provider — it was only ever
+ * hidden by OUR metadata (§6.6 points 1-3). So promoting it is a deletion, not
+ * a construction: drop the four fields that made it belong to someone else, and
+ * the history filter and the empty-session sweep start treating it like any
+ * other conversation on their next pass. Nothing about the transcript, the run
+ * directory or the provider's own store changes.
+ *
+ * `depth` goes with them. A promoted session is the user's, so it starts its own
+ * delegation budget at zero rather than inheriting a place in someone else's
+ * chain — which is also what stops a promoted grandchild from being permanently
+ * barred from delegating.
+ *
+ * A **generator** session is refused: it is a transient the host drives through
+ * a validate-and-submit loop with a tool set no user session should carry, and
+ * it has no transcript worth keeping once it has submitted (§8.6).
+ */
+export function promoteHiddenChild(meta: SessionTypeMeta | undefined): PromotionResult {
+  if (!isHostManagedChild(meta)) return { ok: false, reason: "not-a-child" };
+  if (meta?.hiddenReason === "workflow-generator") return { ok: false, reason: "generator" };
+  const {
+    hiddenReason: _hiddenReason,
+    parentSessionId: _parentSessionId,
+    subagentId: _subagentId,
+    depth: _depth,
+    ...rest
+  } = meta ?? {};
+  return { ok: true, meta: rest };
+}
+
+/**
+ * The name a promoted child is given (§6.6 point 8).
+ *
+ * `<label> (from <parent name>)`, because a promoted subagent in the history
+ * list is otherwise a conversation nobody remembers starting — the parent is
+ * the only thing that explains where it came from. Idempotent, so promoting
+ * something that already carries the suffix does not stack a second one.
+ */
+export function promotedSessionName(label: string, parentName: string): string {
+  const clean = (label ?? "").trim() || "Subagent";
+  const parent = (parentName ?? "").trim();
+  if (!parent) return clean;
+  const suffix = ` (from ${parent})`;
+  return clean.endsWith(suffix) ? clean : `${clean}${suffix}`;
+}

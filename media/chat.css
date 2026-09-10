@@ -6436,3 +6436,32 @@ body.crew-session #mode-btn { display: none; }
   padding: 0 2px;
 }
 .subagent-tray-cancel:hover { text-decoration: underline; }
+
+/* AP-16 P6 — card origin line and actions.
+   The origin only appears when the delegation came from somewhere other than
+   the conversation the card sits in (a crew stage, or a child that delegated
+   once more); in the ordinary case saying it would be noise. */
+.companion-subagent .companion-origin {
+  margin: 3px 0 0 22px;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--vscode-descriptionForeground);
+  opacity: 0.85;
+}
+.companion-subagent .companion-actions {
+  display: flex;
+  gap: 10px;
+  margin: 6px 0 0 22px;
+}
+.companion-subagent .companion-action {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--vscode-textLink-foreground);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0;
+}
+.companion-subagent .companion-action:hover { text-decoration: underline; }

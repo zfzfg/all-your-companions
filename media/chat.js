@@ -13113,9 +13113,11 @@
         BLINK_DOTS +
         `<span class="subagent-time"></span>` +
       `</div>` +
+      `<div class="companion-origin" hidden></div>` +
       `<div class="companion-notes"></div>` +
       `<div class="subagent-stream" hidden></div>` +
-      `<div class="subagent-result" hidden></div>`;
+      `<div class="subagent-result" hidden></div>` +
+      `<div class="companion-actions" hidden></div>`;
     appendTranscriptChild(el);
     state.companionSubagentCards.set(subagentId, el);
     return el;
@@ -13209,6 +13211,14 @@
       }
     }
 
+    // Where a delegation came from, when it was not this conversation: a crew
+    // stage, or a child that delegated once more. Absent in the ordinary case.
+    const origin = el.querySelector(".companion-origin");
+    if (origin) {
+      origin.textContent = msg.startedBy || "";
+      origin.hidden = !msg.startedBy;
+    }
+
     const terminal = msg.status === "completed" || msg.status === "failed"
       || msg.status === "cancelled" || msg.status === "refused";
     el.classList.toggle("subagent-failed", msg.status === "failed" || msg.status === "refused");
@@ -13224,7 +13234,40 @@
       el.classList.add("subagent-done");
       renderCompanionResult(el, msg);
     }
+    renderCompanionActions(el, msg);
     scrollToBottom();
+  }
+
+  /**
+   * The card's actions. Only ever what this child can actually do right now —
+   * a button that answers with a notice explaining why it does not apply is
+   * worse than no button.
+   */
+  function renderCompanionActions(el, msg) {
+    const bar = el.querySelector(".companion-actions");
+    if (!bar) return;
+    const actions = [];
+    if (msg.sessionId) actions.push({ action: "openTranscript", label: "Open transcript" });
+    // §6.6 point 8. Offered by the host only once the child is finished and has
+    // a session worth keeping.
+    if (msg.promotable) actions.push({ action: "promote", label: "Keep as a session" });
+    bar.textContent = "";
+    bar.hidden = actions.length === 0;
+    for (const entry of actions) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "companion-action";
+      button.dataset.action = entry.action;
+      button.textContent = entry.label;
+      button.addEventListener("click", () => {
+        vscode.postMessage({
+          type: "companionSubagentAction",
+          subagentId: msg.subagentId,
+          action: entry.action,
+        });
+      });
+      bar.appendChild(button);
+    }
   }
 
   function renderCompanionResult(el, msg) {

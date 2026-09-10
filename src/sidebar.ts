@@ -597,6 +597,8 @@ import {
   isSessionTypeLocked,
   forkedSessionTypeMeta,
   lockSessionType,
+  promoteHiddenChild,
+  promotedSessionName,
   type HiddenReason,
   type SessionType,
   type SessionTypeMeta,
@@ -617,6 +619,7 @@ import {
   type SpawnArguments,
 } from "./companions-protocol";
 import { CompanionsHostServer, type CompanionsCall } from "./companions-server";
+import { HostPipeMux } from "./host-pipe-mux";
 import {
   parseSubagentMentions,
   renderDirectiveBlock,
@@ -624,8 +627,12 @@ import {
   type SubagentDirective,
 } from "./subagent-directives";
 import {
+  SUBAGENT_MAX_DEPTH_CAP,
   SubagentRegistry,
+  carveChildLimits,
   deriveSubagentLabel,
+  mayDelegateAtDepth,
+  resolveMaxDepth,
   isTerminalSubagentStatus,
   profileBadge,
   subagentForbidden,
@@ -636,6 +643,7 @@ import {
 import {
   EFFORT_ORDER,
   isEffortLevel,
+  parseRoutingRules,
   listEligibleTargets,
   resolveTarget,
   type EligibilityInput,
@@ -1984,7 +1992,8 @@ export class GrokSidebar {
        * subagent, writes `stage-NN` artefacts, and does not emit an
        * `/agent` result card — the gate card is the one card for the stage.
        */
-      stage?: { stageId: string };
+      /** AP-17. `allowSubagents` is the workflow's half of the §7.9 gate. */
+      stage?: { stageId: string; allowSubagents?: boolean };
       /**
        * AP-18. The workflow generator: hidden, read-only, no `/agent` card,
        * and it does not take over the caller's `agentRun` slot.
@@ -2087,6 +2096,9 @@ export class GrokSidebar {
         `${coords?.runId ?? runId}:${stageCoords.stageId}`,
         "crew-stage",
       );
+      // §7.9. Half the answer; `companions.crew.stagesMayUseSubagents` is the
+      // other half, and `companionsMcpServer` requires both.
+      roleSession.stageAllowsSubagents = stageCoords.allowSubagents === true;
     }
     if (generatorCoords) {
       this.markHiddenChildSession(roleSession, caller, generatorCoords.requestId, "workflow-generator");
@@ -2855,7 +2867,7 @@ export class GrokSidebar {
         runId: run.runId,
         step: current.ordinal,
         cwd: run.worktree ?? run.cwd,
-        stage: { stageId: stage.id },
+        stage: { stageId: stage.id, allowSubagents: stage.allowSubagents === true },
       },
     );
     if (
@@ -2879,7 +2891,7 @@ export class GrokSidebar {
             runId: run.runId,
             step: current.ordinal,
             cwd: run.worktree ?? run.cwd,
-            stage: { stageId: stage.id },
+            stage: { stageId: stage.id, allowSubagents: stage.allowSubagents === true },
           },
         );
       }
@@ -3992,6 +4004,17 @@ export class GrokSidebar {
         }));
       })(),
       subagentsEnabled: this.subagentsEnabledGlobally(),
+      crewStagesMayUseSubagents: this.companionsSetting<boolean>("crew.stagesMayUseSubagents", false),
+      // P6 §6.2. The user's own keyword rules, normalized on the way out so the
+      // page never has to reason about a half-written entry.
+      subagentRouting: parseRoutingRules(
+        this.companionsSetting<unknown>("subagents.routing", []),
+      ).map((rule) => ({
+        match: [...rule.match],
+        provider: rule.target.provider ?? "",
+        model: rule.target.model ?? "",
+        effort: rule.target.effort ?? "",
+      })),
       efforts: [...EFFORT_ORDER],
       providers: PROVIDER_ORDER.map((id) => ({
         id,
@@ -9818,6 +9841,7 @@ Only continue if you trust this code.`,
   private companions(): CompanionsHostServer {
     if (!this.companionsChannel) {
       this.companionsChannel = new CompanionsHostServer({
+        mux: this.hostPipe(),
         // From `extensionUri`, not a path relative to `out/`: the script is a
         // packaged RESOURCE, and `.vscodeignore` has to keep `resources/mcp/**`
         // in the VSIX or this path exists in development and nowhere else.
@@ -9875,16 +9899,62 @@ Only continue if you trust this code.`,
       ?? this.sessionTypeMetaFor(session)?.hiddenReason;
     // Generator sessions get the authoring tool set even when subagents are
     // off — the generator is not delegation, and the master switch must not
-    // disable Settings → Generate workflow.
+    // disable Settings → Generate workflow. It never gets spawn/await (§12.3).
     if (hidden === "workflow-generator") {
       return this.spawnCompanionsServer(session, "generator");
     }
     if (!this.subagentsCouldBeUsedIn(session)) return undefined;
     // A Crew session is the orchestrator, not a chatting agent that delegates.
-    // Stage children are hidden; P4–P5 ignore stagesMayUseSubagents (§7.9).
-    if (session.sessionType === "crew") return undefined;
-    if (hidden) return undefined;
+    if (session.sessionType === "crew" && !hidden) return undefined;
+    // §7.9 — a crew STAGE may delegate, but only when the user turned it on
+    // globally AND the workflow's own stage asked for it. Two switches because
+    // they answer different questions: the setting is "do I want nested runs at
+    // all", the stage flag is "does this particular stage need one".
+    if (hidden === "crew-stage" && !this.stageMayDelegate(session)) return undefined;
+    // D10 / §12.3 — depth. At the shipped `maxDepth: 1` only the user's own
+    // session delegates, which is what P2–P5 enforced as "hidden children never
+    // get the server"; at 2 a depth-1 child may delegate once more.
+    const depth = session.pendingHiddenChild?.depth
+      ?? this.sessionTypeMetaFor(session)?.depth
+      ?? 0;
+    if (!mayDelegateAtDepth(depth, this.subagentMaxDepth())) return undefined;
     return this.spawnCompanionsServer(session, "delegate");
+  }
+
+  /**
+   * `companions.subagents.maxDepth`, clamped, with the clamp said once.
+   *
+   * Said once per window rather than per session: a user who typed 3 into their
+   * settings wants to know it became 2, and wants to be told that a single time
+   * rather than on every session they open.
+   */
+  private subagentMaxDepth(): 1 | 2 {
+    const { depth, clamped } = resolveMaxDepth(
+      this.companionsSetting<number>("subagents.maxDepth", 1),
+    );
+    if (clamped && !this.maxDepthClampReported) {
+      this.maxDepthClampReported = true;
+      this.host.appendLine(
+        `[companions] companions.subagents.maxDepth is out of range; using ${depth}. `
+        + "Delegation is capped at two levels by design.",
+      );
+    }
+    return depth;
+  }
+
+  private maxDepthClampReported = false;
+
+  /**
+   * May THIS crew stage's session delegate (§7.9)?
+   *
+   * Both flags, and the stage's own is carried on the child session rather than
+   * looked up from the run: by the time the CLI asks for `mcpServers` the stage
+   * is already running, and re-deriving which stage this is from run state would
+   * be a second source of truth for something already decided.
+   */
+  private stageMayDelegate(session: Session): boolean {
+    if (!this.companionsSetting<boolean>("crew.stagesMayUseSubagents", false)) return false;
+    return session.stageAllowsSubagents === true;
   }
 
   private async spawnCompanionsServer(
@@ -9971,7 +10041,7 @@ Only continue if you trust this code.`,
     const configured = (key: string, fallback: number) =>
       Math.max(1, Number(this.companionsSetting(`subagents.limits.${key}`, fallback)) || fallback);
     const counts = this.subagents.counts(session.activeSessionId ?? "", turnId);
-    return {
+    const own: SpawnLimits = {
       ...counts,
       maxConcurrent: configured("maxConcurrent", 3),
       maxPerTurn: configured("maxPerTurn", 4),
@@ -9980,6 +10050,75 @@ Only continue if you trust this code.`,
       // window-wide number rather than this session's own.
       poolHeadroom: Math.max(0, GrokSidebar.MAX_LIVE_SESSIONS - this.pool.size),
     };
+    // §12.3 — a delegating CHILD spends its parent's allowance, not a fresh
+    // copy of it. Without this, depth 2 would multiply the cost of a turn: a
+    // parent allowed four children would become a parent allowed four children
+    // each allowed four more.
+    const depth = this.sessionTypeMetaFor(session)?.depth ?? 0;
+    if (depth <= 0) return own;
+    const parent = this.parentSessionOf(session);
+    const parentCounts = parent
+      ? this.subagents.counts(parent.activeSessionId ?? "", this.currentTurnId(parent))
+      : { running: 0, thisTurn: 0, thisSession: 0 };
+    const carved = carveChildLimits({ ...own, ...parentCounts });
+    // The child's OWN counters still decide when it is full.
+    return { ...carved, ...counts };
+  }
+
+  /** The live session that owns this hidden child, if it is still in the pool. */
+  private parentSessionOf(session: Session): Session | undefined {
+    const parentId = session.pendingHiddenChild?.parentSessionId
+      ?? this.sessionTypeMetaFor(session)?.parentSessionId;
+    if (!parentId) return undefined;
+    return [...this.pool].find((candidate) => candidate.activeSessionId === parentId);
+  }
+
+  /**
+   * "Stage: review" / the child's own label — what started this delegation.
+   *
+   * Only ever shown on a card that had to be re-homed to a visible ancestor: in
+   * the ordinary case the conversation the card sits in IS the thing that
+   * started it, and saying so would be noise.
+   */
+  private chainLabelFor(session: Session): string | undefined {
+    const pending = session.pendingHiddenChild;
+    const meta = this.sessionTypeMetaFor(session);
+    const reason = pending?.hiddenReason ?? meta?.hiddenReason;
+    const id = pending?.subagentId ?? meta?.subagentId ?? "";
+    if (reason === "crew-stage") {
+      // The id is `<runId>:<stageId>`; the stage is the half a person knows.
+      const stageId = id.includes(":") ? id.slice(id.indexOf(":") + 1) : id;
+      return stageId ? `Stage: ${stageId}` : "A crew stage";
+    }
+    if (reason === "companion-subagent") {
+      return this.subagents.get(id)?.label ?? "A subagent";
+    }
+    return undefined;
+  }
+
+  /**
+   * The nearest ancestor a person can actually see (§6.11, §7.9).
+   *
+   * A card emitted into a hidden child's transcript is a card nobody reads —
+   * the child is not in the history list and its transcript only opens on
+   * request. So a subagent started BY a stage or by a depth-1 child renders in
+   * the conversation that owns the whole chain, which is the Crew session or
+   * the Agent session the user is looking at.
+   *
+   * Falls back to the session itself: a chain whose parent has been reaped is
+   * still better shown somewhere than nowhere.
+   */
+  private visibleAncestorOf(session: Session): Session {
+    let current = session;
+    for (let hops = 0; hops < SUBAGENT_MAX_DEPTH_CAP + 1; hops += 1) {
+      const hidden = current.pendingHiddenChild?.hiddenReason
+        ?? this.sessionTypeMetaFor(current)?.hiddenReason;
+      if (!hidden) return current;
+      const parent = this.parentSessionOf(current);
+      if (!parent) return current;
+      current = parent;
+    }
+    return current;
   }
 
   /** Everything `target-eligibility.ts` needs, gathered from live host state. */
@@ -10574,7 +10713,8 @@ ${args.task}`,
    */
   private postSubagentTray(session: Session): void {
     const running = this.subagents.running(session.activeSessionId ?? "");
-    this.emit(session, {
+    // Same reasoning as the card: the tray belongs where somebody is looking.
+    this.emit(this.visibleAncestorOf(session), {
       type: "subagentTray",
       subagents: running.map((record) => ({
         subagentId: record.subagentId,
@@ -10708,6 +10848,76 @@ ${args.task}`,
     };
   }
 
+  /**
+   * Promote a companion subagent to a session of its own (§6.6 point 8, P6).
+   *
+   * The child has been a real session for its provider all along; it was only
+   * ever hidden by our own metadata. So this is a deletion of four fields plus
+   * a name, and the history filter and the empty-session sweep pick it up on
+   * their next pass.
+   *
+   * Refused while the child is still running: promoting mid-flight would put a
+   * conversation in the list that the parent is still driving and Stop still
+   * owns, and the user would have two places to steer one turn from.
+   */
+  private async promoteSubagentSession(session: Session, subagentId: string): Promise<void> {
+    const record = this.subagents.get(subagentId);
+    if (!record) return;
+    if (!isTerminalSubagentStatus(record.status)) {
+      this.emit(session, {
+        type: "hostNotice",
+        level: "warning",
+        text: "This subagent is still running. Wait for it to finish, or cancel it first.",
+      });
+      return;
+    }
+    const childId = record.childSessionId;
+    if (!childId) {
+      // A refusal or a crash before `session/new` — there is no session to
+      // promote, and saying "promoted" would be a lie about an empty shell.
+      this.emit(session, {
+        type: "hostNotice",
+        level: "warning",
+        text: "This subagent never started a session, so there is nothing to keep.",
+      });
+      return;
+    }
+    const overrides = this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
+    const promotion = promoteHiddenChild(overrides[childId]);
+    if (!promotion.ok) {
+      this.emit(session, {
+        type: "hostNotice",
+        level: "warning",
+        text: promotion.reason === "generator"
+          ? "A workflow generator run cannot be kept as a session."
+          : "This is already a session of its own.",
+      });
+      return;
+    }
+    const name = promotedSessionName(record.label, this.sessionDisplayName(session));
+    await this.state.update(SESSION_META_KEY, {
+      ...overrides,
+      [childId]: { ...promotion.meta, customName: name },
+    });
+    this.sessionCache.delete(childId);
+    // The live child object, if it is still in the pool, has its own copy of
+    // the hidden marker — clear it too, or a refresh before the next reload
+    // would put the row back.
+    const live = [...this.pool].find((candidate) => candidate.activeSessionId === childId);
+    if (live) live.pendingHiddenChild = undefined;
+    // The card keeps its place in the parent transcript: the delegation
+    // happened, and hiding the record of it would be a second lie.
+    this.subagents.update(subagentId, { promoted: true }, Date.now());
+    this.postSubagentCard(session, subagentId);
+    this.host.appendLine(`[companions] promoted ${subagentId} (${childId}) to "${name}"`);
+    this.postSessionsList();
+    this.emit(session, {
+      type: "hostNotice",
+      level: "info",
+      text: `Kept as a session: ${name}`,
+    });
+  }
+
   /** Write the parked hidden-child stamp once the CLI has named the session. */
   private flushHiddenChildMeta(session: Session): void {
     const pending = session.pendingHiddenChild;
@@ -10793,8 +11003,15 @@ ${args.task}`,
     const record = this.subagents.get(subagentId);
     if (!record) return;
     const outcome = this.subagentOutcomes.get(subagentId);
-    this.emit(session, {
+    // A card in a hidden child's transcript is a card nobody reads, so a
+    // subagent started by a crew stage or by a depth-1 child renders in the
+    // conversation that owns the chain — labelled with where it came from, or
+    // it would look like the user's own session started it (§7.9).
+    const visible = this.visibleAncestorOf(session);
+    const startedBy = visible === session ? undefined : this.chainLabelFor(session);
+    this.emit(visible, {
       type: "companionSubagent",
+      ...(startedBy ? { startedBy } : {}),
       subagentId,
       label: record.label,
       provider: record.target.provider,
@@ -10812,6 +11029,12 @@ ${args.task}`,
       ...(record.profileDowngraded ? { profileDowngraded: record.profileDowngraded } : {}),
       ...(record.errorCode ? { errorCode: record.errorCode } : {}),
       ...(record.childSessionId ? { sessionId: record.childSessionId } : {}),
+      // §6.6 point 8: offered only once the child is finished and actually has
+      // a session to keep. Promoting mid-flight would put a conversation in the
+      // list that the parent is still driving and Stop still owns.
+      ...(record.childSessionId && isTerminalSubagentStatus(record.status) && !record.promoted
+        ? { promotable: true }
+        : {}),
       ...(outcome?.summary ? { summary: outcome.summary } : {}),
       ...(outcome?.filesReported?.length ? { filesReported: outcome.filesReported } : {}),
       ...(outcome?.filesObserved?.length ? { filesObserved: outcome.filesObserved } : {}),
@@ -13323,6 +13546,10 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     // subagent that outlives its editor is spending a subscription for nobody.
     this.companionsChannel?.dispose();
     this.companionsChannel = undefined;
+    // Last, and only here: both protocols hold sockets on it, and each one's
+    // own dispose has just settled what it owed.
+    this.hostPipeMux?.dispose();
+    this.hostPipeMux = undefined;
     for (const session of this.pool) {
       session.askUserToken = undefined;
       this.dropPendingQuestions(session);
@@ -16139,6 +16366,8 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
           // that is the whole reason §6.6 keeps it rather than asking the CLI
           // not to persist.
           await this.openSession(record.childSessionId, this.sessionCwd(session));
+        } else if (msg.action === "promote") {
+          await this.promoteSubagentSession(session, msg.subagentId);
         }
         break;
       }
@@ -16158,6 +16387,30 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       }
       case "openCrewWithGoal":
         await this.openNewCrewSession(origin, msg.goal, this.defaultWorkflowName());
+        break;
+      case "subagentRoutingSave": {
+        // Written as the shape the setting documents, with empty strings
+        // dropped: `""` is how the page says "not set", and storing it would
+        // make `parseRoutingRules` throw the rule away on the next read.
+        const rules = (Array.isArray(msg.rules) ? msg.rules : []).map((rule) => ({
+          match: Array.isArray(rule.match)
+            ? rule.match.map((word) => String(word ?? "").trim()).filter(Boolean)
+            : [],
+          target: {
+            ...(rule.provider ? { provider: rule.provider } : {}),
+            ...(rule.model ? { model: rule.model } : {}),
+            ...(rule.effort ? { effort: rule.effort } : {}),
+          },
+        }));
+        await this.host.getConfiguration("companions").update("subagents.routing", rules, "global");
+        this.host.appendLine(`[companions] routing: ${rules.length} rule(s)`);
+        this.postAgentRoles();
+        break;
+      }
+      case "setCrewStageSubagents":
+        await this.host.getConfiguration("companions")
+          .update("crew.stagesMayUseSubagents", !!msg.value, "global");
+        this.postAgentRoles();
         break;
       case "setSubagentsEnabled":
         // Global, like the other display and behaviour prefs. The config
@@ -24022,9 +24275,27 @@ ${directives.block}`;
    * One per window, shared by every session: the pipe is the transport, the
    * per-session token is the identity on it.
    */
+  /**
+   * The window's one host pipe (P6, §16).
+   *
+   * Shared by the AP-05 question channel and the AP-16 delegation channel. Two
+   * protocols, two entries in `mcpServers` — the CLI needs two stdio servers —
+   * but one listener underneath, and the per-session token is what routes a
+   * connection to the right one.
+   */
+  private hostPipe(): HostPipeMux {
+    if (!this.hostPipeMux) {
+      this.hostPipeMux = new HostPipeMux({ log: (message) => this.host.appendLine(message) });
+    }
+    return this.hostPipeMux;
+  }
+
+  private hostPipeMux?: HostPipeMux;
+
   private askUser(): AskUserServer {
     if (!this.askUserChannel) {
       this.askUserChannel = new AskUserServer({
+        mux: this.hostPipe(),
         // From `extensionUri`, not a path relative to `out/`: the script is a
         // packaged RESOURCE, and `.vscodeignore` has to keep `resources/mcp/**`
         // in the VSIX or this path exists in development and nowhere else.

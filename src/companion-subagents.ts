@@ -67,6 +67,9 @@ export interface SubagentRecord {
   modelVerified?: boolean;
   profileDowngraded?: string;
   sameProviderAsParent?: boolean;
+  /** P6 §6.6 point 8 — the user kept this child as a session of its own. The
+   *  card stays where it is; the delegation still happened. */
+  promoted?: boolean;
 }
 
 /**
@@ -356,4 +359,88 @@ export function subagentPermissionOverlay(
     ];
   }
   return [];
+}
+
+// ---------------------------------------------------------------------------
+// Delegation depth (D10, §12.3) — P6
+// ---------------------------------------------------------------------------
+
+/**
+ * The deepest chain the design allows, ever.
+ *
+ * Not a setting: D10 calls 2 the hard cap, and §2 non-goal 1 says "there is no
+ * depth 3". A parent delegating to a child that delegates once more is already
+ * hard for a person to follow on one screen; a third level is a run nobody can
+ * account for.
+ */
+export const SUBAGENT_MAX_DEPTH_CAP = 2;
+
+/**
+ * Read `companions.subagents.maxDepth`.
+ *
+ * Anything outside 1..2 clamps rather than throwing, and the caller is told
+ * whether it clamped so it can say so once instead of silently running at a
+ * depth the user did not ask for. A missing or unreadable value is 1 — the
+ * shipped default, and the conservative direction.
+ */
+export function resolveMaxDepth(
+  configured: unknown,
+): { depth: 1 | 2; clamped: boolean } {
+  // Absence is not an out-of-range number. `Number(null)` is 0, which would
+  // otherwise report an unset setting as a clamp and put a notice in front of
+  // someone who never touched it.
+  if (configured === undefined || configured === null || configured === "") {
+    return { depth: 1, clamped: false };
+  }
+  const raw = typeof configured === "number" ? configured : Number(configured);
+  if (!Number.isFinite(raw)) return { depth: 1, clamped: false };
+  const floored = Math.floor(raw);
+  if (floored <= 1) return { depth: 1, clamped: floored < 1 };
+  if (floored >= SUBAGENT_MAX_DEPTH_CAP) {
+    return { depth: SUBAGENT_MAX_DEPTH_CAP, clamped: floored > SUBAGENT_MAX_DEPTH_CAP };
+  }
+  return { depth: 1, clamped: false };
+}
+
+/**
+ * May a session at this depth be handed the delegation tools?
+ *
+ * `depth` is 0 for a user's own session, 1 for its children, 2 for theirs. A
+ * session may delegate while its children would still be within `maxDepth`, so
+ * at the shipped `maxDepth: 1` only depth 0 delegates — which is exactly the
+ * P2-P5 behaviour, now expressed as a rule rather than as "hidden children
+ * never get the server".
+ */
+export function mayDelegateAtDepth(depth: number, maxDepth: 1 | 2): boolean {
+  const own = Number.isFinite(depth) ? Math.max(0, Math.floor(depth)) : 0;
+  return own < maxDepth;
+}
+
+/**
+ * A grandchild's budget, carved out of what the parent has left (§12.3, D10).
+ *
+ * The point of the carve-out is that depth 2 must not multiply the cost of a
+ * turn: a parent allowed four children must not become a parent allowed four
+ * children each allowed four more. So a depth-1 delegator is handed a SHARE of
+ * its own remaining allowance rather than a fresh copy of the limits, and its
+ * concurrency is capped below the parent's so one branch cannot starve the
+ * others.
+ *
+ * Halving (rounded down, floor 1) is the simplest rule that keeps the total
+ * bounded and still lets a grandchild exist at all.
+ */
+export function carveChildLimits(parent: SpawnLimits): SpawnLimits {
+  const share = (used: number, max: number) => Math.max(1, Math.floor(Math.max(0, max - used) / 2));
+  return {
+    running: 0,
+    thisTurn: 0,
+    thisSession: 0,
+    maxConcurrent: Math.max(1, Math.floor(parent.maxConcurrent / 2)),
+    maxPerTurn: share(parent.thisTurn, parent.maxPerTurn),
+    maxPerSession: share(parent.thisSession, parent.maxPerSession),
+    // The live-session pool is one window-wide resource; a grandchild competes
+    // for the same slots as everything else, so this is passed through rather
+    // than divided.
+    poolHeadroom: parent.poolHeadroom,
+  };
 }

@@ -19,6 +19,7 @@ import {
   isPermissionProfile,
   limitRefusal,
   listEligibleTargets,
+  parseRoutingRules,
   providerRefusal,
   resolveChildEffort,
   resolveModel,
@@ -511,6 +512,128 @@ describe("listEligibleTargets — compact by default (§2.1)", () => {
     // rather than a built-in suggestion.
     const listing = listEligibleTargets(input({ usable: [], models: () => coldCache }));
     expect(listing.targets).toEqual([]);
+  });
+});
+
+describe("routing rules (§6.2, P6) — the user's own advice", () => {
+  const rules = [
+    { match: ["inspect", "overview", "grep"], target: { provider: "gemini" as const, effort: "low" as const } },
+    { match: ["review"], target: { provider: "claude" as const } },
+  ];
+
+  it("routes on a keyword in the task, and says a rule decided", () => {
+    const result = resolveTarget(
+      { task: "Give me an overview of the auth module" },
+      input({ routing: rules }),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.target.provider).toBe("gemini");
+    expect(result.resolvedBy).toBe("routing-rule");
+  });
+
+  it("matches on the label too", () => {
+    const result = resolveTarget({ label: "Repo inspector", task: "look around" }, input({ routing: rules }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.target.provider).toBe("gemini");
+  });
+
+  it("takes the first matching rule, so list order is precedence", () => {
+    const result = resolveTarget(
+      { task: "review this and give an overview" },
+      input({ routing: [rules[1], rules[0]] }),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.target.provider).toBe("claude");
+  });
+
+  it("never overrides a provider the agent named itself", () => {
+    // A rule is advice about which worker suits which job, not an override of
+    // a choice somebody already made.
+    const result = resolveTarget(
+      { provider: "codex", task: "overview please" },
+      input({ routing: rules }),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.target.provider).toBe("codex");
+    expect(result.resolvedBy).toBe("explicit");
+  });
+
+  it("never overrides a role's own provider", () => {
+    const result = resolveTarget(
+      { role: { provider: "codex" }, task: "overview please" },
+      input({ routing: rules }),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.target.provider).toBe("codex");
+    expect(result.resolvedBy).toBe("role");
+  });
+
+  it("does NOT widen eligibility — a rule pointing at a disabled companion is skipped", () => {
+    const result = resolveTarget(
+      { task: "overview please" },
+      input({ routing: rules, roster: { gemini: roster({ enabled: false }) } }),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.target.provider).not.toBe("gemini");
+    expect(result.resolvedBy).not.toBe("routing-rule");
+  });
+
+  it("applies the rule's effort, but only where the rule chose the target", () => {
+    const routed = resolveTarget({ task: "overview" }, input({ routing: rules }));
+    expect(routed.ok && routed.target.effort).toBe("low");
+    // Explicit provider wins, so the rule never decided — its effort must not
+    // ride along on a target it did not pick.
+    const explicit = resolveTarget({ provider: "codex", task: "overview" }, input({ routing: rules }));
+    expect(explicit.ok && explicit.target.effort).toBeUndefined();
+  });
+
+  it("still loses to an explicit effort on the tool call", () => {
+    const result = resolveTarget({ task: "overview", effort: "high" }, input({ routing: rules }));
+    expect(result.ok && result.target.effort).toBe("high");
+  });
+
+  it("ignores rules when the spawn said nothing to match against", () => {
+    const result = resolveTarget({}, input({ routing: rules }));
+    expect(result.ok && result.resolvedBy).not.toBe("routing-rule");
+  });
+
+  it("matches case-insensitively", () => {
+    const result = resolveTarget({ task: "OVERVIEW of the repo" }, input({ routing: rules }));
+    expect(result.ok && result.target.provider).toBe("gemini");
+  });
+});
+
+describe("parseRoutingRules — hand-edited JSON, tolerantly read", () => {
+  it("keeps a well-formed rule", () => {
+    expect(parseRoutingRules([{ match: [" grep "], target: { provider: "gemini", effort: "low" } }]))
+      .toEqual([{ match: ["grep"], target: { provider: "gemini", effort: "low" } }]);
+  });
+
+  it("drops a rule with no usable keyword rather than throwing", () => {
+    // One malformed entry must not stop the other rules working, and must
+    // certainly not stop a spawn.
+    expect(parseRoutingRules([{ match: ["", "  "], target: { provider: "gemini" } }])).toEqual([]);
+    expect(parseRoutingRules([{ target: { provider: "gemini" } }])).toEqual([]);
+  });
+
+  it("drops a rule that names nothing to route to", () => {
+    expect(parseRoutingRules([{ match: ["grep"], target: {} }])).toEqual([]);
+    expect(parseRoutingRules([{ match: ["grep"] }])).toEqual([]);
+  });
+
+  it("drops an unknown provider and effort, keeping what is usable", () => {
+    expect(parseRoutingRules([{ match: ["x"], target: { provider: "openai", model: "m-fast", effort: "turbo" } }]))
+      .toEqual([{ match: ["x"], target: { model: "m-fast" } }]);
+  });
+
+  it("answers empty for anything that is not a list", () => {
+    for (const bad of [undefined, null, {}, "rules", 7]) expect(parseRoutingRules(bad)).toEqual([]);
   });
 });
 

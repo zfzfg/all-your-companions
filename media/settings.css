@@ -1888,3 +1888,47 @@ a.settings-github-flow-open {
 .settings-roster-select,
 .settings-roster-notes { width: 100%; min-width: 0; }
 .settings-roster-checkbox { display: inline-flex; align-items: center; height: 24px; }
+
+/* AP-16 §6.2 P6 — routing rules. Order is precedence, so the rows carry a
+   move-up control: a narrow rule above a broad one is how a rule list is meant
+   to behave, and that is an edit rather than cosmetics. */
+.settings-routing {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.settings-routing-head,
+.settings-routing-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 2fr) minmax(90px, 1fr) minmax(90px, 1fr) minmax(80px, 1fr) auto auto;
+  gap: 6px;
+  align-items: center;
+}
+.settings-routing-head {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
+.settings-routing-keywords { min-width: 0; }
+.settings-routing-move,
+.settings-routing-remove {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--vscode-textLink-foreground);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0 2px;
+}
+.settings-routing-move:disabled {
+  color: var(--vscode-disabledForeground, var(--vscode-descriptionForeground));
+  cursor: default;
+}
+.settings-routing-move:not(:disabled):hover,
+.settings-routing-remove:hover { text-decoration: underline; }
+/* At phone width the grid would squeeze every select to nothing. */
+@media (max-width: 560px) {
+  .settings-routing-head { display: none; }
+  .settings-routing-row { grid-template-columns: 1fr 1fr; }
+  .settings-routing-keywords { grid-column: 1 / -1; }
+}

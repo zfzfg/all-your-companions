@@ -284,6 +284,9 @@ export const INBOUND_DISPOSITION: Record<WebviewMsg["type"], InboundDisposition>
   // AP-16. Roster and master switch are machine-wide settings about which local
   // CLIs may be spent — host-local, like every other settings write.
   setSubagentsEnabled: "host-local",
+  // Machine-wide settings about which local CLIs may be spent, like the roster.
+  subagentRoutingSave: "host-local",
+  setCrewStageSubagents: "host-local",
   // Acts on a live child process on this machine.
   companionSubagentAction: "host-local",
   subagentRosterSave: "host-local",
@@ -627,6 +630,8 @@ export const REMOTE_REQUIRES_BOUND_SESSION: Record<WebviewMsg["type"], boolean> 
   // host-local, and addressed by its own `sessionId` rather than the bound one.
   setSessionType: false,
   setSubagentsEnabled: false,
+  subagentRoutingSave: false,
+  setCrewStageSubagents: false,
   companionSubagentAction: false,
   subagentRosterSave: false,
   workflowStart: false,

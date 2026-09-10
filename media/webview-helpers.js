@@ -37,7 +37,7 @@
     "remoteStatus", "ruleFiles", "permissionRules", "agentRoles", "workflowGenerator",
   ];
   const WEBVIEW_MESSAGE_TYPES = [
-    "ready", "remotePreferences", "send", "newSession", "cancel", "pickModel", "setMode", "setSessionType", "setSubagentsEnabled", "subagentRosterSave", "companionSubagentAction", "workflowStart", "workflowGateAction", "openCrewWithGoal", "setConfigOption", "removeChip",
+    "ready", "remotePreferences", "send", "newSession", "cancel", "pickModel", "setMode", "setSessionType", "setSubagentsEnabled", "subagentRosterSave", "subagentRoutingSave", "setCrewStageSubagents", "companionSubagentAction", "workflowStart", "workflowGateAction", "openCrewWithGoal", "setConfigOption", "removeChip",
     "toggleChip", "openFile", "showInFolder", "openUrl", "openText", "openDiff", "revertToolEdit", "reviewRevertFile", "reviewRevertAll", "exportExpr", "setEffort",
     "addProjectFolder", "removeProjectFolder", "createProject", "cloneProject", "setupGithubCli", "listGithubRepos", "githubSignOut", "githubLoginWithToken",
     "openGlobalConfig", "openProjectConfig", "listRuleFiles", "openRuleFile", "appendRuleFile", "listAgentRoles", "saveAgentRole", "deleteAgentRole", "saveCrewFlow", "deleteCrewFlow", "saveWorkflow", "validateWorkflow", "generateWorkflow", "cancelWorkflowGenerate", "setDefaultWorkflow", "addWorkflowStagesBlock", "runWorkflow", "listPermissionRules", "deletePermissionRule", "adoptPermissionRules", "listMcpServers", "connectMcpConnector", "disconnectMcpConnector", "completeMcpConnectorOAuth", "showLogs", "toggleDevTools", "openSettings", "openSettingsSurface", "closeSettingsSurface", "dismissWelcomeTip", "welcomeTipShown", "moveView",

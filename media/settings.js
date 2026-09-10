@@ -1047,6 +1047,29 @@
       hostLocal: true,
     },
     {
+      id: "subagentRouting",
+      category: "agents",
+      title: "Routing rules",
+      description:
+        "Prefer a particular companion when a task mentions certain words — \"grep\" or \"overview\" to the fast one, "
+        + "\"review\" to a different one. Advice only: what the agent asks for explicitly still wins.",
+      kind: "subagentRouting",
+      hostLocal: true,
+    },
+    {
+      id: "crewStageSubagents",
+      category: "agents",
+      title: "Crew stages may use subagents",
+      description:
+        "Let a workflow stage start subagents of its own, when the workflow's stage asks for it. Off by default: "
+        + "the workflow is already the orchestration, and a run inside a run is harder to follow.",
+      kind: "toggle",
+      defaultValue: false,
+      get: (s) => !!(s && s.crewStagesMayUseSubagents),
+      message: (value) => ({ type: "setCrewStageSubagents", value }),
+      hostLocal: true,
+    },
+    {
       id: "crewFlows",
       category: "agents",
       title: "Crew flows",
@@ -3459,9 +3482,16 @@
     return Array.isArray(snapshot && snapshot.subagentRoster) ? snapshot.subagentRoster : null;
   }
 
-  function rosterPatch(providerId, patch) {
-    post({ type: "subagentRosterSave", provider: providerId, patch });
-  }
+  /**
+   * Controls in this file are MARKUP ONLY.
+   *
+   * `post` is a local of `mount`, and every repaint rebuilds the surface — so a
+   * listener attached inside a renderer both cannot reach `post` and would be
+   * thrown away on the next frame. The established pattern is a data attribute
+   * here and one `body.querySelectorAll(...)` pass in `mount`, which re-wires
+   * after every repaint. Anything that carries `data-roster-field` /
+   * `data-routing-field` is wired there.
+   */
 
   function rosterField(labelText, control, hint) {
     const field = document.createElement("label");
@@ -3480,9 +3510,11 @@
     return field;
   }
 
-  function rosterSelect(value, options, onChange) {
+  function rosterSelect(value, options, rosterField, routingField) {
     const select = document.createElement("select");
     select.className = "settings-input settings-roster-select";
+    if (rosterField) select.dataset.rosterField = rosterField;
+    if (routingField) select.dataset.routingField = routingField;
     for (const option of options) {
       const el = document.createElement("option");
       el.value = option.value;
@@ -3490,7 +3522,6 @@
       if (option.value === value) el.selected = true;
       select.appendChild(el);
     }
-    select.addEventListener("change", () => onChange(select.value));
     return select;
   }
 
@@ -3506,7 +3537,7 @@
     const toggle = document.createElement("input");
     toggle.type = "checkbox";
     toggle.checked = row.enabled !== false;
-    toggle.addEventListener("change", () => rosterPatch(row.id, { enabled: toggle.checked }));
+    toggle.dataset.rosterField = "enabled";
     const toggleLabel = document.createElement("label");
     toggleLabel.className = "settings-roster-toggle";
     toggleLabel.appendChild(toggle);
@@ -3536,7 +3567,7 @@
     }
     body.appendChild(rosterField(
       "Default model",
-      rosterSelect(row.defaultModel || "", modelOptions, (value) => rosterPatch(row.id, { defaultModel: value })),
+      rosterSelect(row.defaultModel || "", modelOptions, "defaultModel"),
       "Used when the agent does not name one.",
     ));
 
@@ -3545,14 +3576,14 @@
       .concat(efforts.map((level) => ({ value: level, label: level })));
     body.appendChild(rosterField(
       "Max effort",
-      rosterSelect(row.maxEffort || "", effortOptions, (value) => rosterPatch(row.id, { maxEffort: value })),
+      rosterSelect(row.maxEffort || "", effortOptions, "maxEffort"),
       "A higher request is lowered, and the agent is told.",
     ));
 
     const writeToggle = document.createElement("input");
     writeToggle.type = "checkbox";
     writeToggle.checked = row.allowWrite !== false;
-    writeToggle.addEventListener("change", () => rosterPatch(row.id, { allowWrite: writeToggle.checked }));
+    writeToggle.dataset.rosterField = "allowWrite";
     const writeWrap = document.createElement("span");
     writeWrap.className = "settings-roster-checkbox";
     writeWrap.appendChild(writeToggle);
@@ -3567,11 +3598,10 @@
     notes.className = "settings-input settings-roster-notes";
     notes.value = row.notes || "";
     notes.placeholder = "fast and cheap, good for repo scans; weak at large refactors";
-    // On blur, not on every keystroke: each save is a settings write, and a
-    // write per character would fight the user's own typing.
-    notes.addEventListener("blur", () => {
-      if (notes.value !== (row.notes || "")) rosterPatch(row.id, { notes: notes.value });
-    });
+    // Saved on blur, not on every keystroke: each save is a settings write, and
+    // a write per character would fight the user's own typing. `mount` wires it.
+    notes.dataset.rosterField = "notes";
+    notes.dataset.rosterWas = row.notes || "";
     const notesField = rosterField(
       "Notes for the agent",
       notes,
@@ -3601,6 +3631,122 @@
       el.appendChild(off);
     }
     for (const row of rows) el.appendChild(renderRosterRow(row, snapshot));
+    return el;
+  }
+
+  // ------------------------------------------------------ routing rules --
+  //
+  // AP-16 §6.2, P6. An ordered list of "when the task mentions any of these
+  // words, prefer this companion". The keywords are the user's and so is the
+  // target — which is the whole reason this key exists rather than a table of
+  // model strengths in code (D12).
+  //
+  // A rule never widens what is eligible: one pointing at a companion that is
+  // logged out or turned off simply does not apply, and resolution falls
+  // through. The hint under the list says so, because a rule that silently
+  // does nothing is otherwise indistinguishable from a bug.
+
+  function subagentRoutingOf(snapshot) {
+    return Array.isArray(snapshot && snapshot.subagentRouting) ? snapshot.subagentRouting : null;
+  }
+
+  function renderRoutingRow(rule, index, rules, snapshot) {
+    const row = document.createElement("div");
+    row.className = "settings-routing-row";
+    row.dataset.routingIndex = String(index);
+
+    const keywords = document.createElement("input");
+    keywords.type = "text";
+    keywords.className = "settings-input settings-routing-keywords";
+    keywords.value = (rule.match || []).join(", ");
+    keywords.placeholder = "inspect, overview, grep";
+    keywords.setAttribute("aria-label", "Keywords");
+    // Saved on blur, not per keystroke: each save is a settings write, and one
+    // per character would fight the user's own typing. `mount` wires it.
+    keywords.dataset.routingField = "match";
+    keywords.dataset.routingWas = (rule.match || []).join(", ");
+    row.appendChild(keywords);
+
+    const providers = [{ value: "", label: "Any companion" }].concat(
+      (snapshot.agentRoleProviders || []).map((provider) => ({
+        value: provider.id,
+        label: provider.label || provider.id,
+      })),
+    );
+    row.appendChild(rosterSelect(rule.provider || "", providers, undefined, "provider"));
+
+    const provider = (snapshot.agentRoleProviders || []).find((p) => p.id === rule.provider);
+    const models = [{ value: "", label: "Its own default" }].concat(
+      ((provider && provider.models) || []).map((model) => ({
+        value: model.modelId,
+        label: model.name || model.modelId,
+      })),
+    );
+    row.appendChild(rosterSelect(rule.model || "", models, undefined, "model"));
+
+    const efforts = [{ value: "", label: "Default effort" }].concat(
+      (Array.isArray(snapshot.efforts) ? snapshot.efforts : []).map((level) => ({
+        value: level,
+        label: level,
+      })),
+    );
+    row.appendChild(rosterSelect(rule.effort || "", efforts, undefined, "effort"));
+
+    // Order is precedence, so moving a rule up is a real edit rather than
+    // cosmetics — a narrow rule above a broad one is how a rule list is meant
+    // to behave.
+    const up = document.createElement("button");
+    up.type = "button";
+    up.className = "settings-routing-move";
+    up.textContent = "↑";
+    up.title = "Move up — earlier rules win";
+    up.disabled = index === 0;
+    row.appendChild(up);
+
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "settings-routing-remove";
+    remove.textContent = "Remove";
+    row.appendChild(remove);
+
+    return row;
+  }
+
+  function renderSubagentRouting(snapshot, env) {
+    const el = document.createElement("div");
+    el.className = "settings-routing";
+    el.dataset.id = "subagentRouting";
+
+    const rules = subagentRoutingOf(snapshot);
+    if (!rules) {
+      el.appendChild(settingsState("Reading routing rules…"));
+      return el;
+    }
+
+    if (rules.length) {
+      const head = document.createElement("div");
+      head.className = "settings-routing-head";
+      for (const label of ["When the task mentions", "Use", "Model", "Effort", "", ""]) {
+        const cell = document.createElement("span");
+        cell.textContent = label;
+        head.appendChild(cell);
+      }
+      el.appendChild(head);
+    }
+    rules.forEach((rule, index) => el.appendChild(renderRoutingRow(rule, index, rules, snapshot)));
+
+    const add = document.createElement("button");
+    add.type = "button";
+    add.className = "settings-action settings-routing-new";
+    add.textContent = "Add rule";
+    el.appendChild(add);
+
+    const hint = document.createElement("p");
+    hint.className = "settings-agent-field-hint";
+    hint.textContent =
+      "Rules are advice, not overrides: the agent's own choice and a role's companion both win, "
+      + "and a rule pointing at a companion that is off or signed out is skipped. Earlier rules win.";
+    el.appendChild(hint);
     return el;
   }
 
@@ -4384,6 +4530,7 @@
     if (row.kind === "routines") return renderRoutines(snapshot, env);
     if (row.kind === "agentRoles") return renderAgentRoles(snapshot, env);
     if (row.kind === "subagentRoster") return renderSubagentRoster(snapshot, env);
+    if (row.kind === "subagentRouting") return renderSubagentRouting(snapshot, env);
     if (row.kind === "crewFlows") return renderCrewFlows(snapshot, env);
     if (row.kind === "workflows") return renderWorkflows(snapshot, env);
     if (row.kind === "permissionRules") return renderPermissionRules(snapshot, env);
@@ -5663,6 +5810,97 @@
           AGENT_UI.originScope = "";
           AGENT_UI.confirmRemove = "";
           paint();
+        });
+      });
+
+      // AP-16 §6.2 — the subagent roster. Wired here rather than in the
+      // renderer because `post` is a local of this function and every repaint
+      // rebuilds the surface: a listener attached during render would be both
+      // unable to reach `post` and thrown away on the next frame.
+      body.querySelectorAll("[data-roster-field]").forEach((el) => {
+        const row = el.closest(".settings-roster-row");
+        const provider = row && row.dataset.provider;
+        if (!provider) return;
+        const field = el.dataset.rosterField;
+        const send = (value) => post({
+          type: "subagentRosterSave",
+          provider,
+          patch: { [field]: value },
+        });
+        if (el.type === "checkbox") {
+          el.addEventListener("change", () => send(el.checked));
+          return;
+        }
+        if (el.tagName === "SELECT") {
+          el.addEventListener("change", () => send(el.value));
+          return;
+        }
+        // Free text: on blur, and only when it actually changed, so tabbing
+        // through the table does not write the same note back four times.
+        el.addEventListener("blur", () => {
+          if (el.value === (el.dataset.rosterWas || "")) return;
+          el.dataset.rosterWas = el.value;
+          send(el.value);
+        });
+      });
+
+      // AP-16 §6.2 P6 — routing rules. The whole list is posted on every edit:
+      // order is precedence here, so a per-row patch could not express a move.
+      const routingRules = () =>
+        Array.from(body.querySelectorAll(".settings-routing-row")).map((row) => {
+          const field = (name) => row.querySelector('[data-routing-field="' + name + '"]');
+          const keywords = field("match");
+          return {
+            match: String((keywords && keywords.value) || "")
+              .split(",")
+              .map((word) => word.trim())
+              .filter(Boolean),
+            provider: (field("provider") && field("provider").value) || "",
+            model: (field("model") && field("model").value) || "",
+            effort: (field("effort") && field("effort").value) || "",
+          };
+        });
+      const saveRouting = (rules) => post({ type: "subagentRoutingSave", rules });
+
+      body.querySelectorAll(".settings-routing-row [data-routing-field]").forEach((el) => {
+        if (el.tagName === "SELECT") {
+          el.addEventListener("change", () => {
+            const index = Number(el.closest(".settings-routing-row").dataset.routingIndex);
+            const rules = routingRules();
+            // Changing the companion drops a model that belonged to the old one
+            // — a model id means nothing next to a companion that lacks it.
+            if (el.dataset.routingField === "provider" && rules[index]) rules[index].model = "";
+            saveRouting(rules);
+          });
+          return;
+        }
+        el.addEventListener("blur", () => {
+          if (el.value === (el.dataset.routingWas || "")) return;
+          el.dataset.routingWas = el.value;
+          saveRouting(routingRules());
+        });
+      });
+
+      body.querySelectorAll(".settings-routing-move").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const index = Number(btn.closest(".settings-routing-row").dataset.routingIndex);
+          if (!index) return;
+          const rules = routingRules();
+          rules.splice(index - 1, 0, rules.splice(index, 1)[0]);
+          saveRouting(rules);
+        });
+      });
+
+      body.querySelectorAll(".settings-routing-remove").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const index = Number(btn.closest(".settings-routing-row").dataset.routingIndex);
+          saveRouting(routingRules().filter((_, i) => i !== index));
+        });
+      });
+
+      body.querySelectorAll(".settings-routing-new").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          saveRouting(routingRules().concat([{ match: [], provider: "", model: "", effort: "" }]));
         });
       });
 

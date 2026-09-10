@@ -146,6 +146,21 @@ export interface WorkflowGeneratorView {
  * cold, not that the provider has no models, so the page offers free text
  * instead of an empty dropdown.
  */
+/**
+ * One routing rule in the settings table (AP-16 §6.2, P6).
+ *
+ * Flattened — provider / model / effort rather than a nested `target` — because
+ * the table edits three independent selects and a nested object would make
+ * every change a merge. Empty strings mean "not set", which is a real answer
+ * here: a rule may pin only an effort.
+ */
+export interface SubagentRoutingRow {
+  match: string[];
+  provider: string;
+  model: string;
+  effort: string;
+}
+
 /** One companion's row in the subagent roster (AP-16 §6.2). */
 export interface SubagentRosterRow {
   id: AcpProvider;
@@ -748,6 +763,10 @@ export type HostMsg =
       subagentRoster?: SubagentRosterRow[];
       /** The master switch, so the roster can grey itself out when it is off. */
       subagentsEnabled?: boolean;
+      /** P6 — the user's routing rules, flattened for the settings table. */
+      subagentRouting?: SubagentRoutingRow[];
+      /** P6 §7.9 — the global half of the crew-stage delegation gate. */
+      crewStagesMayUseSubagents?: boolean;
       /** Effort levels, generated from `EffortLevel` — never typed out (D12). */
       efforts?: string[];
       problems: string[];
@@ -870,6 +889,14 @@ export type HostMsg =
       errorCode?: string;
       /** The child's own session id, for "Open transcript". */
       sessionId?: string;
+      /**
+       * AP-16 §7.9 / P6 — what started this delegation, when it was NOT the
+       * conversation the card sits in: a crew stage, or a depth-1 child. Absent
+       * in the ordinary case, where saying it would be noise.
+       */
+      startedBy?: string;
+      /** P6 — this child can be promoted to a session of its own (§6.6 point 8). */
+      promotable?: boolean;
       summary?: string;
       filesReported?: string[];
       filesObserved?: string[];
@@ -1447,7 +1474,7 @@ export type WebviewMsg =
   | {
       type: "companionSubagentAction";
       subagentId: string;
-      action: "cancel" | "openTranscript" | "approve" | "deny";
+      action: "cancel" | "openTranscript" | "approve" | "deny" | "promote";
     }
   /**
    * AP-17. Start a workflow in this Crew session (or, with `openNew`, in a
@@ -1490,6 +1517,16 @@ export type WebviewMsg =
     }
   /** AP-17 D8. Open a new Crew session, optionally with this idea already in it. */
   | { type: "openCrewWithGoal"; goal: string }
+  /**
+   * AP-16 §6.2, P6 — the whole routing list, replaced.
+   *
+   * The whole list rather than a patch, unlike the roster: order IS precedence
+   * here, so a per-row patch could not express a move, and a list short enough
+   * to edit by hand is short enough to send whole.
+   */
+  | { type: "subagentRoutingSave"; rules: SubagentRoutingRow[] }
+  /** AP-17 §7.9, P6. Host-local; writes `companions.crew.stagesMayUseSubagents`. */
+  | { type: "setCrewStageSubagents"; value: boolean }
   /** AP-16 §6.2 master switch. Host-local; writes `companions.subagents.enabled`. */
   | { type: "setSubagentsEnabled"; value: boolean }
   /**
@@ -2054,7 +2091,7 @@ const HOST_MESSAGE_TYPE_MAP: Record<HostMsg["type"], true> = {
 
 const WEBVIEW_MESSAGE_TYPE_MAP: Record<WebviewMsg["type"], true> = {
   ready: true, remotePreferences: true, send: true, newSession: true, cancel: true, pickModel: true,
-  setMode: true, setSessionType: true, setSubagentsEnabled: true, subagentRosterSave: true, companionSubagentAction: true, workflowStart: true, workflowGateAction: true, openCrewWithGoal: true, setConfigOption: true, removeChip: true, toggleChip: true, openFile: true, showInFolder: true, openUrl: true,
+  setMode: true, setSessionType: true, setSubagentsEnabled: true, subagentRosterSave: true, subagentRoutingSave: true, setCrewStageSubagents: true, companionSubagentAction: true, workflowStart: true, workflowGateAction: true, openCrewWithGoal: true, setConfigOption: true, removeChip: true, toggleChip: true, openFile: true, showInFolder: true, openUrl: true,
   openText: true, openDiff: true, revertToolEdit: true, reviewRevertFile: true, reviewRevertAll: true, exportExpr: true, setEffort: true, openGlobalConfig: true,
   addProjectFolder: true, removeProjectFolder: true, createProject: true, cloneProject: true, setupGithubCli: true, listGithubRepos: true, githubSignOut: true, githubLoginWithToken: true,
   openProjectConfig: true, listRuleFiles: true, openRuleFile: true, appendRuleFile: true,

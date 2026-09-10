@@ -156,6 +156,60 @@ describe("companion subagent card (real chat.js in a DOM)", () => {
   });
 });
 
+describe("P6 — origin and actions", () => {
+  it("says where a delegation came from when it was not this conversation", () => {
+    // A subagent started by a crew stage renders in the Crew session, so
+    // without this it would look like the user's own session started it.
+    const { window, doc } = bootWebview();
+    dispatch(window, card({ startedBy: "Stage: review" }));
+    expect(cardEl(doc).textContent).toContain("Stage: review");
+  });
+
+  it("stays quiet in the ordinary case, where saying it would be noise", () => {
+    const { window, doc } = bootWebview();
+    dispatch(window, card());
+    expect((cardEl(doc).querySelector(".companion-origin") as HTMLElement).hidden).toBe(true);
+  });
+
+  it("offers Open transcript once the child has a session", () => {
+    const { window, doc } = bootWebview();
+    dispatch(window, card({ status: "completed", endedAt: 2_000, sessionId: "child-1" }));
+    const labels = [...cardEl(doc).querySelectorAll(".companion-action")].map((el) => el.textContent);
+    expect(labels).toContain("Open transcript");
+  });
+
+  it("offers Keep as a session only when the host says it can be promoted", () => {
+    const { window, doc } = bootWebview();
+    dispatch(window, card({ status: "completed", endedAt: 2_000, sessionId: "child-1" }));
+    expect([...cardEl(doc).querySelectorAll(".companion-action")].map((el) => el.textContent))
+      .not.toContain("Keep as a session");
+    dispatch(window, card({ status: "completed", endedAt: 2_000, sessionId: "child-1", promotable: true }));
+    expect([...cardEl(doc).querySelectorAll(".companion-action")].map((el) => el.textContent))
+      .toContain("Keep as a session");
+  });
+
+  it("posts the promote action for this child", () => {
+    const { window, doc, posted } = bootWebview();
+    dispatch(window, card({ status: "completed", endedAt: 2_000, sessionId: "child-1", promotable: true }));
+    const promote = [...cardEl(doc).querySelectorAll(".companion-action")]
+      .find((el) => el.textContent === "Keep as a session")!;
+    click(window, promote);
+    expect(posted).toContainEqual({
+      type: "companionSubagentAction",
+      subagentId: "sa_1",
+      action: "promote",
+    });
+  });
+
+  it("shows no action bar at all while the child is still running", () => {
+    // A button that answers with a notice explaining why it does not apply is
+    // worse than no button.
+    const { window, doc } = bootWebview();
+    dispatch(window, card());
+    expect((cardEl(doc).querySelector(".companion-actions") as HTMLElement).hidden).toBe(true);
+  });
+});
+
 describe("the subagent tray (§6.10 point 5)", () => {
   const tray = (doc: Document) => doc.getElementById("subagent-tray") as HTMLElement;
 

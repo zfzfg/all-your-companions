@@ -4,7 +4,11 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  SUBAGENT_MAX_DEPTH_CAP,
   SubagentRegistry,
+  carveChildLimits,
+  mayDelegateAtDepth,
+  resolveMaxDepth,
   deriveSubagentLabel,
   isTerminalSubagentStatus,
   profileBadge,
@@ -208,6 +212,99 @@ describe("bookkeeping", () => {
       record({ subagentId: "sa_3", target: { provider: "codex" } }),
     ];
     expect(runningTargets(running)).toEqual(["gemini", "codex"]);
+  });
+});
+
+describe("delegation depth (D10, §12.3) — P6", () => {
+  it("reads the shipped default as 1", () => {
+    expect(resolveMaxDepth(1)).toEqual({ depth: 1, clamped: false });
+    expect(resolveMaxDepth(undefined)).toEqual({ depth: 1, clamped: false });
+  });
+
+  it("allows 2, which is the hard cap", () => {
+    expect(resolveMaxDepth(2)).toEqual({ depth: 2, clamped: false });
+    expect(SUBAGENT_MAX_DEPTH_CAP).toBe(2);
+  });
+
+  it("clamps anything deeper — there is no depth 3", () => {
+    // §2 non-goal 1 is explicit about this, and it is a design limit rather
+    // than a setting: a third level is a run nobody can account for.
+    expect(resolveMaxDepth(3)).toEqual({ depth: 2, clamped: true });
+    expect(resolveMaxDepth(99)).toEqual({ depth: 2, clamped: true });
+  });
+
+  it("clamps a nonsense value up to 1 rather than disabling delegation", () => {
+    expect(resolveMaxDepth(0)).toEqual({ depth: 1, clamped: true });
+    expect(resolveMaxDepth(-4)).toEqual({ depth: 1, clamped: true });
+  });
+
+  it("falls back to 1 for a value it cannot read at all", () => {
+    for (const bad of ["deep", null, {}, NaN]) {
+      expect(resolveMaxDepth(bad)).toEqual({ depth: 1, clamped: false });
+    }
+  });
+
+  it("lets only the user's own session delegate at the default depth", () => {
+    // Which is exactly the P2-P5 behaviour, now stated as a rule rather than
+    // as "hidden children never get the server".
+    expect(mayDelegateAtDepth(0, 1)).toBe(true);
+    expect(mayDelegateAtDepth(1, 1)).toBe(false);
+  });
+
+  it("lets a child delegate once when the user opted into depth 2", () => {
+    expect(mayDelegateAtDepth(0, 2)).toBe(true);
+    expect(mayDelegateAtDepth(1, 2)).toBe(true);
+    expect(mayDelegateAtDepth(2, 2)).toBe(false);
+  });
+
+  it("treats a missing or broken depth as the user's own session", () => {
+    expect(mayDelegateAtDepth(NaN, 1)).toBe(true);
+    expect(mayDelegateAtDepth(-1, 1)).toBe(true);
+  });
+});
+
+describe("carving a grandchild's budget out of the parent's (§12.3)", () => {
+  const parent = {
+    running: 1,
+    maxConcurrent: 4,
+    thisTurn: 2,
+    maxPerTurn: 6,
+    thisSession: 4,
+    maxPerSession: 20,
+    poolHeadroom: 3,
+  };
+
+  it("halves the parent's REMAINING allowance, not its total", () => {
+    // The point of the carve-out: depth 2 must not multiply the cost of a
+    // turn. A parent that has already spent 2 of 6 this turn has 4 left, so a
+    // grandchild gets 2 — not 3, and certainly not another 6.
+    const child = carveChildLimits(parent);
+    expect(child.maxPerTurn).toBe(2);
+    expect(child.maxPerSession).toBe(8);
+  });
+
+  it("caps concurrency below the parent's, so one branch cannot starve the rest", () => {
+    expect(carveChildLimits(parent).maxConcurrent).toBe(2);
+  });
+
+  it("starts the child's own counters at zero", () => {
+    const child = carveChildLimits(parent);
+    expect(child.running).toBe(0);
+    expect(child.thisTurn).toBe(0);
+    expect(child.thisSession).toBe(0);
+  });
+
+  it("still allows one, rather than handing over a budget of zero", () => {
+    // A grandchild allowed nothing is a feature that looks enabled and is not.
+    const exhausted = { ...parent, thisTurn: 6, thisSession: 20, maxConcurrent: 1 };
+    const child = carveChildLimits(exhausted);
+    expect(child.maxPerTurn).toBe(1);
+    expect(child.maxPerSession).toBe(1);
+    expect(child.maxConcurrent).toBe(1);
+  });
+
+  it("passes the pool headroom through — it is one window-wide resource", () => {
+    expect(carveChildLimits(parent).poolHeadroom).toBe(3);
   });
 });
 

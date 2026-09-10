@@ -155,6 +155,15 @@ export interface EligibilityInput {
   forbiddenThisTurn?: boolean;
   /** The master switch, or this session's gear override. */
   subagentsEnabled?: boolean;
+  /**
+   * The user's own routing rules (`companions.subagents.routing`, P6).
+   *
+   * Step 3 of §6.4.2's target resolution. Consulted only when the agent, the
+   * role and an explicit directive have all left the target open — a rule is
+   * advice about which worker suits which job, not an override of a choice
+   * somebody already made.
+   */
+  routing?: readonly RoutingRule[];
 }
 
 /** Refusal codes (§6.13). Every one of them is user-visible somewhere. */
@@ -185,11 +194,88 @@ export interface SpawnRequest {
     effort?: EffortLevel;
     preferDifferentProvider?: boolean;
   };
+  /** The spawn's own words, matched against the user's routing rules (§6.2). */
+  task?: string;
+  /** A short name the spawn gave itself; matched alongside the task. */
+  label?: string;
+}
+
+/**
+ * One user-written routing rule (`companions.subagents.routing`, P6).
+ *
+ * The keywords are the USER'S, and so is the target — which is the whole reason
+ * this key exists rather than a table of model strengths in code (D12). A rule
+ * is advice about which worker suits which kind of job; it never widens what is
+ * eligible, so a rule pointing at a companion that is logged out simply does
+ * not apply.
+ */
+export interface RoutingRule {
+  /** Case-insensitive substrings. Any one of them matching is a match. */
+  match: string[];
+  target: { provider?: AcpProvider; model?: string; effort?: EffortLevel };
+}
+
+/**
+ * The first rule whose keywords appear in the spawn's task or label.
+ *
+ * Ordered, first match wins — the settings list order IS the precedence, which
+ * is what makes a narrow rule above a broad one behave the way anyone would
+ * expect from a rule list.
+ */
+export function matchRoutingRule(
+  rules: readonly RoutingRule[] | undefined,
+  request: { task?: string; label?: string },
+): RoutingRule | undefined {
+  const haystack = `${request.task ?? ""} ${request.label ?? ""}`.toLowerCase();
+  if (!haystack.trim()) return undefined;
+  return (rules ?? []).find((rule) =>
+    (rule.match ?? []).some((keyword) => {
+      const needle = String(keyword ?? "").trim().toLowerCase();
+      return !!needle && haystack.includes(needle);
+    }),
+  );
+}
+
+/**
+ * Normalize the raw setting into rules.
+ *
+ * Tolerant, and deliberately so: this is hand-edited JSON in a settings file.
+ * A rule with no usable keyword or no target is DROPPED rather than throwing —
+ * one malformed entry must not stop every other rule from working, and it must
+ * certainly not stop a spawn.
+ */
+export function parseRoutingRules(raw: unknown): RoutingRule[] {
+  if (!Array.isArray(raw)) return [];
+  const rules: RoutingRule[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const record = entry as Record<string, unknown>;
+    const match = Array.isArray(record.match)
+      ? record.match.filter((k): k is string => typeof k === "string" && !!k.trim()).map((k) => k.trim())
+      : [];
+    if (!match.length) continue;
+    const rawTarget = (record.target ?? {}) as Record<string, unknown>;
+    const provider = typeof rawTarget.provider === "string" && (ACP_PROVIDERS as readonly string[]).includes(rawTarget.provider)
+      ? (rawTarget.provider as AcpProvider)
+      : undefined;
+    const model = typeof rawTarget.model === "string" && rawTarget.model.trim()
+      ? rawTarget.model.trim()
+      : undefined;
+    const effort = isEffortLevel(rawTarget.effort) ? rawTarget.effort : undefined;
+    // A rule that names nothing to route TO is not a rule.
+    if (!provider && !model && !effort) continue;
+    rules.push({
+      match,
+      target: { ...(provider ? { provider } : {}), ...(model ? { model } : {}), ...(effort ? { effort } : {}) },
+    });
+  }
+  return rules;
 }
 
 export type ResolvedBy =
   | "explicit"
   | "role"
+  | "routing-rule"
   | "roster-default"
   | "prefer-different-provider"
   | "roster-order";
@@ -245,11 +331,14 @@ export interface EffortDefaults {
  */
 export function resolveChildEffort(
   provider: AcpProvider,
-  request: { effort?: EffortLevel; roleEffort?: EffortLevel },
+  request: { effort?: EffortLevel; roleEffort?: EffortLevel; routedEffort?: EffortLevel },
   defaults: EffortDefaults = {},
 ): EffortLevel | undefined {
   if (isEffortLevel(request.effort)) return request.effort;
   if (isEffortLevel(request.roleEffort)) return request.roleEffort;
+  // Step 3 of §6.3.1's chain, in the same place routing sits for the provider:
+  // after anything explicit, before the session gear and the roster.
+  if (isEffortLevel(request.routedEffort)) return request.routedEffort;
 
   const perProvider = defaults.sessionOverride?.[provider];
   const forAll = defaults.sessionOverride?.["*"];
@@ -475,6 +564,13 @@ export function resolveTarget(request: SpawnRequest, input: EligibilityInput): E
   const eligible = eligibleProviders(input);
   const alternatives = (): Target[] => eligible.map((provider) => ({ provider }));
 
+  // Matched once, up front, so the model and effort steps below can consult the
+  // same rule the provider step did rather than re-matching and possibly
+  // landing on a different one.
+  const routed = request.provider || request.role?.provider
+    ? undefined
+    : matchRoutingRule(input.routing, request);
+
   // --- which provider ---
   let provider: AcpProvider | undefined;
   let resolvedBy: ResolvedBy = "explicit";
@@ -485,6 +581,12 @@ export function resolveTarget(request: SpawnRequest, input: EligibilityInput): E
   } else if (request.role?.provider && !providerRefusal(input, request.role.provider)) {
     provider = request.role.provider;
     resolvedBy = "role";
+  } else if (routed?.target.provider && !providerRefusal(input, routed.target.provider)) {
+    // Step 3 — the user's own routing rules. A rule never WIDENS eligibility:
+    // one pointing at a companion that is logged out or turned off simply does
+    // not apply, and resolution falls through to the steps below.
+    provider = routed.target.provider;
+    resolvedBy = "routing-rule";
   } else if (request.role?.preferDifferentProvider) {
     provider = eligible.find((candidate) => candidate !== input.parent?.provider) ?? eligible[0];
     resolvedBy = "prefer-different-provider";
@@ -502,7 +604,10 @@ export function resolveTarget(request: SpawnRequest, input: EligibilityInput): E
   }
 
   // --- model ---
-  const requestedModel = request.model ?? request.role?.model;
+  // A routing rule's model applies only when it also supplied the provider —
+  // a model id means nothing next to a companion that does not have it.
+  const routedModel = resolvedBy === "routing-rule" ? routed?.target.model : undefined;
+  const requestedModel = request.model ?? request.role?.model ?? routedModel;
   const model = resolveModel(input, provider, requestedModel);
   if ("code" in model) return { ok: false, ...model, alternatives: alternatives() };
   if (!requestedModel && rosterFor(input, provider).defaultModel && resolvedBy === "roster-order") {
@@ -517,7 +622,15 @@ export function resolveTarget(request: SpawnRequest, input: EligibilityInput): E
   // --- effort ---
   const chosenEffort = resolveChildEffort(
     provider,
-    { effort: request.effort, roleEffort: request.role?.effort },
+    {
+      effort: request.effort,
+      roleEffort: request.role?.effort,
+      // Same restriction as the model: a rule's effort applies only where the
+      // rule actually decided the target.
+      ...(resolvedBy === "routing-rule" && routed?.target.effort
+        ? { routedEffort: routed.target.effort }
+        : {}),
+    },
     {
       ...(input.effortDefaults ?? {}),
       rosterDefault:

@@ -622,7 +622,7 @@
         "companions.subagents.routing": {
           "type": "array",
           "default": [],
-          "description": "Reserved for keyword routing rules. Not read yet.",
+          "description": "Prefer a particular companion when a subagent's task mentions certain words. An ordered list of { match: [\"grep\", \"overview\"], target: { provider, model, effort } } — earlier rules win. Advice only: what the agent asks for explicitly, and a role's own companion, both still win, and a rule pointing at a companion that is off or signed out is skipped.",
           "items": {
             "type": "object"
           }
@@ -634,7 +634,7 @@
             2
           ],
           "default": 1,
-          "description": "How deep delegation may go. Only 1 is supported; 2 is reserved."
+          "description": "How deep delegation may go. 1 means only the conversation you are in may start subagents; 2 also lets a subagent start one more. Two levels is the hard limit."
         },
         "companions.subagents.readOnlyCommandAllowList": {
           "type": "array",
@@ -659,7 +659,7 @@
         "companions.crew.stagesMayUseSubagents": {
           "type": "boolean",
           "default": false,
-          "description": "Reserved: let crew stages start subagents of their own. Not read yet."
+          "description": "Let a workflow stage start subagents of its own, when the workflow's stage asks for it. Off by default: the workflow is already the orchestration, and a run inside a run is harder to follow."
         },
         "companions.crew.defaultWorkflow": {
           "type": "string",
@@ -687,9 +687,15 @@
           "default": {},
           "description": "Default companion, model and effort for the workflow generator. Empty uses the first eligible target. Do not hard-code a model id.",
           "properties": {
-            "provider": { "type": "string" },
-            "model": { "type": "string" },
-            "effort": { "type": "string" }
+            "provider": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
+            "effort": {
+              "type": "string"
+            }
           }
         },
         "companions.crew.providers": {
