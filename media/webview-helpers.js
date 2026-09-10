@@ -34,10 +34,10 @@
     "promptComplete", "contextUsage", "commandOutput", "expandCommandOutputs", "setAllToolDetails", "focusInput", "findInSession", "restoreComposer", "truncateMessages", "uiConfirmRequest", "agentReset", "agentError", "limitOffer", "limitOfferResolved", "agentResult", "agentEnd", "exit", "setBusy", "summarizing",
     "sessionContext", "clearMessages", "onboarding", "error", "hostNotice", "xaiNotification", "subagentUpdate", "childStream", "runProgress", "sessions", "repoSessions", "pinnedSessions", "repos",
     "sessionDot", "queuedSends", "submitQueuedSend", "steerUnavailable", "feedbackAvailability", "turnFeedbackAck", "usage", "planEntries", "reviewCenter", "crewRun", "steerByDefault", "soundNotifications", "processingSound", "readRepliesAloud", "summarizeRepliesAloud", "speechSummary", "imageFull", "moveComposerCaret",
-    "remoteStatus", "ruleFiles", "permissionRules", "agentRoles", "sessionMode",
+    "remoteStatus", "ruleFiles", "permissionRules", "agentRoles",
   ];
   const WEBVIEW_MESSAGE_TYPES = [
-    "ready", "remotePreferences", "send", "newSession", "cancel", "pickModel", "setMode", "setSessionMode", "setConfigOption", "removeChip",
+    "ready", "remotePreferences", "send", "newSession", "cancel", "pickModel", "setMode", "setConfigOption", "removeChip",
     "toggleChip", "openFile", "showInFolder", "openUrl", "openText", "openDiff", "revertToolEdit", "reviewRevertFile", "reviewRevertAll", "exportExpr", "setEffort",
     "addProjectFolder", "removeProjectFolder", "createProject", "cloneProject", "setupGithubCli", "listGithubRepos", "githubSignOut", "githubLoginWithToken",
     "openGlobalConfig", "openProjectConfig", "listRuleFiles", "openRuleFile", "appendRuleFile", "listAgentRoles", "saveAgentRole", "deleteAgentRole", "saveCrewFlow", "deleteCrewFlow", "listPermissionRules", "deletePermissionRule", "adoptPermissionRules", "listMcpServers", "connectMcpConnector", "disconnectMcpConnector", "completeMcpConnectorOAuth", "showLogs", "toggleDevTools", "openSettings", "openSettingsSurface", "closeSettingsSurface", "dismissWelcomeTip", "welcomeTipShown", "moveView",

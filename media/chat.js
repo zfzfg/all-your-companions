@@ -362,18 +362,6 @@
   const crewRunList = $("crew-run-list");
   const crewRunStop = $("crew-run-stop");
 
-  const modeSwitchBar = $("mode-switch-bar");
-  const modeSwitch = $("mode-switch");
-  const msOptSingle = $("ms-opt-single");
-  const msOptCrew = $("ms-opt-crew");
-  const msLock = $("ms-lock");
-  const msNewSession = $("ms-new-session");
-  const crewBar = $("crew-bar");
-  const crewPresetName = $("crew-preset-name");
-  const btnViewRoles = $("btn-view-roles");
-  const crewCost = $("crew-cost");
-  const crewRolesEl = $("crew-roles");
-
   // Canonical low→high ORDER for known effort ids, and the FALLBACK ladder when a
   // model advertises no menu (`max` is not a real grok level — see #3/#4).
   const GROK_EFFORT_LEVELS = ["none", "minimal", "low", "medium", "high", "xhigh"];
@@ -467,10 +455,6 @@
     codexInstall: { phase: "idle", receivedBytes: 0, totalBytes: 0, reason: "" },
     availableModels: [],
     currentModeId: "agent",
-    sessionMode: "single",
-    sessionStarted: false,
-    crewPreset: "default",
-    crewRoles: null,
     effort: "",
     cwd: "",
     contextWindow: 200000,
@@ -3450,8 +3434,8 @@
 
     addSection("Rules & Agents");
     addGearItem(
-      `<span class="gear-lead">${ICON.file}<span>Rules & Agent Roles</span></span>`,
-      () => openSettingsCategory("advanced"),
+      `<span class="gear-lead">${ICON.file}<span>Agent roles & crew flows</span></span>`,
+      () => openSettingsCategory("agents"),
     );
 
     addSection("Settings");
@@ -4177,49 +4161,6 @@
       };
       modePopover.appendChild(el);
     }
-
-    const sec = document.createElement("div");
-    sec.className = "popover-section";
-    sec.textContent = "Multi-Agent & Crew";
-    modePopover.appendChild(sec);
-
-    const crewEl = document.createElement("div");
-    crewEl.className = "toolbar-popover-item mode-popover-item";
-    crewEl.innerHTML =
-      `<span class="mode-item-icon">${ICON.bot}</span>` +
-      `<span class="mode-item-body">` +
-        `<span class="crew-trigger-label">Crew Orchestration (/crew)</span>` +
-        `<span class="crew-trigger-desc">Run task with Planner, Implementer, Reviewer</span>` +
-      `</span>`;
-    crewEl.onclick = (e) => {
-      e.stopPropagation();
-      closePopovers();
-      if (promptInput) {
-        promptInput.value = "/crew ";
-        promptInput.focus();
-        updateSendButton();
-      }
-    };
-    modePopover.appendChild(crewEl);
-
-    const rolesEl = document.createElement("div");
-    rolesEl.className = "toolbar-popover-item mode-popover-item";
-    rolesEl.innerHTML =
-      `<span class="mode-item-icon">${ICON.bot}</span>` +
-      `<span class="mode-item-body">` +
-        `<span class="crew-trigger-label">Agent Roles (/agent)</span>` +
-        `<span class="crew-trigger-desc">Assign persona: planner, implementer, reviewer, fixer</span>` +
-      `</span>`;
-    rolesEl.onclick = (e) => {
-      e.stopPropagation();
-      closePopovers();
-      if (promptInput) {
-        promptInput.value = "/agent ";
-        promptInput.focus();
-        updateSendButton();
-      }
-    };
-    modePopover.appendChild(rolesEl);
 
     positionPopover(modePopover, modeBtn);
     modePopover.hidden = false;
@@ -7258,106 +7199,6 @@
     ensureVisibleNewSession();
   }
 
-  function renderSessionMode() {
-    const isCrew = state.sessionMode === "crew";
-    if (msOptSingle) msOptSingle.setAttribute("aria-pressed", isCrew ? "false" : "true");
-    if (msOptCrew) msOptCrew.setAttribute("aria-pressed", isCrew ? "true" : "false");
-    if (modeSwitch) modeSwitch.classList.toggle("locked", !!state.sessionStarted);
-    if (crewBar) crewBar.hidden = !isCrew;
-    if (msLock && !state.sessionStarted) msLock.hidden = true;
-
-    if (input) {
-      if (isCrew) {
-        input.placeholder = "Task a crew… (Planner → Implementer → Reviewer)";
-      } else {
-        const p = state.activeProvider ? capitalize(state.activeProvider) : "Assistant";
-        input.placeholder = COMPOSER_PLACEHOLDER[state.activeProvider] || `Ask ${p}…`;
-      }
-    }
-    if (modeBtn) {
-      if (isCrew) {
-        modeBtn.innerHTML = `${ICON.bot} Crew`;
-        modeBtn.title = "Crew mode (multi-agent execution)";
-      } else {
-        modeBtn.title = modeButtonTitle(state.currentModeId);
-        const meta = MODE_META[state.currentModeId] || MODE_META.agent;
-        modeBtn.innerHTML = `${meta.icon} ${meta.label}`;
-      }
-    }
-
-    if (isCrew) renderCrewBar();
-  }
-
-  function renderCrewBar() {
-    if (!crewRolesEl) return;
-    if (crewPresetName) crewPresetName.textContent = `Preset: ${state.crewPreset || "default"}`;
-    crewRolesEl.textContent = "";
-    const roles = Array.isArray(state.crewRoles) && state.crewRoles.length ? state.crewRoles : [
-      { role: "planner", provider: "grok", label: "Planner" },
-      { role: "implementer", provider: "claude", label: "Implementer" },
-      { role: "reviewer", provider: "codex", label: "Reviewer" },
-      { role: "fixer", provider: "gemini", label: "Fixer" },
-    ];
-    for (const r of roles) {
-      const pill = document.createElement("span");
-      pill.className = "rolepill";
-      const dot = document.createElement("span");
-      dot.className = `dot ${r.provider || "grok"}`;
-      pill.appendChild(dot);
-      const text = document.createElement("span");
-      text.textContent = r.label || r.role;
-      pill.appendChild(text);
-      crewRolesEl.appendChild(pill);
-    }
-  }
-
-  function wireModeSwitch() {
-    if (msOptSingle && !msOptSingle.dataset.wired) {
-      msOptSingle.dataset.wired = "1";
-      msOptSingle.onclick = () => {
-        if (state.sessionStarted) {
-          if (state.sessionMode !== "single" && msLock) msLock.hidden = false;
-          return;
-        }
-        state.sessionMode = "single";
-        if (msLock) msLock.hidden = true;
-        vscode.postMessage({ type: "setSessionMode", mode: "single" });
-        renderSessionMode();
-      };
-    }
-    if (msOptCrew && !msOptCrew.dataset.wired) {
-      msOptCrew.dataset.wired = "1";
-      msOptCrew.onclick = () => {
-        if (state.sessionStarted) {
-          if (state.sessionMode !== "crew" && msLock) msLock.hidden = false;
-          return;
-        }
-        state.sessionMode = "crew";
-        if (msLock) msLock.hidden = true;
-        vscode.postMessage({ type: "setSessionMode", mode: "crew" });
-        renderSessionMode();
-      };
-    }
-    if (msNewSession && !msNewSession.dataset.wired) {
-      msNewSession.dataset.wired = "1";
-      msNewSession.onclick = () => {
-        const targetMode = state.sessionMode === "crew" ? "single" : "crew";
-        if (msLock) msLock.hidden = true;
-        state.sessionStarted = false;
-        state.sessionMode = targetMode;
-        vscode.postMessage({ type: "newSession", mode: targetMode });
-        vscode.postMessage({ type: "setSessionMode", mode: targetMode });
-        renderSessionMode();
-      };
-    }
-    if (btnViewRoles && !btnViewRoles.dataset.wired) {
-      btnViewRoles.dataset.wired = "1";
-      btnViewRoles.onclick = () => {
-        openSettingsCategory("rules");
-      };
-    }
-  }
-
   function renderRailRepo(repo, inArchive) {
     const key = cwdKey(repo.cwd);
     const selected = sameCwd(repo.cwd, state.selectedRepoCwd);
@@ -9268,11 +9109,8 @@
     }
     crewRunEl.hidden = false;
     const done = run.steps.filter((s) => s.status === "done" || s.status === "skipped").length;
-    let ticks = 0;
-    for (const s of run.steps) if (typeof s.costUsdTicks === "number") ticks += s.costUsdTicks;
     if (crewRunCount) {
       crewRunCount.textContent = done + "/" + run.steps.length + " · " + (run.status || "");
-      if (ticks) crewRunCount.textContent += " · $" + (ticks / 1e10).toFixed(4);
     }
     if (crewRunStop) {
       const live = run.status === "running" || run.status === "planning" || run.status === "assigning";
@@ -9296,7 +9134,6 @@
       meta.className = "crew-step-meta";
       const bits = [step.status];
       if (typeof step.durationMs === "number") bits.push(Math.round(step.durationMs / 100) / 10 + "s");
-      if (typeof step.costUsdTicks === "number") bits.push("$" + (step.costUsdTicks / 1e10).toFixed(4));
       const files = (step.filesObserved && step.filesObserved.length) ? step.filesObserved : (step.filesReported || []);
       if (files.length) bits.push(files.length + " file" + (files.length === 1 ? "" : "s"));
       meta.textContent = bits.filter(Boolean).join(" · ");
@@ -9396,10 +9233,6 @@
     renderReviewCenter();
     state.crewRun = null;
     renderCrewRun();
-    state.sessionStarted = false;
-    if (msLock) msLock.hidden = true;
-    if (modeSwitch) modeSwitch.classList.remove("locked");
-    renderSessionMode();
     state.pendingDiffByToolCallId.clear();
     state.revertedEdits.clear();
     state.toolItemsByToolCallId.clear();
@@ -15634,13 +15467,7 @@
     // Sendable = typed text or any visible chip (file or image alike — image
     // chips render as remove-only attachment rows, so they're never hidden).
     if (!text && state.chips.every((c) => c.hidden)) return;
-    state.sessionStarted = true;
-    if (msLock) msLock.hidden = true;
-    if (modeSwitch) modeSwitch.classList.add("locked");
     let sendText = text;
-    if (state.sessionMode === "crew" && sendText && !sendText.trim().startsWith("/")) {
-      sendText = "/crew " + sendText;
-    }
     stopVoiceForManualSend();
     state.busy = true;
     updateSendButton();
@@ -17728,15 +17555,6 @@
         state.contextBreakdown = null;
         updateDonut(0);
         reportRemotePreferences();
-        if (msg.sessionMode) state.sessionMode = msg.mode || msg.sessionMode;
-        if (msg.crewPreset) state.crewPreset = msg.crewPreset;
-        if (msg.crewRoles) state.crewRoles = msg.crewRoles;
-        renderSessionMode();
-        break;
-      }
-      case "sessionMode": {
-        state.sessionMode = msg.mode === "crew" ? "crew" : "single";
-        renderSessionMode();
         break;
       }
       case "sessionName": {
@@ -20002,8 +19820,6 @@
     });
   }
   syncProviderVoice();
-  wireModeSwitch();
-  renderSessionMode();
   initMermaid();
   initMathJax();
   claimRemoteTabIdentity((finalToken) => {

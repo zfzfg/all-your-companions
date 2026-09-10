@@ -78,7 +78,7 @@ describe("serializeAgentRole → parseAgentRole", () => {
       effort: "high",
       mode: "plan",
       scope: ["src/**", "test/**"],
-      budget: { toolCalls: 40, tokens: 120000, usd: 2.5 },
+      budget: { toolCalls: 40, tokens: 120000 },
       permissions: ["allow edit src/**", "deny execute rm"],
       preferDifferentProvider: true,
     });
@@ -87,12 +87,18 @@ describe("serializeAgentRole → parseAgentRole", () => {
     expect(role.effort).toBe("high");
     expect(role.mode).toBe("plan");
     expect(role.scope).toEqual(["src/**", "test/**"]);
-    expect(role.budget).toEqual({ toolCalls: 40, tokens: 120000, usd: 2.5 });
+    expect(role.budget).toEqual({ toolCalls: 40, tokens: 120000 });
     expect(role.permissions).toEqual([
       { action: "allow", kind: "edit", pathGlob: "src/**" },
       { action: "deny", kind: "execute", commandPrefix: "rm" },
     ]);
     expect(role.preferDifferentProvider).toBe(true);
+  });
+
+  it("does not write a money budget from the settings draft", () => {
+    const text = serializeAgentRole(draft({ budget: { toolCalls: 8, usd: 9 } }));
+    expect(text).toContain("tool_calls: 8");
+    expect(text).not.toContain("usd:");
   });
 
   it("omits every field the draft left empty rather than writing blanks", () => {

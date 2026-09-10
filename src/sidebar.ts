@@ -322,7 +322,6 @@ import {
   applyStepOutcome,
   assignStepRole,
   cancelCrewRun,
-  crewCostTicks,
   crewProgress,
   insertCrewStep,
   makeCrewRun,
@@ -2402,12 +2401,10 @@ export class GrokSidebar {
       session.crewRun = setCrewStatus(session.crewRun, "done");
       this.emitCrewRun(session);
       const progress = crewProgress(session.crewRun);
-      const cost = crewCostTicks(session.crewRun);
       this.agentNotice(
         session,
         "info",
         `Crew ${session.crewRun.runId} finished: ${progress.done}/${progress.total} steps`
-        + (cost ? `, cost ticks ${cost}` : "")
         + ". Review the combined diffs in the Review panel.",
       );
     }
@@ -4393,7 +4390,6 @@ export class GrokSidebar {
       currentModelId: client.currentModelId,
       worktree: !!session.worktree,
       provider: session.provider,
-      sessionMode: session.sessionMode ?? "single",
     };
   }
 
@@ -4410,7 +4406,6 @@ export class GrokSidebar {
       currentModelId: client.currentModelId,
       worktree: !!session.worktree,
       provider: session.provider,
-      sessionMode: session.sessionMode ?? "single",
     });
   }
 
@@ -12851,10 +12846,6 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
           await this.handleCrewCommand(msg.text, session, origin);
           break;
         }
-        if (session.sessionMode === "crew" && !msg.text.trim().startsWith("/")) {
-          await this.handleCrewCommand(msg.text, session, origin);
-          break;
-        }
         let queuedSendCommit: { text: string; items: QueuedSendEntry[] } | undefined;
         if (origin === "remote" && msg.queuedSendId) {
           if (session.completedQueuedSendIds.includes(msg.queuedSendId)) {
@@ -13075,15 +13066,6 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       case "setMode":
         await this.setMode(msg.modeId, session, requester);
         break;
-      case "setSessionMode": {
-        const mode = msg.mode === "crew" ? "crew" : "single";
-        session.sessionMode = mode;
-        this.emit(session, {
-          type: "sessionMode",
-          mode,
-        });
-        break;
-      }
       case "removeChip": {
         // A removed image chip's staged file has no other reference — reclaim
         // it now instead of leaving multi-MB orphans until the weekly sweep.
@@ -13619,7 +13601,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         if (this.host.canToggleDevTools) this.host.toggleDevTools();
         break;
       case "openSettings":
-        await this.host.openSettings(typeof msg.section === "string" ? msg.section : "grok");
+        await this.host.openSettings(typeof msg.section === "string" ? msg.section : "companions");
         break;
       case "openSettingsSurface":
         await this.openSettingsEditor(typeof msg.category === "string" ? msg.category : undefined);
@@ -23640,32 +23622,6 @@ ${openMain}
     <div id="repo-popover" class="toolbar-popover repo-popover" hidden></div>
     <div id="history-popover" class="toolbar-popover history-popover" hidden></div>
   </header>
-  <div id="mode-switch-bar" class="mode-switch-bar">
-    <div class="modeswitch" id="mode-switch" role="group" aria-label="Session mode">
-      <button class="ms-opt" id="ms-opt-single" data-mode="single" type="button" aria-pressed="true">
-        <span class="ms-t">Single Agent</span>
-        <span class="ms-d">one companion, subagents available</span>
-      </button>
-      <button class="ms-opt" id="ms-opt-crew" data-mode="crew" type="button" aria-pressed="false">
-        <span class="ms-t">Crew</span>
-        <span class="ms-d">multi-agent roles, sequential steps, review</span>
-      </button>
-      <div class="ms-lock" id="ms-lock" hidden>
-        <span class="lockicon">🔒</span>
-        <span class="lockmsg">The mode is bound to this session — locked after the first message.</span>
-        <button class="lnk" id="ms-new-session" type="button">New session in other mode</button>
-      </div>
-    </div>
-    <div class="crewbar" id="crew-bar" hidden>
-      <div class="cb-line">
-        <strong id="crew-preset-name">Preset: default</strong>
-        <button class="lnk" id="btn-view-roles" type="button">View roles</button>
-        <span class="sp"></span>
-        <span class="cb-cost" id="crew-cost"></span>
-      </div>
-      <div class="cb-roles" id="crew-roles"></div>
-    </div>
-  </div>
 ${fileShellOpen}
   <main id="messages" class="messages">
     <div class="welcome" id="welcome">

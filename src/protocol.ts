@@ -678,8 +678,7 @@ export type HostMsg =
   | { type: "initialized"; info: { cliPath: string; cwd: string; version: string | null; provider?: "grok" | "codex" | "claude" | "gemini"; init: { protocolVersion?: unknown } } }
   | { type: "cliUpdating" }
   // `worktree` gates the gear's Apply/Remove worktree items to worktree sessions.
-  | { type: "session"; sessionId: string; models: ModelInfo[]; currentModelId: string | undefined; worktree?: boolean; provider?: "grok" | "codex" | "claude" | "gemini"; sessionMode?: "single" | "crew" }
-  | { type: "sessionMode"; mode: "single" | "crew" }
+  | { type: "session"; sessionId: string; models: ModelInfo[]; currentModelId: string | undefined; worktree?: boolean; provider?: "grok" | "codex" | "claude" | "gemini" }
   // The focused conversation's display name, using the same precedence as a
   // history row. It is separate from `sessions` because VS Code does not keep
   // that browser-only list populated while the history popover is closed.
@@ -1211,7 +1210,6 @@ export type WebviewMsg =
   | { type: "cancel" }
   | { type: "pickModel" }
   | { type: "setMode"; modeId: "agent" | "plan" | "yolo" }
-  | { type: "setSessionMode"; mode: "single" | "crew" }
   | { type: "setConfigOption"; configId: string; value: unknown }
   | { type: "removeChip"; id: string }
   | { type: "toggleChip"; id: string }
@@ -1723,12 +1721,11 @@ const HOST_MESSAGE_TYPE_MAP: Record<HostMsg["type"], true> = {
   setAllToolDetails: true, focusInput: true, findInSession: true, restoreComposer: true, truncateMessages: true, uiConfirmRequest: true,
   sessions: true, sessionRemoved: true, repoSessions: true, pinnedSessions: true, repos: true, sessionDot: true, queuedSends: true, submitQueuedSend: true,
   steerUnavailable: true, feedbackAvailability: true, turnFeedbackAck: true, usage: true, providerCapabilities: true, planEntries: true, reviewCenter: true, crewRun: true, ruleFiles: true, permissionRules: true, agentRoles: true,
-  sessionMode: true,
 };
 
 const WEBVIEW_MESSAGE_TYPE_MAP: Record<WebviewMsg["type"], true> = {
   ready: true, remotePreferences: true, send: true, newSession: true, cancel: true, pickModel: true,
-  setMode: true, setSessionMode: true, setConfigOption: true, removeChip: true, toggleChip: true, openFile: true, showInFolder: true, openUrl: true,
+  setMode: true, setConfigOption: true, removeChip: true, toggleChip: true, openFile: true, showInFolder: true, openUrl: true,
   openText: true, openDiff: true, revertToolEdit: true, reviewRevertFile: true, reviewRevertAll: true, exportExpr: true, setEffort: true, openGlobalConfig: true,
   addProjectFolder: true, removeProjectFolder: true, createProject: true, cloneProject: true, setupGithubCli: true, listGithubRepos: true, githubSignOut: true, githubLoginWithToken: true,
   openProjectConfig: true, listRuleFiles: true, openRuleFile: true, appendRuleFile: true,

@@ -469,7 +469,7 @@
       kind: "action",
       actionLabel: "Open VS Code settings",
       visible: (s, env) => !!(env && !env.isRemote && !env.clientOwnsFontScale && !env.isDesktop),
-      message: () => ({ type: "openSettings", section: "grok.chatFontScale" }),
+      message: () => ({ type: "openSettings", section: "companions.chatFontScale" }),
     },
     {
       id: "showThinking",
@@ -525,7 +525,7 @@
       kind: "action",
       actionLabel: "Open VS Code settings",
       visible: (s, env) => !!(env && !env.isRemote && !env.isDesktop),
-      message: () => ({ type: "openSettings", section: "grok.telemetry.enabled" }),
+      message: () => ({ type: "openSettings", section: "companions.telemetry.enabled" }),
     },
     {
       id: "telemetryRemote",
@@ -1018,8 +1018,8 @@
       category: "agents",
       title: "Roles",
       description:
-        "Who answers when you run /agent <role>, and who a crew hands each step to. Each role pins its own companion, model and mode — "
-        + "a reviewer on a different model from the implementer is the whole point, and the one thing a same-model review cannot give you.",
+        "Who answers when you run /agent <role>, /handoff, or /second-opinion. Each role pins its own companion, model and mode — "
+        + "a reviewer on a different model from the implementer is the whole point. Crew workflows reuse these same roles.",
       kind: "agentRoles",
       hostLocal: true,
     },
@@ -1028,7 +1028,7 @@
       category: "agents",
       title: "Crew flows",
       description:
-        "How /crew walks a plan: which roles may be assigned and in what order, a check to run after each writing step, "
+        "Presets for /crew in this session: which roles may be assigned and in what order, a check to run after each writing step, "
         + "how often to stop and review, and whether independent steps may run at once.",
       kind: "crewFlows",
       hostLocal: true,
@@ -1081,12 +1081,12 @@
       id: "openVsCodeSettings",
       category: "advanced",
       title: "Open VS Code settings",
-      description: "Open the host Settings editor focused on Grok.",
+      description: "Open the host Settings editor focused on Companions.",
       kind: "action",
       actionLabel: "Open",
       hostLocal: true,
       visible: (s, env) => !!(env && !env.isDesktop),
-      message: () => ({ type: "openSettings", section: "grok" }),
+      message: () => ({ type: "openSettings", section: "companions" }),
     },
     {
       id: "moveView",
@@ -3188,7 +3188,6 @@
       "",
     ));
     advanced.appendChild(labelledField("Budget — tokens", textControl("budgetTokens", draft.budget.tokens, "no limit"), ""));
-    advanced.appendChild(labelledField("Budget — US$", textControl("budgetUsd", draft.budget.usd, "no limit"), ""));
     form.appendChild(advanced);
 
     const prefer = document.createElement("label");
@@ -4907,7 +4906,6 @@
         }
         if (field === "budgetToolCalls") { draft.budget.toolCalls = value; return false; }
         if (field === "budgetTokens") { draft.budget.tokens = value; return false; }
-        if (field === "budgetUsd") { draft.budget.usd = value; return false; }
         if (field === "addRole") {
           if (!value) return false;
           draft.roles = draft.roles.concat([value]);

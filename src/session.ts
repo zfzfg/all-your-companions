@@ -136,8 +136,6 @@ export class Session {
   provider: AcpProvider = "grok";
   /** Host-owned composer attachments for this session/view. */
   chips: ContextChip[] = [];
-  /** Session-level mode: "single" (individual companion) vs "crew" (multi-agent team). */
-  sessionMode: "single" | "crew" = "single";
   /** The live ACP client (one spawned `grok agent stdio` process), once started. */
   client?: AcpClient;
 

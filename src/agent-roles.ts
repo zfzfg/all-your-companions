@@ -424,6 +424,8 @@ function strList(value: unknown): string[] {
 }
 
 function num(value: unknown): number | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value === "string" && value.trim() === "") return undefined;
   const parsed = typeof value === "number" ? value : Number(str(value));
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
 }

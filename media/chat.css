@@ -1247,200 +1247,6 @@ a:hover {
 .repo-chip-icon, .repo-chip > svg { display: inline-flex; flex: none; }
 .repo-chip-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* ---- mode switch & crew bar (crew-ui-prototype integration) ---- */
-
-.mode-switch-bar {
-  flex: none;
-  padding: 6px 10px 8px;
-  border-bottom: 1px solid var(--vscode-editorWidget-border, rgba(127, 127, 127, 0.2));
-  background: var(--vscode-sideBar-background, var(--vscode-editor-background));
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  position: relative;
-  z-index: 5;
-}
-
-.modeswitch {
-  display: flex;
-  gap: 4px;
-  padding: 3px;
-  border-radius: 8px;
-  background: var(--vscode-input-background, rgba(127, 127, 127, 0.12));
-  border: 1px solid var(--vscode-widget-border, rgba(127, 127, 127, 0.2));
-  position: relative;
-}
-
-.ms-opt {
-  flex: 1 1 0;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  border: 1px solid transparent;
-  background: none;
-  color: var(--vscode-descriptionForeground, #9d9d9d);
-  border-radius: 6px;
-  padding: 5px 9px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-  transition: background 0.15s ease, color 0.15s ease;
-}
-
-.ms-opt:hover {
-  background: var(--vscode-list-hoverBackground, rgba(127, 127, 127, 0.15));
-  color: var(--vscode-foreground);
-}
-
-.ms-opt[aria-pressed="true"] {
-  background: var(--vscode-editor-background, var(--vscode-sideBar-background));
-  color: var(--vscode-foreground);
-  border-color: var(--vscode-widget-border, rgba(127, 127, 127, 0.35));
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
-}
-
-.ms-t {
-  font-size: 12px;
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-}
-
-.ms-opt[aria-pressed="true"] .ms-t::after {
-  content: "active";
-  margin-left: 6px;
-  font-size: 9.5px;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--vscode-textLink-foreground, #4daafc);
-  font-weight: 600;
-}
-
-.ms-d {
-  font-size: 10.5px;
-  color: var(--vscode-descriptionForeground, #888);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.modeswitch.locked .ms-opt {
-  cursor: not-allowed;
-  opacity: 0.72;
-}
-
-.modeswitch.locked .ms-opt[aria-pressed="true"] {
-  opacity: 1;
-}
-
-.ms-lock {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  right: 0;
-  z-index: 15;
-  background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
-  border: 1px solid var(--vscode-widget-border, var(--vscode-focusBorder, rgba(127, 127, 127, 0.4)));
-  border-radius: 6px;
-  padding: 8px 10px;
-  font-size: 11.5px;
-  color: var(--vscode-foreground);
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-}
-
-.ms-lock[hidden] {
-  display: none !important;
-}
-
-.lockicon {
-  flex: none;
-  font-size: 12px;
-}
-
-.lockmsg {
-  flex: 1 1 180px;
-  min-width: 0;
-}
-
-.lnk {
-  font: inherit;
-  font-size: 11.5px;
-  background: none;
-  border: 0;
-  color: var(--vscode-textLink-foreground, #4daafc);
-  cursor: pointer;
-  padding: 0;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
-.lnk:hover {
-  color: var(--vscode-textLink-activeForeground, #70baff);
-}
-
-.crewbar {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 7px 9px;
-  border: 1px solid var(--vscode-widget-border, rgba(127, 127, 127, 0.25));
-  border-radius: 7px;
-  background: var(--vscode-input-background, rgba(127, 127, 127, 0.08));
-}
-
-.crewbar[hidden] {
-  display: none !important;
-}
-
-.cb-line {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 11.5px;
-}
-
-.cb-cost {
-  font-variant-numeric: tabular-nums;
-  color: var(--vscode-descriptionForeground);
-  font-size: 11px;
-}
-
-.cb-roles {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-}
-
-.rolepill {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 10.5px;
-  border: 1px solid var(--vscode-widget-border, rgba(127, 127, 127, 0.3));
-  border-radius: 11px;
-  padding: 2px 8px;
-  color: var(--vscode-foreground);
-  background: var(--vscode-badge-background, rgba(127, 127, 127, 0.12));
-}
-
-.dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  flex: none;
-  display: inline-block;
-}
-
-.dot.grok { background: #4daafc; }
-.dot.claude { background: #e08a55; }
-.dot.codex { background: #89d185; }
-.dot.gemini { background: #b39ce8; }
-
 /* ---- toolbar popovers ---- */
 
 .toolbar-popover {
@@ -1479,7 +1285,7 @@ a:hover {
 }
 .toolbar-popover-item:hover { background: var(--vscode-list-hoverBackground); }
 .toolbar-popover-item:hover .mode-item-label,
-.toolbar-popover-item:hover .crew-trigger-label { color: var(--vscode-list-hoverForeground, var(--vscode-foreground)); }
+
 .toolbar-popover-item.active { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground, var(--vscode-foreground)); }
 .toolbar-popover-item.active .mode-item-desc { color: var(--vscode-list-activeSelectionForeground, var(--vscode-descriptionForeground)); opacity: 0.75; }
 /* textLink, not button-background. `button.background` is a SURFACE colour and
@@ -4212,8 +4018,8 @@ textarea#input {
   flex: 1;
   min-width: 0;
 }
-.mode-item-label, .crew-trigger-label { font-size: 12px; font-weight: 500; line-height: 16px; }
-.mode-item-desc, .crew-trigger-desc { font-size: 11px; color: var(--vscode-descriptionForeground); white-space: normal; line-height: 1.3; }
+.mode-item-label { font-size: 12px; font-weight: 500; line-height: 16px; }
+.mode-item-desc { font-size: 11px; color: var(--vscode-descriptionForeground); white-space: normal; line-height: 1.3; }
 .mode-popover-item.disabled { opacity: 0.45; cursor: not-allowed; }
 .mode-popover-item.disabled:hover { background: transparent; }
 .mode-item-disabled-note { display: block; font-size: 10px; color: var(--vscode-descriptionForeground); opacity: 0.85; margin-top: 3px; line-height: 1.3; white-space: normal; }

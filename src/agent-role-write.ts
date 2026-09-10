@@ -153,12 +153,10 @@ export function serializeAgentRole(draft: AgentRoleDraft): string {
   emitList("scope", cleanList(draft.scope), lines);
   const toolCalls = positiveNumber(draft.budget?.toolCalls);
   const tokens = positiveNumber(draft.budget?.tokens);
-  const usd = positiveNumber(draft.budget?.usd);
-  if (toolCalls !== undefined || tokens !== undefined || usd !== undefined) {
+  if (toolCalls !== undefined || tokens !== undefined) {
     lines.push("budget:");
     if (toolCalls !== undefined) lines.push(`  tool_calls: ${toolCalls}`);
     if (tokens !== undefined) lines.push(`  tokens: ${tokens}`);
-    if (usd !== undefined) lines.push(`  usd: ${usd}`);
   }
   emitList("permissions", cleanList(draft.permissions), lines);
   if (draft.preferDifferentProvider) lines.push("prefer_different_provider: true");
@@ -291,7 +289,6 @@ function budgetToDraft(budget: AgentRoleBudget): NonNullable<AgentRoleDraft["bud
   return {
     ...(budget.toolCalls !== undefined ? { toolCalls: budget.toolCalls } : {}),
     ...(budget.tokens !== undefined ? { tokens: budget.tokens } : {}),
-    ...(budget.usd !== undefined ? { usd: budget.usd } : {}),
   };
 }
 

@@ -40,17 +40,19 @@ describe("crew view (real chat.js in a DOM)", () => {
     expect(panel.hidden).toBe(true);
   });
 
-  it("renders each step with role, status, duration and cost, and sums the run", () => {
+  it("renders each step with role, status and duration, and counts the run without a dollar line", () => {
     const { window, doc } = bootWebview();
     dispatch(window, { type: "crewRun", run: run() });
     const panel = doc.getElementById("crew-run")!;
     expect(panel.hidden).toBe(false);
-    expect(doc.getElementById("crew-run-count")!.textContent).toMatch(/1\/2/);
-    expect(doc.getElementById("crew-run-count")!.textContent).toMatch(/\$1\.0000/);
+    expect(doc.getElementById("crew-run-count")!.textContent).toBe("1/2 · running");
+    expect(doc.getElementById("crew-run-count")!.textContent).not.toMatch(/\$/);
     const items = [...doc.querySelectorAll("#crew-run-list .crew-step")];
     expect(items).toHaveLength(2);
     expect(items[0].textContent).toMatch(/implementer/);
     expect(items[0].textContent).toMatch(/done/);
+    expect(items[0].textContent).toMatch(/1\.2s/);
+    expect(items[0].textContent).not.toMatch(/\$/);
     expect(items[1].textContent).toMatch(/reviewer/);
   });
 
