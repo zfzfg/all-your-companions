@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+**You can write and generate Crew workflows.** Settings → Agents & Crew has a **Workflows** section: every crew preset is listed with its stage graph, a default radio for new Crew sessions, and Validate / Save / Delete. **Generate workflow…** describes the pipeline in plain language; the extension drafts stages and contracts, shows a preview, and writes nothing until you press Save.
+
+### Added
+
+- **Workflows in Settings (AP-18).** Built-in, this-machine and this-project workflows with scope badges and override markers. A preset without a stages block still runs as the default Plan → Implement → Review → Fix graph and can gain a stages block when you ask. Saving goes through a writer that re-reads the file and refuses anything that would change meaning.
+- **Generate workflow…** A hidden, read-only session drafts the JSON. If the companion can use host tools it validates and submits that way; otherwise a fenced `companions-workflow` block in the reply is accepted the same way. **Save**, **Save & set as default**, and **Run this workflow** use the copy-deck labels. Recompile from description is offered when a workflow was generated.
+- **Invalid workflows never run.** Starting a Crew session on a broken graph shows the JSON pointer and the reason, and does not create a run. A paused run still uses the snapshot it started with, even if you edit the file later.
+
+### Added (settings)
+
+- `companions.workflows.generator.target` — optional companion / model / effort for the generator. Empty uses the first eligible target.
+
 **Crew sessions now run a stage-gated workflow.** Pick **Crew**, describe an idea, and the default **Idea to done** pipeline plans, implements, reviews and (if needed) fixes — stopping after every stage so you choose the next companion, pause and come back later, or cancel. `/crew` typed in an Agent session no longer starts a chain in that thread; it offers to open a Crew session with that goal instead.
 
 ### Added

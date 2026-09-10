@@ -350,8 +350,27 @@ import {
   isReservedTarget,
   workflowSnapshotHash,
   workflowSnapshotPayload,
+  workflowToMermaid,
   type WorkflowDefinition,
 } from "./workflow";
+import { validateWorkflowDefinition, validateWorkflowRaw, type ValidateWorkflowContext } from "./workflow-validate";
+import { draftFromUnknown, validateWorkflowDraft, workflowToDraft, type WorkflowDraft } from "./workflow-write";
+import {
+  acceptSubmission,
+  COMPANIONS_LIST_ROLES_TOOL,
+  COMPANIONS_LIST_WORKFLOWS_TOOL,
+  COMPANIONS_SUBMIT_WORKFLOW_TOOL,
+  COMPANIONS_VALIDATE_WORKFLOW_TOOL,
+  COMPANIONS_WORKFLOW_SCHEMA_TOOL,
+  extractCompanionsWorkflow,
+  generatorMetaPrompt,
+  isGeneratorTool,
+  makeGeneratorState,
+  recordValidation,
+  workflowArg,
+  WORKFLOW_AUTHORING_GUIDE,
+  type GeneratorState,
+} from "./workflow-generator";
 import {
   appendGateNotes,
   applyGateAction,
@@ -1241,6 +1260,13 @@ export class GrokSidebar {
     "deleteAgentRole",
     "saveCrewFlow",
     "deleteCrewFlow",
+    "saveWorkflow",
+    "validateWorkflow",
+    "generateWorkflow",
+    "cancelWorkflowGenerate",
+    "setDefaultWorkflow",
+    "addWorkflowStagesBlock",
+    "runWorkflow",
     "setShowThinking",
     "setAppPurpose",
     "setExpandCommandOutputs",
@@ -1959,6 +1985,11 @@ export class GrokSidebar {
        * `/agent` result card — the gate card is the one card for the stage.
        */
       stage?: { stageId: string };
+      /**
+       * AP-18. The workflow generator: hidden, read-only, no `/agent` card,
+       * and it does not take over the caller's `agentRun` slot.
+       */
+      generator?: { requestId: string };
     },
   ): Promise<{
     outcome: "completed" | "failed" | "cancelled";
@@ -2045,6 +2076,7 @@ export class GrokSidebar {
     this.pool.add(roleSession);
     const subagentCoords = coords?.subagent;
     const stageCoords = coords?.stage;
+    const generatorCoords = coords?.generator;
     // AP-16 §6.6 point 1 / AP-17 D5: stamped BEFORE the first turn, so no
     // history refresh can race the child into the list.
     if (subagentCoords) this.markHiddenChildSession(roleSession, caller, subagentCoords.subagentId);
@@ -2056,10 +2088,15 @@ export class GrokSidebar {
         "crew-stage",
       );
     }
+    if (generatorCoords) {
+      this.markHiddenChildSession(roleSession, caller, generatorCoords.requestId, "workflow-generator");
+      const gen = this.generatorStore();
+      if (gen.requestId === generatorCoords.requestId) gen.roleSession = roleSession;
+    }
     const subagentHandle = subagentCoords
       ? { subagentId: subagentCoords.subagentId, roleSession, cancelled: false }
       : undefined;
-    const liveHandle = (coords?.live || stageCoords) && !subagentCoords
+    const liveHandle = (coords?.live || stageCoords) && !subagentCoords && !generatorCoords
       ? { runId, step, roleName: role.name, roleSession, cancelled: false }
       : undefined;
     if (subagentHandle) {
@@ -2069,7 +2106,7 @@ export class GrokSidebar {
       caller.subagentLive = [...(caller.subagentLive ?? []), subagentHandle];
     } else if (liveHandle) {
       caller.crewLive = [...(caller.crewLive ?? []), liveHandle];
-    } else {
+    } else if (!generatorCoords) {
       caller.agentRun = { runId, step, roleName: role.name, roleSession, cancelled: false };
       this.setStatus(caller, "working");
       this.emit(caller, { type: "setBusy", value: true });
@@ -2077,12 +2114,13 @@ export class GrokSidebar {
     const roleCancelled = () =>
       !!(subagentHandle?.cancelled
         || liveHandle?.cancelled
-        || (!subagentHandle && caller.agentRun?.cancelled)
+        || (generatorCoords && this.generatorStore().cancelled)
+        || (!subagentHandle && !generatorCoords && caller.agentRun?.cancelled)
         || (!subagentHandle && caller.crewRun?.status === "cancelled"));
     // A subagent announces itself on its own card, not as a line in the
     // parent's transcript — §6.11 is explicit that a child's output never
     // reaches the parent's own transcript text.
-    if (!subagentCoords && !stageCoords) {
+    if (!subagentCoords && !stageCoords && !generatorCoords) {
       this.agentNotice(
         caller,
         "info",
@@ -2092,7 +2130,19 @@ export class GrokSidebar {
     }
 
     let reply = "";
-    roleSession.agentTextTap = (chunk) => { reply += chunk; };
+    roleSession.agentTextTap = (chunk) => {
+      reply += chunk;
+      if (!generatorCoords) return;
+      const store = this.generatorStore();
+      const now = Date.now();
+      if (store.requestId !== generatorCoords.requestId || now - store.lastProgressAt < 400) return;
+      store.lastProgressAt = now;
+      this.postWorkflowGenerator({
+        status: "running",
+        requestId: generatorCoords.requestId,
+        progress: reply.slice(-500),
+      });
+    };
     let outcome: "completed" | "failed" | "cancelled" = "completed";
     let detail: string | undefined;
     try {
@@ -2155,14 +2205,15 @@ export class GrokSidebar {
       caller.subagentLive = (caller.subagentLive ?? []).filter((h) => h !== subagentHandle);
     } else if (liveHandle) {
       caller.crewLive = (caller.crewLive ?? []).filter((h) => h !== liveHandle);
-    } else {
+    } else if (!generatorCoords) {
       caller.agentRun = undefined;
       this.setStatus(caller, outcome === "failed" ? "error" : "done");
       this.emit(caller, { type: "setBusy", value: false });
     }
     // A companion subagent renders as its own card (§6.11) and must not also
-    // produce an `/agent` result card — one run, one card.
-    if (subagentCoords || stageCoords) {
+    // produce an `/agent` result card — one run, one card. Same for a crew
+    // stage and the workflow generator: the settings preview is the surface.
+    if (subagentCoords || stageCoords || generatorCoords) {
       return {
         outcome,
         filesReported: result.files,
@@ -2333,6 +2384,37 @@ export class GrokSidebar {
 
   private workflowRuns(): WorkflowRunStore { return this.workflowStore().store; }
 
+  private generatorState?: {
+    requestId: string;
+    cancelled: boolean;
+    state: GeneratorState;
+    roleSession?: Session;
+    caller?: Session;
+    submitted?: ReturnType<typeof acceptSubmission>;
+    compiler?: { provider?: string; model?: string; sourcePrompt?: string; generatedAt?: string };
+    scope: RoleScope;
+    lastProgressAt: number;
+  };
+
+  private generatorStore(): NonNullable<GrokSidebar["generatorState"]> {
+    if (!this.generatorState) {
+      this.generatorState = {
+        requestId: "",
+        cancelled: false,
+        state: makeGeneratorState(""),
+        scope: "project",
+        lastProgressAt: 0,
+      };
+    }
+    return this.generatorState;
+  }
+
+  private postWorkflowGenerator(view: import("./protocol").WorkflowGeneratorView): void {
+    const message = { type: "workflowGenerator" as const, ...view };
+    this.postLocal(message);
+    void this.settingsEditor?.webview.postMessage(message);
+  }
+
   private inThreadCrewCommand(): boolean {
     try {
       return this.host.getConfiguration("companions").get<boolean>("crew.inThreadCommand", false) === true;
@@ -2379,7 +2461,7 @@ export class GrokSidebar {
     return applyMaxFixerPasses(presetToStageGraph(named), this.maxFixerPasses());
   }
 
-  private postWorkflowList(session: Session): void {
+  private postWorkflowList(session: Session, preferred?: string): void {
     try {
       let cwd = session.cwd || "";
       try {
@@ -2388,7 +2470,7 @@ export class GrokSidebar {
         cwd = "";
       }
       const presets = this.crewPresetSet(cwd);
-      const defaultName = this.defaultWorkflowName();
+      const defaultName = preferred || this.defaultWorkflowName();
       const workflows = presets.presets.map((preset) => ({
         name: preset.name,
         title: preset.title || preset.name,
@@ -2573,6 +2655,18 @@ export class GrokSidebar {
     }
     await this.waitForSessionStart(session);
     const def = this.resolveWorkflow(session, workflowName);
+    const check = validateWorkflowDefinition(def, this.workflowValidateContext());
+    if (!check.valid) {
+      const first = check.errors[0];
+      this.emit(session, {
+        type: "hostNotice",
+        level: "warning",
+        text: first
+          ? `This workflow is not valid (${first.pointer || "/"}): ${first.message}`
+          : "This workflow is not valid.",
+      });
+      return;
+    }
     const runId = this.agentRuns.newRunId();
     const cwd = this.sessionCwd(session);
     let worktree: string | undefined;
@@ -2955,7 +3049,7 @@ export class GrokSidebar {
     this.focused.sessionType = "crew";
     this.persistSessionType(this.focused);
     this.postSessionType(this.focused);
-    this.postWorkflowList(this.focused);
+    this.postWorkflowList(this.focused, workflowName);
     if (idea.trim()) {
       await this.startWorkflowRun(this.focused, origin, idea, workflowName, options);
     }
@@ -3919,6 +4013,8 @@ export class GrokSidebar {
       hasProject: !!cwd,
       ...(this.agentRolesError ? { error: this.agentRolesError.message } : {}),
       ...(this.agentRolesError?.id ? { errorId: this.agentRolesError.id } : {}),
+      workflows: this.buildWorkflowViews(flowSet, roleSet.roles.map((role) => role.name)),
+      defaultWorkflow: this.defaultWorkflowName(),
     };
   }
 
@@ -4091,6 +4187,264 @@ export class GrokSidebar {
     }
     this.agentRolesError = undefined;
     this.postAgentRoles();
+  }
+
+  private workflowValidateContext(over: Partial<ValidateWorkflowContext> = {}): ValidateWorkflowContext {
+    const cwd = this.sessionCwd();
+    const cache = this.state.get<ProviderModelCache>(PROVIDER_MODEL_CACHE_KEY, {});
+    return {
+      roleNames: this.agentRoleSet(cwd).roles.map((role) => role.name),
+      knownModels: Object.fromEntries(PROVIDER_ORDER.map((id) => [
+        id,
+        {
+          checked: Array.isArray(cache[id]?.models),
+          ids: (cache[id]?.models ?? []).map((model) => model.modelId),
+        },
+      ])),
+      ...over,
+    };
+  }
+
+  private buildWorkflowViews(
+    flowSet: CrewPresetSet,
+    roleNames: string[],
+  ): import("./protocol").WorkflowManagerView[] {
+    const defaultName = this.defaultWorkflowName();
+    const context = this.workflowValidateContext({ roleNames });
+    return flowSet.presets.map((preset) => {
+      const graph = presetToStageGraph(preset);
+      const validation = validateWorkflowDefinition(graph, context);
+      const hasStages = preset.stages !== undefined || preset.name === "idea-to-done";
+      return {
+        name: preset.name,
+        title: preset.title || graph.title || preset.name,
+        whenToUse: preset.whenToUse || graph.whenToUse || "",
+        scope: preset.source,
+        ...(preset.overrides ? { overrides: preset.overrides } : {}),
+        ...(preset.path ? { path: preset.path } : {}),
+        hasStages,
+        defaultGraph: !hasStages,
+        isDefault: preset.name === defaultName,
+        mermaid: workflowToMermaid(graph),
+        stages: graph.stages.map((stage) => ({
+          id: stage.id,
+          title: stage.title,
+          role: stage.role,
+          profile: stage.profile,
+        })),
+        draft: {
+          ...workflowToDraft(graph),
+          body: preset.body,
+          verify: preset.verify ?? graph.defaults.verify,
+        },
+        validation,
+        ...(graph.compiler ? { compiler: graph.compiler } : {}),
+      };
+    });
+  }
+
+  private async handleSaveWorkflow(msg: {
+    scope: RoleScope;
+    originalName?: string;
+    originalScope?: RoleScope;
+    draft: WorkflowDraft;
+    setDefault?: boolean;
+  }): Promise<void> {
+    const id = msg.originalName || msg.draft?.name || "new";
+    const dir = this.companionsWriteDir(msg.scope, "crews");
+    if (!dir) {
+      this.refuseAgentRoles(id, "Open a project folder first — a project workflow needs somewhere to live.");
+      return;
+    }
+    const result = validateWorkflowDraft(msg.draft ?? ({} as WorkflowDraft), this.workflowValidateContext({
+      existingNames: this.agentRoleNamesInScope(msg.scope, "crews"),
+      ...(msg.originalName ? { originalName: msg.originalName } : {}),
+    }));
+    if (!result.ok) {
+      this.refuseAgentRoles(id, result.error);
+      return;
+    }
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, `${result.workflow.name}.md`), result.text, "utf8");
+      this.dropSupersededCompanionFile({
+        kind: "crews",
+        savedName: result.workflow.name,
+        savedScope: msg.scope,
+        ...(msg.originalName ? { originalName: msg.originalName } : {}),
+        ...(msg.originalScope ? { originalScope: msg.originalScope } : {}),
+      });
+    } catch (error) {
+      this.refuseAgentRoles(id, `Could not write the workflow file — ${(error as Error).message}`);
+      return;
+    }
+    if (msg.setDefault) {
+      await this.host.getConfiguration("companions").update("crew.defaultWorkflow", result.workflow.name, "global");
+    }
+    this.agentRolesError = undefined;
+    this.postAgentRoles();
+  }
+
+  private postWorkflowValidation(draft: WorkflowDraft): void {
+    const result = validateWorkflowDraft(draft ?? ({} as WorkflowDraft), this.workflowValidateContext());
+    this.postWorkflowGenerator({
+      status: result.ok ? "preview" : "error",
+      requestId: "validate",
+      draft,
+      ...(result.ok ? { mermaid: workflowToMermaid(result.workflow), validation: result.validation } : {}),
+      ...(!result.ok ? {
+        error: result.error,
+        ...(result.validation ? { validation: result.validation } : {}),
+      } : {}),
+    });
+  }
+
+  private async handleAddWorkflowStagesBlock(scope: RoleScope, name: string): Promise<void> {
+    const preset = this.crewPresetSet(this.sessionCwd()).presets.find((p) => p.name === name);
+    if (!preset) {
+      this.refuseAgentRoles(name, "That workflow is not loaded.");
+      return;
+    }
+    if (preset.stages !== undefined) {
+      this.refuseAgentRoles(name, "This workflow already has a stages block.");
+      return;
+    }
+    const graph = presetToStageGraph(preset);
+    await this.handleSaveWorkflow({
+      scope,
+      originalName: name,
+      originalScope: preset.source === "builtin" ? undefined : preset.source,
+      draft: { ...workflowToDraft(graph), body: preset.body, verify: preset.verify },
+    });
+  }
+
+  private async handleGenerateWorkflow(msg: {
+    description: string;
+    scope: RoleScope;
+    reuseRoles?: boolean;
+    newRoles?: "inline" | "files";
+    allowWrite?: boolean;
+    maxStages?: number;
+    provider?: import("./acp-backend").AcpProvider;
+    model?: string;
+    effort?: string;
+    refine?: string;
+  }): Promise<void> {
+    const description = [msg.description, msg.refine].filter((s) => String(s ?? "").trim()).join("\n\nFeedback: ");
+    if (!description.trim()) {
+      this.postWorkflowGenerator({
+        status: "error",
+        requestId: "generate",
+        error: "Describe how you want this workflow to run.",
+      });
+      return;
+    }
+    const previous = this.generatorStore();
+    if (previous.roleSession) {
+      previous.cancelled = true;
+      void previous.roleSession.client?.cancel("a new generation started");
+    }
+    const requestId = `wg_${this.agentRuns.newRunId()}`;
+    const store = this.generatorStore();
+    store.requestId = requestId;
+    store.cancelled = false;
+    store.submitted = undefined;
+    store.scope = msg.scope;
+    store.state = makeGeneratorState(description, {
+      reuseRoles: msg.reuseRoles !== false,
+      newRoles: msg.newRoles === "files" ? "files" : "inline",
+      allowWrite: msg.allowWrite !== false,
+      maxStages: msg.maxStages,
+    });
+    const caller = this.focused ?? [...this.pool][0];
+    if (!caller) {
+      this.postWorkflowGenerator({ status: "error", requestId, error: "Open a project first." });
+      return;
+    }
+    store.caller = caller;
+    const usable = this.usableProviders();
+    const storedTarget = this.companionsSetting<{ provider?: string; model?: string; effort?: string }>(
+      "workflows.generator.target",
+      {},
+    );
+    const requestedProvider = msg.provider || (storedTarget?.provider as import("./acp-backend").AcpProvider | undefined);
+    const provider = (requestedProvider && usable.includes(requestedProvider) ? requestedProvider : usable[0])
+      ?? caller.provider;
+    if (!msg.model && storedTarget?.model) msg.model = storedTarget.model;
+    if (!msg.effort && storedTarget?.effort) msg.effort = storedTarget.effort;
+    store.compiler = {
+      provider,
+      ...(msg.model ? { model: msg.model } : {}),
+      sourcePrompt: msg.description.trim(),
+      generatedAt: new Date().toISOString(),
+    };
+    this.postWorkflowGenerator({ status: "running", requestId, progress: "Starting the generator…" });
+    const role: import("./agent-roles").AgentRole = {
+      name: "workflow-generator",
+      provider,
+      ...(msg.model ? { model: msg.model } : {}),
+      ...(msg.effort ? { effort: msg.effort } : {}),
+      mode: "agent",
+      whenToUse: "Design a workflow from a description.",
+      source: "builtin",
+      permissions: [{ action: "deny", kind: "edit", pathGlob: "**" }],
+    };
+    const brief = {
+      task: generatorMetaPrompt({ description, options: store.state.options }),
+      goal: description,
+    };
+    try {
+      const outcome = await this.runAgentRole(role, brief, "workflow-stage", caller, "local", {
+        runId: requestId,
+        step: 1,
+        generator: { requestId },
+      });
+      if (store.cancelled || store.requestId !== requestId) return;
+      const accepted = store.submitted
+        ?? (outcome.rawReply ? acceptSubmission(
+          extractCompanionsWorkflow(outcome.rawReply) ?? {},
+          this.workflowValidateContext({
+            generated: true,
+            allowWrite: store.state.options.allowWrite,
+            maxStages: store.state.options.maxStages,
+          }),
+          store.compiler,
+        ) : undefined);
+      if (accepted && accepted.ok) {
+        this.postWorkflowGenerator({
+          status: "preview",
+          requestId,
+          draft: workflowToDraft(accepted.workflow),
+          mermaid: workflowToMermaid(accepted.workflow),
+          validation: accepted.validation,
+          compiler: store.compiler,
+        });
+        return;
+      }
+      this.postWorkflowGenerator({
+        status: "error",
+        requestId,
+        error: accepted && !accepted.ok
+          ? accepted.error
+          : "The generator finished without a valid workflow. Try again, refine, or open the JSON editor.",
+        ...(accepted && !accepted.ok && accepted.validation ? { validation: accepted.validation } : {}),
+        ...(store.state.lastDraft ? { draft: draftFromUnknown(store.state.lastDraft) } : {}),
+      });
+    } catch (error) {
+      if (store.cancelled || store.requestId !== requestId) return;
+      this.postWorkflowGenerator({
+        status: "error",
+        requestId,
+        error: (error as Error).message,
+      });
+    }
+  }
+
+  private cancelWorkflowGenerate(): void {
+    const store = this.generatorStore();
+    store.cancelled = true;
+    void store.roleSession?.client?.cancel("the user cancelled generation");
+    this.postWorkflowGenerator({ status: "idle", requestId: store.requestId || "generate" });
   }
 
   /**
@@ -9517,17 +9871,29 @@ Only continue if you trust this code.`,
    * next spawn in an already-open session.
    */
   private async companionsMcpServer(session: Session): Promise<AcpMcpStdioServer | undefined> {
+    const hidden = session.pendingHiddenChild?.hiddenReason
+      ?? this.sessionTypeMetaFor(session)?.hiddenReason;
+    // Generator sessions get the authoring tool set even when subagents are
+    // off — the generator is not delegation, and the master switch must not
+    // disable Settings → Generate workflow.
+    if (hidden === "workflow-generator") {
+      return this.spawnCompanionsServer(session, "generator");
+    }
     if (!this.subagentsCouldBeUsedIn(session)) return undefined;
     // A Crew session is the orchestrator, not a chatting agent that delegates.
     // Stage children are hidden; P4–P5 ignore stagesMayUseSubagents (§7.9).
     if (session.sessionType === "crew") return undefined;
-    if (session.pendingHiddenChild?.hiddenReason) return undefined;
-    // Depth: a companion subagent never gets the delegation server itself.
-    // `maxDepth` is 1 and values above it are refused until P6 (§12.3).
-    if (this.sessionTypeMetaFor(session)?.hiddenReason) return undefined;
+    if (hidden) return undefined;
+    return this.spawnCompanionsServer(session, "delegate");
+  }
+
+  private async spawnCompanionsServer(
+    session: Session,
+    mode: "delegate" | "generator",
+  ): Promise<AcpMcpStdioServer | undefined> {
     if (providerCapability(session.provider, "hostMcp").state !== "yes") {
       this.host.appendLine(
-        `[companions] not offering delegation on ${session.provider}: host MCP support is unproven`,
+        `[companions] not offering ${mode} MCP on ${session.provider}: host MCP support is unproven`,
       );
       return undefined;
     }
@@ -9541,7 +9907,7 @@ Only continue if you trust this code.`,
     const channel = this.companions();
     if (!(await channel.listen())) return undefined;
     this.revokeCompanionsToken(session);
-    session.companionsToken = channel.register();
+    session.companionsToken = channel.register(mode);
     return channel.spawnSpec(session.companionsToken);
   }
 
@@ -9693,6 +10059,12 @@ Only continue if you trust this code.`,
 
   private async handleCompanionsCall(session: Session, call: CompanionsCall): Promise<void> {
     try {
+      const hidden = session.pendingHiddenChild?.hiddenReason
+        ?? this.sessionTypeMetaFor(session)?.hiddenReason;
+      if (hidden === "workflow-generator" || isGeneratorTool(call.tool)) {
+        this.handleGeneratorTool(session, call);
+        return;
+      }
       switch (call.tool) {
         case COMPANIONS_LIST_TOOL:
           call.resolve(this.companionsList(session, normalizeListArguments(call.args)));
@@ -9716,6 +10088,76 @@ Only continue if you trust this code.`,
       // A throw here would leave the CLI blocked inside `tools/call` for ever.
       this.host.appendLine(`[companions] ${call.tool} failed: ${(error as Error).message}`);
       call.fail(`${call.tool} failed: ${(error as Error).message}`);
+    }
+  }
+
+  private handleGeneratorTool(session: Session, call: CompanionsCall): void {
+    const hidden = session.pendingHiddenChild?.hiddenReason
+      ?? this.sessionTypeMetaFor(session)?.hiddenReason;
+    if (hidden !== "workflow-generator") {
+      call.fail("This tool is only available while generating a workflow.");
+      return;
+    }
+    const store = this.generatorStore();
+    const ctx = this.workflowValidateContext({
+      generated: true,
+      allowWrite: store.state.options.allowWrite,
+      maxStages: store.state.options.maxStages,
+    });
+    switch (call.tool) {
+      case COMPANIONS_WORKFLOW_SCHEMA_TOOL:
+        call.resolve({ guide: WORKFLOW_AUTHORING_GUIDE });
+        return;
+      case COMPANIONS_LIST_ROLES_TOOL:
+        call.resolve({
+          roles: this.agentRoleSet(this.sessionCwd()).roles.map((role) => ({
+            name: role.name,
+            whenToUse: role.whenToUse,
+            provider: role.source === "builtin" ? undefined : role.provider,
+            ...(role.model ? { model: role.model } : {}),
+            source: role.source,
+          })),
+        });
+        return;
+      case COMPANIONS_LIST_TOOL:
+        call.resolve(this.companionsList(session, normalizeListArguments(call.args)));
+        return;
+      case COMPANIONS_LIST_WORKFLOWS_TOOL:
+        call.resolve({
+          workflows: this.crewPresetSet(this.sessionCwd()).presets.map((preset) => ({
+            name: preset.name,
+            title: preset.title || preset.name,
+            whenToUse: preset.whenToUse || "",
+            source: preset.source,
+          })),
+        });
+        return;
+      case COMPANIONS_VALIDATE_WORKFLOW_TOOL: {
+        const raw = workflowArg(call.args);
+        const validation = validateWorkflowRaw(raw, ctx);
+        store.state = recordValidation(store.state, raw, validation);
+        call.resolve(validation);
+        return;
+      }
+      case COMPANIONS_SUBMIT_WORKFLOW_TOOL: {
+        const raw = workflowArg(call.args);
+        const accepted = acceptSubmission(raw, ctx, store.compiler);
+        store.submitted = accepted;
+        if (accepted.ok) {
+          call.resolve({ ok: true, name: accepted.workflow.name, warnings: accepted.validation.warnings });
+        } else {
+          call.resolve({
+            ok: false,
+            error: accepted.error,
+            ...(accepted.validation
+              ? { errors: accepted.validation.errors, warnings: accepted.validation.warnings }
+              : {}),
+          });
+        }
+        return;
+      }
+      default:
+        call.fail(`Unknown tool: ${call.tool}`);
     }
   }
 
@@ -15756,6 +16198,36 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         this.handleDeleteCompanionFile(msg.scope, "crews", msg.name);
         break;
       }
+      case "saveWorkflow": {
+        await this.handleSaveWorkflow(msg);
+        break;
+      }
+      case "validateWorkflow": {
+        this.postWorkflowValidation(msg.draft);
+        break;
+      }
+      case "generateWorkflow": {
+        await this.handleGenerateWorkflow(msg);
+        break;
+      }
+      case "cancelWorkflowGenerate":
+        this.cancelWorkflowGenerate();
+        break;
+      case "setDefaultWorkflow": {
+        const name = String(msg.name ?? "").trim().toLowerCase();
+        if (name) {
+          await this.host.getConfiguration("companions").update("crew.defaultWorkflow", name, "global");
+        }
+        this.postAgentRoles();
+        break;
+      }
+      case "addWorkflowStagesBlock": {
+        await this.handleAddWorkflowStagesBlock(msg.scope, msg.name);
+        break;
+      }
+      case "runWorkflow":
+        await this.openNewCrewSession(origin, "", msg.name);
+        break;
       case "listPermissionRules": {
         this.postPermissionRules(session);
         break;
@@ -21976,6 +22448,7 @@ ${directives.block}`;
     "crewRun",
     "workflowRun",
     "workflowList",
+    "workflowGenerator",
   ]);
   /**
    * Host→rail catalog surface. Everything else stays chat-only so a user who
@@ -25751,7 +26224,25 @@ ${directives.block}`;
             agentRolesCwd: msg.cwd || "",
             agentRolesHasProject: msg.hasProject === true,
             agentRolesError: msg.error || "",
-            agentRolesErrorId: msg.errorId || ""
+            agentRolesErrorId: msg.errorId || "",
+            workflows: Array.isArray(msg.workflows) ? msg.workflows : [],
+            defaultWorkflow: msg.defaultWorkflow || "idea-to-done",
+            subagentRoster: Array.isArray(msg.subagentRoster) ? msg.subagentRoster : [],
+            subagentsEnabled: msg.subagentsEnabled !== false
+          });
+        }
+        if (msg.type === "workflowGenerator") {
+          surface.update({
+            workflowGenerator: {
+              status: msg.status || "idle",
+              requestId: msg.requestId || "",
+              progress: msg.progress || "",
+              draft: msg.draft,
+              mermaid: msg.mermaid || "",
+              validation: msg.validation,
+              error: msg.error || "",
+              compiler: msg.compiler
+            }
           });
         }
         if (msg.type === "routines") {

@@ -40,6 +40,9 @@ import {
   encodeFrame,
   parseClientFrame,
 } from "./companions-protocol";
+import { GENERATOR_PRIMER, GENERATOR_TOOLS } from "./workflow-generator";
+
+export type CompanionsTokenMode = "delegate" | "generator";
 
 /** One live tool call, as the sidebar sees it. */
 export interface CompanionsCall {
@@ -110,6 +113,8 @@ export class CompanionsHostServer {
   private listening?: Promise<string | undefined>;
   /** Tokens currently valid. One per live session; revoked on restart. */
   private readonly tokens = new Set<string>();
+  /** Which tool set a token's handshake advertises. Default is delegate. */
+  private readonly tokenModes = new Map<string, CompanionsTokenMode>();
   /** Outstanding calls by host id. */
   private readonly open = new Map<string, Outstanding>();
   /** Sockets that completed the handshake, by token, so revoking a session
@@ -161,9 +166,10 @@ export class CompanionsHostServer {
   }
 
   /** Mint a token for one session. The caller keeps it to revoke later. */
-  register(): string {
+  register(mode: CompanionsTokenMode = "delegate"): string {
     const token = (this.opts.mintToken ?? (() => randomBytes(32).toString("hex")))();
     this.tokens.add(token);
+    this.tokenModes.set(token, mode);
     return token;
   }
 
@@ -197,6 +203,7 @@ export class CompanionsHostServer {
    * dropped, and any later hello on that token is refused.
    */
   revoke(token: string): void {
+    this.tokenModes.delete(token);
     if (!this.tokens.delete(token)) return;
     for (const [id, entry] of [...this.open]) {
       if (entry.token !== token) continue;
@@ -278,11 +285,12 @@ export class CompanionsHostServer {
           try {
             // The generated schemas and the primer travel with the handshake —
             // see CompanionsReadyFrame for why they cannot live in the script.
+            const mode = this.tokenModes.get(token) ?? "delegate";
             socket.write(encodeFrame({
               t: "ready",
               v: COMPANIONS_IPC_VERSION,
-              tools: COMPANIONS_TOOLS as unknown as unknown[],
-              instructions: COMPANIONS_PRIMER,
+              tools: (mode === "generator" ? GENERATOR_TOOLS : COMPANIONS_TOOLS) as unknown as unknown[],
+              instructions: mode === "generator" ? GENERATOR_PRIMER : COMPANIONS_PRIMER,
             }));
           } catch { /* going away */ }
           continue;

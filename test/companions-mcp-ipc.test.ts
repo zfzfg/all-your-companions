@@ -27,6 +27,7 @@ import {
   COMPANIONS_TOOL_NAMES,
 } from "../src/companions-protocol";
 import { CompanionsHostServer, type CompanionsCall } from "../src/companions-server";
+import { GENERATOR_PRIMER, GENERATOR_TOOL_NAMES } from "../src/workflow-generator";
 
 const SCRIPT = path.join(__dirname, "..", "resources", "mcp", "companions-server.cjs");
 
@@ -52,7 +53,7 @@ interface Harness {
   waitForCalls(n: number): Promise<CompanionsCall[]>;
 }
 
-async function boot(options: { badToken?: boolean; noAddress?: boolean } = {}): Promise<Harness> {
+async function boot(options: { badToken?: boolean; noAddress?: boolean; mode?: "delegate" | "generator" } = {}): Promise<Harness> {
   const calls: CompanionsCall[] = [];
   const abandoned: string[] = [];
   const server = new CompanionsHostServer({
@@ -64,7 +65,7 @@ async function boot(options: { badToken?: boolean; noAddress?: boolean } = {}): 
   started.push({ server });
   const address = await server.listen();
   expect(address, "the pipe must bind for this test to mean anything").toBeTruthy();
-  const token = server.register();
+  const token = server.register(options.mode ?? "delegate");
 
   const spec = server.spawnSpec(token)!;
   const env: NodeJS.ProcessEnv = { ...process.env };
@@ -146,6 +147,21 @@ describe("companions MCP server over a real pipe", () => {
     expect(names).not.toContain("companions_subagent_status");
     const awaitTool = tools.result.tools.find((t: any) => t.name === COMPANIONS_AWAIT_TOOL);
     expect(awaitTool.inputSchema.properties.action.enum).toEqual(["wait", "cancel", "read"]);
+  });
+
+  it("advertises generator tools (not spawn/await) when the token is a generator session", async () => {
+    const h = await boot({ mode: "generator" });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    h.send({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
+    const init = await h.reply(1);
+    expect(init.result.instructions).toBe(GENERATOR_PRIMER);
+    h.send({ jsonrpc: "2.0", id: 2, method: "tools/list" });
+    const tools = await h.reply(2);
+    const names: string[] = tools.result.tools.map((t: any) => t.name).sort();
+    expect(names).toEqual([...GENERATOR_TOOL_NAMES].slice().sort());
+    expect(names).not.toContain(COMPANIONS_SPAWN_TOOL);
+    expect(names).not.toContain(COMPANIONS_AWAIT_TOOL);
+    expect(names).toContain(COMPANIONS_LIST_TOOL);
   });
 
   it("carries the primer in the server's instructions once the host is up", async () => {

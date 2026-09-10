@@ -1057,6 +1057,15 @@
       hostLocal: true,
     },
     {
+      id: "workflows",
+      category: "agents",
+      title: "Workflows",
+      description:
+        "Stage graphs a Crew session can run. A workflow is a crew preset with a stages block; presets without one still run as the default Plan → Implement → Review → Fix graph.",
+      kind: "workflows",
+      hostLocal: true,
+    },
+    {
       id: "routinesList",
       category: "routines",
       title: "Routines",
@@ -1397,9 +1406,9 @@
           ...snapshot.mcpServers.map((s) => [s.displayName, s.name, s.scopeName, s.configFile].filter(Boolean).join(" ")),
         ].join(" ")
       : "";
-    const extraRoles = row.kind === "agentRoles" || row.kind === "crewFlows"
+    const extraRoles = row.kind === "agentRoles" || row.kind === "crewFlows" || row.kind === "workflows"
       ? "planner implementer reviewer researcher fixer inspector crew multi-agent persona roles agents /agent /crew rules "
-        + "subagent subagents delegate delegation roster companion "
+        + "subagent subagents delegate delegation roster companion workflow workflows generate stages mermaid "
         + "provider model companion claude codex gemini grok verify review every parallel worktree scope budget permissions"
       : "";
     const section = connectorSection(row);
@@ -1581,6 +1590,9 @@
       // roles, and "none yet" must not paint like "still loading".
       agentRoles: null,
       crewFlows: null,
+      workflows: null,
+      defaultWorkflow: "idea-to-done",
+      workflowGenerator: null,
       agentRoleProviders: [],
       agentRoleProblems: [],
       agentRolesCwd: "",
@@ -2925,6 +2937,29 @@
   const NEW_ROLE = "*new-role*";
   const NEW_FLOW = "*new-flow*";
   const AGENT_UI = { openRole: "", openFlow: "", draft: null, scope: "project", originScope: "", confirmRemove: "", pendingSave: false };
+  const NEW_WORKFLOW = "*new-workflow*";
+  const WORKFLOW_UI = {
+    open: "",
+    draft: null,
+    jsonText: "",
+    originScope: "",
+    scope: "project",
+    confirmRemove: "",
+    pendingSave: false,
+    generatorOpen: false,
+    generator: {
+      description: "",
+      reuseRoles: true,
+      newRoles: "inline",
+      allowWrite: true,
+      maxStages: "8",
+      provider: "",
+      model: "",
+      effort: "",
+      scope: "project",
+      refine: "",
+    },
+  };
 
   const ROLE_EFFORTS = ["", "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultracode"];
 
@@ -2934,6 +2969,10 @@
 
   function crewFlowsOf(snapshot) {
     return Array.isArray(snapshot && snapshot.crewFlows) ? snapshot.crewFlows : null;
+  }
+
+  function workflowsOf(snapshot) {
+    return Array.isArray(snapshot && snapshot.workflows) ? snapshot.workflows : null;
   }
 
   function roleProvidersOf(snapshot) {
@@ -3338,14 +3377,27 @@
    * moment that is genuinely the host's answer.
    */
   function resolveAgentPendingSave(snapshot) {
-    if (!AGENT_UI.pendingSave) return;
-    AGENT_UI.pendingSave = false;
-    if (snapshot.agentRolesError) return;
-    AGENT_UI.openRole = "";
-    AGENT_UI.openFlow = "";
-    AGENT_UI.draft = null;
-    AGENT_UI.originScope = "";
-    AGENT_UI.confirmRemove = "";
+    if (AGENT_UI.pendingSave) {
+      AGENT_UI.pendingSave = false;
+      if (!snapshot.agentRolesError) {
+        AGENT_UI.openRole = "";
+        AGENT_UI.openFlow = "";
+        AGENT_UI.draft = null;
+        AGENT_UI.originScope = "";
+        AGENT_UI.confirmRemove = "";
+      }
+    }
+    if (WORKFLOW_UI.pendingSave) {
+      WORKFLOW_UI.pendingSave = false;
+      if (!snapshot.agentRolesError) {
+        WORKFLOW_UI.open = "";
+        WORKFLOW_UI.draft = null;
+        WORKFLOW_UI.jsonText = "";
+        WORKFLOW_UI.originScope = "";
+        WORKFLOW_UI.confirmRemove = "";
+        WORKFLOW_UI.generatorOpen = false;
+      }
+    }
   }
 
   function renderAgentRoles(snapshot, env) {
@@ -3771,6 +3823,388 @@
     return el;
   }
 
+  function stringifyStages(draft) {
+    try {
+      return JSON.stringify((draft && draft.stagesJson) || {}, null, 2);
+    } catch {
+      return "{}";
+    }
+  }
+
+  function workflowDraftFrom(view) {
+    const draft = Object.assign({}, view && view.draft);
+    draft.name = draft.name || (view && view.name) || "";
+    draft.title = draft.title || (view && view.title) || "";
+    draft.whenToUse = draft.whenToUse || (view && view.whenToUse) || "";
+    draft.body = draft.body || "";
+    draft.verify = draft.verify || "";
+    draft.stagesJson = draft.stagesJson || {};
+    return draft;
+  }
+
+  function renderValidationList(validation, kind) {
+    const items = validation && Array.isArray(validation[kind]) ? validation[kind] : [];
+    if (!items.length) return null;
+    const box = document.createElement("div");
+    box.className = "settings-workflow-issues is-" + kind;
+    const head = document.createElement("div");
+    head.className = "settings-agent-field-label";
+    head.textContent = kind === "errors" ? "Validation errors" : "Warnings";
+    box.appendChild(head);
+    const list = document.createElement("ul");
+    for (const issue of items) {
+      const li = document.createElement("li");
+      li.textContent = (issue.pointer || "/") + " — " + (issue.message || "");
+      list.appendChild(li);
+    }
+    box.appendChild(list);
+    return box;
+  }
+
+  function renderWorkflowGenerator(snapshot, env) {
+    const gen = WORKFLOW_UI.generator;
+    const live = snapshot.workflowGenerator || {};
+    const card = document.createElement("div");
+    card.className = "settings-agent-card settings-workflow-generator";
+    card.dataset.workflow = "generator";
+
+    const title = document.createElement("div");
+    title.className = "settings-agent-name settings-row-title";
+    title.textContent = "Generate workflow";
+    card.appendChild(title);
+
+    const form = document.createElement("div");
+    form.className = "settings-agent-form";
+
+    const desc = textControl("wfGenDescription", gen.description, "For bug reports: first reproduce the bug with a failing test…", true);
+    desc.dataset.field = "wfGenDescription";
+    form.appendChild(labelledField("Describe how you want this workflow to run.", desc));
+
+    const providers = roleProvidersOf(snapshot);
+    const providerOpts = [{ value: "", label: "First eligible companion" }].concat(
+      providers.map((option) => ({ value: option.id, label: providerOptionLabel(option) })),
+    );
+    form.appendChild(labelledField(
+      "Generator",
+      selectControl("wfGenProvider", providerOpts, gen.provider),
+      "A stronger reasoning model produces better contracts.",
+    ));
+
+    form.appendChild(renderScopeChoice(gen.scope, !snapshot.agentRolesHasProject));
+
+    const reuse = document.createElement("label");
+    reuse.className = "settings-agent-field";
+    const reuseBox = document.createElement("input");
+    reuseBox.type = "checkbox";
+    reuseBox.dataset.field = "wfGenReuseRoles";
+    reuseBox.checked = gen.reuseRoles !== false;
+    reuse.appendChild(reuseBox);
+    reuse.appendChild(document.createTextNode(" Reuse existing roles where possible"));
+    form.appendChild(reuse);
+
+    const write = document.createElement("label");
+    write.className = "settings-agent-field";
+    const writeBox = document.createElement("input");
+    writeBox.type = "checkbox";
+    writeBox.dataset.field = "wfGenAllowWrite";
+    writeBox.checked = gen.allowWrite !== false;
+    write.appendChild(writeBox);
+    write.appendChild(document.createTextNode(" Allow write stages"));
+    form.appendChild(write);
+
+    form.appendChild(labelledField(
+      "New roles",
+      selectControl("wfGenNewRoles", [
+        { value: "inline", label: "Keep new roles inline" },
+        { value: "files", label: "Create new role files" },
+      ], gen.newRoles || "inline"),
+    ));
+
+    if (live.status === "running") {
+      const progress = document.createElement("pre");
+      progress.className = "settings-workflow-progress";
+      progress.textContent = live.progress || "Generating…";
+      form.appendChild(progress);
+    }
+    if (live.status === "error" && live.error) {
+      const err = document.createElement("p");
+      err.className = "settings-agent-error";
+      err.setAttribute("role", "alert");
+      err.textContent = live.error;
+      form.appendChild(err);
+    }
+    const issues = renderValidationList(live.validation, "errors");
+    if (issues) form.appendChild(issues);
+    if (live.status === "preview" && live.mermaid) {
+      const pre = document.createElement("pre");
+      pre.className = "settings-workflow-mermaid";
+      pre.textContent = live.mermaid;
+      form.appendChild(pre);
+    }
+    if (live.status === "preview" || live.status === "error") {
+      const refine = textControl("wfGenRefine", gen.refine, "merge review and security audit into one stage", true);
+      refine.dataset.field = "wfGenRefine";
+      form.appendChild(labelledField("Refine", refine));
+    }
+
+    const actions = document.createElement("div");
+    actions.className = "settings-agent-actions";
+    const generate = document.createElement("button");
+    generate.type = "button";
+    generate.className = "settings-action settings-workflow-generate-run";
+    generate.textContent = live.status === "preview" || live.status === "error" ? "Refine" : "Generate";
+    generate.disabled = !!(env && env.isRemote) || live.status === "running";
+    actions.appendChild(generate);
+    if (live.status === "running") {
+      const cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.className = "settings-action settings-workflow-generate-cancel";
+      cancel.textContent = "Cancel";
+      actions.appendChild(cancel);
+    }
+    if (live.status === "preview" && live.draft) {
+      const save = document.createElement("button");
+      save.type = "button";
+      save.className = "settings-action settings-workflow-generate-save";
+      save.textContent = "Save";
+      actions.appendChild(save);
+      const saveDefault = document.createElement("button");
+      saveDefault.type = "button";
+      saveDefault.className = "settings-action settings-workflow-generate-save-default";
+      saveDefault.textContent = "Save & set as default";
+      actions.appendChild(saveDefault);
+      const run = document.createElement("button");
+      run.type = "button";
+      run.className = "settings-action settings-workflow-generate-run-it";
+      run.textContent = "Run this workflow";
+      actions.appendChild(run);
+    }
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "settings-action settings-workflow-generate-close";
+    close.textContent = "Close";
+    actions.appendChild(close);
+    form.appendChild(actions);
+    card.appendChild(form);
+    return card;
+  }
+
+  function renderWorkflowEditor(view, snapshot, env) {
+    const draft = WORKFLOW_UI.draft;
+    const form = document.createElement("div");
+    form.className = "settings-agent-form";
+    const grid = document.createElement("div");
+    grid.className = "settings-agent-grid";
+    grid.appendChild(labelledField("Name", textControl("name", draft.name, "bugfix")));
+    grid.appendChild(labelledField("Title", textControl("title", draft.title || "", "Bug fix")));
+    grid.appendChild(renderScopeChoice(WORKFLOW_UI.scope, !snapshot.agentRolesHasProject));
+    grid.appendChild(labelledField("Verify", textControl("verify", draft.verify || "", "npm test")));
+    form.appendChild(grid);
+    form.appendChild(labelledField("When to use", textControl("whenToUse", draft.whenToUse || "", "", true)));
+    if (view && view.mermaid) {
+      const pre = document.createElement("pre");
+      pre.className = "settings-workflow-mermaid";
+      pre.textContent = view.mermaid;
+      form.appendChild(pre);
+    }
+    const issues = renderValidationList(view && view.validation, "errors");
+    if (issues) form.appendChild(issues);
+    const warns = renderValidationList(view && view.validation, "warnings");
+    if (warns) form.appendChild(warns);
+    if (view && view.defaultGraph) {
+      const note = document.createElement("p");
+      note.className = "settings-agent-field-hint";
+      note.textContent = "This preset has no stages block yet — Crew sessions run the default graph. Add a stages block to pin the graph in the file.";
+      form.appendChild(note);
+    }
+    const json = textControl("stagesJsonText", WORKFLOW_UI.jsonText || stringifyStages(draft), "{ \"schemaVersion\": 1, … }", true);
+    json.dataset.field = "stagesJsonText";
+    json.classList.add("settings-workflow-json");
+    form.appendChild(labelledField("Stages JSON", json, "Saved only if it re-parses to the same meaning."));
+
+    const actions = document.createElement("div");
+    actions.className = "settings-agent-actions";
+    const save = document.createElement("button");
+    save.type = "button";
+    save.className = "settings-action settings-workflow-save";
+    save.textContent = "Save";
+    save.disabled = !!(env && env.isRemote);
+    actions.appendChild(save);
+    const saveDefault = document.createElement("button");
+    saveDefault.type = "button";
+    saveDefault.className = "settings-action settings-workflow-save-default";
+    saveDefault.textContent = "Save & set as default";
+    saveDefault.disabled = !!(env && env.isRemote);
+    actions.appendChild(saveDefault);
+    const validate = document.createElement("button");
+    validate.type = "button";
+    validate.className = "settings-action settings-workflow-validate";
+    validate.textContent = "Validate";
+    actions.appendChild(validate);
+    if (view && view.defaultGraph && view.scope !== "builtin") {
+      const add = document.createElement("button");
+      add.type = "button";
+      add.className = "settings-action settings-workflow-add-stages";
+      add.dataset.name = view.name;
+      add.dataset.scope = view.scope;
+      add.textContent = "Add stages block";
+      actions.appendChild(add);
+    }
+    if (view && view.compiler && view.compiler.sourcePrompt) {
+      const recompile = document.createElement("button");
+      recompile.type = "button";
+      recompile.className = "settings-action settings-workflow-recompile";
+      recompile.dataset.prompt = view.compiler.sourcePrompt;
+      recompile.textContent = "Recompile from description";
+      actions.appendChild(recompile);
+    }
+    if (view && view.name) {
+      const run = document.createElement("button");
+      run.type = "button";
+      run.className = "settings-action settings-workflow-run";
+      run.dataset.name = view.name;
+      run.textContent = "Run this workflow";
+      actions.appendChild(run);
+      const exp = document.createElement("button");
+      exp.type = "button";
+      exp.className = "settings-action settings-workflow-export";
+      exp.dataset.name = view.name;
+      exp.textContent = "Export";
+      actions.appendChild(exp);
+    }
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "settings-action settings-workflow-cancel";
+    cancel.textContent = "Cancel";
+    actions.appendChild(cancel);
+    if (view && view.scope !== "builtin") {
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "settings-action settings-workflow-remove";
+      remove.dataset.name = view.name;
+      remove.dataset.scope = view.scope;
+      const confirming = WORKFLOW_UI.confirmRemove === "wf:" + view.name;
+      remove.textContent = confirming ? "Delete " + view.name + ".md" : "Delete";
+      if (confirming) remove.classList.add("is-confirming");
+      actions.appendChild(remove);
+    }
+    form.appendChild(actions);
+    const err = renderAgentError(snapshot, view ? view.name : "new");
+    if (err) form.appendChild(err);
+    return form;
+  }
+
+  function renderWorkflowCard(view, snapshot, env) {
+    const card = document.createElement("div");
+    card.className = "settings-agent-card";
+    card.dataset.workflow = view.name;
+
+    const head = document.createElement("button");
+    head.type = "button";
+    head.className = "settings-workflow-toggle";
+    head.setAttribute("aria-expanded", WORKFLOW_UI.open === view.name ? "true" : "false");
+
+    const title = document.createElement("div");
+    title.className = "settings-agent-name settings-row-title";
+    const label = document.createElement("span");
+    label.textContent = view.title || view.name;
+    title.appendChild(label);
+    const name = document.createElement("span");
+    name.className = "settings-agent-badge";
+    name.textContent = view.name;
+    title.appendChild(name);
+    const scope = document.createElement("span");
+    scope.className = "settings-agent-badge is-scope-" + view.scope;
+    scope.textContent = SCOPE_BADGE[view.scope] || view.scope;
+    title.appendChild(scope);
+    if (view.defaultGraph) {
+      const graph = document.createElement("span");
+      graph.className = "settings-agent-badge";
+      graph.textContent = "default graph";
+      title.appendChild(graph);
+    }
+    if (view.isDefault) {
+      const def = document.createElement("span");
+      def.className = "settings-agent-badge";
+      def.textContent = "default";
+      title.appendChild(def);
+    }
+    if (view.validation && view.validation.valid === false) {
+      const bad = document.createElement("span");
+      bad.className = "settings-agent-badge is-override";
+      bad.textContent = "invalid";
+      title.appendChild(bad);
+    }
+
+    const detail = document.createElement("div");
+    detail.className = "settings-row-desc";
+    const parts = [];
+    if (view.whenToUse) parts.push(view.whenToUse);
+    if (view.stages && view.stages.length) {
+      parts.push(view.stages.map((s) => s.title || s.id).join(" → "));
+    }
+    detail.textContent = parts.join(" · ");
+
+    const copy = document.createElement("div");
+    copy.className = "settings-agent-copy";
+    copy.append(title, detail);
+    head.appendChild(copy);
+    card.appendChild(head);
+
+    const defaultBtn = document.createElement("button");
+    defaultBtn.type = "button";
+    defaultBtn.className = "settings-action settings-workflow-default";
+    defaultBtn.dataset.name = view.name;
+    defaultBtn.textContent = view.isDefault ? "Default for new Crew sessions" : "Set as default";
+    defaultBtn.disabled = !!view.isDefault || !!(env && env.isRemote);
+    card.appendChild(defaultBtn);
+
+    if (WORKFLOW_UI.open === view.name && WORKFLOW_UI.draft) {
+      card.appendChild(renderWorkflowEditor(view, snapshot, env));
+    }
+    return card;
+  }
+
+  function renderWorkflows(snapshot, env) {
+    const el = document.createElement("div");
+    el.className = "settings-agent-workflows";
+    el.dataset.id = "workflows";
+
+    const list = workflowsOf(snapshot);
+    if (!list) {
+      el.appendChild(settingsState("Reading workflows…"));
+      return el;
+    }
+
+    const actions = document.createElement("div");
+    actions.className = "settings-agent-actions";
+    const generate = document.createElement("button");
+    generate.type = "button";
+    generate.className = "settings-action settings-workflow-generate";
+    generate.textContent = "Generate workflow…";
+    generate.disabled = !!(env && env.isRemote);
+    actions.appendChild(generate);
+    el.appendChild(actions);
+
+    if (WORKFLOW_UI.generatorOpen) {
+      el.appendChild(renderWorkflowGenerator(snapshot, env));
+    }
+
+    const cards = document.createElement("div");
+    cards.className = "settings-agent-list";
+    for (const view of list) cards.appendChild(renderWorkflowCard(view, snapshot, env));
+    el.appendChild(cards);
+
+    if (WORKFLOW_UI.open === NEW_WORKFLOW && WORKFLOW_UI.draft) {
+      const card = document.createElement("div");
+      card.className = "settings-agent-card is-new";
+      card.dataset.workflow = NEW_WORKFLOW;
+      card.appendChild(renderWorkflowEditor(null, snapshot, env));
+      el.appendChild(card);
+    }
+    return el;
+  }
+
   /**
    * AP-04 rule/instruction-file panel. The host NEVER interprets file
    * content — this renders only what `ruleFileCandidates` computed (path,
@@ -3951,6 +4385,7 @@
     if (row.kind === "agentRoles") return renderAgentRoles(snapshot, env);
     if (row.kind === "subagentRoster") return renderSubagentRoster(snapshot, env);
     if (row.kind === "crewFlows") return renderCrewFlows(snapshot, env);
+    if (row.kind === "workflows") return renderWorkflows(snapshot, env);
     if (row.kind === "permissionRules") return renderPermissionRules(snapshot, env);
     if (row.kind === "ruleFiles") return renderRuleFiles(snapshot, env);
     const el = document.createElement("div");
@@ -4379,9 +4814,10 @@
         // the flow's role pool (which is a list of rows). Deliberately NOT the
         // prose fields: those change per keystroke, and repainting would
         // rebuild the textarea under the caret.
-        agentOpen: AGENT_UI.openRole + "|" + AGENT_UI.openFlow,
-        agentConfirm: AGENT_UI.confirmRemove,
-        agentScope: AGENT_UI.scope,
+        agentOpen: AGENT_UI.openRole + "|" + AGENT_UI.openFlow + "|" + WORKFLOW_UI.open + "|" + (WORKFLOW_UI.generatorOpen ? "g" : ""),
+        agentConfirm: AGENT_UI.confirmRemove + "|" + WORKFLOW_UI.confirmRemove,
+        agentScope: AGENT_UI.scope + "|" + WORKFLOW_UI.scope + "|" + WORKFLOW_UI.generator.scope,
+        wfGen: (snapshot.workflowGenerator && snapshot.workflowGenerator.status) || "",
         agentDraft: AGENT_UI.draft
           ? [AGENT_UI.draft.provider || "", (AGENT_UI.draft.roles || []).join(",")].join(" ")
           : "",
@@ -5078,11 +5514,39 @@
        *  the SAME draft object, so Save posts what is on screen rather than
        *  what the host last sent. */
       function applyAgentField(el) {
-        const draft = AGENT_UI.draft;
-        if (!draft) return false;
         const field = el.dataset.field;
         if (!field) return false;
         const value = el.type === "checkbox" ? el.checked : el.value;
+        if (field === "wfGenDescription") { WORKFLOW_UI.generator.description = value; return false; }
+        if (field === "wfGenRefine") { WORKFLOW_UI.generator.refine = value; return false; }
+        if (field === "wfGenProvider") { WORKFLOW_UI.generator.provider = value; return true; }
+        if (field === "wfGenNewRoles") { WORKFLOW_UI.generator.newRoles = value; return false; }
+        if (field === "wfGenReuseRoles") { WORKFLOW_UI.generator.reuseRoles = !!value; return false; }
+        if (field === "wfGenAllowWrite") { WORKFLOW_UI.generator.allowWrite = !!value; return false; }
+        if (field === "stagesJsonText") {
+          WORKFLOW_UI.jsonText = value;
+          if (WORKFLOW_UI.draft) {
+            try { WORKFLOW_UI.draft.stagesJson = JSON.parse(value); } catch { /* keep typing */ }
+          }
+          return false;
+        }
+        if (field === "cardScope" && WORKFLOW_UI.generatorOpen && !WORKFLOW_UI.open) {
+          WORKFLOW_UI.generator.scope = value;
+          return false;
+        }
+        const wfDraft = WORKFLOW_UI.draft;
+        if (wfDraft && WORKFLOW_UI.open) {
+          if (field === "cardScope") {
+            WORKFLOW_UI.scope = value;
+            return false;
+          }
+          if (field === "name" || field === "title" || field === "whenToUse" || field === "verify" || field === "body") {
+            wfDraft[field] = value;
+            return false;
+          }
+        }
+        const draft = AGENT_UI.draft;
+        if (!draft) return false;
         if (field === "cardScope") {
           AGENT_UI.scope = value;
           return false;
@@ -5267,6 +5731,215 @@
           AGENT_UI.confirmRemove = "";
           AGENT_UI.openFlow = "";
           AGENT_UI.draft = null;
+          post({ type: "deleteCrewFlow", scope: btn.dataset.scope || "project", name });
+        });
+      });
+
+      body.querySelectorAll(".settings-workflow-generate").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          WORKFLOW_UI.generatorOpen = true;
+          WORKFLOW_UI.open = "";
+          WORKFLOW_UI.draft = null;
+          WORKFLOW_UI.generator.scope = snapshot.agentRolesHasProject ? "project" : "global";
+          paint();
+        });
+      });
+
+      body.querySelectorAll(".settings-workflow-generate-close").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          WORKFLOW_UI.generatorOpen = false;
+          post({ type: "cancelWorkflowGenerate" });
+          paint();
+        });
+      });
+
+      body.querySelectorAll(".settings-workflow-generate-cancel").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          post({ type: "cancelWorkflowGenerate" });
+        });
+      });
+
+      body.querySelectorAll(".settings-workflow-generate-run").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const g = WORKFLOW_UI.generator;
+          const live = snapshot.workflowGenerator || {};
+          post({
+            type: "generateWorkflow",
+            description: g.description,
+            scope: g.scope || "project",
+            reuseRoles: g.reuseRoles !== false,
+            newRoles: g.newRoles || "inline",
+            allowWrite: g.allowWrite !== false,
+            maxStages: Number(g.maxStages) || 8,
+            ...(g.provider ? { provider: g.provider } : {}),
+            ...(live.status === "preview" || live.status === "error" ? { refine: g.refine } : {}),
+          });
+        });
+      });
+
+      body.querySelectorAll(".settings-workflow-generate-save, .settings-workflow-generate-save-default").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const live = snapshot.workflowGenerator || {};
+          if (!live.draft) return;
+          WORKFLOW_UI.pendingSave = true;
+          post({
+            type: "saveWorkflow",
+            scope: WORKFLOW_UI.generator.scope || "project",
+            draft: live.draft,
+            setDefault: btn.classList.contains("settings-workflow-generate-save-default"),
+          });
+        });
+      });
+
+      body.querySelectorAll(".settings-workflow-generate-run-it").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const live = snapshot.workflowGenerator || {};
+          const name = live.draft && live.draft.name;
+          if (name) post({ type: "runWorkflow", name });
+        });
+      });
+
+      body.querySelectorAll(".settings-workflow-toggle").forEach((head) => {
+        head.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const card = head.closest(".settings-agent-card");
+          const name = card && card.dataset.workflow;
+          if (!name) return;
+          const list = workflowsOf(snapshot) || [];
+          const view = list.find((entry) => entry && entry.name === name);
+          const closing = WORKFLOW_UI.open === name;
+          WORKFLOW_UI.open = closing ? "" : name;
+          WORKFLOW_UI.confirmRemove = "";
+          WORKFLOW_UI.draft = closing || !view ? null : workflowDraftFrom(view);
+          WORKFLOW_UI.jsonText = WORKFLOW_UI.draft ? stringifyStages(WORKFLOW_UI.draft) : "";
+          WORKFLOW_UI.originScope = view && view.scope !== "builtin" ? view.scope : "";
+          WORKFLOW_UI.scope = view && view.scope === "global" ? "global"
+            : snapshot.agentRolesHasProject ? "project" : "global";
+          AGENT_UI.openRole = "";
+          AGENT_UI.openFlow = "";
+          paint();
+        });
+      });
+
+      body.querySelectorAll(".settings-workflow-default").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          if (btn.dataset.name) post({ type: "setDefaultWorkflow", name: btn.dataset.name });
+        });
+      });
+
+      body.querySelectorAll(".settings-workflow-save, .settings-workflow-save-default").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          if (!WORKFLOW_UI.draft) return;
+          try {
+            WORKFLOW_UI.draft.stagesJson = JSON.parse(WORKFLOW_UI.jsonText || stringifyStages(WORKFLOW_UI.draft));
+          } catch {
+            return;
+          }
+          const editing = WORKFLOW_UI.open && WORKFLOW_UI.open !== NEW_WORKFLOW ? WORKFLOW_UI.open : "";
+          WORKFLOW_UI.pendingSave = true;
+          post({
+            type: "saveWorkflow",
+            scope: WORKFLOW_UI.scope,
+            draft: WORKFLOW_UI.draft,
+            setDefault: btn.classList.contains("settings-workflow-save-default"),
+            ...(editing ? { originalName: editing } : {}),
+            ...(WORKFLOW_UI.originScope ? { originalScope: WORKFLOW_UI.originScope } : {}),
+          });
+        });
+      });
+
+      body.querySelectorAll(".settings-workflow-validate").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          if (!WORKFLOW_UI.draft) return;
+          try {
+            WORKFLOW_UI.draft.stagesJson = JSON.parse(WORKFLOW_UI.jsonText || stringifyStages(WORKFLOW_UI.draft));
+          } catch {
+            return;
+          }
+          post({ type: "validateWorkflow", draft: WORKFLOW_UI.draft });
+        });
+      });
+
+      body.querySelectorAll(".settings-workflow-add-stages").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          post({ type: "addWorkflowStagesBlock", scope: btn.dataset.scope || "project", name: btn.dataset.name });
+        });
+      });
+
+      body.querySelectorAll(".settings-workflow-recompile").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          WORKFLOW_UI.generatorOpen = true;
+          WORKFLOW_UI.generator.description = btn.dataset.prompt || "";
+          paint();
+          post({
+            type: "generateWorkflow",
+            description: WORKFLOW_UI.generator.description,
+            scope: WORKFLOW_UI.scope || "project",
+            reuseRoles: true,
+            newRoles: "inline",
+            allowWrite: true,
+          });
+        });
+      });
+
+      body.querySelectorAll(".settings-workflow-run").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          if (btn.dataset.name) post({ type: "runWorkflow", name: btn.dataset.name });
+        });
+      });
+
+      body.querySelectorAll(".settings-workflow-export").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const name = btn.dataset.name;
+          const list = workflowsOf(snapshot) || [];
+          const view = list.find((entry) => entry && entry.name === name);
+          if (!view || !view.draft) return;
+          post({
+            type: "openText",
+            content: JSON.stringify(view.draft.stagesJson || {}, null, 2),
+            language: "json",
+            filename: name + ".workflow.json",
+          });
+        });
+      });
+
+      body.querySelectorAll(".settings-workflow-cancel").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          WORKFLOW_UI.open = "";
+          WORKFLOW_UI.draft = null;
+          WORKFLOW_UI.jsonText = "";
+          WORKFLOW_UI.confirmRemove = "";
+          paint();
+        });
+      });
+
+      body.querySelectorAll(".settings-workflow-remove").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const name = btn.dataset.name;
+          if (!name) return;
+          if (WORKFLOW_UI.confirmRemove !== "wf:" + name) {
+            WORKFLOW_UI.confirmRemove = "wf:" + name;
+            paint();
+            return;
+          }
+          WORKFLOW_UI.confirmRemove = "";
+          WORKFLOW_UI.open = "";
+          WORKFLOW_UI.draft = null;
           post({ type: "deleteCrewFlow", scope: btn.dataset.scope || "project", name });
         });
       });

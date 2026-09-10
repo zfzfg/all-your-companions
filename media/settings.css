@@ -1660,6 +1660,38 @@ a.settings-github-flow-open {
   border-style: dashed;
 }
 
+.settings-workflow-mermaid,
+.settings-workflow-progress,
+.settings-workflow-json {
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-family: var(--vscode-editor-font-family, ui-monospace, monospace);
+  font-size: 11px;
+  line-height: 1.45;
+  padding: 8px;
+  border: 1px solid var(--vscode-widget-border, rgba(127, 127, 127, .2));
+  border-radius: 3px;
+  background: var(--vscode-editor-background);
+}
+
+.settings-workflow-issues {
+  font-size: 12px;
+}
+
+.settings-workflow-issues ul {
+  margin: 4px 0 0;
+  padding-left: 1.2em;
+}
+
+.settings-workflow-issues.is-errors {
+  color: var(--vscode-errorForeground, #f14c4c);
+}
+
+.settings-workflow-default {
+  margin: 0 14px 10px;
+}
+
 .settings-agent-form {
   display: flex;
   flex-direction: column;

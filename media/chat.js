@@ -884,6 +884,9 @@
     // like "still loading".
     agentRoles: null,
     crewFlows: null,
+    workflows: null,
+    defaultWorkflow: "idea-to-done",
+    workflowGenerator: null,
     agentRoleProviders: [],
     agentRoleProblems: [],
     agentRolesCwd: "",
@@ -3014,6 +3017,9 @@
       ruleFiles: state.ruleFiles,
       agentRoles: state.agentRoles,
       crewFlows: state.crewFlows,
+      workflows: state.workflows,
+      defaultWorkflow: state.defaultWorkflow,
+      workflowGenerator: state.workflowGenerator,
       agentRoleProviders: state.agentRoleProviders,
       agentRoleProblems: state.agentRoleProblems,
       agentRolesCwd: state.agentRolesCwd,
@@ -17683,6 +17689,21 @@
         state.agentRolesHasProject = msg.hasProject === true;
         state.agentRolesError = msg.error || "";
         state.agentRolesErrorId = msg.errorId || "";
+        state.workflows = Array.isArray(msg.workflows) ? msg.workflows : [];
+        state.defaultWorkflow = typeof msg.defaultWorkflow === "string" ? msg.defaultWorkflow : "idea-to-done";
+        refreshSettingsOverlay();
+        break;
+      case "workflowGenerator":
+        state.workflowGenerator = {
+          status: msg.status || "idle",
+          requestId: msg.requestId || "",
+          progress: msg.progress || "",
+          draft: msg.draft,
+          mermaid: msg.mermaid || "",
+          validation: msg.validation,
+          error: msg.error || "",
+          compiler: msg.compiler,
+        };
         refreshSettingsOverlay();
         break;
       case "permissionRules":

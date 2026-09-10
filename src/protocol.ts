@@ -43,6 +43,7 @@ import type { CrewRun } from "./crew";
 export type { CrewRun };
 import type { RuleFile } from "./rules-files";
 import type { AgentRoleDraft, CrewFlowDraft, RoleScope } from "./agent-role-write";
+import type { WorkflowDraft } from "./workflow-write";
 export type { RuleFile };
 import type { LimitOfferAction, LimitOfferRecommended, LimitOfferTarget } from "./limit-errors";
 export type { LimitOfferAction };
@@ -96,6 +97,43 @@ export interface CrewFlowView {
   overrides?: "builtin" | "global";
   path?: string;
   draft: CrewFlowDraft;
+}
+
+/** Settings → Agents & Crew → Workflows (AP-18). */
+export interface WorkflowManagerView {
+  name: string;
+  title: string;
+  whenToUse: string;
+  scope: "builtin" | "global" | "project";
+  overrides?: "builtin" | "global";
+  path?: string;
+  hasStages: boolean;
+  defaultGraph: boolean;
+  isDefault: boolean;
+  mermaid: string;
+  stages: { id: string; title: string; role: string; profile: string }[];
+  draft: WorkflowDraft;
+  validation: {
+    valid: boolean;
+    errors: { pointer: string; message: string }[];
+    warnings: { pointer: string; message: string }[];
+  };
+  compiler?: { provider?: string; model?: string; sourcePrompt?: string; generatedAt?: string };
+}
+
+export interface WorkflowGeneratorView {
+  status: "idle" | "running" | "preview" | "error";
+  requestId: string;
+  progress?: string;
+  draft?: WorkflowDraft;
+  mermaid?: string;
+  validation?: {
+    valid: boolean;
+    errors: { pointer: string; message: string }[];
+    warnings: { pointer: string; message: string }[];
+  };
+  error?: string;
+  compiler?: { provider?: string; model?: string; sourcePrompt?: string; generatedAt?: string };
 }
 
 /**
@@ -722,6 +760,28 @@ export type HostMsg =
       /** Which card the refusal belongs to, so it lands on the draft that
        *  caused it rather than on the top of the page. */
       errorId?: string;
+      /** AP-18. The same presets as `flows`, with stage graphs and validation. */
+      workflows?: WorkflowManagerView[];
+      defaultWorkflow?: string;
+    }
+  /**
+   * AP-18. Live generator progress / preview. Replacing state for one
+   * requestId; `idle` clears the dialog's in-flight chrome.
+   */
+  | {
+      type: "workflowGenerator";
+      status: "idle" | "running" | "preview" | "error";
+      requestId: string;
+      progress?: string;
+      draft?: WorkflowDraft;
+      mermaid?: string;
+      validation?: {
+        valid: boolean;
+        errors: { pointer: string; message: string }[];
+        warnings: { pointer: string; message: string }[];
+      };
+      error?: string;
+      compiler?: { provider?: string; model?: string; sourcePrompt?: string; generatedAt?: string };
     }
   /**
    * AP-07 permission-rule list (Settings → Advanced). Always the FULL list,
@@ -1557,6 +1617,33 @@ export type WebviewMsg =
   | { type: "deleteAgentRole"; scope: RoleScope; name: string }
   | { type: "saveCrewFlow"; scope: RoleScope; originalName?: string; originalScope?: RoleScope; draft: CrewFlowDraft }
   | { type: "deleteCrewFlow"; scope: RoleScope; name: string }
+  /** AP-18. Persist a workflow preset after the writer re-parse check. */
+  | {
+      type: "saveWorkflow";
+      scope: RoleScope;
+      originalName?: string;
+      originalScope?: RoleScope;
+      draft: WorkflowDraft;
+      setDefault?: boolean;
+    }
+  | { type: "validateWorkflow"; draft: WorkflowDraft }
+  | {
+      type: "generateWorkflow";
+      description: string;
+      scope: RoleScope;
+      reuseRoles?: boolean;
+      newRoles?: "inline" | "files";
+      allowWrite?: boolean;
+      maxStages?: number;
+      provider?: AcpProvider;
+      model?: string;
+      effort?: string;
+      refine?: string;
+    }
+  | { type: "cancelWorkflowGenerate" }
+  | { type: "setDefaultWorkflow"; name: string }
+  | { type: "addWorkflowStagesBlock"; scope: RoleScope; name: string }
+  | { type: "runWorkflow"; name: string }
   | { type: "listMcpServers" }
   /** Open the Routines page — the host answers with a `routines` frame. */
   | { type: "listRoutines" }
@@ -1962,7 +2049,7 @@ const HOST_MESSAGE_TYPE_MAP: Record<HostMsg["type"], true> = {
   soundNotifications: true, processingSound: true, readRepliesAloud: true, summarizeRepliesAloud: true, speechSummary: true, imageFull: true, moveComposerCaret: true, remoteStatus: true,
   setAllToolDetails: true, focusInput: true, findInSession: true, restoreComposer: true, truncateMessages: true, uiConfirmRequest: true,
   sessions: true, sessionRemoved: true, repoSessions: true, pinnedSessions: true, repos: true, sessionDot: true, queuedSends: true, submitQueuedSend: true,
-  steerUnavailable: true, feedbackAvailability: true, turnFeedbackAck: true, usage: true, providerCapabilities: true, planEntries: true, reviewCenter: true, crewRun: true, ruleFiles: true, permissionRules: true, agentRoles: true,
+  steerUnavailable: true, feedbackAvailability: true, turnFeedbackAck: true, usage: true, providerCapabilities: true, planEntries: true, reviewCenter: true, crewRun: true, ruleFiles: true, permissionRules: true, agentRoles: true, workflowGenerator: true,
 };
 
 const WEBVIEW_MESSAGE_TYPE_MAP: Record<WebviewMsg["type"], true> = {
@@ -1971,7 +2058,7 @@ const WEBVIEW_MESSAGE_TYPE_MAP: Record<WebviewMsg["type"], true> = {
   openText: true, openDiff: true, revertToolEdit: true, reviewRevertFile: true, reviewRevertAll: true, exportExpr: true, setEffort: true, openGlobalConfig: true,
   addProjectFolder: true, removeProjectFolder: true, createProject: true, cloneProject: true, setupGithubCli: true, listGithubRepos: true, githubSignOut: true, githubLoginWithToken: true,
   openProjectConfig: true, listRuleFiles: true, openRuleFile: true, appendRuleFile: true,
-  listAgentRoles: true, saveAgentRole: true, deleteAgentRole: true, saveCrewFlow: true, deleteCrewFlow: true, listMcpServers: true, connectMcpConnector: true, disconnectMcpConnector: true, completeMcpConnectorOAuth: true,
+  listAgentRoles: true, saveAgentRole: true, deleteAgentRole: true, saveCrewFlow: true, deleteCrewFlow: true, saveWorkflow: true, validateWorkflow: true, generateWorkflow: true, cancelWorkflowGenerate: true, setDefaultWorkflow: true, addWorkflowStagesBlock: true, runWorkflow: true, listMcpServers: true, connectMcpConnector: true, disconnectMcpConnector: true, completeMcpConnectorOAuth: true,
   listRoutines: true, saveRoutine: true, deleteRoutine: true, setRoutinePaused: true, runRoutineNow: true, showLogs: true, toggleDevTools: true, openSettings: true, openSettingsSurface: true, closeSettingsSurface: true, dismissWelcomeTip: true, welcomeTipShown: true, moveView: true,
   setShowThinking: true, setAppPurpose: true, setExpandCommandOutputs: true, setSteerByDefault: true,
   setSoundNotifications: true, setProcessingSound: true, setReadRepliesAloud: true, setSummarizeRepliesAloud: true, setVoiceSendPhrase: true, setVoiceKeyterms: true, setTelemetryEnabled: true, setThumbsFeedback: true, summarizeSpeech: true, requestImageFull: true, composerFocus: true,

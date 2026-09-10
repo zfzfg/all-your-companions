@@ -144,6 +144,26 @@ Real `chat.js`. Copy-deck strings for Gate N, Gate 0, fixer-limit and
 staleness. Start posts `workflowGateAction`. D8's hostNotice button posts
 `openCrewWithGoal`. Empty Crew **Start workflow** posts `workflowStart`.
 
+### `test/workflow-validate.test.ts` — twelve §8.7 rules (AP-18)
+
+`idea-to-done` (in-code and the shipped Markdown) passes. Unbounded cycles, dangling `to`, unknown models (warm cache), missing verdict definitions, write stages without scope, inherit when write was not allowed, unknown `schemaVersion`, unknown roles, unreachable `$done`, missing input provenance, and the stage cap are errors with JSON pointers. A cold model cache warns rather than errors.
+
+### `test/workflow-write.test.ts` — serialize then re-parse (AP-18)
+
+`idea-to-done` round-trips through `serializeWorkflowPreset` / `parseCrewPreset` with the same meaning. A stages block that will not re-parse is refused rather than written. The generator fenced-block fallback extracts and accepts a valid submission.
+
+### `test/workflow-generator.test.ts` — generator tools and repair loop (AP-18)
+
+Generator tools are schema/list/validate/submit plus `list_subagent_targets` — never spawn/await. An unbounded cycle fails validate; the repaired draft submits. The Appendix C meta-prompt carries the user's description. Mermaid preview names the stages and `$done`.
+
+### `test/workflow-manager-host.test.ts` — save and fence fallback (AP-18)
+
+A valid save writes `.companions/crews/<name>.md` that re-parses. An invalid draft writes nothing. The no-MCP fallback turns a `companions-workflow` fence into a preview and does not write a file.
+
+### `test/workflow-settings.dom.test.ts` — Workflows page (AP-18)
+
+Real `settings.js`. The host's list is painted with scope and default badges. **Generate workflow…** opens the copy-deck form and posts `generateWorkflow`. Save posts `saveWorkflow`. The default radio posts `setDefaultWorkflow`.
+
 ### `test/workflow-crew-host.test.ts` — D8 and Start workflow (AP-17, 4 tests)
 
 `/crew` in an Agent session is the copy-deck card, not a chain, unless

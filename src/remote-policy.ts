@@ -491,6 +491,13 @@ export const INBOUND_DISPOSITION: Record<WebviewMsg["type"], InboundDisposition>
   deleteAgentRole: "host-local",
   saveCrewFlow: "host-local",
   deleteCrewFlow: "host-local",
+  saveWorkflow: "host-local",
+  validateWorkflow: "host-local",
+  generateWorkflow: "host-local",
+  cancelWorkflowGenerate: "host-local",
+  setDefaultWorkflow: "host-local",
+  addWorkflowStagesBlock: "host-local",
+  runWorkflow: "host-local",
   // AP-07: listing is observation of a security surface the remote already
   // shares (permission cards, Auto accept). Delete/adopt change what is
   // auto-granted, same class as permissionAnswer.
@@ -701,6 +708,13 @@ export const REMOTE_REQUIRES_BOUND_SESSION: Record<WebviewMsg["type"], boolean> 
   deleteAgentRole: false,
   saveCrewFlow: false,
   deleteCrewFlow: false,
+  saveWorkflow: false,
+  validateWorkflow: false,
+  generateWorkflow: false,
+  cancelWorkflowGenerate: false,
+  setDefaultWorkflow: false,
+  addWorkflowStagesBlock: false,
+  runWorkflow: false,
   listPermissionRules: true,
   deletePermissionRule: true,
   adoptPermissionRules: true,
@@ -1040,6 +1054,7 @@ export const OUTBOUND_DISPOSITION: Record<HostMsg["type"], OutboundDisposition> 
   // AP-17. The idea, notes, packets and target pickers are prompts.
   workflowRun: "host-local",
   workflowList: "host-local",
+  workflowGenerator: "host-local",
   planModeAvailability: "mirror",
   providerCapabilities: "mirror",
   // Display-only checklist of the agent's own steps; carries no path, no
@@ -1238,6 +1253,7 @@ export const OUTBOUND_PROJECT_AUTH: Record<HostMsg["type"], OutboundProjectAuth>
   subagentTray: "scope",
   workflowRun: "scope",
   workflowList: "scope",
+  workflowGenerator: "scope",
   planModeAvailability: "scope",
   providerCapabilities: "scope",
   planEntries: "scope",

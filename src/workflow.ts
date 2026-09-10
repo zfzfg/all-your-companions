@@ -531,6 +531,32 @@ export function applyMaxFixerPasses(def: WorkflowDefinition, maxFixerPasses: num
   };
 }
 
+/** Mermaid flowchart for the settings preview. Labels are escaped so a
+ *  stage title cannot break out of the node. */
+export function workflowToMermaid(def: WorkflowDefinition): string {
+  const esc = (value: string) => value.replace(/["\\]/g, " ").replace(/\n/g, " ").slice(0, 80);
+  const lines = ["flowchart LR"];
+  const reserved = new Set<string>();
+  for (const stage of def.stages) {
+    if (!stage.enabled) continue;
+    const label = `${stage.title || stage.id}<br/>${stage.role} · ${stage.profile}`;
+    lines.push(`    ${stage.id}["${esc(label)}"]`);
+    for (const transition of stage.next) {
+      const dest = isReservedTarget(transition.to) ? transition.to.slice(1) : transition.to;
+      if (isReservedTarget(transition.to) && !reserved.has(dest)) {
+        reserved.add(dest);
+        lines.push(`    ${dest}((${esc(transition.to)}))`);
+      }
+      const edge = transition.reason
+        || (transition.when?.verdict ? transition.when.verdict.join("/") : "");
+      lines.push(edge
+        ? `    ${stage.id} -->|"${esc(edge)}"| ${dest}`
+        : `    ${stage.id} --> ${dest}`);
+    }
+  }
+  return lines.join("\n");
+}
+
 export function stageTargetHint(stage: WorkflowStage): Target | undefined {
   const t = stage.target;
   if (!t) return undefined;

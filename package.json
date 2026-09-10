@@ -682,6 +682,16 @@
           "default": false,
           "description": "Let /crew still walk a step list inside an Agent session. Off: /crew in an Agent session offers to open a Crew session instead."
         },
+        "companions.workflows.generator.target": {
+          "type": "object",
+          "default": {},
+          "description": "Default companion, model and effort for the workflow generator. Empty uses the first eligible target. Do not hard-code a model id.",
+          "properties": {
+            "provider": { "type": "string" },
+            "model": { "type": "string" },
+            "effort": { "type": "string" }
+          }
+        },
         "companions.crew.providers": {
           "type": "object",
           "default": {},

@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "companions-stages.v1",
+  "title": "Companions workflow stages v1",
+  "type": "object",
+  "required": ["schemaVersion", "name", "stages", "contracts", "start"],
+  "additionalProperties": true,
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "name": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+    "title": { "type": "string" },
+    "description": { "type": "string" },
+    "whenToUse": { "type": "string" },
+    "whenNotToUse": { "type": "string" },
+    "defaults": {
+      "type": "object",
+      "properties": {
+        "gate": { "enum": ["manual", "auto"] },
+        "worktree": { "type": "boolean" },
+        "verify": { "type": ["string", "null"] },
+        "allowSubagents": { "type": "boolean" }
+      }
+    },
+    "roles": { "type": "object" },
+    "stages": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "role"],
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "role": { "type": "string" },
+          "enabled": { "type": "boolean" },
+          "profile": { "enum": ["read-only", "scoped-edit", "inherit"] },
+          "maxVisits": { "type": "integer", "minimum": 1 },
+          "onMaxVisits": { "type": "string" },
+          "next": { "type": "array" }
+        }
+      }
+    },
+    "contracts": { "type": "object" },
+    "start": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+    "compiler": { "type": "object" }
+  }
+}
