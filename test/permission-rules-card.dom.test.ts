@@ -43,8 +43,10 @@ describe("permission card rule suggestions", () => {
         { id: "cmd-head", label: "npm *", match: { kind: "execute", commandPrefix: "npm" }, scope: "workspace" },
       ],
     });
-    expect(doc.querySelector(".perm-rule-suggestions-label")?.textContent).toBe("Always allow for…");
-    const sug = [...doc.querySelectorAll(".perm-rule-suggestion")].map((b) => b.textContent);
+    expect(doc.querySelector(".perm-rule-suggestions-label")?.textContent).toBe("Always allow — saved as a rule");
+    const sug = [...doc.querySelectorAll(".perm-rule-suggestion-label")].map((b) => b.textContent);
+    // Where each rule would be written is on the button, not implied.
+    expect([...doc.querySelectorAll(".perm-rule-suggestion .cx-pill")].map((b) => b.textContent)).toEqual(["this project", "this project"]);
     expect(sug).toEqual(["npm test", "npm *"]);
     (doc.querySelector(".perm-rule-suggestion") as HTMLButtonElement).click();
     expect(posted).toContainEqual({

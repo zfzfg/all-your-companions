@@ -1543,6 +1543,14 @@
       case "thumbsFeedback":
         next.thumbsFeedback = !!value;
         break;
+      // AP-16. Their `get` reads these two keys, so without a case the switch
+      // would sit in its old position until the host's next frame.
+      case "subagentsEnabled":
+        next.subagentsEnabled = !!value;
+        break;
+      case "crewStageSubagents":
+        next.crewStagesMayUseSubagents = !!value;
+        break;
       default:
         break;
     }
@@ -2965,6 +2973,11 @@
     open: "",
     draft: null,
     jsonText: "",
+    // A stages block that does not parse — shown at the field, never a
+    // silent no-op on Save.
+    jsonError: "",
+    // The last Validate answer, keyed to the card it was asked for.
+    validation: null,
     originScope: "",
     scope: "project",
     confirmRemove: "",
@@ -2985,6 +2998,12 @@
   };
 
   const ROLE_EFFORTS = ["", "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultracode"];
+  // The ids are the wire's; these are what a person reads.
+  const EFFORT_LABELS = {
+    "": "That companion's default", none: "None", minimal: "Minimal", low: "Low", medium: "Medium",
+    high: "High", xhigh: "Extra high", max: "Max", ultracode: "Ultracode",
+  };
+  const effortLabel = (id) => EFFORT_LABELS[id] || id;
 
   function agentRolesOf(snapshot) {
     return Array.isArray(snapshot && snapshot.agentRoles) ? snapshot.agentRoles : null;
@@ -3078,12 +3097,24 @@
     return el;
   }
 
-  function labelledField(labelText, control, hint) {
-    const wrap = document.createElement("label");
-    wrap.className = "settings-agent-field";
+  /**
+   * One labelled field of an Agents & Crew editor. A `<label>` when it wraps a
+   * single control (clicking the words focuses it); a `<div role="group">`
+   * when it wraps several — a label around a row of buttons would forward
+   * every click on its text to the first of them.
+   */
+  function agentField(labelText, control, hint, opts) {
+    const group = !!(opts && opts.group);
+    const wrap = document.createElement(group ? "div" : "label");
+    wrap.className = "settings-agent-field" + (opts && opts.wide ? " is-wide" : "");
     const label = document.createElement("span");
     label.className = "settings-agent-field-label";
     label.textContent = labelText;
+    if (group) {
+      wrap.setAttribute("role", "group");
+      label.id = "sx-field-" + (++agentFieldSeq);
+      wrap.setAttribute("aria-labelledby", label.id);
+    }
     wrap.appendChild(label);
     wrap.appendChild(control);
     if (hint) {
@@ -3093,6 +3124,84 @@
       wrap.appendChild(note);
     }
     return wrap;
+  }
+  let agentFieldSeq = 0;
+
+  /** A labelled switch row: the upstream `.settings-switch`, used everywhere
+   *  this page offers an on/off, instead of a bare checkbox. */
+  function agentSwitch(field, on, labelText, hint, dataKey) {
+    const row = document.createElement("div");
+    row.className = "settings-agent-switch";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "settings-switch" + (on ? " on" : "");
+    btn.setAttribute("role", "switch");
+    btn.setAttribute("aria-checked", on ? "true" : "false");
+    btn.dataset[dataKey || "field"] = field;
+    btn.innerHTML = '<span class="settings-switch-knob"></span>';
+    const copy = document.createElement("span");
+    copy.className = "settings-agent-switch-copy";
+    const label = document.createElement("span");
+    label.className = "settings-agent-switch-label";
+    label.textContent = labelText;
+    label.id = "sx-switch-" + (++agentFieldSeq);
+    btn.setAttribute("aria-labelledby", label.id);
+    copy.appendChild(label);
+    if (hint) {
+      const note = document.createElement("span");
+      note.className = "settings-agent-field-hint";
+      note.textContent = hint;
+      copy.appendChild(note);
+    }
+    row.append(btn, copy);
+    return row;
+  }
+
+  /** A row of buttons for an editor footer. `spacer` pushes what follows to
+   *  the right — the destructive action lives there, away from Save. */
+  function agentActions() {
+    const row = document.createElement("div");
+    row.className = "settings-agent-actions";
+    return row;
+  }
+  function agentButton(className, label, kind) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "settings-action " + className + (kind ? " is-" + kind : "");
+    btn.textContent = label;
+    return btn;
+  }
+  function agentSpacer() {
+    const s = document.createElement("span");
+    s.className = "settings-agent-spacer";
+    return s;
+  }
+  /** The card chevron — the routines cards' glyph, so an openable card looks
+   *  openable everywhere on the page. */
+  function chevron() {
+    const chev = document.createElement("span");
+    chev.className = "settings-routine-chev settings-agent-chev";
+    chev.setAttribute("aria-hidden", "true");
+    chev.innerHTML =
+      '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>';
+    return chev;
+  }
+  /** A designed empty state — a list with nothing in it should say what
+   *  would go there, not look like a list that failed to load. */
+  function agentEmpty(title, text) {
+    const box = document.createElement("div");
+    box.className = "settings-agent-empty";
+    const t = document.createElement("div");
+    t.className = "settings-agent-empty-title";
+    t.textContent = title;
+    box.appendChild(t);
+    if (text) {
+      const p = document.createElement("div");
+      p.className = "settings-agent-field-hint";
+      p.textContent = text;
+      box.appendChild(p);
+    }
+    return box;
   }
 
   function selectControl(field, options, value) {
@@ -3109,14 +3218,18 @@
     return select;
   }
 
-  function textControl(field, value, placeholder, multiline) {
+  /** `multiline` is a row count (`true` means 3); `opts.type` makes a typed
+   *  input — a budget is a number, and the keyboard should say so. */
+  function textControl(field, value, placeholder, multiline, opts) {
     const el = document.createElement(multiline ? "textarea" : "input");
     el.className = "settings-agent-input" + (multiline ? " settings-agent-textarea" : "");
     el.dataset.field = field;
     el.value = value == null ? "" : String(value);
     if (placeholder) el.placeholder = placeholder;
-    if (multiline) el.rows = multiline;
-    else el.type = "text";
+    if (multiline) el.rows = typeof multiline === "number" ? multiline : 3;
+    else el.type = (opts && opts.type) || "text";
+    if (opts && opts.min != null) el.min = String(opts.min);
+    if (opts && opts.mono) el.classList.add("is-mono");
     el.spellcheck = false;
     return el;
   }
@@ -3145,6 +3258,13 @@
     return box;
   }
 
+  /** Must match `agentCardErrorId` in src/sidebar.ts: the host tags a refusal
+   *  with the card it belongs to, and a role, a flow and a workflow may share
+   *  a name. */
+  function agentCardId(kind, name) {
+    return kind + ":" + (name || "*new*");
+  }
+
   function renderAgentError(snapshot, id) {
     if (!snapshot.agentRolesError) return null;
     const errorId = snapshot.agentRolesErrorId || "";
@@ -3158,20 +3278,31 @@
 
   /** Which scope this card writes to. A built-in has no file yet, so the
    *  toggle is how the user says where the materialised one should go. */
-  function renderScopeChoice(value, disabled) {
+  /** Where Save writes. It sits beside the Save button, not among the role's
+   *  own fields: it is a decision about the FILE, not about the role. */
+  function renderStoreChoice(value, disabled) {
     const control = selectControl("cardScope", [
       { value: "project", label: "This project (.companions)" },
       { value: "global", label: "All projects (~/.companions)" },
     ], value);
     control.dataset.field = "cardScope";
+    control.classList.add("settings-agent-store-select");
     if (disabled) control.disabled = true;
-    return labelledField(
-      "Stored in",
-      control,
-      disabled
-        ? "No project folder is open, so this can only be saved for all projects."
-        : "A project file is versionable and shared with the team; an all-projects file follows you but is not in git.",
-    );
+    const row = document.createElement("div");
+    row.className = "settings-agent-store";
+    const label = document.createElement("label");
+    label.className = "settings-agent-store-label";
+    label.textContent = "Save to";
+    label.appendChild(control);
+    const hint = document.createElement("span");
+    hint.className = "settings-agent-field-hint";
+    hint.textContent = disabled
+      ? "No project folder is open, so this can only be saved for all projects."
+      : value === "global"
+        ? "Follows you to every project; not in git."
+        : "Versioned with the project and shared with the team.";
+    row.append(label, hint);
+    return row;
   }
 
   function renderRoleEditor(view, snapshot, env) {
@@ -3182,14 +3313,14 @@
     const grid = document.createElement("div");
     grid.className = "settings-agent-grid";
 
-    grid.appendChild(labelledField(
+    grid.appendChild(agentField(
       "Name",
       textControl("name", draft.name, "reviewer"),
       "What follows /agent. Lowercase letters, digits and dashes.",
     ));
 
     const providers = roleProvidersOf(snapshot);
-    grid.appendChild(labelledField(
+    grid.appendChild(agentField(
       "Companion",
       selectControl("provider", providers.map((option) => ({ value: option.id, label: providerOptionLabel(option) })), draft.provider),
       view && view.providerPinned === false
@@ -3200,7 +3331,7 @@
     const option = providerOptionFor(snapshot, draft.provider);
     const models = (option && Array.isArray(option.models) ? option.models : []);
     if (models.length) {
-      grid.appendChild(labelledField(
+      grid.appendChild(agentField(
         "Model",
         selectControl(
           "model",
@@ -3215,14 +3346,14 @@
       // An EMPTY model list means the cache is cold, not that the companion
       // has no models — so free text, never an empty dropdown that looks like
       // the answer is "none".
-      grid.appendChild(labelledField(
+      grid.appendChild(agentField(
         "Model",
         textControl("model", draft.model, "leave empty for that companion's default"),
         "This companion's model list has not been loaded yet, so it cannot be checked here. Leave empty for its default.",
       ));
     }
 
-    grid.appendChild(labelledField(
+    grid.appendChild(agentField(
       "Mode",
       selectControl("mode", [
         { value: "agent", label: "Agent — may edit files" },
@@ -3231,82 +3362,78 @@
       "",
     ));
 
-    grid.appendChild(labelledField(
+    grid.appendChild(agentField(
       "Effort",
-      selectControl("effort", ROLE_EFFORTS.map((value) => ({ value, label: value || "That companion's default" })), draft.effort),
+      selectControl("effort", ROLE_EFFORTS.map((value) => ({ value, label: effortLabel(value) })), draft.effort),
       "",
     ));
-
-    grid.appendChild(renderScopeChoice(AGENT_UI.scope, !snapshot.agentRolesHasProject));
     form.appendChild(grid);
 
-    form.appendChild(labelledField(
+    form.appendChild(agentField(
       "When to use it",
       textControl("whenToUse", draft.whenToUse, "Checking finished work against its briefing, in a fresh session.", 3),
       "Required. This is also the text a crew reads to decide which step belongs to this role.",
     ));
-    form.appendChild(labelledField(
+    form.appendChild(agentField(
       "When not to use it",
       textControl("whenNotToUse", draft.whenNotToUse, "", 2),
       "",
     ));
-    form.appendChild(labelledField(
+    form.appendChild(agentField(
       "Standing instruction",
       textControl("systemPreamble", draft.systemPreamble, "You are reviewing, not fixing. Do not edit any file.", 3),
       "Put ahead of everything else in the briefing this role receives.",
     ));
 
-    const advanced = document.createElement("div");
-    advanced.className = "settings-agent-grid";
-    advanced.appendChild(labelledField(
+    // The rarely-touched limits, folded away: a role is usually a companion,
+    // a model and a sentence, and the form should look like that.
+    const advanced = document.createElement("details");
+    advanced.className = "settings-agent-more";
+    const hasLimits = (draft.scope || []).length || (draft.permissions || []).length
+      || draft.budget.toolCalls || draft.budget.tokens;
+    if (hasLimits) advanced.open = true;
+    const summary = document.createElement("summary");
+    summary.textContent = "Limits — files, permissions, budget";
+    advanced.appendChild(summary);
+    const limits = document.createElement("div");
+    limits.className = "settings-agent-grid";
+    limits.appendChild(agentField(
       "Files it may touch",
-      textControl("scopeGlobs", (draft.scope || []).join("\n"), "src/**", 2),
+      textControl("scopeGlobs", (draft.scope || []).join("\n"), "src/**", 3, { mono: true }),
       "One glob per line. Empty means the whole project.",
     ));
-    advanced.appendChild(labelledField(
+    limits.appendChild(agentField(
       "Permission rules",
-      textControl("permissions", (draft.permissions || []).join("\n"), "allow edit src/**", 2),
-      "One per line: allow|ask|deny, then read|edit|execute|other, then a glob or command prefix. Deny always wins.",
+      textControl("permissions", (draft.permissions || []).join("\n"), "allow edit src/**\ndeny execute git push", 3, { mono: true }),
+      "One per line: allow | ask | deny, then read | edit | execute | other, then a glob or command prefix. Deny always wins.",
     ));
-    advanced.appendChild(labelledField(
+    limits.appendChild(agentField(
       "Budget — tool calls",
-      textControl("budgetToolCalls", draft.budget.toolCalls, "no limit"),
+      textControl("budgetToolCalls", draft.budget.toolCalls, "No limit", false, { type: "number", min: 1 }),
       "",
     ));
-    advanced.appendChild(labelledField("Budget — tokens", textControl("budgetTokens", draft.budget.tokens, "no limit"), ""));
+    limits.appendChild(agentField("Budget — tokens",
+      textControl("budgetTokens", draft.budget.tokens, "No limit", false, { type: "number", min: 1 }), ""));
+    advanced.appendChild(limits);
     form.appendChild(advanced);
 
-    const prefer = document.createElement("label");
-    prefer.className = "settings-agent-check";
-    const box = document.createElement("input");
-    box.type = "checkbox";
-    box.dataset.field = "preferDifferentProvider";
-    box.checked = !!draft.preferDifferentProvider;
-    prefer.appendChild(box);
-    const preferCopy = document.createElement("span");
-    preferCopy.textContent = "Prefer a companion other than the one that did the work";
-    prefer.appendChild(preferCopy);
-    form.appendChild(prefer);
+    form.appendChild(agentSwitch(
+      "preferDifferentProvider",
+      !!draft.preferDifferentProvider,
+      "Prefer a companion other than the one that did the work",
+      "What makes a review an outside opinion. When only one companion is connected it still runs, and says so.",
+    ));
 
-    const error = renderAgentError(snapshot, view ? view.name : NEW_ROLE);
+    const error = renderAgentError(snapshot, agentCardId("role", view && view.name));
     if (error) form.appendChild(error);
 
-    const actions = document.createElement("div");
-    actions.className = "settings-agent-actions";
-    const save = document.createElement("button");
-    save.type = "button";
-    save.className = "settings-action settings-agent-save";
-    save.textContent = view ? "Save role" : "Create role";
-    actions.appendChild(save);
-    const cancel = document.createElement("button");
-    cancel.type = "button";
-    cancel.className = "settings-action settings-agent-cancel";
-    cancel.textContent = "Cancel";
-    actions.appendChild(cancel);
+    form.appendChild(renderStoreChoice(AGENT_UI.scope, !snapshot.agentRolesHasProject));
+    const actions = agentActions();
+    actions.appendChild(agentButton("settings-agent-save", view ? "Save role" : "Create role", "primary"));
+    actions.appendChild(agentButton("settings-agent-cancel", "Cancel"));
     if (view && view.scope !== "builtin") {
-      const remove = document.createElement("button");
-      remove.type = "button";
-      remove.className = "settings-action settings-agent-remove";
+      actions.appendChild(agentSpacer());
+      const remove = agentButton("settings-agent-remove", "", "danger");
       remove.dataset.name = view.name;
       remove.dataset.scope = view.scope;
       const confirming = AGENT_UI.confirmRemove === "role:" + view.name;
@@ -3331,14 +3458,16 @@
   }
 
   function renderRoleCard(view, snapshot, env) {
+    const open = AGENT_UI.openRole === view.name;
     const card = document.createElement("div");
-    card.className = "settings-agent-card";
+    card.className = "settings-agent-card" + (open ? " is-open" : "");
     card.dataset.role = view.name;
 
     const head = document.createElement("button");
     head.type = "button";
-    head.className = "settings-agent-toggle";
-    head.setAttribute("aria-expanded", AGENT_UI.openRole === view.name ? "true" : "false");
+    head.className = "settings-agent-toggle settings-agent-head";
+    head.setAttribute("aria-expanded", open ? "true" : "false");
+    head.appendChild(chevron());
 
     const title = document.createElement("div");
     title.className = "settings-agent-name settings-row-title";
@@ -3347,7 +3476,7 @@
     title.appendChild(label);
 
     const command = document.createElement("span");
-    command.className = "settings-agent-badge";
+    command.className = "settings-agent-badge is-code";
     command.textContent = "/agent " + view.name;
     title.appendChild(command);
 
@@ -3437,24 +3566,25 @@
     const problems = renderAgentProblems(snapshot.agentRoleProblems);
     if (problems) el.appendChild(problems);
 
+    const heading = document.createElement("div");
+    heading.className = "settings-section-actions";
+    const add = agentButton("settings-agent-new", "New role");
+    add.disabled = AGENT_UI.openRole === NEW_ROLE;
+    heading.appendChild(add);
+    el.appendChild(heading);
+
+    if (AGENT_UI.openRole === NEW_ROLE && AGENT_UI.draft) {
+      const card = document.createElement("div");
+      card.className = "settings-agent-card is-new is-open";
+      card.dataset.role = NEW_ROLE;
+      card.appendChild(renderRoleEditor(null, snapshot, env));
+      el.appendChild(card);
+    }
+
     const list = document.createElement("div");
     list.className = "settings-agent-list";
     for (const view of roles) list.appendChild(renderRoleCard(view, snapshot, env));
     el.appendChild(list);
-
-    if (AGENT_UI.openRole === NEW_ROLE && AGENT_UI.draft) {
-      const card = document.createElement("div");
-      card.className = "settings-agent-card is-new";
-      card.dataset.role = NEW_ROLE;
-      card.appendChild(renderRoleEditor(null, snapshot, env));
-      el.appendChild(card);
-    } else {
-      const add = document.createElement("button");
-      add.type = "button";
-      add.className = "settings-action settings-agent-new";
-      add.textContent = "New role";
-      el.appendChild(add);
-    }
 
     const general = renderAgentError(snapshot, "");
     if (general) el.appendChild(general);
@@ -3512,13 +3642,14 @@
 
   function rosterSelect(value, options, rosterField, routingField) {
     const select = document.createElement("select");
-    select.className = "settings-input settings-roster-select";
+    select.className = "settings-select settings-agent-input settings-roster-select";
     if (rosterField) select.dataset.rosterField = rosterField;
     if (routingField) select.dataset.routingField = routingField;
     for (const option of options) {
       const el = document.createElement("option");
       el.value = option.value;
       el.textContent = option.label;
+      if (option.disabled) el.disabled = true;
       if (option.value === value) el.selected = true;
       select.appendChild(el);
     }
@@ -3533,24 +3664,29 @@
 
     const head = document.createElement("div");
     head.className = "settings-roster-head";
-
-    const toggle = document.createElement("input");
-    toggle.type = "checkbox";
-    toggle.checked = row.enabled !== false;
+    const on = row.enabled !== false;
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "settings-switch" + (on ? " on" : "");
+    toggle.setAttribute("role", "switch");
+    toggle.setAttribute("aria-checked", on ? "true" : "false");
+    toggle.setAttribute("aria-label", "Use " + row.label + " as a subagent");
     toggle.dataset.rosterField = "enabled";
-    const toggleLabel = document.createElement("label");
-    toggleLabel.className = "settings-roster-toggle";
-    toggleLabel.appendChild(toggle);
+    toggle.innerHTML = '<span class="settings-switch-knob"></span>';
+    head.appendChild(toggle);
     const name = document.createElement("span");
     name.className = "settings-roster-name";
     name.textContent = row.label;
-    toggleLabel.appendChild(name);
-    head.appendChild(toggleLabel);
+    head.appendChild(name);
 
     const status = document.createElement("span");
     status.className = "settings-roster-status is-" + row.status;
     status.textContent = ROSTER_STATUS_LABELS[row.status] || row.status;
     head.appendChild(status);
+    const saved = document.createElement("span");
+    saved.className = "settings-roster-saved";
+    saved.setAttribute("aria-live", "polite");
+    head.appendChild(saved);
     card.appendChild(head);
 
     const body = document.createElement("div");
@@ -3573,29 +3709,22 @@
 
     const efforts = Array.isArray(snapshot.efforts) ? snapshot.efforts : [];
     const effortOptions = [{ value: "", label: "No ceiling" }]
-      .concat(efforts.map((level) => ({ value: level, label: level })));
+      .concat(efforts.map((level) => ({ value: level, label: effortLabel(level) })));
     body.appendChild(rosterField(
       "Max effort",
       rosterSelect(row.maxEffort || "", effortOptions, "maxEffort"),
       "A higher request is lowered, and the agent is told.",
     ));
 
-    const writeToggle = document.createElement("input");
-    writeToggle.type = "checkbox";
-    writeToggle.checked = row.allowWrite !== false;
-    writeToggle.dataset.rosterField = "allowWrite";
-    const writeWrap = document.createElement("span");
-    writeWrap.className = "settings-roster-checkbox";
-    writeWrap.appendChild(writeToggle);
-    body.appendChild(rosterField(
-      "May edit files",
-      writeWrap,
-      "Off restricts this companion to read-only subagents.",
-    ));
+    const write = row.allowWrite !== false;
+    const writeToggle = agentSwitch("allowWrite", write, "May edit files",
+      write ? "Can run as a scoped-edit subagent." : "Read-only subagents only.", "rosterField");
+    writeToggle.classList.add("settings-roster-write");
+    body.appendChild(writeToggle);
 
     const notes = document.createElement("input");
     notes.type = "text";
-    notes.className = "settings-input settings-roster-notes";
+    notes.className = "settings-agent-input settings-roster-notes";
     notes.value = row.notes || "";
     notes.placeholder = "fast and cheap, good for repo scans; weak at large refactors";
     // Saved on blur, not on every keystroke: each save is a settings write, and
@@ -3626,9 +3755,13 @@
     }
     if (snapshot.subagentsEnabled === false) {
       const off = document.createElement("p");
-      off.className = "settings-agent-field-hint";
-      off.textContent = "Subagents are turned off, so nothing here is used yet.";
+      off.className = "settings-agent-note";
+      off.textContent = "Subagents are turned off above, so nothing here is used until you turn them on.";
       el.appendChild(off);
+    }
+    if (!rows.length) {
+      el.appendChild(agentEmpty("No companions to list.", "Connect a companion in Providers and it appears here."));
+      return el;
     }
     for (const row of rows) el.appendChild(renderRosterRow(row, snapshot));
     return el;
@@ -3645,35 +3778,56 @@
   // logged out or turned off simply does not apply, and resolution falls
   // through. The hint under the list says so, because a rule that silently
   // does nothing is otherwise indistinguishable from a bug.
+  //
+  // The host keeps only rules with keywords AND a companion
+  // (`parseRoutingRules`), so a fresh row is a local DRAFT until both are
+  // set — saving it empty would make it vanish on the next frame.
+
+  const ROUTING_UI = { draft: null };
 
   function subagentRoutingOf(snapshot) {
     return Array.isArray(snapshot && snapshot.subagentRouting) ? snapshot.subagentRouting : null;
   }
 
-  function renderRoutingRow(rule, index, rules, snapshot) {
+  function routingRuleComplete(rule) {
+    return !!(rule && Array.isArray(rule.match) && rule.match.length && rule.provider);
+  }
+
+  function renderRoutingRow(rule, index, count, snapshot, isDraft) {
     const row = document.createElement("div");
-    row.className = "settings-routing-row";
+    row.className = "settings-routing-row" + (isDraft ? " is-draft" : "");
     row.dataset.routingIndex = String(index);
+    if (isDraft) row.dataset.routingDraft = "1";
+
+    const cell = (label, control, cls) => {
+      const wrap = document.createElement("label");
+      wrap.className = "settings-routing-cell" + (cls ? " " + cls : "");
+      const text = document.createElement("span");
+      text.className = "settings-routing-cell-label";
+      text.textContent = label;
+      wrap.append(text, control);
+      return wrap;
+    };
 
     const keywords = document.createElement("input");
     keywords.type = "text";
-    keywords.className = "settings-input settings-routing-keywords";
+    keywords.className = "settings-agent-input settings-routing-keywords";
     keywords.value = (rule.match || []).join(", ");
     keywords.placeholder = "inspect, overview, grep";
-    keywords.setAttribute("aria-label", "Keywords");
     // Saved on blur, not per keystroke: each save is a settings write, and one
     // per character would fight the user's own typing. `mount` wires it.
     keywords.dataset.routingField = "match";
     keywords.dataset.routingWas = (rule.match || []).join(", ");
-    row.appendChild(keywords);
+    row.appendChild(cell("When the task mentions", keywords, "is-keywords"));
 
-    const providers = [{ value: "", label: "Any companion" }].concat(
+    // No "any companion": a rule without a target is one the host drops.
+    const providers = [{ value: "", label: "Choose…", disabled: true }].concat(
       (snapshot.agentRoleProviders || []).map((provider) => ({
         value: provider.id,
         label: provider.label || provider.id,
       })),
     );
-    row.appendChild(rosterSelect(rule.provider || "", providers, undefined, "provider"));
+    row.appendChild(cell("Use", rosterSelect(rule.provider || "", providers, undefined, "provider")));
 
     const provider = (snapshot.agentRoleProviders || []).find((p) => p.id === rule.provider);
     const models = [{ value: "", label: "Its own default" }].concat(
@@ -3682,33 +3836,46 @@
         label: model.name || model.modelId,
       })),
     );
-    row.appendChild(rosterSelect(rule.model || "", models, undefined, "model"));
+    row.appendChild(cell("Model", rosterSelect(rule.model || "", models, undefined, "model")));
 
-    const efforts = [{ value: "", label: "Default effort" }].concat(
+    const efforts = [{ value: "", label: "Default" }].concat(
       (Array.isArray(snapshot.efforts) ? snapshot.efforts : []).map((level) => ({
         value: level,
-        label: level,
+        label: effortLabel(level),
       })),
     );
-    row.appendChild(rosterSelect(rule.effort || "", efforts, undefined, "effort"));
+    row.appendChild(cell("Effort", rosterSelect(rule.effort || "", efforts, undefined, "effort")));
 
-    // Order is precedence, so moving a rule up is a real edit rather than
-    // cosmetics — a narrow rule above a broad one is how a rule list is meant
-    // to behave.
-    const up = document.createElement("button");
-    up.type = "button";
-    up.className = "settings-routing-move";
-    up.textContent = "↑";
-    up.title = "Move up — earlier rules win";
-    up.disabled = index === 0;
-    row.appendChild(up);
-
+    // Order is precedence, so moving a rule is a real edit rather than
+    // cosmetics — a narrow rule above a broad one is how a rule list is
+    // meant to behave.
+    const tools = document.createElement("div");
+    tools.className = "settings-routing-tools";
+    const move = (cls, glyph, label, disabled) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "settings-action is-icon " + cls;
+      btn.textContent = glyph;
+      btn.title = label;
+      btn.setAttribute("aria-label", label);
+      btn.disabled = disabled;
+      return btn;
+    };
+    tools.appendChild(move("settings-routing-move", "↑", "Move up — earlier rules win", isDraft || index === 0));
+    tools.appendChild(move("settings-routing-down", "↓", "Move down", isDraft || index >= count - 1));
     const remove = document.createElement("button");
     remove.type = "button";
-    remove.className = "settings-routing-remove";
-    remove.textContent = "Remove";
-    row.appendChild(remove);
+    remove.className = "settings-action is-danger settings-routing-remove";
+    remove.textContent = isDraft ? "Discard" : "Remove";
+    tools.appendChild(remove);
+    row.appendChild(tools);
 
+    if (isDraft) {
+      const note = document.createElement("div");
+      note.className = "settings-routing-draft-note";
+      note.textContent = "Not saved yet — a rule is saved once it has at least one word and a companion.";
+      row.appendChild(note);
+    }
     return row;
   }
 
@@ -3723,23 +3890,23 @@
       return el;
     }
 
-    if (rules.length) {
-      const head = document.createElement("div");
-      head.className = "settings-routing-head";
-      for (const label of ["When the task mentions", "Use", "Model", "Effort", "", ""]) {
-        const cell = document.createElement("span");
-        cell.textContent = label;
-        head.appendChild(cell);
-      }
-      el.appendChild(head);
+    const draft = ROUTING_UI.draft;
+    if (!rules.length && !draft) {
+      el.appendChild(agentEmpty("No routing rules.", "The agent picks a subagent from the roster notes alone."));
     }
-    rules.forEach((rule, index) => el.appendChild(renderRoutingRow(rule, index, rules, snapshot)));
+    const count = rules.length;
+    rules.forEach((rule, index) => el.appendChild(renderRoutingRow(rule, index, count, snapshot, false)));
+    if (draft) el.appendChild(renderRoutingRow(draft, count, count, snapshot, true));
 
+    const foot = document.createElement("div");
+    foot.className = "settings-section-actions is-foot";
     const add = document.createElement("button");
     add.type = "button";
     add.className = "settings-action settings-routing-new";
     add.textContent = "Add rule";
-    el.appendChild(add);
+    add.disabled = !!draft;
+    foot.appendChild(add);
+    el.appendChild(foot);
 
     const hint = document.createElement("p");
     hint.className = "settings-agent-field-hint";
@@ -3777,7 +3944,7 @@
 
       const up = document.createElement("button");
       up.type = "button";
-      up.className = "settings-action settings-agent-pool-up";
+      up.className = "settings-action is-icon settings-agent-pool-up";
       up.dataset.index = String(index);
       up.textContent = "↑";
       up.setAttribute("aria-label", "Move " + name + " earlier");
@@ -3785,7 +3952,7 @@
 
       const down = document.createElement("button");
       down.type = "button";
-      down.className = "settings-action settings-agent-pool-down";
+      down.className = "settings-action is-icon settings-agent-pool-down";
       down.dataset.index = String(index);
       down.textContent = "↓";
       down.setAttribute("aria-label", "Move " + name + " later");
@@ -3793,7 +3960,7 @@
 
       const drop = document.createElement("button");
       drop.type = "button";
-      drop.className = "settings-action settings-agent-pool-remove";
+      drop.className = "settings-action is-danger settings-agent-pool-remove";
       drop.dataset.index = String(index);
       drop.textContent = "Remove";
       drop.setAttribute("aria-label", "Remove " + name + " from this flow");
@@ -3823,59 +3990,44 @@
 
     const grid = document.createElement("div");
     grid.className = "settings-agent-grid";
-    grid.appendChild(labelledField(
+    grid.appendChild(agentField(
       "Name",
       textControl("name", draft.name, "audit"),
       "What follows /crew. A flow called `default` is the one a plain /crew uses.",
     ));
-    grid.appendChild(labelledField(
+    grid.appendChild(agentField(
       "Check after each writing step",
       textControl("verify", draft.verify, "npm test"),
       "Run after a step that writes. When it fails, a fixer step is spliced in.",
     ));
-    grid.appendChild(labelledField(
+    grid.appendChild(agentField(
       "Review every",
-      textControl("reviewEvery", draft.reviewEvery, "steps — empty means only at the end"),
-      "A review step is inserted after this many working steps, so a wrong decision is caught before the run builds on it.",
+      textControl("reviewEvery", draft.reviewEvery, "Only at the end", false, { type: "number", min: 1 }),
+      "Working steps between reviews, so a wrong decision is caught before the run builds on it. Empty: review once, at the end.",
     ));
-    grid.appendChild(renderScopeChoice(AGENT_UI.scope, !snapshot.agentRolesHasProject));
     form.appendChild(grid);
 
-    form.appendChild(labelledField("Roles this flow may assign", renderFlowRolePool(draft, snapshot), ""));
+    form.appendChild(agentField("Roles this flow may assign", renderFlowRolePool(draft, snapshot), "", { group: true }));
 
-    const parallel = document.createElement("label");
-    parallel.className = "settings-agent-check";
-    const box = document.createElement("input");
-    box.type = "checkbox";
-    box.dataset.field = "parallel";
-    box.checked = !!draft.parallel;
-    parallel.appendChild(box);
-    const parallelCopy = document.createElement("span");
-    parallelCopy.textContent = "Run independent steps at the same time, each in its own worktree";
-    parallel.appendChild(parallelCopy);
-    form.appendChild(parallel);
+    form.appendChild(agentSwitch(
+      "parallel",
+      !!draft.parallel,
+      "Run independent steps at the same time",
+      "Each writer gets its own worktree; the number at once is capped by the live-session pool.",
+    ));
 
-    form.appendChild(labelledField("Notes", textControl("notes", draft.notes, "", 2), ""));
+    form.appendChild(agentField("Notes", textControl("notes", draft.notes, "", 2), ""));
 
-    const error = renderAgentError(snapshot, view ? "flow:" + view.name : NEW_FLOW);
+    const error = renderAgentError(snapshot, agentCardId("flow", view && view.name));
     if (error) form.appendChild(error);
 
-    const actions = document.createElement("div");
-    actions.className = "settings-agent-actions";
-    const save = document.createElement("button");
-    save.type = "button";
-    save.className = "settings-action settings-flow-save";
-    save.textContent = view ? "Save flow" : "Create flow";
-    actions.appendChild(save);
-    const cancel = document.createElement("button");
-    cancel.type = "button";
-    cancel.className = "settings-action settings-agent-cancel";
-    cancel.textContent = "Cancel";
-    actions.appendChild(cancel);
+    form.appendChild(renderStoreChoice(AGENT_UI.scope, !snapshot.agentRolesHasProject));
+    const actions = agentActions();
+    actions.appendChild(agentButton("settings-flow-save", view ? "Save flow" : "Create flow", "primary"));
+    actions.appendChild(agentButton("settings-agent-cancel", "Cancel"));
     if (view && view.scope !== "builtin") {
-      const remove = document.createElement("button");
-      remove.type = "button";
-      remove.className = "settings-action settings-flow-remove";
+      actions.appendChild(agentSpacer());
+      const remove = agentButton("settings-flow-remove", "", "danger");
       remove.dataset.name = view.name;
       remove.dataset.scope = view.scope;
       const confirming = AGENT_UI.confirmRemove === "flow:" + view.name;
@@ -3888,14 +4040,16 @@
   }
 
   function renderFlowCard(view, snapshot, env) {
+    const open = AGENT_UI.openFlow === view.name;
     const card = document.createElement("div");
-    card.className = "settings-agent-card";
+    card.className = "settings-agent-card" + (open ? " is-open" : "");
     card.dataset.flow = view.name;
 
     const head = document.createElement("button");
     head.type = "button";
-    head.className = "settings-flow-toggle";
-    head.setAttribute("aria-expanded", AGENT_UI.openFlow === view.name ? "true" : "false");
+    head.className = "settings-flow-toggle settings-agent-head";
+    head.setAttribute("aria-expanded", open ? "true" : "false");
+    head.appendChild(chevron());
 
     const title = document.createElement("div");
     title.className = "settings-agent-name settings-row-title";
@@ -3903,7 +4057,7 @@
     label.textContent = view.name;
     title.appendChild(label);
     const command = document.createElement("span");
-    command.className = "settings-agent-badge";
+    command.className = "settings-agent-badge is-code";
     command.textContent = "/crew " + view.name;
     title.appendChild(command);
     const scope = document.createElement("span");
@@ -3948,24 +4102,28 @@
       return el;
     }
 
+    const heading = document.createElement("div");
+    heading.className = "settings-section-actions";
+    const add = agentButton("settings-flow-new", "New crew flow");
+    add.disabled = AGENT_UI.openFlow === NEW_FLOW;
+    heading.appendChild(add);
+    el.appendChild(heading);
+
+    if (AGENT_UI.openFlow === NEW_FLOW && AGENT_UI.draft) {
+      const card = document.createElement("div");
+      card.className = "settings-agent-card is-new is-open";
+      card.dataset.flow = NEW_FLOW;
+      card.appendChild(renderFlowEditor(null, snapshot, env));
+      el.appendChild(card);
+    }
+    if (!flows.length && AGENT_UI.openFlow !== NEW_FLOW) {
+      el.appendChild(agentEmpty("No crew flows.", "A plain /crew uses every role, in the order the host picks."));
+    }
+
     const list = document.createElement("div");
     list.className = "settings-agent-list";
     for (const view of flows) list.appendChild(renderFlowCard(view, snapshot, env));
     el.appendChild(list);
-
-    if (AGENT_UI.openFlow === NEW_FLOW && AGENT_UI.draft) {
-      const card = document.createElement("div");
-      card.className = "settings-agent-card is-new";
-      card.dataset.flow = NEW_FLOW;
-      card.appendChild(renderFlowEditor(null, snapshot, env));
-      el.appendChild(card);
-    } else {
-      const add = document.createElement("button");
-      add.type = "button";
-      add.className = "settings-action settings-flow-new";
-      add.textContent = "New crew flow";
-      el.appendChild(add);
-    }
     return el;
   }
 
@@ -4000,7 +4158,16 @@
     const list = document.createElement("ul");
     for (const issue of items) {
       const li = document.createElement("li");
-      li.textContent = (issue.pointer || "/") + " — " + (issue.message || "");
+      if (typeof issue === "string") {
+        li.textContent = issue;
+      } else {
+        if (issue.pointer) {
+          const where = document.createElement("code");
+          where.textContent = issue.pointer;
+          li.append(where, " ");
+        }
+        li.appendChild(document.createTextNode(issue.message || ""));
+      }
       list.appendChild(li);
     }
     box.appendChild(list);
@@ -4010,66 +4177,61 @@
   function renderWorkflowGenerator(snapshot, env) {
     const gen = WORKFLOW_UI.generator;
     const live = snapshot.workflowGenerator || {};
+    const remote = !!(env && env.isRemote);
     const card = document.createElement("div");
-    card.className = "settings-agent-card settings-workflow-generator";
+    card.className = "settings-agent-card is-open settings-workflow-generator";
     card.dataset.workflow = "generator";
 
+    const head = document.createElement("div");
+    head.className = "settings-agent-card-head";
     const title = document.createElement("div");
     title.className = "settings-agent-name settings-row-title";
-    title.textContent = "Generate workflow";
-    card.appendChild(title);
+    title.textContent = "Generate a workflow";
+    const sub = document.createElement("div");
+    sub.className = "settings-row-desc";
+    sub.textContent = "Describe the process in a few sentences; a companion drafts the stage graph and you review it before anything is saved.";
+    head.append(title, sub);
+    card.appendChild(head);
 
     const form = document.createElement("div");
     form.className = "settings-agent-form";
 
-    const desc = textControl("wfGenDescription", gen.description, "For bug reports: first reproduce the bug with a failing test…", true);
-    desc.dataset.field = "wfGenDescription";
-    form.appendChild(labelledField("Describe how you want this workflow to run.", desc));
+    const desc = textControl("wfGenDescription", gen.description, "For bug reports: first reproduce the bug with a failing test, then fix it, then have a different companion review the fix.", 4);
+    form.appendChild(agentField("Describe how you want this workflow to run.", desc, "", { wide: true }));
 
+    const grid = document.createElement("div");
+    grid.className = "settings-agent-grid";
     const providers = roleProvidersOf(snapshot);
     const providerOpts = [{ value: "", label: "First eligible companion" }].concat(
       providers.map((option) => ({ value: option.id, label: providerOptionLabel(option) })),
     );
-    form.appendChild(labelledField(
-      "Generator",
+    grid.appendChild(agentField(
+      "Drafted by",
       selectControl("wfGenProvider", providerOpts, gen.provider),
-      "A stronger reasoning model produces better contracts.",
+      "A stronger reasoning model writes better stage contracts.",
     ));
-
-    form.appendChild(renderScopeChoice(gen.scope, !snapshot.agentRolesHasProject));
-
-    const reuse = document.createElement("label");
-    reuse.className = "settings-agent-field";
-    const reuseBox = document.createElement("input");
-    reuseBox.type = "checkbox";
-    reuseBox.dataset.field = "wfGenReuseRoles";
-    reuseBox.checked = gen.reuseRoles !== false;
-    reuse.appendChild(reuseBox);
-    reuse.appendChild(document.createTextNode(" Reuse existing roles where possible"));
-    form.appendChild(reuse);
-
-    const write = document.createElement("label");
-    write.className = "settings-agent-field";
-    const writeBox = document.createElement("input");
-    writeBox.type = "checkbox";
-    writeBox.dataset.field = "wfGenAllowWrite";
-    writeBox.checked = gen.allowWrite !== false;
-    write.appendChild(writeBox);
-    write.appendChild(document.createTextNode(" Allow write stages"));
-    form.appendChild(write);
-
-    form.appendChild(labelledField(
+    grid.appendChild(agentField(
+      "At most",
+      textControl("wfGenMaxStages", gen.maxStages, "8", false, { type: "number", min: 1 }),
+      "Stages in the graph.",
+    ));
+    grid.appendChild(agentField(
       "New roles",
       selectControl("wfGenNewRoles", [
-        { value: "inline", label: "Keep new roles inline" },
-        { value: "files", label: "Create new role files" },
+        { value: "inline", label: "Keep them inside the workflow" },
+        { value: "files", label: "Create role files" },
       ], gen.newRoles || "inline"),
+      "",
     ));
+    form.appendChild(grid);
+    form.appendChild(agentSwitch("wfGenReuseRoles", gen.reuseRoles !== false, "Reuse existing roles where they fit", ""));
+    form.appendChild(agentSwitch("wfGenAllowWrite", gen.allowWrite !== false, "Allow stages that edit files", "Off drafts a read-only workflow — research, review, audit."));
 
     if (live.status === "running") {
       const progress = document.createElement("pre");
       progress.className = "settings-workflow-progress";
-      progress.textContent = live.progress || "Generating…";
+      progress.setAttribute("aria-live", "polite");
+      progress.textContent = live.progress || "Drafting…";
       form.appendChild(progress);
     }
     if (live.status === "error" && live.error) {
@@ -4081,174 +4243,214 @@
     }
     const issues = renderValidationList(live.validation, "errors");
     if (issues) form.appendChild(issues);
-    if (live.status === "preview" && live.mermaid) {
-      const pre = document.createElement("pre");
-      pre.className = "settings-workflow-mermaid";
-      pre.textContent = live.mermaid;
-      form.appendChild(pre);
+    const warns = renderValidationList(live.validation, "warnings");
+    if (warns) form.appendChild(warns);
+    if (live.status === "preview" && live.draft) {
+      form.appendChild(renderWorkflowPreview(live.draft, live.mermaid));
     }
     if (live.status === "preview" || live.status === "error") {
-      const refine = textControl("wfGenRefine", gen.refine, "merge review and security audit into one stage", true);
-      refine.dataset.field = "wfGenRefine";
-      form.appendChild(labelledField("Refine", refine));
+      const refine = textControl("wfGenRefine", gen.refine, "Merge review and security audit into one stage", 2);
+      form.appendChild(agentField("Refine the draft", refine, "Say what to change; the draft is regenerated with it.", { wide: true }));
     }
+    const genError = renderAgentError(snapshot, agentCardId("workflow"));
+    if (genError) form.appendChild(genError);
+    if (remote) form.appendChild(remoteHint("Generating runs a companion on the computer that owns this project, so it is only available there."));
 
-    const actions = document.createElement("div");
-    actions.className = "settings-agent-actions";
-    const generate = document.createElement("button");
-    generate.type = "button";
-    generate.className = "settings-action settings-workflow-generate-run";
-    generate.textContent = live.status === "preview" || live.status === "error" ? "Refine" : "Generate";
-    generate.disabled = !!(env && env.isRemote) || live.status === "running";
+    form.appendChild(renderStoreChoice(gen.scope, !snapshot.agentRolesHasProject));
+    const actions = agentActions();
+    const refining = live.status === "preview" || live.status === "error";
+    const generate = agentButton("settings-workflow-generate-run", refining ? "Regenerate" : "Generate", live.status === "preview" && live.draft ? "" : "primary");
+    generate.disabled = remote || live.status === "running" || !String(gen.description || "").trim();
+    if (!remote && !String(gen.description || "").trim()) generate.title = "Describe the workflow first";
     actions.appendChild(generate);
-    if (live.status === "running") {
-      const cancel = document.createElement("button");
-      cancel.type = "button";
-      cancel.className = "settings-action settings-workflow-generate-cancel";
-      cancel.textContent = "Cancel";
-      actions.appendChild(cancel);
-    }
+    if (live.status === "running") actions.appendChild(agentButton("settings-workflow-generate-cancel", "Stop"));
     if (live.status === "preview" && live.draft) {
-      const save = document.createElement("button");
-      save.type = "button";
-      save.className = "settings-action settings-workflow-generate-save";
-      save.textContent = "Save";
-      actions.appendChild(save);
-      const saveDefault = document.createElement("button");
-      saveDefault.type = "button";
-      saveDefault.className = "settings-action settings-workflow-generate-save-default";
-      saveDefault.textContent = "Save & set as default";
-      actions.appendChild(saveDefault);
-      const run = document.createElement("button");
-      run.type = "button";
-      run.className = "settings-action settings-workflow-generate-run-it";
-      run.textContent = "Run this workflow";
-      actions.appendChild(run);
+      actions.appendChild(agentButton("settings-workflow-generate-save", "Save", "primary"));
+      actions.appendChild(agentButton("settings-workflow-generate-save-default", "Save & make default"));
+      actions.appendChild(agentButton("settings-workflow-generate-run-it", "Run it"));
     }
-    const close = document.createElement("button");
-    close.type = "button";
-    close.className = "settings-action settings-workflow-generate-close";
-    close.textContent = "Close";
-    actions.appendChild(close);
+    actions.appendChild(agentSpacer());
+    actions.appendChild(agentButton("settings-workflow-generate-close", "Close"));
     form.appendChild(actions);
     card.appendChild(form);
     return card;
   }
 
+  function remoteHint(text) {
+    const p = document.createElement("p");
+    p.className = "settings-agent-field-hint settings-agent-remote-hint";
+    p.textContent = text;
+    return p;
+  }
+
+  /** The stage graph as a row of chips, with the mermaid source one click
+   *  away. A reader wants the order of stages at a glance, not a diagram
+   *  language they then have to render in their head. */
+  function renderWorkflowPreview(draft, mermaid) {
+    const box = document.createElement("div");
+    box.className = "settings-workflow-preview";
+    const stages = draft && draft.stagesJson && Array.isArray(draft.stagesJson.stages) ? draft.stagesJson.stages : [];
+    if (stages.length) {
+      const flow = document.createElement("ol");
+      flow.className = "settings-workflow-flow";
+      for (const stage of stages) {
+        const li = document.createElement("li");
+        li.className = "settings-workflow-stage";
+        const name = document.createElement("span");
+        name.className = "settings-workflow-stage-title";
+        name.textContent = stage.title || stage.id || "stage";
+        li.appendChild(name);
+        if (stage.role) {
+          const role = document.createElement("span");
+          role.className = "settings-agent-badge";
+          role.textContent = stage.role;
+          li.appendChild(role);
+        }
+        flow.appendChild(li);
+      }
+      box.appendChild(flow);
+    }
+    if (mermaid) {
+      const details = document.createElement("details");
+      details.className = "settings-agent-more";
+      const summary = document.createElement("summary");
+      summary.textContent = "Mermaid source";
+      const pre = document.createElement("pre");
+      pre.className = "settings-workflow-mermaid";
+      pre.textContent = mermaid;
+      details.append(summary, pre);
+      box.appendChild(details);
+    }
+    return box;
+  }
+
   function renderWorkflowEditor(view, snapshot, env) {
     const draft = WORKFLOW_UI.draft;
+    const remote = !!(env && env.isRemote);
     const form = document.createElement("div");
     form.className = "settings-agent-form";
     const grid = document.createElement("div");
     grid.className = "settings-agent-grid";
-    grid.appendChild(labelledField("Name", textControl("name", draft.name, "bugfix")));
-    grid.appendChild(labelledField("Title", textControl("title", draft.title || "", "Bug fix")));
-    grid.appendChild(renderScopeChoice(WORKFLOW_UI.scope, !snapshot.agentRolesHasProject));
-    grid.appendChild(labelledField("Verify", textControl("verify", draft.verify || "", "npm test")));
+    grid.appendChild(agentField("Name", textControl("name", draft.name, "bugfix"), "Lowercase letters, digits and dashes."));
+    grid.appendChild(agentField("Title", textControl("title", draft.title || "", "Bug fix"), "What the Crew picker shows."));
+    grid.appendChild(agentField("Verify", textControl("verify", draft.verify || "", "npm test"), "Run after each writing stage."));
     form.appendChild(grid);
-    form.appendChild(labelledField("When to use", textControl("whenToUse", draft.whenToUse || "", "", true)));
-    if (view && view.mermaid) {
-      const pre = document.createElement("pre");
-      pre.className = "settings-workflow-mermaid";
-      pre.textContent = view.mermaid;
-      form.appendChild(pre);
-    }
-    const issues = renderValidationList(view && view.validation, "errors");
-    if (issues) form.appendChild(issues);
-    const warns = renderValidationList(view && view.validation, "warnings");
-    if (warns) form.appendChild(warns);
+    form.appendChild(agentField("When to use", textControl("whenToUse", draft.whenToUse || "", "A production bug with a known cause.", 2), "", { wide: true }));
     if (view && view.defaultGraph) {
       const note = document.createElement("p");
       note.className = "settings-agent-field-hint";
-      note.textContent = "This preset has no stages block yet — Crew sessions run the default graph. Add a stages block to pin the graph in the file.";
+      note.textContent = "This preset has no stages block yet — Crew sessions run the default Plan → Implement → Review → Fix graph. Add a stages block to pin the graph in the file.";
       form.appendChild(note);
     }
-    const json = textControl("stagesJsonText", WORKFLOW_UI.jsonText || stringifyStages(draft), "{ \"schemaVersion\": 1, … }", true);
-    json.dataset.field = "stagesJsonText";
-    json.classList.add("settings-workflow-json");
-    form.appendChild(labelledField("Stages JSON", json, "Saved only if it re-parses to the same meaning."));
+    // The last Validate answer for THIS draft, else what the host computed
+    // when it loaded the file.
+    const checked = WORKFLOW_UI.validation && WORKFLOW_UI.validation.name === (view ? view.name : NEW_WORKFLOW)
+      ? WORKFLOW_UI.validation
+      : null;
+    const validation = checked ? checked.validation : view && view.validation;
+    if (checked && checked.ok) {
+      const ok = document.createElement("p");
+      ok.className = "settings-workflow-ok";
+      ok.setAttribute("role", "status");
+      ok.textContent = "Valid — this workflow would save as written.";
+      form.appendChild(ok);
+    }
+    if (checked && checked.error) {
+      const err = document.createElement("p");
+      err.className = "settings-agent-error";
+      err.setAttribute("role", "alert");
+      err.textContent = checked.error;
+      form.appendChild(err);
+    }
+    const issues = renderValidationList(validation, "errors");
+    if (issues) form.appendChild(issues);
+    const warns = renderValidationList(validation, "warnings");
+    if (warns) form.appendChild(warns);
+    if (view && view.mermaid) form.appendChild(renderWorkflowPreview(view.draft, view.mermaid));
 
-    const actions = document.createElement("div");
-    actions.className = "settings-agent-actions";
-    const save = document.createElement("button");
-    save.type = "button";
-    save.className = "settings-action settings-workflow-save";
-    save.textContent = "Save";
-    save.disabled = !!(env && env.isRemote);
+    const json = textControl("stagesJsonText", WORKFLOW_UI.jsonText || stringifyStages(draft), "{ \"schemaVersion\": 1, … }", 12, { mono: true });
+    json.classList.add("settings-workflow-json");
+    const jsonError = WORKFLOW_UI.jsonError;
+    if (jsonError) json.setAttribute("aria-invalid", "true");
+    const jsonField = agentField("Stages (JSON)", json, "Saved only if it re-parses to the same meaning.", { wide: true });
+    if (jsonError) {
+      const err = document.createElement("span");
+      err.className = "settings-agent-field-error";
+      err.setAttribute("role", "alert");
+      err.textContent = "Not valid JSON: " + jsonError;
+      jsonField.appendChild(err);
+    }
+    const jsonMore = document.createElement("details");
+    jsonMore.className = "settings-agent-more";
+    if (jsonError || !view) jsonMore.open = true;
+    const jsonSummary = document.createElement("summary");
+    jsonSummary.textContent = "Stage graph source";
+    jsonMore.append(jsonSummary, jsonField);
+    form.appendChild(jsonMore);
+
+    const err = renderAgentError(snapshot, agentCardId("workflow", view && view.name));
+    if (err) form.appendChild(err);
+
+    form.appendChild(renderStoreChoice(WORKFLOW_UI.scope, !snapshot.agentRolesHasProject));
+    const actions = agentActions();
+    const save = agentButton("settings-workflow-save", view ? "Save" : "Create", "primary");
+    save.disabled = remote;
     actions.appendChild(save);
-    const saveDefault = document.createElement("button");
-    saveDefault.type = "button";
-    saveDefault.className = "settings-action settings-workflow-save-default";
-    saveDefault.textContent = "Save & set as default";
-    saveDefault.disabled = !!(env && env.isRemote);
+    const saveDefault = agentButton("settings-workflow-save-default", "Save & make default");
+    saveDefault.disabled = remote;
     actions.appendChild(saveDefault);
-    const validate = document.createElement("button");
-    validate.type = "button";
-    validate.className = "settings-action settings-workflow-validate";
-    validate.textContent = "Validate";
-    actions.appendChild(validate);
+    actions.appendChild(agentButton("settings-workflow-validate", "Validate"));
+    actions.appendChild(agentButton("settings-workflow-cancel", "Cancel"));
+
+    // Secondary actions on the file, away from the editing ones.
+    const more = agentActions();
+    more.classList.add("is-secondary");
+    if (view && view.name) {
+      const run = agentButton("settings-workflow-run", "Run this workflow");
+      run.dataset.name = view.name;
+      more.appendChild(run);
+      const exp = agentButton("settings-workflow-export", "Export JSON");
+      exp.dataset.name = view.name;
+      more.appendChild(exp);
+    }
     if (view && view.defaultGraph && view.scope !== "builtin") {
-      const add = document.createElement("button");
-      add.type = "button";
-      add.className = "settings-action settings-workflow-add-stages";
+      const add = agentButton("settings-workflow-add-stages", "Add stages block");
       add.dataset.name = view.name;
       add.dataset.scope = view.scope;
-      add.textContent = "Add stages block";
-      actions.appendChild(add);
+      more.appendChild(add);
     }
     if (view && view.compiler && view.compiler.sourcePrompt) {
-      const recompile = document.createElement("button");
-      recompile.type = "button";
-      recompile.className = "settings-action settings-workflow-recompile";
+      const recompile = agentButton("settings-workflow-recompile", "Regenerate from its description");
       recompile.dataset.prompt = view.compiler.sourcePrompt;
-      recompile.textContent = "Recompile from description";
-      actions.appendChild(recompile);
+      more.appendChild(recompile);
     }
-    if (view && view.name) {
-      const run = document.createElement("button");
-      run.type = "button";
-      run.className = "settings-action settings-workflow-run";
-      run.dataset.name = view.name;
-      run.textContent = "Run this workflow";
-      actions.appendChild(run);
-      const exp = document.createElement("button");
-      exp.type = "button";
-      exp.className = "settings-action settings-workflow-export";
-      exp.dataset.name = view.name;
-      exp.textContent = "Export";
-      actions.appendChild(exp);
-    }
-    const cancel = document.createElement("button");
-    cancel.type = "button";
-    cancel.className = "settings-action settings-workflow-cancel";
-    cancel.textContent = "Cancel";
-    actions.appendChild(cancel);
     if (view && view.scope !== "builtin") {
-      const remove = document.createElement("button");
-      remove.type = "button";
-      remove.className = "settings-action settings-workflow-remove";
+      more.appendChild(agentSpacer());
+      const remove = agentButton("settings-workflow-remove", "", "danger");
       remove.dataset.name = view.name;
       remove.dataset.scope = view.scope;
       const confirming = WORKFLOW_UI.confirmRemove === "wf:" + view.name;
       remove.textContent = confirming ? "Delete " + view.name + ".md" : "Delete";
       if (confirming) remove.classList.add("is-confirming");
-      actions.appendChild(remove);
+      more.appendChild(remove);
     }
     form.appendChild(actions);
-    const err = renderAgentError(snapshot, view ? view.name : "new");
-    if (err) form.appendChild(err);
+    if (more.childNodes.length) form.appendChild(more);
     return form;
   }
 
   function renderWorkflowCard(view, snapshot, env) {
+    const open = WORKFLOW_UI.open === view.name;
     const card = document.createElement("div");
-    card.className = "settings-agent-card";
+    card.className = "settings-agent-card" + (open ? " is-open" : "");
     card.dataset.workflow = view.name;
 
+    const top = document.createElement("div");
+    top.className = "settings-agent-card-top";
     const head = document.createElement("button");
     head.type = "button";
-    head.className = "settings-workflow-toggle";
-    head.setAttribute("aria-expanded", WORKFLOW_UI.open === view.name ? "true" : "false");
+    head.className = "settings-workflow-toggle settings-agent-head";
+    head.setAttribute("aria-expanded", open ? "true" : "false");
 
     const title = document.createElement("div");
     title.className = "settings-agent-name settings-row-title";
@@ -4256,7 +4458,7 @@
     label.textContent = view.title || view.name;
     title.appendChild(label);
     const name = document.createElement("span");
-    name.className = "settings-agent-badge";
+    name.className = "settings-agent-badge is-code";
     name.textContent = view.name;
     title.appendChild(name);
     const scope = document.createElement("span");
@@ -4271,13 +4473,13 @@
     }
     if (view.isDefault) {
       const def = document.createElement("span");
-      def.className = "settings-agent-badge";
+      def.className = "settings-agent-badge is-default";
       def.textContent = "default";
       title.appendChild(def);
     }
     if (view.validation && view.validation.valid === false) {
       const bad = document.createElement("span");
-      bad.className = "settings-agent-badge is-override";
+      bad.className = "settings-agent-badge is-invalid";
       bad.textContent = "invalid";
       title.appendChild(bad);
     }
@@ -4294,18 +4496,22 @@
     const copy = document.createElement("div");
     copy.className = "settings-agent-copy";
     copy.append(title, detail);
+    head.appendChild(chevron());
     head.appendChild(copy);
-    card.appendChild(head);
+    top.appendChild(head);
 
-    const defaultBtn = document.createElement("button");
-    defaultBtn.type = "button";
-    defaultBtn.className = "settings-action settings-workflow-default";
-    defaultBtn.dataset.name = view.name;
-    defaultBtn.textContent = view.isDefault ? "Default for new Crew sessions" : "Set as default";
-    defaultBtn.disabled = !!view.isDefault || !!(env && env.isRemote);
-    card.appendChild(defaultBtn);
+    // Beside the header rather than under it, and only when it applies: the
+    // current default says so in its badge, it needs no disabled button.
+    if (!view.isDefault) {
+      const defaultBtn = agentButton("settings-workflow-default", "Make default");
+      defaultBtn.dataset.name = view.name;
+      defaultBtn.title = "Use this workflow for new Crew sessions";
+      defaultBtn.disabled = !!(env && env.isRemote);
+      top.appendChild(defaultBtn);
+    }
+    card.appendChild(top);
 
-    if (WORKFLOW_UI.open === view.name && WORKFLOW_UI.draft) {
+    if (open && WORKFLOW_UI.draft) {
       card.appendChild(renderWorkflowEditor(view, snapshot, env));
     }
     return card;
@@ -4322,32 +4528,37 @@
       return el;
     }
 
-    const actions = document.createElement("div");
-    actions.className = "settings-agent-actions";
-    const generate = document.createElement("button");
-    generate.type = "button";
-    generate.className = "settings-action settings-workflow-generate";
-    generate.textContent = "Generate workflow…";
-    generate.disabled = !!(env && env.isRemote);
-    actions.appendChild(generate);
-    el.appendChild(actions);
+    const remote = !!(env && env.isRemote);
+    const heading = document.createElement("div");
+    heading.className = "settings-section-actions";
+    const create = agentButton("settings-workflow-new", "New workflow");
+    create.disabled = remote || WORKFLOW_UI.open === NEW_WORKFLOW;
+    const generate = agentButton("settings-workflow-generate", "Generate workflow…", "primary");
+    generate.disabled = remote || WORKFLOW_UI.generatorOpen;
+    if (remote) generate.title = create.title = "Only on the computer that owns this project";
+    heading.append(create, generate);
+    el.appendChild(heading);
 
     if (WORKFLOW_UI.generatorOpen) {
       el.appendChild(renderWorkflowGenerator(snapshot, env));
+    }
+
+    if (WORKFLOW_UI.open === NEW_WORKFLOW && WORKFLOW_UI.draft) {
+      const card = document.createElement("div");
+      card.className = "settings-agent-card is-new is-open";
+      card.dataset.workflow = NEW_WORKFLOW;
+      card.appendChild(renderWorkflowEditor(null, snapshot, env));
+      el.appendChild(card);
+    }
+
+    if (!list.length && !WORKFLOW_UI.generatorOpen && WORKFLOW_UI.open !== NEW_WORKFLOW) {
+      el.appendChild(agentEmpty("No workflows yet.", "Generate one from a description, or start from an empty stage graph."));
     }
 
     const cards = document.createElement("div");
     cards.className = "settings-agent-list";
     for (const view of list) cards.appendChild(renderWorkflowCard(view, snapshot, env));
     el.appendChild(cards);
-
-    if (WORKFLOW_UI.open === NEW_WORKFLOW && WORKFLOW_UI.draft) {
-      const card = document.createElement("div");
-      card.className = "settings-agent-card is-new";
-      card.dataset.workflow = NEW_WORKFLOW;
-      card.appendChild(renderWorkflowEditor(null, snapshot, env));
-      el.appendChild(card);
-    }
     return el;
   }
 
@@ -4422,6 +4633,11 @@
     return el;
   }
 
+  const PERM_SCOPE_LABELS = { workspace: "this project", global: "all projects" };
+  // Deleting a rule changes what runs without asking — two clicks, like
+  // every other delete on these pages.
+  const PERM_UI = { confirmDelete: "" };
+
   function renderPermissionRules(snapshot, env) {
     const el = document.createElement("div");
     el.className = "settings-perm-rules";
@@ -4437,22 +4653,25 @@
     if (pending && pending.path) {
       const banner = document.createElement("div");
       banner.className = "settings-perm-pending";
+      banner.setAttribute("role", "status");
       const copy = document.createElement("div");
-      copy.className = "settings-row-desc";
-      copy.textContent = "This project ships " + pending.path + " (" +
-        (pending.ruleCount || 0) + " rule" + (pending.ruleCount === 1 ? "" : "s") +
-        "). Those rules are visible here but not active until you adopt them.";
+      copy.className = "settings-perm-pending-copy";
+      const lead = document.createElement("div");
+      lead.className = "settings-perm-pending-title";
+      lead.textContent = "This project ships " + (pending.ruleCount || 0) + " permission rule" + (pending.ruleCount === 1 ? "" : "s");
+      const detail = document.createElement("div");
+      detail.className = "settings-row-desc";
+      detail.textContent = pending.path + " is listed below but not active until you adopt it. Rules from a repository are someone else's decision about your machine.";
+      copy.append(lead, detail);
       banner.appendChild(copy);
       if (!(env && env.isRemote)) {
-        const adopt = document.createElement("button");
-        adopt.type = "button";
-        adopt.className = "settings-action settings-perm-adopt";
-        adopt.textContent = "Adopt";
-        const decline = document.createElement("button");
-        decline.type = "button";
-        decline.className = "settings-action settings-perm-decline";
-        decline.textContent = "Leave inactive";
-        banner.append(adopt, decline);
+        const actions = document.createElement("div");
+        actions.className = "settings-perm-pending-actions";
+        actions.append(
+          agentButton("settings-perm-adopt", "Adopt rules", "primary"),
+          agentButton("settings-perm-decline", "Leave inactive"),
+        );
+        banner.appendChild(actions);
       }
       el.appendChild(banner);
     }
@@ -4494,24 +4713,31 @@
         row.dataset.ruleId = rule.id || "";
         const copy = document.createElement("div");
         copy.className = "settings-rules-copy";
+        // Allow / ask / deny leads the row in its own colour: it is the one
+        // word that decides what happens, and it was buried in the summary.
+        const verdict = document.createElement("span");
+        const action = rule.deletable ? (rule.action || "rule") : "deny";
+        verdict.className = "settings-perm-action is-" + action;
+        verdict.textContent = rule.deletable ? action : "floor";
+        row.appendChild(verdict);
         const name = document.createElement("div");
         name.className = "settings-rules-name settings-row-title";
         name.textContent = rule.summary || rule.id || "rule";
         const badge = document.createElement("span");
         badge.className = "settings-rules-badge" + (rule.deletable ? "" : " is-floor");
-        badge.textContent = rule.deletable ? (rule.scope || "rule") : "safety floor";
-        name.appendChild(badge);
+        badge.textContent = rule.deletable ? (PERM_SCOPE_LABELS[rule.scope] || rule.scope || "rule") : "safety floor";
+        // The FLOOR mark already says it; the badge would say it twice.
+        if (rule.deletable) name.appendChild(badge);
         const detail = document.createElement("div");
         detail.className = "settings-row-desc";
         detail.textContent = rule.detail || "";
         copy.append(name, detail);
         row.appendChild(copy);
         if (rule.deletable) {
-          const btn = document.createElement("button");
-          btn.type = "button";
-          btn.className = "settings-action settings-perm-delete";
+          const confirming = PERM_UI.confirmDelete === rule.id;
+          const btn = agentButton("settings-perm-delete", confirming ? "Delete this rule" : "Delete", "danger");
           btn.dataset.ruleId = rule.id;
-          btn.textContent = "Delete";
+          if (confirming) btn.classList.add("is-confirming");
           row.appendChild(btn);
         }
         list.appendChild(row);
@@ -4524,17 +4750,52 @@
     return el;
   }
 
+  /**
+   * A list-shaped setting (roles, flows, rules…) under its own heading.
+   *
+   * These rows have no single control, so the ordinary two-column row does not
+   * fit them — but they still have a title and a description, and without
+   * this they rendered as unlabelled blocks one after another. A renderer's
+   * leading `.settings-section-actions` (New role, Generate…) moves up into
+   * the heading, beside the title it belongs to.
+   */
+  function renderListSection(row, content) {
+    const section = document.createElement("section");
+    section.className = "settings-list-section";
+    section.dataset.section = row.id;
+    const head = document.createElement("div");
+    head.className = "settings-list-section-head";
+    const copy = document.createElement("div");
+    copy.className = "settings-list-section-copy";
+    const title = document.createElement("h3");
+    title.className = "settings-list-section-title";
+    title.textContent = row.title;
+    copy.appendChild(title);
+    if (row.description) {
+      const desc = document.createElement("p");
+      desc.className = "settings-row-desc";
+      desc.textContent = row.description;
+      copy.appendChild(desc);
+    }
+    head.appendChild(copy);
+    const lead = Array.from(content.children).find((child) =>
+      child.classList.contains("settings-section-actions") && !child.classList.contains("is-foot"));
+    if (lead) head.appendChild(lead);
+    section.append(head, content);
+    return section;
+  }
+
   function renderRow(row, snapshot, env, keyForm, githubTokenForm, githubCliStarted) {
     if (row.kind === "mcp") return renderMcpCatalog(snapshot, env);
     if (row.kind === "connectors") return renderConnectorsCatalog(snapshot, env, keyForm);
     if (row.kind === "routines") return renderRoutines(snapshot, env);
-    if (row.kind === "agentRoles") return renderAgentRoles(snapshot, env);
-    if (row.kind === "subagentRoster") return renderSubagentRoster(snapshot, env);
-    if (row.kind === "subagentRouting") return renderSubagentRouting(snapshot, env);
-    if (row.kind === "crewFlows") return renderCrewFlows(snapshot, env);
-    if (row.kind === "workflows") return renderWorkflows(snapshot, env);
-    if (row.kind === "permissionRules") return renderPermissionRules(snapshot, env);
-    if (row.kind === "ruleFiles") return renderRuleFiles(snapshot, env);
+    if (row.kind === "agentRoles") return renderListSection(row, renderAgentRoles(snapshot, env));
+    if (row.kind === "subagentRoster") return renderListSection(row, renderSubagentRoster(snapshot, env));
+    if (row.kind === "subagentRouting") return renderListSection(row, renderSubagentRouting(snapshot, env));
+    if (row.kind === "crewFlows") return renderListSection(row, renderCrewFlows(snapshot, env));
+    if (row.kind === "workflows") return renderListSection(row, renderWorkflows(snapshot, env));
+    if (row.kind === "permissionRules") return renderListSection(row, renderPermissionRules(snapshot, env));
+    if (row.kind === "ruleFiles") return renderListSection(row, renderRuleFiles(snapshot, env));
     const el = document.createElement("div");
     el.className = "settings-row";
     el.dataset.id = row.id;
@@ -4880,6 +5141,17 @@
       post({ type: "listAgentRoles" });
     }
 
+    /** Leaving a page forgets that its list was fetched, like the upstream
+     *  pages above: a file edited elsewhere shows up on the next visit
+     *  rather than after a reload. */
+    function forgetForkChecks(next) {
+      if (next !== "advanced") {
+        ruleFilesChecked = false;
+        permissionRulesChecked = false;
+      }
+      if (next !== "agents") agentRolesChecked = false;
+    }
+
     function maybeRefreshPermissionRules() {
       if (permissionRulesChecked || categoryId !== "advanced" || query.trim()) return;
       permissionRulesChecked = true;
@@ -4962,7 +5234,13 @@
         // prose fields: those change per keystroke, and repainting would
         // rebuild the textarea under the caret.
         agentOpen: AGENT_UI.openRole + "|" + AGENT_UI.openFlow + "|" + WORKFLOW_UI.open + "|" + (WORKFLOW_UI.generatorOpen ? "g" : ""),
-        agentConfirm: AGENT_UI.confirmRemove + "|" + WORKFLOW_UI.confirmRemove,
+        agentConfirm: AGENT_UI.confirmRemove + "|" + WORKFLOW_UI.confirmRemove + "|" + PERM_UI.confirmDelete,
+        // The unsaved routing row (and its companion, which re-fills the model
+        // list), a stages block that failed to parse, and a Validate answer.
+        routingDraft: ROUTING_UI.draft ? "d:" + ROUTING_UI.draft.provider : "",
+        workflowCheck: WORKFLOW_UI.jsonError + "|" + (WORKFLOW_UI.validation
+          ? JSON.stringify(WORKFLOW_UI.validation)
+          : ""),
         agentScope: AGENT_UI.scope + "|" + WORKFLOW_UI.scope + "|" + WORKFLOW_UI.generator.scope,
         wfGen: (snapshot.workflowGenerator && snapshot.workflowGenerator.status) || "",
         agentDraft: AGENT_UI.draft
@@ -5232,6 +5510,7 @@
         if (next !== "providers") providersChecked = false;
         if (next !== "connectors") mcpChecked = false;
         if (next !== "routines") routinesChecked = false;
+        forgetForkChecks(next);
         categoryId = next;
         query = "";
         dismissRestoreConfirm();
@@ -5664,7 +5943,19 @@
         const field = el.dataset.field;
         if (!field) return false;
         const value = el.type === "checkbox" ? el.checked : el.value;
-        if (field === "wfGenDescription") { WORKFLOW_UI.generator.description = value; return false; }
+        if (field === "wfGenDescription") {
+          WORKFLOW_UI.generator.description = value;
+          // Enable Generate in place: a repaint per keystroke would take the
+          // caret away from the field being typed in.
+          const run = body.querySelector(".settings-workflow-generate-run");
+          const live = snapshot.workflowGenerator || {};
+          if (run && !env.isRemote && live.status !== "running") {
+            run.disabled = !String(value).trim();
+            run.title = run.disabled ? "Describe the workflow first" : "";
+          }
+          return false;
+        }
+        if (field === "wfGenMaxStages") { WORKFLOW_UI.generator.maxStages = value; return false; }
         if (field === "wfGenRefine") { WORKFLOW_UI.generator.refine = value; return false; }
         if (field === "wfGenProvider") { WORKFLOW_UI.generator.provider = value; return true; }
         if (field === "wfGenNewRoles") { WORKFLOW_UI.generator.newRoles = value; return false; }
@@ -5673,7 +5964,16 @@
         if (field === "stagesJsonText") {
           WORKFLOW_UI.jsonText = value;
           if (WORKFLOW_UI.draft) {
-            try { WORKFLOW_UI.draft.stagesJson = JSON.parse(value); } catch { /* keep typing */ }
+            try {
+              WORKFLOW_UI.draft.stagesJson = JSON.parse(value);
+              // Fixed while typing: drop the complaint without a repaint.
+              if (WORKFLOW_UI.jsonError) {
+                WORKFLOW_UI.jsonError = "";
+                el.removeAttribute && el.removeAttribute("aria-invalid");
+                const stale = el.parentNode && el.parentNode.querySelector(".settings-agent-field-error");
+                if (stale) stale.remove();
+              }
+            } catch { /* keep typing; Save and Validate say what is wrong */ }
           }
           return false;
         }
@@ -5725,6 +6025,19 @@
       }
 
       body.querySelectorAll(".settings-agent-form [data-field]").forEach((el) => {
+        if (el.getAttribute("role") === "switch") {
+          // A switch reads like a checkbox to applyAgentField, and flips in
+          // place — a draft field is not saved until Save, so there is no
+          // host round-trip to wait for.
+          el.addEventListener("click", (e) => {
+            e.stopPropagation();
+            const next = el.getAttribute("aria-checked") !== "true";
+            el.setAttribute("aria-checked", next ? "true" : "false");
+            el.classList.toggle("on", next);
+            if (applyAgentField({ dataset: el.dataset, type: "checkbox", checked: next })) paint();
+          });
+          return;
+        }
         const eventName = el.tagName === "SELECT" || el.type === "checkbox" ? "change" : "input";
         el.addEventListener(eventName, () => {
           if (applyAgentField(el)) paint();
@@ -5822,11 +6135,32 @@
         const provider = row && row.dataset.provider;
         if (!provider) return;
         const field = el.dataset.rosterField;
-        const send = (value) => post({
-          type: "subagentRosterSave",
-          provider,
-          patch: { [field]: value },
-        });
+        // Each change is written at once, so say so where it happened — the
+        // page has no Save button to confirm it.
+        const send = (value) => {
+          post({
+            type: "subagentRosterSave",
+            provider,
+            patch: { [field]: value },
+          });
+          const saved = row.querySelector(".settings-roster-saved");
+          if (saved) {
+            saved.textContent = "Saved";
+            saved.classList.add("is-shown");
+            setTimeout(() => { saved.classList.remove("is-shown"); }, 1600);
+          }
+        };
+        if (el.getAttribute("role") === "switch") {
+          el.addEventListener("click", (e) => {
+            e.stopPropagation();
+            const next = el.getAttribute("aria-checked") !== "true";
+            el.setAttribute("aria-checked", next ? "true" : "false");
+            el.classList.toggle("on", next);
+            if (field === "enabled") row.classList.toggle("is-off", !next);
+            send(next);
+          });
+          return;
+        }
         if (el.type === "checkbox") {
           el.addEventListener("change", () => send(el.checked));
           return;
@@ -5846,8 +6180,39 @@
 
       // AP-16 §6.2 P6 — routing rules. The whole list is posted on every edit:
       // order is precedence here, so a per-row patch could not express a move.
+      // The draft row (a rule still missing its words or its companion) is
+      // never posted: the host would drop it, and it would vanish mid-edit.
+      const readRoutingRow = (row) => {
+        const field = (name) => row.querySelector('[data-routing-field="' + name + '"]');
+        const keywords = field("match");
+        return {
+          match: String((keywords && keywords.value) || "")
+            .split(",")
+            .map((word) => word.trim())
+            .filter(Boolean),
+          provider: (field("provider") && field("provider").value) || "",
+          model: (field("model") && field("model").value) || "",
+          effort: (field("effort") && field("effort").value) || "",
+        };
+      };
+      const draftRow = () => body.querySelector('.settings-routing-row[data-routing-draft="1"]');
+      /** The saved rules, plus the draft once it is complete — at which point
+       *  it stops being a draft. */
+      const routingForSave = () => {
+        const rules = routingRules();
+        const draft = draftRow();
+        if (draft) {
+          const rule = readRoutingRow(draft);
+          ROUTING_UI.draft = rule;
+          if (routingRuleComplete(rule)) {
+            rules.push(rule);
+            ROUTING_UI.draft = null;
+          }
+        }
+        return rules;
+      };
       const routingRules = () =>
-        Array.from(body.querySelectorAll(".settings-routing-row")).map((row) => {
+        Array.from(body.querySelectorAll(".settings-routing-row:not([data-routing-draft])")).map((row) => {
           const field = (name) => row.querySelector('[data-routing-field="' + name + '"]');
           const keywords = field("match");
           return {
@@ -5863,13 +6228,27 @@
       const saveRouting = (rules) => post({ type: "subagentRoutingSave", rules });
 
       body.querySelectorAll(".settings-routing-row [data-routing-field]").forEach((el) => {
+        const row = el.closest(".settings-routing-row");
+        const isDraft = row.dataset.routingDraft === "1";
         if (el.tagName === "SELECT") {
           el.addEventListener("change", () => {
-            const index = Number(el.closest(".settings-routing-row").dataset.routingIndex);
-            const rules = routingRules();
+            const index = Number(row.dataset.routingIndex);
             // Changing the companion drops a model that belonged to the old one
             // — a model id means nothing next to a companion that lacks it.
+            if (isDraft) {
+              const before = ROUTING_UI.draft || {};
+              const rules = routingForSave();
+              if (ROUTING_UI.draft && el.dataset.routingField === "provider" && before.provider !== ROUTING_UI.draft.provider) {
+                ROUTING_UI.draft.model = "";
+              }
+              if (!ROUTING_UI.draft) saveRouting(rules);
+              else paint(); // the model list follows the companion
+              return;
+            }
+            const rules = routingRules();
             if (el.dataset.routingField === "provider" && rules[index]) rules[index].model = "";
+            const draft = draftRow();
+            if (draft) ROUTING_UI.draft = readRoutingRow(draft);
             saveRouting(rules);
           });
           return;
@@ -5877,30 +6256,47 @@
         el.addEventListener("blur", () => {
           if (el.value === (el.dataset.routingWas || "")) return;
           el.dataset.routingWas = el.value;
+          if (isDraft) {
+            const rules = routingForSave();
+            if (!ROUTING_UI.draft) saveRouting(rules);
+            return;
+          }
+          const draft = draftRow();
+          if (draft) ROUTING_UI.draft = readRoutingRow(draft);
           saveRouting(routingRules());
         });
       });
 
-      body.querySelectorAll(".settings-routing-move").forEach((btn) => {
+      body.querySelectorAll(".settings-routing-move, .settings-routing-down").forEach((btn) => {
         btn.addEventListener("click", () => {
           const index = Number(btn.closest(".settings-routing-row").dataset.routingIndex);
-          if (!index) return;
           const rules = routingRules();
-          rules.splice(index - 1, 0, rules.splice(index, 1)[0]);
+          const to = btn.classList.contains("settings-routing-down") ? index + 1 : index - 1;
+          if (to < 0 || to >= rules.length) return;
+          rules.splice(to, 0, rules.splice(index, 1)[0]);
           saveRouting(rules);
         });
       });
 
       body.querySelectorAll(".settings-routing-remove").forEach((btn) => {
         btn.addEventListener("click", () => {
-          const index = Number(btn.closest(".settings-routing-row").dataset.routingIndex);
+          const row = btn.closest(".settings-routing-row");
+          if (row.dataset.routingDraft === "1") {
+            ROUTING_UI.draft = null;
+            paint();
+            return;
+          }
+          const index = Number(row.dataset.routingIndex);
           saveRouting(routingRules().filter((_, i) => i !== index));
         });
       });
 
       body.querySelectorAll(".settings-routing-new").forEach((btn) => {
         btn.addEventListener("click", () => {
-          saveRouting(routingRules().concat([{ match: [], provider: "", model: "", effort: "" }]));
+          ROUTING_UI.draft = { match: [], provider: "", model: "", effort: "" };
+          paint();
+          const fresh = body.ownerDocument.querySelector('.settings-routing-row[data-routing-draft="1"] .settings-routing-keywords');
+          if (fresh) fresh.focus();
         });
       });
 
@@ -6072,15 +6468,44 @@
         });
       });
 
+      /** Parse the stages field into the draft, or say at the field why not. */
+      const takeStagesJson = () => {
+        try {
+          WORKFLOW_UI.draft.stagesJson = JSON.parse(WORKFLOW_UI.jsonText || stringifyStages(WORKFLOW_UI.draft));
+          WORKFLOW_UI.jsonError = "";
+          return true;
+        } catch (error) {
+          WORKFLOW_UI.jsonError = (error && error.message) || "it does not parse";
+          paint();
+          return false;
+        }
+      };
+
+      body.querySelectorAll(".settings-workflow-new").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          WORKFLOW_UI.open = NEW_WORKFLOW;
+          WORKFLOW_UI.generatorOpen = false;
+          WORKFLOW_UI.confirmRemove = "";
+          WORKFLOW_UI.draft = workflowDraftFrom({
+            draft: { name: "", title: "", stagesJson: { schemaVersion: 1, name: "", stages: [] } },
+          });
+          WORKFLOW_UI.jsonText = stringifyStages(WORKFLOW_UI.draft);
+          WORKFLOW_UI.jsonError = "";
+          WORKFLOW_UI.validation = null;
+          WORKFLOW_UI.originScope = "";
+          WORKFLOW_UI.scope = snapshot.agentRolesHasProject ? "project" : "global";
+          AGENT_UI.openRole = "";
+          AGENT_UI.openFlow = "";
+          paint();
+        });
+      });
+
       body.querySelectorAll(".settings-workflow-save, .settings-workflow-save-default").forEach((btn) => {
         btn.addEventListener("click", (e) => {
           e.stopPropagation();
           if (!WORKFLOW_UI.draft) return;
-          try {
-            WORKFLOW_UI.draft.stagesJson = JSON.parse(WORKFLOW_UI.jsonText || stringifyStages(WORKFLOW_UI.draft));
-          } catch {
-            return;
-          }
+          if (!takeStagesJson()) return;
           const editing = WORKFLOW_UI.open && WORKFLOW_UI.open !== NEW_WORKFLOW ? WORKFLOW_UI.open : "";
           WORKFLOW_UI.pendingSave = true;
           post({
@@ -6098,11 +6523,10 @@
         btn.addEventListener("click", (e) => {
           e.stopPropagation();
           if (!WORKFLOW_UI.draft) return;
-          try {
-            WORKFLOW_UI.draft.stagesJson = JSON.parse(WORKFLOW_UI.jsonText || stringifyStages(WORKFLOW_UI.draft));
-          } catch {
-            return;
-          }
+          if (!takeStagesJson()) return;
+          // The host answers through the generator frame with requestId
+          // "validate"; `update` routes that answer here, to this card.
+          WORKFLOW_UI.validation = { name: WORKFLOW_UI.open, pending: true };
           post({ type: "validateWorkflow", draft: WORKFLOW_UI.draft });
         });
       });
@@ -6218,6 +6642,12 @@
           e.stopPropagation();
           const id = btn.dataset.ruleId;
           if (!id || id.indexOf("socket-") === 0) return;
+          if (PERM_UI.confirmDelete !== id) {
+            PERM_UI.confirmDelete = id;
+            paint();
+            return;
+          }
+          PERM_UI.confirmDelete = "";
           post({ type: "deletePermissionRule", id });
         });
       });
@@ -6328,6 +6758,24 @@
 
     return {
       update(nextSnapshot, nextEnv) {
+        // A Validate answer rides the generator frame (requestId "validate").
+        // It belongs to the editor that asked, not to the generator card — left
+        // in place it would replace a generated preview, or show nowhere.
+        if (nextSnapshot && nextSnapshot.workflowGenerator
+          && nextSnapshot.workflowGenerator.requestId === "validate") {
+          const answer = nextSnapshot.workflowGenerator;
+          nextSnapshot = { ...nextSnapshot };
+          delete nextSnapshot.workflowGenerator;
+          if (WORKFLOW_UI.validation) {
+            WORKFLOW_UI.validation = {
+              name: WORKFLOW_UI.validation.name,
+              ok: answer.status === "preview",
+              error: answer.error || "",
+              validation: answer.validation,
+            };
+            lastPaintedKey = "";
+          }
+        }
         if (nextSnapshot) snapshot = defaultSnapshot({ ...snapshot, ...nextSnapshot });
         if (nextEnv) Object.assign(env, nextEnv);
         if (githubConnectedNow(snapshot)) githubTokenForm = { open: false, value: "" };
@@ -6374,6 +6822,7 @@
         if (id !== "providers") providersChecked = false;
         if (id !== "connectors") mcpChecked = false;
         if (id !== "routines") routinesChecked = false;
+        forgetForkChecks(id);
         categoryId = id || "general";
         query = "";
         dismissRestoreConfirm();

@@ -90,7 +90,10 @@ describe("Permission rules settings", () => {
     expect(rows[0].querySelector(".settings-perm-delete")).toBeNull();
     const del = rows[1].querySelector(".settings-perm-delete") as HTMLButtonElement;
     expect(del).toBeTruthy();
+    // Two clicks: a deleted rule changes what runs without asking.
     del.click();
+    expect(posted.some((m) => m.type === "deletePermissionRule")).toBe(false);
+    (root.querySelectorAll(".settings-perm-row")[1].querySelector(".settings-perm-delete") as HTMLButtonElement).click();
     expect(posted).toContainEqual({ type: "deletePermissionRule", id: "r1" });
   });
 

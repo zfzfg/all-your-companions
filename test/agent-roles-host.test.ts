@@ -130,7 +130,9 @@ describe("saving a role", () => {
     expect(existsSync(join(project, ".companions", "agents", "reviewer.md"))).toBe(false);
     const answer = frame(posted);
     expect(answer.error).toContain("when to use");
-    expect(answer.errorId).toBe("reviewer");
+    // A draft with no originalName is the page's unsaved card; the id says
+    // so, and says it is a role, not a flow or workflow of the same name.
+    expect(answer.errorId).toBe("role:*new*");
   });
 
   it("leaves no trace when the draft is refused", async () => {

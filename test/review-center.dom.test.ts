@@ -68,7 +68,7 @@ describe("review center (real chat.js in a DOM)", () => {
     const panel = doc.getElementById("review-center")!;
     expect(panel.hidden).toBe(false);
     expect(rows(doc).map((li) => li.querySelector(".review-file-name")!.textContent)).toEqual(["a.ts", "b.ts"]);
-    expect(doc.getElementById("review-center-count")!.textContent).toBe(formatReviewHeadline(2, 6, 3));
+    expect(doc.getElementById("review-center-count")!.getAttribute("aria-label")).toBe(formatReviewHeadline(2, 6, 3));
     expect(rows(doc)[0].querySelector(".diff-stat-add")!.textContent).toBe("+4");
     expect(rows(doc)[0].querySelector(".diff-stat-del")!.textContent).toBe("−1");
   });
@@ -96,17 +96,17 @@ describe("review center (real chat.js in a DOM)", () => {
     });
 
     expect(rows(doc).map((li) => li.querySelector(".review-file-name")!.textContent)).toEqual(["new.ts"]);
-    expect(doc.getElementById("review-center-count")!.textContent).toBe(formatReviewHeadline(1, 3, 0));
+    expect(doc.getElementById("review-center-count")!.getAttribute("aria-label")).toBe(formatReviewHeadline(1, 3, 0));
 
     click(window, doc.getElementById("review-scope-session")!);
     expect(rows(doc).map((li) => li.querySelector(".review-file-name")!.textContent)).toEqual(["old.ts", "new.ts"]);
-    expect(doc.getElementById("review-center-count")!.textContent).toBe(formatReviewHeadline(2, 4, 1));
+    expect(doc.getElementById("review-center-count")!.getAttribute("aria-label")).toBe(formatReviewHeadline(2, 4, 1));
   });
 
   it("open diff posts the existing openDiff payload for that file", () => {
     const { window, doc, posted } = bootWebview();
     dispatch(window, { type: "reviewCenter", currentTurnId: "1", files: [file()] });
-    click(window, rows(doc)[0].querySelector(".preview-link")!);
+    click(window, rows(doc)[0].querySelector(".review-open")!);
     const sent = posted.filter((m: { type: string }) => m.type === "openDiff");
     expect(sent).toHaveLength(1);
     expect(sent[0]).toMatchObject({
@@ -120,7 +120,7 @@ describe("review center (real chat.js in a DOM)", () => {
   it("discard file posts reviewRevertFile with the current scope", () => {
     const { window, doc, posted } = bootWebview();
     dispatch(window, { type: "reviewCenter", currentTurnId: "1", files: [file()] });
-    const discard = [...rows(doc)[0].querySelectorAll("button")].find((b) => b.textContent === "discard file")!;
+    const discard = rows(doc)[0].querySelector(".review-discard")!;
     click(window, discard);
     expect(posted.filter((m: { type: string }) => m.type === "reviewRevertFile")).toEqual([
       { type: "reviewRevertFile", path: "src/a.ts", scope: "turn" },
@@ -134,6 +134,10 @@ describe("review center (real chat.js in a DOM)", () => {
       currentTurnId: "1",
       files: [file({ path: "a.ts" }), file({ path: "b.ts", diff: { toolCallId: "t2", oldText: "x", newText: "y", sites: [] } })],
     });
+    // Two presses: the first arms it and says what the second does.
+    click(window, doc.getElementById("review-revert-all")!);
+    expect(posted.filter((m: { type: string }) => m.type === "reviewRevertAll")).toEqual([]);
+    expect(doc.getElementById("review-revert-all")!.textContent).toBe("Discard all?");
     click(window, doc.getElementById("review-revert-all")!);
     expect(posted.filter((m: { type: string }) => m.type === "reviewRevertAll")).toEqual([
       { type: "reviewRevertAll", scope: "turn" },

@@ -27,11 +27,11 @@ export const BODY = `
       <span id="session-name-repo" class="session-name-repo" hidden></span>
       <button id="session-name-edit" class="session-name-edit icon-btn" type="button" hidden></button>
     </div>
-    <div id="session-type-picker" class="session-type-picker" role="radiogroup" aria-label="Session type" hidden>
-      <button id="session-type-agent" class="session-type-opt" type="button" role="radio" aria-checked="true" data-session-type="agent">Agent</button>
-      <button id="session-type-crew" class="session-type-opt" type="button" role="radio" aria-checked="false" data-session-type="crew">Crew</button>
+    <div id="session-type-picker" class="cx-seg cx-session-type" role="radiogroup" aria-label="Session type" hidden>
+      <button id="session-type-agent" class="cx-seg-opt session-type-opt" type="button" role="radio" aria-checked="true" tabindex="0" data-session-type="agent">Agent</button>
+      <button id="session-type-crew" class="cx-seg-opt session-type-opt" type="button" role="radio" aria-checked="false" tabindex="-1" data-session-type="crew">Crew</button>
     </div>
-    <span id="session-type-badge" class="session-type-badge" hidden></span>
+    <span id="session-type-badge" class="cx-pill cx-pill--outline cx-session-badge" hidden></span>
     <button id="repo-btn" type="button"></button>
     <button id="remote-btn" hidden></button>
     <button id="history-btn"></button>
@@ -40,10 +40,6 @@ export const BODY = `
     <div id="repo-popover" hidden></div>
     <div id="history-popover" hidden></div>
   </header>
-  <div id="subagent-tray" hidden>
-    <div class="subagent-tray-head"><span id="subagent-tray-title"></span></div>
-    <ol id="subagent-tray-list"></ol>
-  </div>
   <div id="session-head">
     <div id="session-head-main"><span id="session-head-title"></span><span id="session-head-sub"></span></div>
   </div>
@@ -55,40 +51,55 @@ export const BODY = `
   </main>
   <footer class="composer">
     <button id="scroll-bottom-btn" class="scroll-bottom-btn"></button>
-    <div id="todo-rail" class="todo-rail" hidden>
-      <button id="todo-rail-head" class="todo-rail-head" type="button" aria-expanded="true" aria-controls="todo-rail-list">
-        <span id="todo-rail-caret" class="todo-rail-caret"></span>
-        <span class="todo-rail-title">Tasks</span>
-        <span id="todo-rail-count" class="todo-rail-count"></span>
-      </button>
-      <ol id="todo-rail-list" class="todo-rail-list"></ol>
-    </div>
-    <div id="crew-run" class="crew-run" hidden>
-      <div class="crew-run-head">
-        <button id="crew-run-toggle" class="crew-run-toggle" type="button" aria-expanded="true" aria-controls="crew-run-list">
-          <span id="crew-run-caret" class="crew-run-caret"></span>
-          <span class="crew-run-title">Crew</span>
-          <span id="crew-run-count" class="crew-run-count"></span>
-        </button>
-        <button id="crew-run-stop" class="crew-run-stop" type="button">Stop</button>
-      </div>
-      <ol id="crew-run-list" class="crew-run-list"></ol>
-    </div>
-    <div id="review-center" class="review-center" hidden>
-      <div class="review-center-head">
-        <button id="review-center-toggle" class="review-center-toggle" type="button" aria-expanded="true" aria-controls="review-center-list">
-          <span id="review-center-caret" class="review-center-caret"></span>
-          <span class="review-center-title">Review</span>
-          <span id="review-center-count" class="review-center-count"></span>
-        </button>
-        <div class="review-center-scope" role="tablist">
-          <button id="review-scope-turn" class="review-scope-btn" type="button" aria-pressed="true">This turn</button>
-          <button id="review-scope-session" class="review-scope-btn" type="button" aria-pressed="false">Session</button>
+    <div id="cx-dock" class="cx-dock">
+      <section id="crew-empty" class="cx-rail cx-crew-start" hidden>
+        <div id="crew-workflow-list" class="cx-choice-list" role="radiogroup" aria-label="Workflow"></div>
+        <button id="crew-start" class="cx-btn cx-btn--primary cx-btn--sm" type="button">Start workflow</button>
+      </section>
+      <section id="todo-rail" class="cx-rail" hidden>
+        <div class="cx-rail-head">
+          <button id="todo-rail-head" class="cx-rail-toggle" type="button" aria-expanded="true" aria-controls="todo-rail-list">
+            <span class="cx-rail-title">Tasks</span>
+            <span id="todo-rail-count" class="cx-rail-meta"></span>
+          </button>
         </div>
-        <button id="review-revert-all" class="review-revert-all" type="button">Discard all</button>
-      </div>
-        <button id="review-handoff" class="review-handoff" type="button">Hand off</button>
-      <ul id="review-center-list" class="review-center-list"></ul>
+        <div class="cx-rail-bar"><span id="todo-rail-bar"></span></div>
+        <ol id="todo-rail-list" class="cx-rail-body cx-list-plain"></ol>
+      </section>
+      <section id="subagent-tray" class="cx-rail cx-rail--purple" hidden>
+        <div class="cx-rail-head"><span class="cx-rail-title">Subagents</span><span id="subagent-tray-title" class="cx-rail-meta"></span></div>
+        <ol id="subagent-tray-list" class="cx-rail-body cx-list-plain"></ol>
+      </section>
+      <section id="crew-run" class="cx-rail" hidden>
+        <div class="cx-rail-head">
+          <button id="crew-run-toggle" class="cx-rail-toggle" type="button" aria-expanded="true" aria-controls="crew-run-list">
+            <span id="crew-run-title" class="cx-rail-title">Crew</span>
+            <span id="crew-run-count" class="cx-rail-meta"></span>
+          </button>
+          <button id="crew-run-stop" class="cx-btn cx-btn--danger cx-btn--sm" type="button">Stop</button>
+        </div>
+        <div class="cx-rail-bar"><span id="crew-run-bar"></span></div>
+        <ol id="crew-run-list" class="cx-rail-body cx-list-plain cx-steps"></ol>
+      </section>
+      <section id="review-center" class="cx-rail" hidden>
+        <div class="cx-rail-head">
+          <button id="review-center-toggle" class="cx-rail-toggle" type="button" aria-expanded="true" aria-controls="review-center-body">
+            <span class="cx-rail-title">Review</span>
+            <span id="review-center-count" class="cx-rail-meta"></span>
+          </button>
+        </div>
+        <div id="review-center-body" class="cx-rail-section">
+          <div class="cx-rail-toolbar">
+            <div class="cx-seg" role="tablist" aria-label="Review scope">
+              <button id="review-scope-turn" class="cx-seg-opt" type="button" role="tab" aria-selected="true">This turn</button>
+              <button id="review-scope-session" class="cx-seg-opt" type="button" role="tab" aria-selected="false">Session</button>
+            </div>
+            <button id="review-handoff" class="cx-btn cx-btn--sm" type="button">Hand off</button>
+            <button id="review-revert-all" class="cx-btn cx-btn--danger cx-btn--sm" type="button">Discard all</button>
+          </div>
+          <ul id="review-center-list" class="cx-rail-body cx-list-plain" role="tabpanel"></ul>
+        </div>
+      </section>
     </div>
     <div class="composer-card">
       <div id="attachments"></div>

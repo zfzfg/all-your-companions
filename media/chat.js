@@ -347,11 +347,13 @@
       const selected = opt.dataset.sessionType === type;
       opt.classList.toggle("selected", selected);
       opt.setAttribute("aria-checked", selected ? "true" : "false");
+      // Roving tabindex: one stop in the tab order, arrows move within.
+      opt.tabIndex = selected ? 0 : -1;
     }
     if (locked) {
-      // The glyph is part of the label rather than a pseudo-element so that a
-      // screen reader and a copied string both carry "locked".
-      sessionTypeBadge.textContent = SESSION_TYPE_LABELS[type];
+      // The lock is decoration; the accessible name says "locked" in words.
+      sessionTypeBadge.innerHTML = ICON.lock;
+      sessionTypeBadge.appendChild(document.createTextNode(SESSION_TYPE_LABELS[type]));
       sessionTypeBadge.dataset.sessionType = type;
       sessionTypeBadge.title = SESSION_TYPE_LOCK_TOOLTIPS[type];
       sessionTypeBadge.setAttribute("aria-label", SESSION_TYPE_LOCK_TOOLTIPS[type]);
@@ -375,6 +377,15 @@
     sessionTypePicker.addEventListener("click", (event) => {
       const opt = event.target && event.target.closest ? event.target.closest(".session-type-opt") : null;
       if (opt) requestSessionType(opt.dataset.sessionType);
+    });
+    sessionTypePicker.addEventListener("keydown", (event) => {
+      const keys = { ArrowLeft: "agent", ArrowUp: "agent", ArrowRight: "crew", ArrowDown: "crew", Home: "agent", End: "crew" };
+      const next = keys[event.key];
+      if (!next) return;
+      event.preventDefault();
+      requestSessionType(next);
+      const opt = sessionTypePicker.querySelector(`[data-session-type="${next}"]`);
+      if (opt && opt.focus) opt.focus();
     });
   }
 
@@ -402,14 +413,14 @@
   // serves its own page), so every use is null-guarded rather than assumed.
   const todoRail = $("todo-rail");
   const todoRailHead = $("todo-rail-head");
-  const todoRailCaret = $("todo-rail-caret");
   const todoRailCount = $("todo-rail-count");
+  const todoRailBar = $("todo-rail-bar");
   const todoRailList = $("todo-rail-list");
   // Multi-file change overview (AP-09). Null-guarded like the todo rail so
   // an older shell that didn't ship the mount just never shows it.
   const reviewCenter = $("review-center");
   const reviewCenterToggle = $("review-center-toggle");
-  const reviewCenterCaret = $("review-center-caret");
+  const reviewCenterBody = $("review-center-body");
   const reviewCenterCount = $("review-center-count");
   const reviewCenterList = $("review-center-list");
   const reviewHandoff = $("review-handoff");
@@ -418,8 +429,9 @@
   const reviewRevertAll = $("review-revert-all");
   const crewRunEl = $("crew-run");
   const crewRunToggle = $("crew-run-toggle");
-  const crewRunCaret = $("crew-run-caret");
+  const crewRunTitle = $("crew-run-title");
   const crewRunCount = $("crew-run-count");
+  const crewRunBar = $("crew-run-bar");
   const crewRunList = $("crew-run-list");
   const crewRunStop = $("crew-run-stop");
 
@@ -893,6 +905,13 @@
     agentRolesHasProject: false,
     agentRolesError: "",
     agentRolesErrorId: "",
+    // AP-16 — the same `agentRoles` frame carries the subagent roster and
+    // routing. NULL until it arrives, so the page says "reading", not "none".
+    subagentRoster: null,
+    subagentRouting: null,
+    subagentsEnabled: true,
+    crewStagesMayUseSubagents: false,
+    efforts: [],
     // AP-07: null until the host answers listPermissionRules. The answered
     // list always includes the two safety-floor rows, so [] is not a loading
     // state.
@@ -1067,7 +1086,103 @@
     info: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>`,
     // Animated equalizer bars shown while listening (CSS drives the bounce).
     micWaves: `<span class="mic-waves" aria-hidden="true"><i></i><i></i><i></i><i></i></span>`,
+    // Companion surfaces (crew, review, second opinion). Lucide, same
+    // conventions as the rest of this map.
+    lock: `<svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>`,
+    users: `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`,
+    listChecks: `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 17 2 2 4-4"/><path d="m3 7 2 2 4-4"/><path d="M13 6h8"/><path d="M13 12h8"/><path d="M13 18h8"/></svg>`,
+    gitCompare: `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><path d="M11 18H8a2 2 0 0 1-2-2V9"/></svg>`,
+    flag: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" x2="4" y1="22" y2="15"/></svg>`,
+    gauge: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></svg>`,
+    circleCheck: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>`,
+    circleX: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>`,
+    // Two speech bubbles: "ask someone else". The magnifier this replaces read
+    // as search.
+    messages: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 9a2 2 0 0 1-2 2H6l-4 4V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2z"/><path d="M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1"/></svg>`,
+    handoff: `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>`,
+    stop: `<svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>`,
   };
+
+  /**
+   * Build an element without an HTML string. Everything the companion surfaces
+   * paint comes from the host or from a model, so text always goes through
+   * textContent; `html` is only for this file's own ICON glyphs.
+   */
+  function h(tag, attrs, ...children) {
+    const el = document.createElement(tag);
+    for (const [key, value] of Object.entries(attrs || {})) {
+      if (value === undefined || value === null || value === false) continue;
+      if (key === "class") el.className = value;
+      else if (key === "html") el.innerHTML = value;
+      else if (key === "text") el.textContent = value;
+      else if (key === "dataset") Object.assign(el.dataset, value);
+      else if (key.startsWith("on") && typeof value === "function") el.addEventListener(key.slice(2), value);
+      else el.setAttribute(key, value === true ? "" : String(value));
+    }
+    for (const child of children.flat()) {
+      if (child === undefined || child === null || child === false) continue;
+      el.appendChild(typeof child === "string" ? document.createTextNode(child) : child);
+    }
+    return el;
+  }
+
+  /** A button that asks twice. The first press arms it and says what the
+   *  second one does; it disarms itself after a few seconds. */
+  function armedButton(el, confirmLabel, onConfirm) {
+    let timer = 0;
+    const idle = el.innerHTML;
+    el.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (el.disabled) return;
+      if (!el.classList.contains("is-arming")) {
+        el.classList.add("is-arming");
+        el.textContent = confirmLabel;
+        timer = setTimeout(() => {
+          el.classList.remove("is-arming");
+          el.innerHTML = idle;
+        }, 4000);
+        return;
+      }
+      clearTimeout(timer);
+      el.classList.remove("is-arming");
+      el.innerHTML = idle;
+      onConfirm(e);
+    });
+    return el;
+  }
+
+  /** "12s", "2m 05s", "1h 04m". */
+  function formatElapsed(ms) {
+    const s = Math.max(0, Math.round(ms / 1000));
+    if (s < 60) return s + "s";
+    const m = Math.floor(s / 60);
+    if (m < 60) return m + "m " + String(s % 60).padStart(2, "0") + "s";
+    return Math.floor(m / 60) + "h " + String(m % 60).padStart(2, "0") + "m";
+  }
+
+  // The shell marks its static glyph slots with data-icon rather than inlining
+  // SVG into getHtml, so ICON stays the single source of every glyph.
+  for (const slot of document.querySelectorAll("[data-icon]")) {
+    if (ICON[slot.dataset.icon]) slot.innerHTML = ICON[slot.dataset.icon];
+  }
+
+  /** Fold state for a dock panel, per conversation — folding one away in one
+   *  conversation is not a statement about the next. */
+  function railCollapsed(name) {
+    return storedBool("grok." + name + ".collapsed:" + (state.activeSessionId || "none"), false);
+  }
+  function toggleRailCollapsed(name) {
+    const key = "grok." + name + ".collapsed:" + (state.activeSessionId || "none");
+    try { window.localStorage.setItem(key, String(!railCollapsed(name))); } catch { /* unavailable */ }
+  }
+  function paintRailFold(rail, toggle, body, collapsed, label) {
+    rail.classList.toggle("is-collapsed", collapsed);
+    if (toggle) {
+      toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+      toggle.title = (collapsed ? "Show " : "Hide ") + label;
+    }
+    if (body) body.hidden = collapsed;
+  }
 
   const MODE_META = {
     agent: {
@@ -3026,6 +3141,11 @@
       agentRolesHasProject: state.agentRolesHasProject,
       agentRolesError: state.agentRolesError,
       agentRolesErrorId: state.agentRolesErrorId,
+      subagentRoster: state.subagentRoster,
+      subagentRouting: state.subagentRouting,
+      subagentsEnabled: state.subagentsEnabled !== false,
+      crewStagesMayUseSubagents: !!state.crewStagesMayUseSubagents,
+      efforts: state.efforts,
       permissionRules: state.permissionRules,
       permissionRulesOrderCopy: state.permissionRulesOrderCopy,
       permissionRulesPending: state.permissionRulesPending,
@@ -3110,6 +3230,12 @@
         break;
       case "thumbsFeedback":
         state.thumbsFeedback = !!value;
+        break;
+      case "subagentsEnabled":
+        state.subagentsEnabled = !!value;
+        break;
+      case "crewStageSubagents":
+        state.crewStagesMayUseSubagents = !!value;
         break;
       default:
         break;
@@ -8969,16 +9095,28 @@
    * message replaces the whole list, and a second card would be a second claim
    * about the same run.
    */
-  function todoRailCollapseKey() {
-    // Per conversation: a plan you folded away in one is not a statement about
-    // the next one's. No id yet (pre-session frames) parks on a shared key
-    // rather than leaking the previous conversation's choice.
-    return "grok.todoRail.collapsed:" + (state.activeSessionId || "none");
+  /** One status marker for every list the dock paints — steps, stages, tasks —
+   *  so "running" and "done" look the same wherever they appear. The ring and
+   *  spinner are CSS; only terminal states carry a glyph. */
+  function statusMark(status, label) {
+    const known = ["pending", "running", "done", "failed", "skipped", "cancelled"];
+    const s = known.includes(status) ? status : "pending";
+    const glyph = s === "done" ? ICON.check : s === "failed" ? ICON.x : "";
+    const mark = h("span", { class: "cx-status cx-status--" + s, "aria-hidden": "true", html: glyph || undefined });
+    if (!glyph && label != null) mark.textContent = String(label);
+    // The glyph is for the eye; the word is for everyone else (and for copy).
+    const frag = document.createDocumentFragment();
+    frag.append(mark, h("span", { class: "cx-sr" }, s));
+    return frag;
   }
 
-  function todoRailCollapsed() {
-    return storedBool(todoRailCollapseKey(), false);
+  function paintProgress(bar, done, total, failed) {
+    if (!bar) return;
+    bar.style.width = total ? Math.round((done / total) * 100) + "%" : "0%";
+    bar.classList.toggle("is-failed", !!failed);
   }
+
+  const TODO_STATUS = { completed: "done", in_progress: "running", pending: "pending" };
 
   function renderTodoRail() {
     if (!todoRail) return;
@@ -8991,47 +9129,35 @@
       return;
     }
     const progress = planEntriesProgress(entries);
-    const collapsed = todoRailCollapsed();
+    const collapsed = railCollapsed("todoRail");
     todoRail.hidden = false;
-    todoRail.classList.toggle("collapsed", collapsed);
-    if (todoRailCaret) todoRailCaret.innerHTML = collapsed ? ICON.chevronRight : ICON.chevronDown;
-    if (todoRailHead) {
-      todoRailHead.setAttribute("aria-expanded", collapsed ? "false" : "true");
-      todoRailHead.title = collapsed ? "Show steps" : "Hide steps";
-    }
+    paintRailFold(todoRail, todoRailHead, todoRailList, collapsed, "steps");
     if (todoRailCount) todoRailCount.textContent = progress.done + "/" + progress.total;
+    paintProgress(todoRailBar, progress.done, progress.total, false);
     if (!todoRailList) return;
-    todoRailList.hidden = collapsed;
     todoRailList.textContent = "";
     for (let i = 0; i < entries.length; i++) {
       const entry = entries[i] || {};
       const status = entry.status === "completed" || entry.status === "in_progress"
         ? entry.status
         : "pending";
-      const li = document.createElement("li");
-      li.className = "todo-item todo-" + status.replace("_", "-");
-      if (i === progress.activeIndex) li.classList.add("todo-active");
-      li.dataset.todoId = entry.id || String(i);
-      if (entry.priority) li.dataset.todoPriority = entry.priority;
-      const mark = document.createElement("span");
-      mark.className = "todo-mark";
-      // Only the tick is a glyph; the dot and the spinner are drawn in CSS, so
-      // a shell without our stylesheet still shows readable text rows.
-      if (status === "completed") mark.innerHTML = ICON.check;
-      const text = document.createElement("span");
-      text.className = "todo-text";
-      text.textContent = entry.content || "";
-      text.title = entry.content || "";
-      li.appendChild(mark);
-      li.appendChild(text);
+      const li = h("li", {
+        class: "cx-row todo-item todo-" + status.replace("_", "-") + (i === progress.activeIndex ? " todo-active" : ""),
+        dataset: { todoId: entry.id || String(i), ...(entry.priority ? { todoPriority: entry.priority } : {}) },
+      });
+      li.appendChild(statusMark(TODO_STATUS[status]));
+      li.appendChild(h("span", { class: "cx-row-title todo-text", title: entry.content || "" }, entry.content || ""));
+      // Only "high" earns a mark: a priority on every row is a column of noise.
+      if (entry.priority === "high" && status !== "completed") {
+        li.appendChild(h("span", { class: "cx-pill cx-pill--warn" }, "high"));
+      }
       todoRailList.appendChild(li);
     }
   }
 
   if (todoRailHead) {
     todoRailHead.onclick = () => {
-      const next = !todoRailCollapsed();
-      try { window.localStorage.setItem(todoRailCollapseKey(), String(next)); } catch { /* unavailable */ }
+      toggleRailCollapsed("todoRail");
       renderTodoRail();
     };
   }
@@ -9044,14 +9170,6 @@
    * as the todo rail. Scope ("this turn" / "session") is client-local; the
    * host always sends both columns.
    */
-  function reviewCenterCollapseKey() {
-    return "grok.reviewCenter.collapsed:" + (state.activeSessionId || "none");
-  }
-
-  function reviewCenterCollapsed() {
-    return storedBool(reviewCenterCollapseKey(), false);
-  }
-
   function reviewRowsForScope() {
     const files = Array.isArray(state.reviewFiles) ? state.reviewFiles : [];
     if (state.reviewScope === "session") return files;
@@ -9081,21 +9199,25 @@
       added += state.reviewScope === "turn" ? (f.turnAdded || 0) : (f.added || 0);
       removed += state.reviewScope === "turn" ? (f.turnRemoved || 0) : (f.removed || 0);
     }
-    const collapsed = reviewCenterCollapsed();
+    const collapsed = railCollapsed("reviewCenter");
     reviewCenter.hidden = false;
-    reviewCenter.classList.toggle("collapsed", collapsed);
-    if (reviewCenterCaret) reviewCenterCaret.innerHTML = collapsed ? ICON.chevronRight : ICON.chevronDown;
-    if (reviewCenterToggle) {
-      reviewCenterToggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
-      reviewCenterToggle.title = collapsed ? "Show changes" : "Hide changes";
-    }
+    paintRailFold(reviewCenter, reviewCenterToggle, reviewCenterBody, collapsed, "changes");
     if (reviewCenterCount) {
-      reviewCenterCount.textContent = formatReviewHeadline
+      reviewCenterCount.textContent = "";
+      reviewCenterCount.appendChild(document.createTextNode(rows.length + (rows.length === 1 ? " file " : " files ")));
+      reviewCenterCount.appendChild(h("span", { class: "diff-stat-add" }, "+" + added));
+      reviewCenterCount.appendChild(document.createTextNode(" "));
+      reviewCenterCount.appendChild(h("span", { class: "diff-stat-del" }, "−" + removed));
+      reviewCenterCount.setAttribute("aria-label", formatReviewHeadline
         ? formatReviewHeadline(rows.length, added, removed)
-        : (rows.length + " files · +" + added + " −" + removed);
+        : (rows.length + " files · +" + added + " −" + removed));
     }
-    if (reviewScopeTurn) reviewScopeTurn.setAttribute("aria-pressed", state.reviewScope === "turn" ? "true" : "false");
-    if (reviewScopeSession) reviewScopeSession.setAttribute("aria-pressed", state.reviewScope === "session" ? "true" : "false");
+    for (const [btn, scope] of [[reviewScopeTurn, "turn"], [reviewScopeSession, "session"]]) {
+      if (!btn) continue;
+      const on = state.reviewScope === scope;
+      btn.setAttribute("aria-selected", on ? "true" : "false");
+      btn.tabIndex = on ? 0 : -1;
+    }
     const canDiscardAll = rows.some((f) => state.reviewScope === "turn" ? f.turnCompleted : f.completed);
     // Handoff belongs to the state of the WORK, not to one turn — which is
     // also why it sits in this panel: the panel is only here when there is
@@ -9110,37 +9232,29 @@
         : "Nothing to discard";
     }
     if (!reviewCenterList) return;
-    reviewCenterList.hidden = collapsed;
     reviewCenterList.textContent = "";
+    if (!rows.length) {
+      reviewCenterList.appendChild(h("li", { class: "cx-empty" },
+        state.reviewScope === "turn"
+          ? "This turn changed no files. Switch to Session to see earlier changes."
+          : "No changes in this conversation."));
+    }
     for (const file of rows) {
-      const li = document.createElement("li");
-      li.className = "review-file";
-      li.dataset.reviewPath = file.path || "";
-      const name = document.createElement("span");
-      name.className = "review-file-name";
+      const li = h("li", { class: "cx-row review-file", dataset: { reviewPath: file.path || "" } });
       const path = file.path || "";
-      const base = path.split("/").pop() || path;
-      name.textContent = base;
-      name.title = path;
-      const stat = document.createElement("span");
-      stat.className = "review-file-stat";
+      const slash = path.lastIndexOf("/");
+      const main = h("span", { class: "cx-row-main", title: path },
+        h("span", { class: "cx-row-icon", "aria-hidden": "true", html: ICON.file }),
+        h("span", { class: "cx-row-title review-file-name" }, slash >= 0 ? path.slice(slash + 1) : path),
+        slash > 0 ? h("span", { class: "cx-row-sub cx-row-sub--path" }, path.slice(0, slash)) : null);
       const a = state.reviewScope === "turn" ? (file.turnAdded || 0) : (file.added || 0);
       const r = state.reviewScope === "turn" ? (file.turnRemoved || 0) : (file.removed || 0);
-      const addEl = document.createElement("span");
-      addEl.className = "diff-stat-add";
-      addEl.textContent = "+" + a;
-      const delEl = document.createElement("span");
-      delEl.className = "diff-stat-del";
-      delEl.textContent = "−" + r;
-      stat.appendChild(addEl);
-      stat.appendChild(document.createTextNode(" "));
-      stat.appendChild(delEl);
-      const actions = document.createElement("div");
-      actions.className = "review-file-actions";
-      const open = document.createElement("button");
-      open.className = "preview-link";
-      open.type = "button";
-      open.textContent = "open diff →";
+      const stat = h("span", { class: "cx-row-end review-file-stat" },
+        h("span", { class: "diff-stat-add" }, "+" + a), " ",
+        h("span", { class: "diff-stat-del" }, "−" + r));
+      const actions = h("span", { class: "cx-row-actions review-file-actions" });
+      const open = h("button", { class: "cx-btn cx-btn--ghost cx-btn--icon review-open", type: "button",
+        title: "Open diff", "aria-label": "Open diff of " + path, html: ICON.eye });
       open.onclick = (e) => {
         e.stopPropagation();
         const diff = reviewFileDiff(file);
@@ -9153,23 +9267,22 @@
           replaceAll: !!diff.replaceAll,
         });
       };
-      const discard = document.createElement("button");
-      discard.className = "preview-link revert-link";
-      discard.type = "button";
       const done = state.reviewScope === "turn" ? file.turnCompleted : file.completed;
-      discard.textContent = "discard file";
+      const discard = h("button", { class: "cx-btn cx-btn--ghost cx-btn--icon cx-btn--danger-ghost review-discard", type: "button",
+        title: done ? "Discard this file's changes" : "Still being written — nothing to discard yet",
+        "aria-label": "Discard changes to " + path, html: ICON.undo });
       discard.disabled = !done;
       if (done) {
         discard.onclick = (e) => {
           e.stopPropagation();
           discard.disabled = true;
-          discard.textContent = "discarding…";
+          li.classList.add("is-busy");
           vscode.postMessage({ type: "reviewRevertFile", path: file.path, scope: state.reviewScope });
         };
       }
       actions.appendChild(open);
       actions.appendChild(discard);
-      li.appendChild(name);
+      li.appendChild(main);
       li.appendChild(stat);
       li.appendChild(actions);
       reviewCenterList.appendChild(li);
@@ -9177,84 +9290,94 @@
   }
 
   if (reviewHandoff) {
+    reviewHandoff.innerHTML = ICON.handoff;
+    reviewHandoff.appendChild(document.createTextNode("Hand off"));
     reviewHandoff.onclick = () => vscode.postMessage({ type: "requestHandoff", kind: "handoff" });
   }
   if (reviewCenterToggle) {
     reviewCenterToggle.onclick = () => {
-      const next = !reviewCenterCollapsed();
-      try { window.localStorage.setItem(reviewCenterCollapseKey(), String(next)); } catch { /* unavailable */ }
+      toggleRailCollapsed("reviewCenter");
       renderReviewCenter();
     };
   }
 
+  /** The words a status is shown as. The wire carries ids; a person reads these. */
+  const RUN_STATUS_WORDS = {
+    planning: "Planning", assigning: "Assigning roles", running: "Running", paused: "Paused",
+    review: "In review", done: "Done", failed: "Failed", cancelled: "Cancelled", "at-gate": "Waiting for you",
+  };
+  const RUN_STATUS_TONE = {
+    planning: "info", assigning: "info", running: "info", paused: "warn", review: "info",
+    done: "ok", failed: "danger", cancelled: "muted", "at-gate": "warn",
+  };
+  const STEP_STATUS = { pending: "pending", running: "running", done: "done", failed: "failed", skipped: "skipped", cancelled: "cancelled" };
+
+  function runPill(status) {
+    return h("span", { class: "cx-pill cx-pill--" + (RUN_STATUS_TONE[status] || "muted") },
+      RUN_STATUS_WORDS[status] || String(status || ""));
+  }
+
+  function crewRunLive(status) {
+    return status === "running" || status === "planning" || status === "assigning" || status === "at-gate" || status === "paused";
+  }
+
+  function paintCrewRail(title, status, items, done, failed) {
+    crewRunEl.hidden = false;
+    const collapsed = railCollapsed("crewRun");
+    paintRailFold(crewRunEl, crewRunToggle, crewRunList, collapsed, "steps");
+    if (crewRunTitle) crewRunTitle.textContent = title;
+    if (crewRunCount) {
+      crewRunCount.textContent = "";
+      crewRunCount.appendChild(document.createTextNode(done + "/" + items + " "));
+      crewRunCount.appendChild(runPill(status));
+    }
+    paintProgress(crewRunBar, done, items, failed);
+    if (crewRunStop) crewRunStop.hidden = !crewRunLive(status);
+  }
+
   function renderCrewRun() {
     if (!crewRunEl) return;
+    if (state.workflowRun) return; // the workflow pipeline owns the rail
     const run = state.crewRun;
     if (!run || !Array.isArray(run.steps) || !run.steps.length) {
       crewRunEl.hidden = true;
       if (crewRunList) crewRunList.textContent = "";
       return;
     }
-    crewRunEl.hidden = false;
     const done = run.steps.filter((s) => s.status === "done" || s.status === "skipped").length;
-    if (crewRunCount) {
-      crewRunCount.textContent = done + "/" + run.steps.length + " · " + (run.status || "");
-    }
-    if (crewRunStop) {
-      const live = run.status === "running" || run.status === "planning" || run.status === "assigning";
-      crewRunStop.hidden = !live;
-    }
+    paintCrewRail(run.preset ? "Crew · " + run.preset : "Crew", run.status, run.steps.length, done,
+      run.steps.some((s) => s.status === "failed"));
     if (!crewRunList) return;
     crewRunList.textContent = "";
     for (const step of run.steps) {
-      const li = document.createElement("li");
-      li.className = "crew-step crew-step-" + (step.status || "pending");
-      const label = document.createElement("button");
-      label.type = "button";
-      label.className = "crew-step-open";
-      label.textContent = (step.index || "?") + ". " + (step.role ? step.role + " — " : "") + (step.title || "");
-      if (step.sessionId) {
-        label.onclick = () => vscode.postMessage({ type: "openCrewSession", sessionId: step.sessionId });
-      } else {
-        label.disabled = true;
-      }
-      const meta = document.createElement("span");
-      meta.className = "crew-step-meta";
-      const bits = [step.status];
-      if (typeof step.durationMs === "number") bits.push(Math.round(step.durationMs / 100) / 10 + "s");
+      const status = STEP_STATUS[step.status] || "pending";
       const files = (step.filesObserved && step.filesObserved.length) ? step.filesObserved : (step.filesReported || []);
-      if (files.length) bits.push(files.length + " file" + (files.length === 1 ? "" : "s"));
-      meta.textContent = bits.filter(Boolean).join(" · ");
-      li.appendChild(label);
-      li.appendChild(meta);
+      const end = [];
+      if (typeof step.durationMs === "number") end.push(formatTurnDuration(step.durationMs));
+      if (files.length) end.push(files.length + (files.length === 1 ? " file" : " files"));
+      const li = h("li", { class: "cx-step crew-step crew-step-" + status });
+      const open = h("button", {
+        class: "cx-row cx-row--button crew-step-open", type: "button",
+        title: step.sessionId ? "Open this step's session" : (step.detail || ""),
+        disabled: !step.sessionId,
+      },
+      statusMark(status, step.index || "?"),
+      h("span", { class: "cx-row-main" },
+        h("span", { class: "cx-row-title" }, step.title || ""),
+        step.role ? h("span", { class: "cx-pill cx-pill--outline" }, step.role) : null),
+      end.length ? h("span", { class: "cx-row-end crew-step-meta" }, end.join(" · ")) : null);
+      if (step.sessionId) {
+        open.onclick = () => vscode.postMessage({ type: "openCrewSession", sessionId: step.sessionId });
+      }
+      li.appendChild(open);
       crewRunList.appendChild(li);
     }
   }
 
-  function ensureCrewEmpty() {
-    let el = $("crew-empty");
-    if (el) return el;
-    el = document.createElement("div");
-    el.id = "crew-empty";
-    el.className = "crew-empty";
-    el.hidden = true;
-    el.innerHTML =
-      '<label class="crew-empty-label">Workflow</label>' +
-      '<select id="crew-workflow" class="crew-workflow"></select>' +
-      '<p id="crew-workflow-when" class="crew-workflow-when muted"></p>' +
-      '<button id="crew-start" class="crew-start" type="button">Start workflow</button>';
-    const footer = document.querySelector("footer.composer");
-    if (footer) footer.insertBefore(el, footer.firstChild);
-    else document.body.appendChild(el);
-    const start = el.querySelector("#crew-start");
-    if (start) start.addEventListener("click", () => startCrewWorkflow());
-    const select = el.querySelector("#crew-workflow");
-    if (select) select.addEventListener("change", () => {
-      state.selectedWorkflow = select.value;
-      renderCrewEmpty();
-    });
-    return el;
-  }
+  const crewEmpty = $("crew-empty");
+  const crewWorkflowList = $("crew-workflow-list");
+  const crewStart = $("crew-start");
+  if (crewStart) crewStart.addEventListener("click", () => startCrewWorkflow());
 
   function startCrewWorkflow() {
     const idea = (input && input.value ? input.value : "").trim();
@@ -9270,28 +9393,89 @@
     }
   }
 
+  const WORKFLOW_SOURCE_LABEL = { builtin: "built-in", global: "all projects", project: "this project" };
+
   function renderCrewEmpty() {
-    const el = ensureCrewEmpty();
+    if (!crewEmpty) return;
     const show = state.sessionType === "crew" && !state.sessionTypeLocked && !state.workflowRun;
-    el.hidden = !show;
-    const select = $("crew-workflow");
-    if (!select) return;
+    crewEmpty.hidden = !show;
+    if (!show || !crewWorkflowList) return;
     const workflows = state.workflows || [];
     const current = state.selectedWorkflow || state.defaultWorkflow || "idea-to-done";
-    select.textContent = "";
-    for (const wf of workflows) {
-      const opt = document.createElement("option");
-      opt.value = wf.name;
-      opt.textContent = wf.title || wf.name;
-      if (wf.defaultGraph) opt.textContent += " (default graph)";
-      if (wf.name === current) opt.selected = true;
-      select.appendChild(opt);
+    crewWorkflowList.textContent = "";
+    if (crewStart) crewStart.disabled = !workflows.length;
+    if (!workflows.length) {
+      const settings = h("button", { class: "cx-link", type: "button" }, "Settings → Agents & Crew");
+      // The settings tab in VS Code, the in-page overlay everywhere else.
+      settings.onclick = () => openSettingsCategory("agents");
+      crewWorkflowList.appendChild(h("p", { class: "cx-empty" },
+        "No workflows are available. Add or generate one in ", settings, "."));
+      return;
     }
-    const when = $("crew-workflow-when");
-    const selected = workflows.find((w) => w.name === (select.value || current));
-    if (when) when.textContent = selected && selected.whenToUse ? selected.whenToUse : "";
+    for (const wf of workflows) {
+      const selected = wf.name === current;
+      const opt = h("button", {
+        class: "cx-choice crew-workflow-option" + (selected ? " is-selected" : ""),
+        type: "button", role: "radio", "aria-checked": selected ? "true" : "false",
+        tabindex: selected ? "0" : "-1", dataset: { workflow: wf.name },
+      },
+      h("span", { class: "cx-choice-dot", "aria-hidden": "true" }),
+      h("span", { class: "cx-choice-copy" },
+        h("span", { class: "cx-choice-title" }, wf.title || wf.name,
+          wf.defaultGraph ? h("span", { class: "cx-pill" }, "default graph") : null,
+          wf.source && wf.source !== "builtin" ? h("span", { class: "cx-pill cx-pill--outline" }, WORKFLOW_SOURCE_LABEL[wf.source] || wf.source) : null),
+        wf.whenToUse ? h("span", { class: "cx-choice-desc" }, wf.whenToUse) : null));
+      opt.onclick = () => {
+        state.selectedWorkflow = wf.name;
+        renderCrewEmpty();
+        const again = [...crewWorkflowList.querySelectorAll(".cx-choice")].find((b) => b.dataset.workflow === wf.name);
+        if (again) again.focus();
+      };
+      crewWorkflowList.appendChild(opt);
+    }
   }
 
+  if (crewWorkflowList) {
+    crewWorkflowList.addEventListener("keydown", (e) => {
+      if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+      const options = [...crewWorkflowList.querySelectorAll(".cx-choice")];
+      const i = options.indexOf(document.activeElement);
+      if (i < 0) return;
+      e.preventDefault();
+      const next = options[(i + (e.key === "ArrowDown" ? 1 : options.length - 1)) % options.length];
+      next.click();
+    });
+  }
+
+  const GATE_TONE = { stale: "warn", "fixer-limit": "warn", unresumable: "danger", interrupted: "warn" };
+  const SEVERITY_TONE = { critical: "danger", high: "danger", medium: "warn", low: "muted", info: "muted" };
+  const VERDICT = {
+    approved: ["ok", "Approved"], "changes-requested": ["warn", "Changes requested"],
+    rejected: ["danger", "Rejected"], blocked: ["danger", "Blocked"],
+  };
+
+  function gateSection(label, tone, ...children) {
+    return h("div", { class: "cx-section" + (tone ? " cx-section--" + tone : "") },
+      label ? h("div", { class: "cx-section-label" }, label) : null, ...children);
+  }
+
+  function gateFileList(paths, marker) {
+    return h("ul", { class: "cx-files" }, paths.map((p) => {
+      const open = h("button", { class: "cx-link cx-file-link", type: "button", title: "Open " + p }, p);
+      open.onclick = () => vscode.postMessage({ type: "openFile", path: p });
+      return h("li", { class: "cx-file" + (marker ? " cx-file--" + marker : "") },
+        h("span", { class: "cx-row-icon", "aria-hidden": "true", html: ICON.file }), open);
+    }));
+  }
+
+  /**
+   * The human gate between two workflow stages (AP-17).
+   *
+   * One card per run, and it always sits at the END of the transcript: a gate
+   * is a question that is open now, and a question scrolled out of view above
+   * the stage it interrupts is one nobody answers. Every repaint moves it back
+   * to the bottom rather than rewriting it wherever it was first drawn.
+   */
   function renderWorkflowGate(run) {
     let el = document.querySelector(".workflow-gate-card");
     if (!run || !run.gate) {
@@ -9299,85 +9483,143 @@
       return;
     }
     const gate = run.gate;
-    if (!el) {
-      el = document.createElement("div");
-      el.className = "workflow-gate-card";
-      appendTranscriptChild(el);
+    if (el) el.remove();
+    clearWelcome();
+    const tone = GATE_TONE[gate.kind] || "info";
+    el = h("section", {
+      class: "cx-card cx-card--" + tone + " workflow-gate-card",
+      "aria-live": "polite", "aria-label": gate.title || "Workflow gate",
+      dataset: { kind: gate.kind || "" },
+    });
+    const done = (run.stages || []).filter((s) => s.status === "done" || s.status === "skipped").length;
+    el.appendChild(h("div", { class: "cx-card-head" },
+      h("span", { class: "cx-card-icon", "aria-hidden": "true", html: gate.kind === "stale" || gate.kind === "fixer-limit" ? ICON.diagnostics : ICON.flag }),
+      h("div", { class: "cx-card-heading" },
+        h("div", { class: "cx-card-title gate-header" }, gate.title || ""),
+        h("div", { class: "cx-card-sub" }, [run.workflowTitle || run.workflowName, (run.stages || []).length ? done + "/" + run.stages.length + " stages" : ""].filter(Boolean).join(" · "))),
+      runPill(run.status)));
+
+    const body = h("div", { class: "cx-card-body" });
+    if (gate.reason) body.appendChild(h("p", { class: "cx-text gate-reason" }, gate.reason));
+    if (gate.summary) body.appendChild(h("blockquote", { class: "cx-quote gate-summary" }, gate.summary));
+    if (Array.isArray(gate.staleDetails) && gate.staleDetails.length) {
+      body.appendChild(h("div", { class: "cx-notice cx-notice--warning gate-stale" },
+        h("span", { class: "cx-notice-icon", html: ICON.diagnostics }),
+        h("div", { class: "cx-notice-body" },
+          h("div", {}, "The workspace changed since this run paused."),
+          h("ul", { class: "cx-list" }, gate.staleDetails.map((d) => h("li", {}, d))))));
     }
-    el.dataset.kind = gate.kind || "";
+    const observed = Array.isArray(gate.filesObserved) ? gate.filesObserved : [];
+    const unreported = Array.isArray(gate.unreported) ? gate.unreported : [];
+    const claimed = Array.isArray(gate.claimedOnly) ? gate.claimedOnly : [];
+    // The discrepancies first, as on every other card: the files nobody
+    // mentioned are the ones the next stage must be told about.
+    if (unreported.length) body.appendChild(gateSection("Changed but not reported", "warn", gateFileList(unreported, "warn")));
+    if (claimed.length) body.appendChild(gateSection("Reported but not observed", "", gateFileList(claimed)));
+    const plain = observed.filter((p) => !unreported.includes(p));
+    if (plain.length) body.appendChild(gateSection("Files changed (" + observed.length + ")", "", gateFileList(plain)));
+
+    if (gate.verify && gate.verify.command) {
+      const ok = gate.verify.exitCode === 0;
+      const verify = gateSection("Verify", "",
+        h("div", { class: "cx-verify" },
+          h("code", { class: "cx-code" }, gate.verify.command),
+          h("span", { class: "cx-pill cx-pill--" + (ok ? "ok" : "danger") }, ok ? "passed" : "exit " + gate.verify.exitCode)));
+      if (gate.verify.outputTail) {
+        verify.appendChild(h("details", { class: "cx-details", open: ok ? undefined : true },
+          h("summary", {}, "Output"),
+          h("pre", { class: "cx-pre" }, gate.verify.outputTail)));
+      }
+      body.appendChild(verify);
+    }
+    if (gate.verdict) {
+      const [vt, vw] = VERDICT[gate.verdict] || ["muted", gate.verdict];
+      body.appendChild(gateSection("Verdict", "", h("div", {}, h("span", { class: "cx-pill cx-pill--" + vt + " gate-verdict" }, vw))));
+    }
+    if (Array.isArray(gate.findings) && gate.findings.length) {
+      body.appendChild(gateSection("Findings (" + gate.findings.length + ")", "",
+        h("ul", { class: "cx-findings gate-findings" }, gate.findings.map((f) => {
+          const where = f.file ? f.file + (f.line ? ":" + f.line : "") : "";
+          let loc = null;
+          if (where) {
+            loc = h("button", { class: "cx-link cx-finding-loc", type: "button" }, where);
+            loc.onclick = () => vscode.postMessage({ type: "openFile", path: where });
+          }
+          return h("li", { class: "cx-finding" },
+            h("span", { class: "cx-pill cx-pill--" + (SEVERITY_TONE[f.severity] || "muted") }, f.severity || "note"),
+            h("span", { class: "cx-finding-text" }, f.text || "", loc ? h("span", { class: "cx-finding-where" }, " — ", loc) : null));
+        }))));
+    }
+    if (Array.isArray(gate.openQuestions) && gate.openQuestions.length) {
+      body.appendChild(gateSection("Open questions", "", h("ul", { class: "cx-list" }, gate.openQuestions.map((q) => h("li", {}, q)))));
+    }
+
+    const proposed = (gate.proposedNext || []).filter((n) => n && n.id && n.id.charAt(0) !== "$");
+    const eligible = Array.isArray(gate.eligible) ? gate.eligible : [];
+    const ineligible = Array.isArray(gate.ineligible) ? gate.ineligible : [];
+    const choosing = gate.kind !== "fixer-limit" && gate.kind !== "unresumable";
+    if (choosing && (proposed.length || eligible.length)) {
+      const fields = h("div", { class: "cx-fields" });
+      if (proposed.length) {
+        const sel = h("select", { class: "cx-select gate-next", id: "gate-next-" + run.runId },
+          proposed.map((n) => h("option", { value: n.id, selected: n.id === gate.nextStageId || undefined }, n.title || n.id)));
+        fields.appendChild(h("label", { class: "cx-field" }, h("span", { class: "cx-field-label" }, "Next stage"), sel));
+      }
+      if (eligible.length) {
+        const pre = gate.preselected && (gate.preselected.provider || gate.preselected);
+        const sel = h("select", { class: "cx-select gate-provider" },
+          eligible.map((t) => h("option", { value: t.provider, selected: t.provider === pre || undefined },
+            (t.displayName || t.provider) + (t.defaultModel ? " · " + t.defaultModel : ""))));
+        fields.appendChild(h("label", { class: "cx-field" }, h("span", { class: "cx-field-label" }, "Run on"), sel));
+      }
+      body.appendChild(fields);
+      if (ineligible.length) {
+        body.appendChild(h("ul", { class: "cx-unavailable" }, ineligible.map((t) =>
+          h("li", {}, h("span", { class: "cx-unavailable-name" }, t.provider), " — ", t.message || "not available"))));
+      }
+    }
+    body.appendChild(h("label", { class: "cx-field" },
+      h("span", { class: "cx-field-label" }, "Notes for the next stage (optional)"),
+      h("textarea", { class: "cx-textarea gate-notes", rows: "2", placeholder: "Anything the next role should know" }, gate.userNotes || "")));
+    el.appendChild(body);
+
+    const actions = h("div", { class: "cx-card-actions gate-actions" });
+    const addBtn = (action, label, kind, extra) => {
+      const btn = h("button", { class: "cx-btn" + (kind ? " cx-btn--" + kind : ""), type: "button", dataset: { action } }, label);
+      btn.addEventListener("click", () => postGateAction(action, extra));
+      actions.appendChild(btn);
+      return btn;
+    };
+    const spacer = () => actions.appendChild(h("span", { class: "cx-spacer" }));
     const next = (gate.proposedNext || [])[0];
     const startLabel = gate.kind === "gate-0"
       ? "Start stage"
-      : (next && next.id && next.id.charAt(0) !== "$"
-        ? ("Start " + (next.title || next.id))
-        : "Start");
-    const files = (gate.filesObserved || []).map((p) => escapeHtml(p)).join(", ");
-    const unreported = (gate.unreported || []).map((p) => '<span class="gate-unreported">' + escapeHtml(p) + "</span>").join(", ");
-    const findings = (gate.findings || []).map((f) =>
-      "<li>[" + escapeHtml(f.severity) + "] " + escapeHtml(f.text) + "</li>"
-    ).join("");
-    const nextOptions = (gate.proposedNext || []).map((n) =>
-      '<option value="' + escapeHtml(n.id) + '"' + (n.id === gate.nextStageId ? " selected" : "") + ">" +
-      escapeHtml(n.title || n.id) + "</option>"
-    ).join("");
-    const eligible = (gate.eligible || []).map((t) =>
-      '<option value="' + escapeHtml(t.provider) + '"' +
-      (gate.preselected && gate.preselected.provider === t.provider ? " selected" : "") + ">" +
-      escapeHtml(t.displayName || t.provider) + "</option>"
-    ).join("");
-    const stale = (gate.staleDetails || []).map((d) => "<li>" + escapeHtml(d) + "</li>").join("");
-    el.innerHTML =
-      '<div class="gate-header">' + escapeHtml(gate.title || "") + "</div>" +
-      (gate.reason ? '<p class="gate-reason">' + escapeHtml(gate.reason) + "</p>" : "") +
-      (gate.summary ? '<p class="gate-summary">' + escapeHtml(gate.summary) + "</p>" : "") +
-      (files ? '<p class="gate-files">Files: ' + files + "</p>" : "") +
-      (unreported ? '<p class="gate-files">Unreported: ' + unreported + "</p>" : "") +
-      (gate.verdict ? '<p class="gate-verdict">Verdict: ' + escapeHtml(gate.verdict) + "</p>" : "") +
-      (findings ? "<ul class=\"gate-findings\">" + findings + "</ul>" : "") +
-      (stale ? '<p class="gate-stale">The workspace changed since this run paused.</p><ul>' + stale + "</ul>" : "") +
-      (nextOptions ? '<label class="gate-next-label">Next <select class="gate-next">' + nextOptions + "</select></label>" : "") +
-      (eligible ? '<label class="gate-target-label">Target <select class="gate-provider">' + eligible + "</select></label>" : "") +
-      '<textarea class="gate-notes" rows="2" placeholder="Notes for the next stage">' +
-        escapeHtml(gate.userNotes || "") + "</textarea>" +
-      '<div class="gate-actions"></div>';
-    const actions = el.querySelector(".gate-actions");
-    const addBtn = (action, label, extra) => {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.textContent = label;
-      btn.dataset.action = action;
-      btn.addEventListener("click", () => postGateAction(action, extra));
-      actions.appendChild(btn);
-    };
-    if (gate.kind === "stale") addBtn("continueAnyway", "Continue anyway");
+      : (next && next.id && next.id.charAt(0) !== "$" ? "Start " + (next.title || next.id) : "Start");
+    if (gate.kind === "stale") addBtn("continueAnyway", "Continue anyway", "primary");
     if (gate.kind === "fixer-limit") {
-      addBtn("anotherRound", "Another round");
+      addBtn("anotherRound", "Another round", "primary");
       addBtn("acceptAsIs", "Accept as is");
-      addBtn("cancel", "Cancel run");
+      spacer();
+      addBtn("cancel", "Cancel run", "danger");
     } else if (gate.kind === "gate-0") {
-      addBtn("start", startLabel);
+      addBtn("start", startLabel, "primary");
       addBtn("changeWorkflow", "Change workflow");
-      addBtn("pause", "Stop & resume later");
+      spacer();
+      addBtn("pause", "Stop & resume later", "ghost");
     } else if (gate.kind === "unresumable") {
-      addBtn("cancel", "Cancel run");
+      addBtn("cancel", "Cancel run", "danger");
     } else {
-      addBtn("start", startLabel);
-      const pick = document.createElement("button");
-      pick.type = "button";
-      pick.textContent = "Pick another model";
-      pick.addEventListener("click", () => {
-        const sel = el.querySelector(".gate-provider");
-        if (sel && sel.focus) sel.focus();
-      });
-      actions.appendChild(pick);
+      addBtn("start", startLabel, gate.kind === "stale" ? "" : "primary");
       addBtn("skip", "Skip this stage");
-      addBtn("pause", "Stop & resume later");
-      addBtn("cancel", "Cancel run");
       if (run.status === "done" || (next && next.id === "$done")) addBtn("finish", "Finish");
+      spacer();
+      addBtn("pause", "Stop & resume later", "ghost");
+      addBtn("cancel", "Cancel run", "danger");
     }
-    if (gate.kind === "interrupted") {
-      addBtn("restart", "Restart stage");
-    }
+    if (gate.kind === "interrupted") addBtn("restart", "Restart stage");
+    el.appendChild(actions);
+    appendTranscriptChild(el);
+    scrollToBottom();
   }
 
   function postGateAction(action, extra) {
@@ -9399,58 +9641,77 @@
     vscode.postMessage(payload);
   }
 
+  const STAGE_STATUS = { "at-gate": "pending", paused: "pending", interrupted: "failed" };
+
   function renderCrewChrome() {
     renderCrewEmpty();
     renderWorkflowGate(state.workflowRun);
-    if (state.workflowRun && crewRunEl) {
-      // Pipeline rides the existing crew rail so Stop still stops the run.
-      const run = state.workflowRun;
-      crewRunEl.hidden = false;
-      if (crewRunCount) crewRunCount.textContent = run.subtitle || run.status;
-      if (crewRunList) {
-        crewRunList.textContent = "";
-        for (const stage of run.stages || []) {
-          const li = document.createElement("li");
-          li.className = "crew-step crew-step-" + (stage.status || "pending");
-          li.textContent = (stage.title || stage.id) + " · " + (stage.status || "");
-          crewRunList.appendChild(li);
-        }
-      }
+    if (!crewRunEl) return;
+    if (!state.workflowRun) {
+      renderCrewRun();
+      return;
     }
+    // The pipeline rides the crew rail, so Stop still stops the run.
+    const run = state.workflowRun;
+    const stages = Array.isArray(run.stages) ? run.stages : [];
+    const done = stages.filter((s) => s.status === "done" || s.status === "skipped").length;
+    paintCrewRail(run.workflowTitle || "Crew", run.status, stages.length, done, stages.some((s) => s.status === "failed"));
+    crewRunEl.title = run.subtitle || "";
+    if (!crewRunList) return;
+    crewRunList.textContent = "";
+    stages.forEach((stage, i) => {
+      const status = STEP_STATUS[stage.status] || STAGE_STATUS[stage.status] || "pending";
+      const current = stage.id === run.currentStageId;
+      const li = h("li", { class: "cx-step crew-step crew-step-" + status + (current ? " is-current" : "") },
+        h("span", { class: "cx-row" },
+          statusMark(status, stage.ordinal || i + 1),
+          h("span", { class: "cx-row-main" }, h("span", { class: "cx-row-title" }, stage.title || stage.id)),
+          current && run.gate ? h("span", { class: "cx-row-end" }, "next") : null));
+      crewRunList.appendChild(li);
+    });
   }
 
   if (crewRunToggle) {
     crewRunToggle.onclick = () => {
-      if (!crewRunEl) return;
-      crewRunEl.classList.toggle("collapsed");
-      const collapsed = crewRunEl.classList.contains("collapsed");
-      crewRunToggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
-      if (crewRunList) crewRunList.hidden = collapsed;
+      toggleRailCollapsed("crewRun");
+      renderCrewChrome();
     };
   }
   if (crewRunStop) {
-    crewRunStop.onclick = () => vscode.postMessage({ type: "stopCrew" });
+    armedButton(crewRunStop, "Stop the run?", () => vscode.postMessage({ type: "stopCrew" }));
   }
+  const setReviewScope = (scope) => {
+    state.reviewScope = scope;
+    renderReviewCenter();
+  };
   if (reviewScopeTurn) {
     reviewScopeTurn.onclick = (e) => {
       e.stopPropagation();
-      state.reviewScope = "turn";
-      renderReviewCenter();
+      setReviewScope("turn");
     };
   }
   if (reviewScopeSession) {
     reviewScopeSession.onclick = (e) => {
       e.stopPropagation();
-      state.reviewScope = "session";
-      renderReviewCenter();
+      setReviewScope("session");
     };
   }
+  for (const tab of [reviewScopeTurn, reviewScopeSession]) {
+    if (!tab) continue;
+    tab.addEventListener("keydown", (e) => {
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      e.preventDefault();
+      const next = state.reviewScope === "turn" ? "session" : "turn";
+      setReviewScope(next);
+      const target = next === "turn" ? reviewScopeTurn : reviewScopeSession;
+      if (target) target.focus();
+    });
+  }
   if (reviewRevertAll) {
-    reviewRevertAll.onclick = (e) => {
-      e.stopPropagation();
+    armedButton(reviewRevertAll, "Discard all?", () => {
       if (reviewRevertAll.disabled) return;
       vscode.postMessage({ type: "reviewRevertAll", scope: state.reviewScope });
-    };
+    });
   }
 
   function resetForNewSession() {
@@ -10724,7 +10985,7 @@
     btn.className = "msg-action-btn msg-second-opinion-btn";
     btn.type = "button";
     btn.setAttribute("aria-label", "Get a second opinion on this turn");
-    btn.innerHTML = `<span class="msg-action-glyph">${ICON.search || "?"}</span>`;
+    btn.innerHTML = `<span class="msg-action-glyph">${ICON.messages}</span>`;
     btn.onclick = () => {
       if (btn.disabled) return;
       vscode.postMessage({ type: "requestHandoff", kind: "second-opinion" });
@@ -11985,6 +12246,7 @@
   function buildRevertEditButton(toolCallId, diff) {
     const key = toolCallId + "|" + diff.path;
     const button = document.createElement("button");
+    button.type = "button";
     button.className = "preview-link revert-link";
     const alreadyReverted = state.revertedEdits.has(key);
     button.textContent = alreadyReverted ? "reverted" : "revert edit ↶";
@@ -12018,6 +12280,10 @@
     if (msg.ok) state.revertedEdits.add(key);
     for (const button of document.querySelectorAll('button[data-revert-key]')) {
       if (button.dataset.revertKey !== key) continue;
+      // The reason is shown, not tucked into a tooltip: a revert that did not
+      // happen is the one outcome the user must not miss.
+      const prior = button.nextElementSibling;
+      if (prior && prior.classList.contains("cx-inline-error")) prior.remove();
       if (msg.ok) {
         button.textContent = "reverted";
         button.disabled = true;
@@ -12026,6 +12292,8 @@
         button.textContent = "revert edit ↶";
         button.disabled = false;
         button.title = msg.reason || "";
+        button.insertAdjacentElement("afterend",
+          h("span", { class: "cx-inline-error", role: "alert" }, msg.reason || "Could not revert this edit."));
       }
     }
     // A review-center "discard file" is the same revert; rebuild the panel
@@ -12379,17 +12647,33 @@
     scrollToBottom();
   }
 
+  /** Settle a limit card in place. The original title stays — "Continued
+   *  with Claude" means nothing once you can no longer see what hit a limit —
+   *  and the outcome becomes the status pill. */
   function resolveLimitOfferCardEl(el, action, targetName) {
-    el.classList.add("resolved");
-    const title = el.querySelector(".card-title");
-    if (title) {
-      title.textContent = action === "continue" && targetName
-        ? "Continued with " + targetName
-        : action === "retry" ? "Retrying"
-        : "Dismissed";
+    el.classList.add("resolved", "is-resolved");
+    const outcome = action === "continue" && targetName
+      ? "Continued with " + targetName
+      : action === "retry" ? "Retrying"
+      : "Dismissed";
+    const status = el.querySelector(".cx-card-status");
+    if (status) {
+      status.textContent = "";
+      status.appendChild(h("span", { class: "cx-pill cx-pill--" + (action === "dismiss" ? "muted" : "ok") + " limit-outcome" }, outcome));
     }
-    const actions = el.querySelector(".card-actions");
+    const body = el.querySelector(".cx-card-body");
+    if (body) body.remove();
+    const actions = el.querySelector(".cx-card-actions");
     if (actions) actions.remove();
+  }
+
+  function cardHead(icon, title, sub, status) {
+    return h("div", { class: "cx-card-head" },
+      h("span", { class: "cx-card-icon", "aria-hidden": "true", html: icon }),
+      h("div", { class: "cx-card-heading" },
+        h("div", { class: "cx-card-title card-title" }, title),
+        sub ? h("div", { class: "cx-card-sub" }, sub) : null),
+      h("span", { class: "cx-card-status" }, status || null));
   }
 
   /**
@@ -12410,86 +12694,71 @@
     state.busyLocked = false;
     updateSendButton();
 
-    const el = document.createElement("div");
-    el.className = "card agent-result" + (msg.outcome === "failed" ? " failed" : "");
-    el.dataset.agentRunId = String(msg.runId || "");
-    el.dataset.agentStep = String(msg.step != null ? msg.step : 1);
-
-    const title = document.createElement("div");
-    title.className = "card-title";
-    const verb = msg.outcome === "completed" ? "finished" : msg.outcome === "cancelled" ? "was stopped" : "failed";
-    title.textContent = "Role " + (msg.role || "agent") + " " + verb;
-    el.appendChild(title);
-
-    const meta = document.createElement("div");
-    meta.className = "card-subtitle";
-    const bits = [msg.providerName || msg.provider || "", msg.model || "default model"];
-    if (msg.effort) bits.push("effort " + msg.effort);
-    if (msg.mode) bits.push(msg.mode + " mode");
-    if (typeof msg.durationMs === "number") bits.push(Math.max(1, Math.round(msg.durationMs / 1000)) + "s");
+    const outcome = msg.outcome === "completed" || msg.outcome === "cancelled" ? msg.outcome : "failed";
+    const tone = outcome === "completed" ? "info" : outcome === "cancelled" ? "muted" : "danger";
+    const el = h("section", {
+      class: "cx-card cx-card--" + tone + " agent-result" + (outcome === "failed" ? " failed" : "") + (outcome === "cancelled" ? " cancelled" : ""),
+      dataset: { agentRunId: String(msg.runId || ""), agentStep: String(msg.step != null ? msg.step : 1) },
+    });
+    const verb = outcome === "completed" ? "finished" : outcome === "cancelled" ? "was stopped" : "failed";
     // Who wrote the task. Absent on cards replayed from before AP-11, which
     // is why nothing here assumes it.
-    if (msg.origin === "handoff") bits.push("handoff");
-    else if (msg.origin === "second-opinion") bits.push("second opinion");
-    // Always present — the host writes "no cost reported" rather than a
-    // reassuring $0.00 when the provider reported nothing.
-    bits.push(msg.cost || "no cost reported");
-    meta.textContent = bits.filter(Boolean).join(" · ");
-    el.appendChild(meta);
+    const origin = msg.origin === "handoff" ? "Handoff"
+      : msg.origin === "second-opinion" ? "Second opinion"
+      : msg.origin === "crew-step" ? "Crew step"
+      : msg.origin === "workflow-stage" ? "Workflow stage" : "";
+    const who = [msg.providerName || msg.provider || "", msg.model || "default model"];
+    if (msg.effort) who.push("effort " + msg.effort);
+    if (msg.mode) who.push(msg.mode + " mode");
+    el.appendChild(cardHead(
+      outcome === "completed" ? ICON.circleCheck : outcome === "cancelled" ? ICON.stop : ICON.circleX,
+      "Role " + (msg.role || "agent") + " " + verb,
+      who.filter(Boolean).join(" · "),
+      origin ? h("span", { class: "cx-pill cx-pill--outline agent-result-origin" }, origin) : null));
 
-    if (msg.detail) {
-      const detail = document.createElement("div");
-      detail.className = "card-subtitle";
-      detail.textContent = msg.detail;
-      el.appendChild(detail);
+    const body = h("div", { class: "cx-card-body" });
+    // Cost and time as their own marks: a role is a SECOND, separately billed
+    // run, so the cost must never read as a footnote. Always present — the host
+    // writes "no cost reported" rather than a reassuring $0.00.
+    const meta = h("div", { class: "cx-meta card-subtitle" });
+    if (typeof msg.durationMs === "number") {
+      meta.appendChild(h("span", { class: "cx-pill" }, formatElapsed(Math.max(1000, msg.durationMs))));
     }
+    meta.appendChild(h("span", { class: "cx-pill cx-pill--cost agent-result-cost" }, msg.cost || "no cost reported"));
+    body.appendChild(meta);
+    if (msg.detail) body.appendChild(h("div", { class: "cx-text cx-muted agent-result-detail" }, msg.detail));
     // A same-companion review is still a review, but it is not an outside one.
     // Stated on the card so the label matches what actually happened.
     if (msg.caution) {
-      const caution = document.createElement("div");
-      caution.className = "agent-result-caution";
-      caution.textContent = msg.caution;
-      el.appendChild(caution);
+      body.appendChild(h("div", { class: "cx-notice cx-notice--warning agent-result-caution" },
+        h("span", { class: "cx-notice-icon", html: ICON.info }), h("div", { class: "cx-notice-body" }, msg.caution)));
     }
-    if (msg.summary) {
-      const body = document.createElement("div");
-      body.className = "agent-result-summary";
-      body.textContent = msg.summary;
-      el.appendChild(body);
-    }
+    if (msg.summary) body.appendChild(h("div", { class: "cx-text agent-result-summary" }, msg.summary));
 
-    const section = (label, items) => {
-      const list = Array.isArray(items) ? items.filter(Boolean) : [];
+    const section = (label, items, opts = {}) => {
+      const list = Array.isArray(items) ? items.filter(Boolean).map(String) : [];
       if (!list.length) return;
-      const wrap = document.createElement("div");
-      wrap.className = "agent-result-list"
-        + (label === "Edits the role did not report" ? " unreported" : "");
-      const heading = document.createElement("div");
-      heading.className = "agent-result-list-title";
-      heading.textContent = label + " (" + list.length + ")";
-      wrap.appendChild(heading);
-      const ul = document.createElement("ul");
-      list.forEach((entry) => {
-        const li = document.createElement("li");
-        li.textContent = String(entry);
-        ul.appendChild(li);
-      });
-      wrap.appendChild(ul);
-      el.appendChild(wrap);
+      const wrap = h("div", {
+        class: "cx-section agent-result-list" + (opts.warn ? " cx-section--warn" : "") + (opts.tone === "danger" ? " cx-section--danger" : "") + (opts.cls ? " " + opts.cls : ""),
+      }, h("div", { class: "cx-section-label agent-result-list-title" }, label + " (" + list.length + ")"));
+      if (opts.files) wrap.appendChild(gateFileList(list, opts.warn ? "warn" : ""));
+      else wrap.appendChild(h("ul", { class: "cx-list" }, list.map((entry) => h("li", {}, entry))));
+      body.appendChild(wrap);
     };
-    section("Files touched (reported)", msg.files);
     // Only rendered when non-empty (the host omits the field otherwise), so a
     // clean run shows no discrepancy rows at all and a dirty one stands out.
-    section("Edits the role did not report", msg.unreported);
-    section("Reported but not observed", msg.claimedOnly);
+    // The discrepancies lead, as on the subagent card.
+    section("Edits the role did not report", msg.unreported, { files: true, warn: true, cls: "unreported" });
+    // Not a warning: a file the role only CLAIMED is noise, not a hidden edit.
+    section("Reported but not observed", msg.claimedOnly, { files: true, cls: "claimed-only" });
+    section("Files touched (reported)", msg.files, { files: true });
     section("Still open", msg.open);
-    section("Failed", msg.failed);
+    section("Failed", msg.failed, { tone: "danger" });
+    el.appendChild(body);
 
-    const actions = document.createElement("div");
-    actions.className = "card-actions";
-    const artifact = (label, which) => {
-      const btn = document.createElement("button");
-      btn.textContent = label;
+    const actions = h("div", { class: "cx-card-actions" });
+    const artifact = (label, which, primary) => {
+      const btn = h("button", { class: "cx-btn cx-btn--sm" + (primary ? " cx-btn--primary" : ""), type: "button" }, label);
       btn.onclick = () => vscode.postMessage({
         type: "openAgentArtifact",
         runId: msg.runId,
@@ -12498,11 +12767,11 @@
       });
       actions.appendChild(btn);
     };
+    const hasResult = msg.outcome !== "cancelled" || msg.summary;
+    if (hasResult) artifact("Open result", "result", true);
     artifact("Open briefing", "brief");
-    if (msg.outcome !== "cancelled" || msg.summary) artifact("Open result", "result");
     if (msg.sessionId) {
-      const open = document.createElement("button");
-      open.textContent = "Open session";
+      const open = h("button", { class: "cx-btn cx-btn--sm cx-btn--ghost", type: "button" }, "Open session");
       open.onclick = () => vscode.postMessage({ type: "resumeSession", id: msg.sessionId, cwd: msg.cwd });
       actions.appendChild(open);
     }
@@ -12526,21 +12795,11 @@
     updateSendButton();
     if (!state.replaying) maybeNotifySound("error");
 
-    const el = document.createElement("div");
-    el.className = "card limit";
-    el.dataset.limitOfferId = String(msg.id);
-    const title = document.createElement("div");
-    title.className = "card-title";
-    title.textContent = msg.title || "Usage limit reached";
-    el.appendChild(title);
-    if (msg.text) {
-      const body = document.createElement("div");
-      body.className = "card-subtitle";
-      body.textContent = msg.text;
-      el.appendChild(body);
-    }
-    const actions = document.createElement("div");
-    actions.className = "card-actions";
+    const el = h("section", { class: "cx-card cx-card--orange limit-offer", dataset: { limitOfferId: String(msg.id) } });
+    el.appendChild(cardHead(ICON.gauge, msg.title || "Usage limit reached", "",
+      h("span", { class: "cx-pill cx-pill--warn" }, msg.kind === "rate" ? "rate limit" : "quota")));
+    if (msg.text) el.appendChild(h("div", { class: "cx-card-body" }, h("div", { class: "cx-text card-subtitle" }, msg.text)));
+    const actions = h("div", { class: "cx-card-actions" });
     const settle = (action, target) => {
       if (el.classList.contains("resolved")) return;
       const payload = { type: "limitOfferAnswer", id: msg.id, action };
@@ -12551,19 +12810,18 @@
     const targets = Array.isArray(msg.targets) ? msg.targets : [];
     targets.forEach((target, i) => {
       if (!target || !target.id) return;
-      const btn = document.createElement("button");
-      btn.textContent = "Continue with " + (target.name || target.id);
-      if (msg.recommended === "continue" && i === 0) btn.classList.add("primary");
+      const primary = msg.recommended === "continue" && i === 0;
+      const btn = h("button", { class: "cx-btn cx-btn--sm" + (primary ? " cx-btn--primary primary" : ""), type: "button" },
+        "Continue with " + (target.name || target.id));
       btn.onclick = () => settle("continue", target);
       actions.appendChild(btn);
     });
-    const retry = document.createElement("button");
-    retry.textContent = "Wait and try again";
-    if (msg.recommended === "retry") retry.classList.add("primary");
+    const retry = h("button", { class: "cx-btn cx-btn--sm" + (msg.recommended === "retry" ? " cx-btn--primary primary" : ""), type: "button" },
+      "Wait and try again");
     retry.onclick = () => settle("retry");
     actions.appendChild(retry);
-    const dismiss = document.createElement("button");
-    dismiss.textContent = "Dismiss";
+    actions.appendChild(h("span", { class: "cx-spacer" }));
+    const dismiss = h("button", { class: "cx-btn cx-btn--sm cx-btn--ghost", type: "button" }, "Dismiss");
     dismiss.onclick = () => settle("dismiss");
     actions.appendChild(dismiss);
     el.appendChild(actions);
@@ -13087,11 +13345,15 @@
 
   const COMPANION_STATUS_WORDS = {
     "pending-approval": "waiting for approval",
-    running: "",
-    completed: "",
+    running: "running",
+    completed: "done",
     failed: "failed",
     cancelled: "cancelled",
     refused: "refused",
+  };
+  const COMPANION_STATUS_TONE = {
+    "pending-approval": "warn", running: "info", completed: "ok",
+    failed: "danger", cancelled: "muted", refused: "danger",
   };
 
   function companionCardFor(subagentId) {
@@ -13100,24 +13362,22 @@
     closeToolGroup();
     clearWelcome();
     hideGrokking();
-    el = document.createElement("div");
-    el.className = "subagent-card companion-subagent";
-    el.dataset.companionSubagentId = subagentId;
-    el.innerHTML =
-      `<div class="subagent-row">` +
-        `<span class="subagent-badge">${ICON.bot || "🤖"}</span>` +
-        `<span class="subagent-label">Subagent</span>` +
-        `<span class="subagent-sep">·</span>` +
-        `<span class="subagent-title"></span>` +
-        `<span class="companion-profile"></span>` +
-        BLINK_DOTS +
-        `<span class="subagent-time"></span>` +
-      `</div>` +
-      `<div class="companion-origin" hidden></div>` +
-      `<div class="companion-notes"></div>` +
-      `<div class="subagent-stream" hidden></div>` +
-      `<div class="subagent-result" hidden></div>` +
-      `<div class="companion-actions" hidden></div>`;
+    // The purple subagent card (upstream) is the frame; the companion parts
+    // are a head that wraps instead of truncating, and a body of evidence.
+    el = h("div", { class: "subagent-card companion-subagent", dataset: { companionSubagentId: subagentId } },
+      h("div", { class: "subagent-row companion-head" },
+        h("span", { class: "subagent-badge", html: ICON.bot }),
+        h("span", { class: "companion-heading" },
+          h("span", { class: "companion-name" },
+            h("span", { class: "subagent-label" }, "Subagent"),
+            h("span", { class: "subagent-title" })),
+          h("span", { class: "companion-target" })),
+        h("span", { class: "companion-status" })),
+      h("div", { class: "companion-origin", hidden: true }),
+      h("ul", { class: "companion-notes", hidden: true }),
+      h("div", { class: "subagent-stream", hidden: true }),
+      h("div", { class: "subagent-result", hidden: true }),
+      h("div", { class: "companion-actions", hidden: true }));
     appendTranscriptChild(el);
     state.companionSubagentCards.set(subagentId, el);
     return el;
@@ -13127,8 +13387,10 @@
    * The tray above the composer (§6.10 point 5).
    *
    * Replacing state: an empty list IS the instruction to hide it, so there is
-   * no separate "the tray is done" message to lose.
+   * no separate "the tray is done" message to lose. The elapsed time is the
+   * one thing that changes while nothing else does, so it ticks on its own.
    */
+  let subagentTrayTimer = 0;
   function renderSubagentTray(msg) {
     const tray = $("subagent-tray");
     const list = $("subagent-tray-list");
@@ -13136,48 +13398,59 @@
     if (!tray || !list) return;
     const running = Array.isArray(msg.subagents) ? msg.subagents : [];
     tray.hidden = running.length === 0;
+    clearInterval(subagentTrayTimer);
     if (!running.length) { list.textContent = ""; return; }
-    if (title) title.textContent = `Waiting for ${running.length} subagent(s)`;
+    if (title) title.textContent = running.length === 1 ? "1 running" : running.length + " running";
     list.textContent = "";
     for (const entry of running) {
-      const row = document.createElement("li");
-      row.className = "subagent-tray-row";
-      row.dataset.subagentId = entry.subagentId;
-      const name = document.createElement("span");
-      name.className = "subagent-tray-name";
-      name.textContent = entry.label;
-      row.appendChild(name);
-      const target = document.createElement("span");
-      target.className = "subagent-tray-target";
-      target.textContent = [entry.providerName || entry.provider, entry.model].filter(Boolean).join(" ");
-      row.appendChild(target);
-      const cancel = document.createElement("button");
-      cancel.type = "button";
-      cancel.className = "subagent-tray-cancel";
-      cancel.textContent = "Cancel";
-      cancel.addEventListener("click", () => {
+      const time = h("span", { class: "cx-row-end subagent-tray-time", dataset: { startedAt: String(entry.startedAt || "") } });
+      const cancel = h("button", {
+        class: "cx-btn cx-btn--ghost cx-btn--sm subagent-tray-cancel", type: "button",
+        title: "Stop this subagent", "aria-label": "Stop " + (entry.label || "subagent"),
+      }, "Cancel");
+      armedButton(cancel, "Stop?", () => {
         vscode.postMessage({
           type: "companionSubagentAction",
           subagentId: entry.subagentId,
           action: "cancel",
         });
       });
-      row.appendChild(cancel);
-      list.appendChild(row);
+      list.appendChild(h("li", { class: "cx-row subagent-tray-row", dataset: { subagentId: entry.subagentId } },
+        statusMark("running"),
+        h("span", { class: "cx-row-main" },
+          h("span", { class: "cx-row-title subagent-tray-name" }, entry.label || ""),
+          h("span", { class: "cx-row-sub subagent-tray-target" },
+            [entry.providerName || entry.provider, entry.model].filter(Boolean).join(" "))),
+        time, cancel));
     }
+    const tick = () => {
+      for (const t of list.querySelectorAll(".subagent-tray-time")) {
+        const started = Number(t.dataset.startedAt);
+        t.textContent = started ? formatElapsed(Date.now() - started) : "";
+      }
+    };
+    tick();
+    subagentTrayTimer = setInterval(() => { if (tray.hidden || !tray.isConnected) clearInterval(subagentTrayTimer); else tick(); }, 1000);
   }
 
   function renderCompanionSubagent(msg) {
     const el = companionCardFor(msg.subagentId);
-    const target = [msg.providerName || msg.provider, msg.model].filter(Boolean).join(" ");
     const title = el.querySelector(".subagent-title");
     if (title) {
-      title.textContent = [msg.label, target, msg.effort ? `effort ${msg.effort}` : ""]
-        .filter(Boolean).join(" · ");
-      title.title = title.textContent;
+      title.textContent = msg.label || "";
+      title.title = msg.label || "";
     }
-    const profile = el.querySelector(".companion-profile");
-    if (profile) profile.textContent = msg.profileLabel || msg.profile || "";
+    const target = el.querySelector(".companion-target");
+    if (target) {
+      target.textContent = "";
+      target.appendChild(document.createTextNode(
+        [[msg.providerName || msg.provider, msg.model].filter(Boolean).join(" "), msg.effort ? `effort ${msg.effort}` : ""]
+          .filter(Boolean).join(" · ")));
+      const profileText = msg.profileLabel || msg.profile || "";
+      if (profileText) {
+        target.appendChild(h("span", { class: "cx-pill cx-pill--outline companion-profile" }, profileText));
+      }
+    }
 
     // Everything the user is owed an explanation for. Each of these is a
     // decision the host made that the agent did not ask for, so none of them
@@ -13204,10 +13477,8 @@
       notesEl.textContent = "";
       notesEl.hidden = notes.length === 0;
       for (const note of notes) {
-        const line = document.createElement("div");
-        line.className = "companion-note";
-        line.textContent = note;
-        notesEl.appendChild(line);
+        notesEl.appendChild(h("li", { class: "companion-note" },
+          h("span", { class: "companion-note-icon", "aria-hidden": "true", html: ICON.info }), note));
       }
     }
 
@@ -13215,7 +13486,7 @@
     // stage, or a child that delegated once more. Absent in the ordinary case.
     const origin = el.querySelector(".companion-origin");
     if (origin) {
-      origin.textContent = msg.startedBy || "";
+      origin.textContent = msg.startedBy ? "Started by " + msg.startedBy : "";
       origin.hidden = !msg.startedBy;
     }
 
@@ -13223,12 +13494,15 @@
       || msg.status === "cancelled" || msg.status === "refused";
     el.classList.toggle("subagent-failed", msg.status === "failed" || msg.status === "refused");
     el.classList.toggle("subagent-cancelled", msg.status === "cancelled");
-    const timeEl = el.querySelector(".subagent-time");
-    if (timeEl) {
-      const word = COMPANION_STATUS_WORDS[msg.status] || "";
+    el.dataset.status = msg.status || "";
+    const statusEl = el.querySelector(".companion-status");
+    if (statusEl) {
+      const word = COMPANION_STATUS_WORDS[msg.status] || msg.status || "";
       const ms = terminal && msg.endedAt ? msg.endedAt - msg.startedAt : null;
-      const dur = ms != null ? `${Math.max(1, Math.round(ms / 1000))}s` : "";
-      timeEl.textContent = [word, dur].filter(Boolean).join(" ");
+      statusEl.textContent = "";
+      if (msg.status === "running") statusEl.appendChild(statusMark("running"));
+      statusEl.appendChild(h("span", { class: "cx-pill cx-pill--" + (COMPANION_STATUS_TONE[msg.status] || "muted") }, word));
+      if (ms != null) statusEl.appendChild(h("span", { class: "subagent-time" }, formatElapsed(Math.max(1000, ms))));
     }
     if (terminal) {
       el.classList.add("subagent-done");
@@ -13254,11 +13528,7 @@
     bar.textContent = "";
     bar.hidden = actions.length === 0;
     for (const entry of actions) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "companion-action";
-      button.dataset.action = entry.action;
-      button.textContent = entry.label;
+      const button = h("button", { class: "cx-btn cx-btn--sm companion-action", type: "button", dataset: { action: entry.action } }, entry.label);
       button.addEventListener("click", () => {
         vscode.postMessage({
           type: "companionSubagentAction",
@@ -13293,19 +13563,12 @@
     }
     result.textContent = "";
     for (const section of sections) {
-      const block = document.createElement("div");
-      block.className = section.warn ? "companion-section companion-warn" : "companion-section";
+      const block = h("div", { class: "cx-section companion-section" + (section.warn ? " cx-section--warn companion-warn" : "") });
       if (section.heading) {
-        const heading = document.createElement("div");
-        heading.className = "companion-section-heading";
-        heading.textContent = section.heading;
-        block.appendChild(heading);
-      }
-      for (const line of section.lines) {
-        const row = document.createElement("div");
-        row.className = "companion-section-line";
-        row.textContent = line;
-        block.appendChild(row);
+        block.appendChild(h("div", { class: "cx-section-label companion-section-heading" }, section.heading));
+        block.appendChild(gateFileList(section.lines, section.warn ? "warn" : ""));
+      } else {
+        for (const line of section.lines) block.appendChild(h("div", { class: "cx-text companion-summary" }, line));
       }
       result.appendChild(block);
     }
@@ -13558,44 +13821,64 @@
     scrollToBottom();
   }
 
-  function addPlanNotice(text, action) {
+  function addPlanNotice(text) {
     clearWelcome();
     hideGrokking();
     const el = document.createElement("div");
     el.className = "plan-notice";
-    const str = String(text ?? "");
-    const hasMarkdown = str.includes("\n") || str.includes("`") || str.includes("#") || str.includes("**");
-    if (hasMarkdown) {
-      const body = document.createElement("div");
-      body.className = "plan-notice-body";
-      body.innerHTML = renderMarkdown(str);
+    el.innerHTML = `${ICON.listTree}<span>${escapeHtml(text)}</span>`;
+    appendTranscriptChild(el);
+    scrollToBottom();
+  }
+
+  /**
+   * A line the HOST adds to the transcript (`hostNotice`): an automatic grant
+   * or denial, a refused discard, the /subagents report. Not the agent's plan,
+   * so it does not wear the plan notice — and a warning has to look like one,
+   * which is the whole reason `level` is on the wire.
+   *
+   * Multi-line text is markdown (the diagnose report is a heading plus a
+   * list). A `/agent …` or `/crew …` code span pastes itself into the
+   * composer, since that is what anyone reading it wants to do next.
+   */
+  function addHostNotice(msg) {
+    clearWelcome();
+    hideGrokking();
+    const level = msg.level === "warning" || msg.level === "error" ? msg.level : "info";
+    const text = String(msg.text ?? "");
+    const el = h("div", { class: "cx-notice cx-notice--" + level + " host-notice", role: level === "info" ? "status" : "alert" });
+    el.appendChild(h("span", { class: "cx-notice-icon", html: level === "info" ? ICON.info : ICON.diagnostics }));
+    const body = h("div", { class: "cx-notice-body" });
+    if (/[\n`*#]/.test(text)) {
+      body.classList.add("is-rich");
+      body.innerHTML = renderMarkdown(text);
       body.querySelectorAll("code").forEach((codeEl) => {
-        const txt = (codeEl.textContent || "").trim();
-        if (txt.startsWith("/agent ") || txt.startsWith("/crew")) {
-          codeEl.style.cursor = "pointer";
-          codeEl.title = "Click to paste into prompt";
-          codeEl.onclick = (e) => {
-            e.stopPropagation();
-            input.value = txt + (txt.endsWith(" ") ? "" : " ");
-            input.focus();
-            updateSendButton();
-          };
-        }
+        const command = (codeEl.textContent || "").trim();
+        if (!/^\/(agent|crew|subagents)\b/.test(command)) return;
+        codeEl.classList.add("cx-paste");
+        codeEl.title = "Paste into the prompt";
+        codeEl.tabIndex = 0;
+        const paste = (e) => {
+          e.stopPropagation();
+          input.value = command + " ";
+          input.focus();
+          updateSendButton();
+        };
+        codeEl.onclick = paste;
+        codeEl.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); paste(e); } };
       });
-      el.innerHTML = `<span class="plan-notice-icon">${ICON.listTree}</span>`;
-      el.appendChild(body);
     } else {
-      el.innerHTML = `${ICON.listTree}<span>${escapeHtml(str)}</span>`;
+      body.textContent = text;
     }
+    el.appendChild(body);
+    const action = msg.action;
     if (action && action.id === "openCrewWithGoal") {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "plan-notice-action";
-      btn.textContent = action.label || "Open a new Crew session with this goal";
+      const btn = h("button", { class: "cx-btn cx-btn--sm host-notice-action", type: "button" },
+        action.label || "Open a new Crew session with this goal");
       btn.addEventListener("click", () => {
         vscode.postMessage({ type: "openCrewWithGoal", goal: action.goal || "" });
       });
-      el.appendChild(btn);
+      body.appendChild(h("div", { class: "cx-notice-actions" }, btn));
     }
     appendTranscriptChild(el);
     scrollToBottom();
@@ -14553,22 +14836,21 @@
     return list.find((o) => o.kind === "allow_once") || list.find((o) => o.kind === "allow_always");
   }
 
+  const RULE_SCOPE_WORDS = { workspace: "this project", global: "all projects" };
+
   function renderPermissionRuleSuggestions(el, requestId, cardTitle, suggestions) {
     const old = el.querySelector(".perm-rule-suggestions");
     if (old) old.remove();
     if (!Array.isArray(suggestions) || !suggestions.length) return;
-    const wrap = document.createElement("div");
-    wrap.className = "perm-rule-suggestions";
-    const label = document.createElement("div");
-    label.className = "perm-rule-suggestions-label";
-    label.textContent = "Always allow for…";
-    wrap.appendChild(label);
+    const wrap = h("div", { class: "perm-rule-suggestions", role: "group", "aria-label": "Always allow" },
+      h("div", { class: "perm-rule-suggestions-label" }, "Always allow — saved as a rule"));
     suggestions.forEach((sug) => {
       if (!sug || !sug.match) return;
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "perm-rule-suggestion";
-      btn.textContent = sug.label || "this request";
+      // Where the rule is written is part of the decision: a project rule is
+      // shared through git, an all-projects rule follows the user everywhere.
+      const btn = h("button", { class: "perm-rule-suggestion", type: "button" },
+        h("span", { class: "perm-rule-suggestion-label" }, sug.label || "this request"),
+        sug.scope ? h("span", { class: "cx-pill cx-pill--outline" }, RULE_SCOPE_WORDS[sug.scope] || sug.scope) : null);
       btn.onclick = () => {
         if (state.sessionSuperseded) return;
         const opt = preferredAllowOnce(el._permOptions);
@@ -14585,6 +14867,8 @@
       };
       wrap.appendChild(btn);
     });
+    // Same keyboard model as the card's own row (arrows, Escape, type-through).
+    wirePermissionKeys(wrap, [...wrap.querySelectorAll(".perm-rule-suggestion")]);
     el.appendChild(wrap);
   }
 
@@ -14890,7 +15174,27 @@
     // an auto-continue timeout, or an asking process that withdrew the call.
     el.dataset.questionReqId = String(req.id);
 
-    const title = buildQuestionHead(el, "Grok is asking");
+    // Any companion can ask (AP-05), so the heading names the one that did.
+    const title = buildQuestionHead(el, providerDisplayName(state.activeProvider) + " is asking");
+    // A card that will continue on its own says so, and says when — a timer
+    // nobody can see is a decision taken on the user's behalf in silence.
+    if (autoContinueMs > 0) {
+      const deadline = Date.now() + autoContinueMs;
+      const countdown = h("div", { class: "cx-countdown question-countdown", "aria-live": "off" });
+      el.appendChild(countdown);
+      const paint = () => {
+        if (!countdown.isConnected && el.isConnected) return;
+        const left = deadline - Date.now();
+        if (el.classList.contains("resolved") || left <= 0) {
+          countdown.remove();
+          clearInterval(timer);
+          return;
+        }
+        countdown.textContent = "Continues on its own in " + formatElapsed(left);
+      };
+      const timer = setInterval(paint, 1000);
+      paint();
+    }
 
     // selections[i] = array of chosen labels for question i.
     const selections = questions.map(() => []);
@@ -17734,10 +18038,15 @@
         state.agentRolesErrorId = msg.errorId || "";
         state.workflows = Array.isArray(msg.workflows) ? msg.workflows : [];
         state.defaultWorkflow = typeof msg.defaultWorkflow === "string" ? msg.defaultWorkflow : "idea-to-done";
+        state.subagentRoster = Array.isArray(msg.subagentRoster) ? msg.subagentRoster : [];
+        state.subagentRouting = Array.isArray(msg.subagentRouting) ? msg.subagentRouting : [];
+        state.subagentsEnabled = msg.subagentsEnabled !== false;
+        state.crewStagesMayUseSubagents = msg.crewStagesMayUseSubagents === true;
+        state.efforts = Array.isArray(msg.efforts) ? msg.efforts : [];
         refreshSettingsOverlay();
         break;
-      case "workflowGenerator":
-        state.workflowGenerator = {
+      case "workflowGenerator": {
+        const frame = {
           status: msg.status || "idle",
           requestId: msg.requestId || "",
           progress: msg.progress || "",
@@ -17747,8 +18056,17 @@
           error: msg.error || "",
           compiler: msg.compiler,
         };
+        // A Validate answer is for the open editor, delivered once. Kept as
+        // the generator's state it would be re-sent with every repaint and
+        // stand in for a generated preview.
+        if (frame.requestId === "validate") {
+          if (settingsSurface && settingsSurface.update) settingsSurface.update({ workflowGenerator: frame });
+          break;
+        }
+        state.workflowGenerator = frame;
         refreshSettingsOverlay();
         break;
+      }
       case "permissionRules":
         state.permissionRules = Array.isArray(msg.rules) ? msg.rules : [];
         state.permissionRulesOrderCopy = typeof msg.orderCopy === "string" ? msg.orderCopy : "";
@@ -18768,7 +19086,7 @@
             .map((question) => questionText(question))
             .filter(Boolean)
             .join(" ");
-          speakWaitingPrompt(questions || "Grok is waiting for your answer.");
+          speakWaitingPrompt(questions || providerDisplayName(state.activeProvider) + " is waiting for your answer.");
         }
         break;
       case "planHistory":
@@ -18927,7 +19245,7 @@
         state.ttsTurnText = "";
         break;
       case "limitOfferResolved": {
-        const card = [...document.querySelectorAll(".card.limit")].find(
+        const card = [...liveTranscriptQueryAll(".limit-offer")].find(
           (el) => el.dataset.limitOfferId === String(msg.id),
         );
         if (card && !card.classList.contains("resolved")) {
@@ -19249,7 +19567,7 @@
         addError(msg.text, msg.code);
         break;
       case "hostNotice":
-        addPlanNotice(msg.text, msg.action);
+        addHostNotice(msg);
         break;
       case "xaiNotification":
         break;

@@ -3176,357 +3176,6 @@ blockquote {
   border-color: var(--vscode-focusBorder);
 }
 
-/* ---- todo rail (AP-02) ---- */
-
-/* The agent's step checklist, pinned directly above the composer so it stays in
-   view while the transcript scrolls under it. Sits inside .composer (a flex
-   column), so it needs no positioning of its own to stay put. Hidden entirely
-   when there are no steps -- an empty bordered strip reads as a broken feature,
-   and providers that send plan TEXT never fill this at all. */
-.todo-rail {
-  display: flex;
-  flex-direction: column;
-  margin-bottom: var(--pad);
-  border: 1px solid var(--vscode-input-border, var(--vscode-editorWidget-border));
-  border-radius: var(--radius);
-  background: var(--vscode-editorWidget-background, var(--vscode-input-background));
-  overflow: hidden;
-}
-.todo-rail[hidden] {
-  display: none !important;
-}
-
-.todo-rail-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  padding: 5px 8px;
-  border: 0;
-  background: none;
-  color: var(--vscode-foreground);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-.todo-rail-head:hover {
-  background: var(--vscode-list-hoverBackground);
-}
-.todo-rail-caret {
-  display: inline-flex;
-  align-items: center;
-  opacity: 0.7;
-}
-.todo-rail-title {
-  font-weight: 600;
-  font-size: 0.92em;
-}
-/* The counter is the whole point of the head when the list is folded away, so
-   it keeps full contrast while the label around it stays quiet. */
-.todo-rail-count {
-  margin-left: auto;
-  font-variant-numeric: tabular-nums;
-  font-size: 0.85em;
-  opacity: 0.85;
-}
-
-/* Bounded, then scrollable: a twenty-step plan must not push the composer off
-   the panel. */
-.todo-rail-list {
-  margin: 0;
-  padding: 0 8px 6px;
-  list-style: none;
-  max-height: 12em;
-  overflow-y: auto;
-}
-
-.todo-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  padding: 2px 0;
-  font-size: 0.92em;
-  line-height: 1.35;
-}
-.todo-mark {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 auto;
-  width: 12px;
-  height: 1.35em;
-}
-.todo-text {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.crew-run {
-  display: flex;
-  flex-direction: column;
-  margin-bottom: var(--pad);
-  border: 1px solid var(--vscode-input-border, var(--vscode-editorWidget-border));
-  border-radius: var(--radius);
-  background: var(--vscode-editorWidget-background, var(--vscode-input-background));
-  overflow: hidden;
-}
-.crew-run[hidden] {
-  display: none !important;
-}
-.crew-run-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 8px 4px 0;
-}
-.crew-run-toggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex: 1;
-  background: none;
-  border: 0;
-  color: inherit;
-  cursor: pointer;
-  padding: 4px 8px;
-  font: inherit;
-}
-.crew-run-title { font-weight: 600; }
-.crew-run-count { opacity: 0.7; font-size: 0.9em; }
-.crew-run-stop {
-  background: none;
-  border: 0;
-  color: var(--vscode-errorForeground, inherit);
-  cursor: pointer;
-  font: inherit;
-  padding: 4px 8px;
-}
-.crew-run-list {
-  margin: 0;
-  padding: 0 8px 8px;
-  list-style: none;
-}
-.crew-run.collapsed .crew-run-list { display: none; }
-.crew-step {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 4px 0;
-  border-top: 1px solid var(--vscode-input-border, var(--vscode-editorWidget-border));
-}
-.crew-step-open {
-  background: none;
-  border: 0;
-  color: inherit;
-  cursor: pointer;
-  font: inherit;
-  text-align: left;
-  padding: 0;
-}
-.crew-step-open:disabled { cursor: default; opacity: 0.85; }
-.crew-step-meta { opacity: 0.7; font-size: 0.85em; }
-.crew-step-running .crew-step-open { color: var(--vscode-charts-yellow, inherit); }
-.crew-step-done .crew-step-open { color: var(--vscode-charts-green, inherit); }
-.crew-step-failed .crew-step-open { color: var(--vscode-errorForeground, inherit); }
-
-/* Multi-file change overview (AP-09). Same sticky slot as the todo rail —
-   above the composer, hidden entirely when the selected scope has no files
-   so an empty bordered strip never reads as a broken feature. */
-.review-center {
-  display: flex;
-  flex-direction: column;
-  margin-bottom: var(--pad);
-  border: 1px solid var(--vscode-input-border, var(--vscode-editorWidget-border));
-  border-radius: var(--radius);
-  background: var(--vscode-editorWidget-background, var(--vscode-input-background));
-  overflow: hidden;
-}
-.review-center[hidden] {
-  display: none !important;
-}
-.review-center-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 8px 4px 0;
-}
-.review-center-toggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  flex: 1;
-  padding: 5px 8px;
-  border: 0;
-  background: none;
-  color: var(--vscode-foreground);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-.review-center-toggle:hover {
-  background: var(--vscode-list-hoverBackground);
-}
-.review-center-caret {
-  display: inline-flex;
-  align-items: center;
-  opacity: 0.7;
-}
-.review-center-title {
-  font-weight: 600;
-  font-size: 0.92em;
-}
-.review-center-count {
-  margin-left: auto;
-  font-variant-numeric: tabular-nums;
-  font-size: 0.85em;
-  opacity: 0.85;
-  white-space: nowrap;
-}
-.review-center-scope {
-  display: flex;
-  gap: 2px;
-  flex: 0 0 auto;
-}
-.review-scope-btn {
-  padding: 2px 7px;
-  border: 1px solid transparent;
-  border-radius: calc(var(--radius) - 2px);
-  background: none;
-  color: var(--vscode-descriptionForeground, var(--vscode-foreground));
-  font: inherit;
-  font-size: 0.8em;
-  cursor: pointer;
-}
-.review-scope-btn[aria-pressed="true"] {
-  border-color: var(--vscode-input-border, var(--vscode-editorWidget-border));
-  background: var(--vscode-list-hoverBackground);
-  color: var(--vscode-foreground);
-}
-/* AP-11. Sits beside Discard all and shares its shape — one is where the work
-   goes next, the other is where it stops, and they belong to the same row. */
-.review-handoff {
-  background: transparent;
-  color: var(--vscode-descriptionForeground);
-  border: 1px solid var(--vscode-panel-border);
-  border-radius: 3px;
-  font-size: 11px;
-  padding: 1px 6px;
-  cursor: pointer;
-}
-.review-handoff:hover {
-  color: var(--vscode-foreground);
-  background: var(--vscode-toolbar-hoverBackground);
-}
-/* Disabled rather than hidden (the AP-01 rule), so the footer does not shift
-   under the cursor when a turn happens to change nothing. */
-.msg-second-opinion-btn:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
-.review-revert-all {
-  flex: 0 0 auto;
-  padding: 2px 8px;
-  border: 0;
-  border-radius: calc(var(--radius) - 2px);
-  background: none;
-  color: var(--vscode-errorForeground, var(--vscode-foreground));
-  font: inherit;
-  font-size: 0.8em;
-  cursor: pointer;
-}
-.review-revert-all:hover:not(:disabled) {
-  background: var(--vscode-list-hoverBackground);
-}
-.review-revert-all:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-.review-center-list {
-  margin: 0;
-  padding: 0 8px 6px;
-  list-style: none;
-  max-height: 14em;
-  overflow-y: auto;
-}
-.review-file {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-rows: auto auto;
-  gap: 2px 8px;
-  padding: 4px 0;
-  font-size: 0.92em;
-  line-height: 1.35;
-  border-top: 1px solid var(--vscode-editorWidget-border, transparent);
-}
-.review-file-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.review-file-stat {
-  justify-self: end;
-  font-variant-numeric: tabular-nums;
-}
-.review-file-actions {
-  grid-column: 1 / -1;
-  display: flex;
-  gap: 10px;
-}
-.review-file-actions .preview-link,
-.review-file-actions .revert-link {
-  padding: 0;
-}
-
-/* Pending: an outline dot -- nothing has happened to this step yet. */
-.todo-pending .todo-mark::before {
-  content: "";
-  width: 6px;
-  height: 6px;
-  border: 1px solid var(--vscode-descriptionForeground, currentColor);
-  border-radius: 50%;
-}
-.todo-pending .todo-text {
-  color: var(--vscode-descriptionForeground);
-}
-
-/* In progress: a ring that turns. Falls back to a plain ring under reduced
-   motion and in any renderer that ignores the animation. */
-.todo-in-progress .todo-mark::before {
-  content: "";
-  width: 8px;
-  height: 8px;
-  border: 1.5px solid var(--vscode-progressBar-background, var(--vscode-focusBorder));
-  border-top-color: transparent;
-  border-radius: 50%;
-  animation: todo-spin 0.9s linear infinite;
-}
-@media (prefers-reduced-motion: reduce) {
-  .todo-in-progress .todo-mark::before { animation: none; border-top-color: inherit; }
-}
-@keyframes todo-spin {
-  to { transform: rotate(360deg); }
-}
-
-/* Completed: the tick glyph, and the text steps back -- done work should not
-   compete with the step being worked on. */
-.todo-completed .todo-mark {
-  color: var(--vscode-charts-green, var(--vscode-testing-iconPassed, #4ec9b0));
-}
-.todo-completed .todo-text {
-  color: var(--vscode-descriptionForeground);
-  text-decoration: line-through;
-  text-decoration-thickness: 1px;
-}
-
-/* The one step the agent says it is on. */
-.todo-active .todo-text {
-  color: var(--vscode-foreground);
-  font-weight: 600;
-}
-
 /* Floating "Scroll to bottom" (#28). Anchored to the composer (the chat input
    area), so it sits inside the `--chat-zoom` scaled coordinate space and stays
    correctly placed above the input at any font scale. Hidden (opacity + no
@@ -4447,34 +4096,6 @@ body.dragging { outline: 2px dashed var(--vscode-focusBorder); outline-offset: -
 }
 .card-actions button.danger.arming { pointer-events: none; }
 
-/* AP-07: "Always allow for…" sits outside .card-actions so existing
-   permission-card tests that query those buttons stay byte-identical. */
-.perm-rule-suggestions {
-  display: flex;
-  flex-direction: column;
-  margin: 8px -10px -10px;
-  border-top: 1px dashed var(--vscode-editorWidget-border);
-}
-.perm-rule-suggestions-label {
-  padding: 6px 10px 2px;
-  color: var(--vscode-descriptionForeground);
-  font-size: 11px;
-}
-.perm-rule-suggestion {
-  background: transparent;
-  color: var(--vscode-foreground);
-  border: none;
-  border-bottom: 1px solid var(--vscode-editorWidget-border);
-  border-radius: 0;
-  padding: 6px 10px;
-  cursor: pointer;
-  font-family: inherit;
-  font-size: var(--vscode-font-size, 13px);
-  text-align: left;
-  width: 100%;
-}
-.perm-rule-suggestion:last-child { border-bottom: none; }
-.perm-rule-suggestion:hover { background: var(--vscode-list-hoverBackground); }
 .card-actions button:disabled { opacity: 0.4; cursor: default; }
 .card.resolved { opacity: 0.5; border-left-color: var(--vscode-editorWidget-border); }
 
@@ -4516,135 +4137,6 @@ body.dragging { outline: 2px dashed var(--vscode-focusBorder); outline-offset: -
 
 /* ---------- question card (ask_user_question) ---------- */
 .card.question { border-left-color: var(--vscode-charts-purple, #b180d7); }
-.card.limit { border-left-color: var(--vscode-charts-orange, #d7ba7d); }
-/* AP-10 /agent result. Blue by default, red when the run failed — the card is
-   the only place a role run reports, so a failure must not read as a success. */
-.card.agent-result { border-left-color: var(--vscode-charts-blue, #4fc1ff); }
-.card.agent-result.failed { border-left-color: var(--vscode-errorForeground, #f48771); }
-.card.agent-roles-card {
-  border-left-color: var(--vscode-charts-blue, #4fc1ff);
-  background: var(--vscode-editorWidget-background, var(--vscode-input-background));
-  padding: 10px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.agent-roles-card-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.agent-roles-card-title {
-  font-weight: 600;
-  font-size: 1.05em;
-  color: var(--vscode-foreground);
-}
-.agent-roles-card-sub {
-  font-size: 0.88em;
-  opacity: 0.8;
-  line-height: 1.4;
-}
-.agent-roles-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-top: 4px;
-}
-.agent-role-card-item {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: 6px 8px;
-  border-radius: var(--radius);
-  background: var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.04));
-  border: 1px solid var(--vscode-input-border, rgba(128, 128, 128, 0.2));
-}
-.agent-role-item-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.agent-role-btn {
-  background: var(--vscode-button-secondaryBackground, #3a3d41);
-  color: var(--vscode-button-secondaryForeground, #fff);
-  border: 1px solid var(--vscode-button-border, transparent);
-  border-radius: 4px;
-  font-family: var(--vscode-editor-font-family, monospace);
-  font-size: 0.88em;
-  font-weight: 600;
-  padding: 2px 8px;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-.agent-role-btn:hover {
-  background: var(--vscode-button-secondaryHoverBackground, #45494e);
-}
-.agent-role-tag {
-  font-size: 0.78em;
-  padding: 1px 6px;
-  border-radius: 10px;
-  background: var(--vscode-badge-background, #4d4d4d);
-  color: var(--vscode-badge-foreground, #fff);
-  text-transform: uppercase;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-}
-.agent-role-tag.mode-plan {
-  background: var(--vscode-charts-yellow, #d7ba7d);
-  color: #1e1e1e;
-}
-.agent-role-tag.mode-agent {
-  background: var(--vscode-charts-blue, #4fc1ff);
-  color: #1e1e1e;
-}
-.agent-role-where {
-  margin-left: auto;
-  font-size: 0.8em;
-  opacity: 0.7;
-}
-.agent-role-desc {
-  font-size: 0.88em;
-  line-height: 1.35;
-  opacity: 0.9;
-}
-.agent-roles-card-footer {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 6px;
-  padding-top: 6px;
-  border-top: 1px solid var(--vscode-input-border, rgba(128, 128, 128, 0.15));
-}
-.agent-roles-card-footer button {
-  background: none;
-  border: 1px solid var(--vscode-input-border, var(--vscode-editorWidget-border));
-  color: var(--vscode-textLink-foreground, #3794ff);
-  border-radius: 4px;
-  padding: 3px 8px;
-  font-size: 0.85em;
-  cursor: pointer;
-}
-.agent-roles-card-footer button:hover {
-  background: var(--vscode-list-hoverBackground);
-}
-.agent-roles-hint {
-  font-size: 0.82em;
-  opacity: 0.75;
-  line-height: 1.35;
-}
-.agent-result-summary { margin-top: 6px; white-space: pre-wrap; }
-.agent-result-list { margin-top: 6px; }
-.agent-result-list-title { font-size: 0.9em; opacity: 0.8; }
-.agent-result-list ul { margin: 2px 0 0; padding-left: 18px; }
-.agent-result-list li { word-break: break-word; }
-/* An edit the role never mentioned is the one row on this card that changes
-   what the next step should be told, so it is the one row that is coloured. */
-.agent-result-list.unreported .agent-result-list-title { color: var(--vscode-editorWarning-foreground, #cca700); opacity: 1; }
-.agent-result-caution { margin-top: 6px; font-size: 0.95em; color: var(--vscode-descriptionForeground); }
-.card.limit.resolved { opacity: 1; }
 /* "Grok is asking" / "You answered" reads as a small label so the question
    itself is the prominent line. */
 .card.question .card-title {
@@ -4888,54 +4380,16 @@ body.session-superseded .msg-edit-btn {
 
 .plan-notice {
   display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  font-size: 12.5px;
-  color: var(--vscode-foreground);
-  padding: 8px 12px;
-  margin: 6px 0;
-  border-left: 3px solid var(--vscode-charts-blue, #569cd6);
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  padding: 5px 10px;
+  margin: 4px 0;
+  border-left: 2px solid var(--vscode-charts-blue, #569cd6);
   background: var(--vscode-textBlockQuote-background, rgba(86, 156, 214, 0.08));
-  border-radius: var(--radius);
 }
-.plan-notice svg { flex-shrink: 0; opacity: 0.8; margin-top: 2px; }
-.plan-notice-body {
-  flex: 1;
-  min-width: 0;
-  line-height: 1.45;
-}
-.plan-notice-body h3 {
-  margin: 0 0 6px;
-  font-size: 1.1em;
-  font-weight: 600;
-  color: var(--vscode-foreground);
-}
-.plan-notice-body p {
-  margin: 4px 0;
-}
-.plan-notice-body ul {
-  margin: 4px 0;
-  padding-left: 18px;
-}
-.plan-notice-body li {
-  margin: 3px 0;
-}
-.plan-notice-body code {
-  background: var(--chat-surface-code, rgba(128, 128, 128, 0.2));
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-family: var(--vscode-editor-font-family, monospace);
-  font-size: 0.9em;
-  font-weight: 600;
-}
-.plan-notice-body code:hover {
-  background: var(--vscode-button-secondaryHoverBackground, rgba(128, 128, 128, 0.35));
-}
-.plan-notice-body hr {
-  margin: 8px 0;
-  border: 0;
-  border-top: 1px solid var(--vscode-input-border, rgba(128, 128, 128, 0.2));
-}
+.plan-notice svg { flex-shrink: 0; opacity: 0.8; }
 
 .plan-tools {
   display: flex;
@@ -6190,278 +5644,720 @@ a.add-project-github-open {
 }
 .onb-steps li { margin: 0; }
 
-/* AP-15 — Session type (Agent | Crew).
-   A segmented switch in the top bar while the conversation is empty, replaced
-   by a read-only badge with a lock glyph once the first message is sent. It
-   sits BESIDE the repo chip, never inside the composer's permission-mode
-   button: the two are different axes and must not read as one control. */
-.session-type-picker {
+/* ===========================================================================
+   Companion surfaces — the fork's own design system (cx-*)
+   ===========================================================================
+   Everything this fork added to the chat — the session type switch, the dock
+   above the composer (tasks, subagents, crew run, review), the workflow gate,
+   result/limit cards and host notices — is drawn from the primitives below
+   and nothing else. Colours come only from --vscode-* tokens, so a theme that
+   remaps them (Light, High Contrast, Cursor) repaints these surfaces with it.
+   The upstream chat (.card, .tool-*, .msg-*) is not restyled here. */
+
+:root {
+  --cx-radius: 6px;
+  --cx-radius-sm: 4px;
+  --cx-fs: 12px;
+  --cx-fs-sm: 11px;
+  --cx-fs-xs: 10.5px;
+  --cx-border: var(--vscode-editorWidget-border, var(--vscode-widget-border, rgba(128, 128, 128, 0.35)));
+  --cx-border-soft: color-mix(in srgb, var(--vscode-foreground) 10%, transparent);
+  --cx-surface: var(--vscode-editorWidget-background, var(--vscode-sideBar-background));
+  --cx-tint: color-mix(in srgb, var(--vscode-foreground) 7%, transparent);
+  --cx-tint-strong: color-mix(in srgb, var(--vscode-foreground) 14%, transparent);
+  --cx-hover: var(--vscode-list-hoverBackground, var(--cx-tint));
+  --cx-muted: var(--vscode-descriptionForeground);
+  --cx-info: var(--vscode-charts-blue, #3794ff);
+  --cx-ok: var(--vscode-testing-iconPassed, var(--vscode-charts-green, #73c991));
+  --cx-warn: var(--vscode-editorWarning-foreground, var(--vscode-charts-yellow, #cca700));
+  --cx-danger: var(--vscode-errorForeground, #f14c4c);
+  --cx-orange: var(--vscode-charts-orange, #d18616);
+  --cx-purple: var(--vscode-charts-purple, #b180d7);
+}
+
+/* ---- buttons ---- */
+
+.cx-btn {
   display: inline-flex;
   align-items: center;
-  gap: 1px;
-  padding: 1px;
-  border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.35));
-  border-radius: 5px;
-  background: var(--vscode-editorWidget-background, transparent);
-  flex: 0 0 auto;
-}
-.session-type-opt {
-  appearance: none;
-  border: 0;
-  background: transparent;
-  color: var(--vscode-descriptionForeground);
+  justify-content: center;
+  gap: 5px;
+  min-height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: var(--cx-radius-sm);
+  background: var(--vscode-button-secondaryBackground, var(--cx-tint));
+  color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
   font: inherit;
-  font-size: 11px;
-  line-height: 1.6;
-  padding: 0 7px;
-  border-radius: 4px;
-  cursor: pointer;
+  font-size: var(--cx-fs);
+  line-height: 1;
   white-space: nowrap;
+  cursor: pointer;
+  flex: none;
 }
-.session-type-opt:hover {
+.cx-btn:hover:not(:disabled) { background: var(--vscode-button-secondaryHoverBackground, var(--cx-tint-strong)); }
+.cx-btn svg { width: 12px; height: 12px; flex: none; }
+.cx-btn--primary {
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+}
+.cx-btn--primary:hover:not(:disabled) { background: var(--vscode-button-hoverBackground, var(--vscode-button-background)); }
+.cx-btn--ghost {
+  background: transparent;
+  border-color: transparent;
   color: var(--vscode-foreground);
-  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.15));
 }
-.session-type-opt.selected {
-  color: var(--vscode-button-foreground, var(--vscode-foreground));
-  background: var(--vscode-button-background, rgba(128, 128, 128, 0.35));
+.cx-btn--ghost:hover:not(:disabled) { background: var(--vscode-toolbar-hoverBackground, var(--cx-tint)); }
+.cx-btn--danger {
+  background: transparent;
+  color: var(--cx-danger);
+  border-color: color-mix(in srgb, var(--cx-danger) 45%, transparent);
 }
-.session-type-opt:focus-visible {
+.cx-btn--danger:hover:not(:disabled) { background: color-mix(in srgb, var(--cx-danger) 12%, transparent); }
+.cx-btn--danger-ghost:hover:not(:disabled) { color: var(--cx-danger); }
+/* The armed state of a two-step button: loud, because the next press acts. */
+.cx-btn.is-arming,
+.cx-btn.is-arming:hover:not(:disabled) {
+  background: var(--cx-danger);
+  border-color: var(--cx-danger);
+  color: var(--vscode-button-foreground, #fff);
+}
+.cx-btn--sm { min-height: 22px; padding: 0 8px; font-size: var(--cx-fs-sm); }
+.cx-btn--icon { width: 22px; min-height: 22px; padding: 0; }
+.cx-btn:disabled { opacity: 0.45; cursor: default; }
+.cx-btn:focus-visible,
+.cx-link:focus-visible,
+.cx-seg-opt:focus-visible,
+.cx-rail-toggle:focus-visible,
+.cx-choice:focus-visible,
+.cx-row--button:focus-visible,
+.cx-paste:focus-visible,
+.perm-rule-suggestion:focus-visible {
   outline: 1px solid var(--vscode-focusBorder);
   outline-offset: -1px;
 }
-.session-type-badge {
+
+.cx-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--vscode-textLink-foreground);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.cx-link:hover { color: var(--vscode-textLink-activeForeground, var(--vscode-textLink-foreground)); text-decoration: underline; }
+.cx-spacer { flex: 1 1 auto; }
+.cx-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.cx-muted { color: var(--cx-muted); }
+
+/* ---- pills ---- */
+
+.cx-pill {
+  --cx-tone: var(--cx-muted);
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  flex: 0 0 auto;
-  font-size: 11px;
-  line-height: 1.6;
-  padding: 0 7px;
-  border-radius: 5px;
-  border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.35));
-  color: var(--vscode-descriptionForeground);
+  height: 17px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: var(--cx-tint);
+  color: var(--cx-tone);
+  font-size: var(--cx-fs-xs);
+  font-weight: 500;
+  line-height: 1;
   white-space: nowrap;
+  vertical-align: middle;
+  flex: none;
 }
-/* The lock is decorative: the accessible name carries "locked" in words. */
-.session-type-badge::before {
-  content: "";
-  width: 9px;
-  height: 11px;
-  flex: 0 0 auto;
-  background: currentColor;
-  -webkit-mask: var(--session-type-lock) center / contain no-repeat;
-  mask: var(--session-type-lock) center / contain no-repeat;
-  opacity: 0.75;
-  --session-type-lock: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='11' width='18' height='11' rx='2'/%3E%3Cpath d='M7 11V7a5 5 0 0 1 10 0v4'/%3E%3C/svg%3E");
+.cx-pill svg { width: 10px; height: 10px; }
+.cx-pill--info, .cx-pill--ok, .cx-pill--warn, .cx-pill--danger, .cx-pill--purple {
+  background: color-mix(in srgb, var(--cx-tone) 14%, transparent);
 }
+.cx-pill--info { --cx-tone: var(--cx-info); }
+.cx-pill--ok { --cx-tone: var(--cx-ok); }
+.cx-pill--warn { --cx-tone: var(--cx-warn); }
+.cx-pill--danger { --cx-tone: var(--cx-danger); }
+.cx-pill--purple { --cx-tone: var(--cx-purple); }
+.cx-pill--muted { --cx-tone: var(--cx-muted); }
+.cx-pill--outline { background: transparent; border-color: var(--cx-border-soft); }
+/* The cost of a role run is the one number that must never read as small print. */
+.cx-pill--cost { color: var(--vscode-foreground); font-variant-numeric: tabular-nums; }
 
-/* AP-15 — Crew rows in the history list. Agent rows are unbadged, so the list
-   looks exactly as it always has for anyone who never opens a Crew session. */
+/* ---- segmented control (session type, review scope) ---- */
+
+.cx-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--cx-radius);
+  background: var(--cx-tint);
+  border: 1px solid var(--vscode-contrastBorder, transparent);
+  flex: none;
+}
+.cx-seg-opt {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: var(--cx-radius-sm);
+  background: transparent;
+  color: var(--cx-muted);
+  font: inherit;
+  font-size: var(--cx-fs-sm);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.cx-seg-opt:hover { color: var(--vscode-foreground); }
+.cx-seg-opt[aria-checked="true"],
+.cx-seg-opt[aria-selected="true"] {
+  background: var(--vscode-editor-background, var(--cx-tint-strong));
+  color: var(--vscode-foreground);
+  font-weight: 600;
+  border-color: var(--vscode-contrastActiveBorder, var(--cx-border-soft));
+  box-shadow: 0 1px 2px var(--vscode-widget-shadow, transparent);
+}
+.cx-session-badge { height: 20px; padding: 0 8px; font-size: var(--cx-fs-sm); color: var(--cx-muted); cursor: default; }
+.cx-session-badge svg { opacity: 0.8; }
+/* A Crew session has no per-turn permission mode — its stages carry their own. */
 body.crew-session #mode-btn { display: none; }
 
-.crew-empty {
+/* ---- status marker ---- */
+
+.cx-status {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  font-size: 8.5px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--cx-muted);
+  font-variant-numeric: tabular-nums;
+}
+.cx-status svg { width: 9px; height: 9px; }
+.cx-status--pending { border: 1.5px solid color-mix(in srgb, var(--cx-muted) 70%, transparent); }
+.cx-status--running {
+  border: 1.5px solid var(--cx-info);
+  border-top-color: transparent;
+  color: transparent;
+  animation: cx-spin 0.9s linear infinite;
+}
+.cx-status--done { background: var(--cx-ok); color: var(--vscode-button-foreground, #fff); }
+.cx-status--failed { background: var(--cx-danger); color: var(--vscode-button-foreground, #fff); }
+.cx-status--skipped,
+.cx-status--cancelled { border: 1.5px dashed color-mix(in srgb, var(--cx-muted) 70%, transparent); }
+@keyframes cx-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .cx-status--running { animation: none; border-top-color: var(--cx-info); }
+}
+
+/* ---- the dock and its rails ---- */
+
+.cx-dock {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 8px var(--pad) 0;
+  margin-bottom: var(--pad);
+  /* Bounded: the composer must stay reachable however many panels are open. */
+  max-height: min(52vh, 460px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
-.crew-empty[hidden] { display: none; }
-.crew-empty-label {
-  font-size: 11px;
-  color: var(--vscode-descriptionForeground);
-}
-.crew-workflow {
-  width: 100%;
-  background: var(--vscode-input-background);
-  color: var(--vscode-input-foreground);
-  border: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.35));
-  border-radius: 6px;
-  padding: 6px 8px;
-}
-.crew-start {
-  align-self: flex-start;
-  background: var(--vscode-button-background);
-  color: var(--vscode-button-foreground);
-  border: none;
-  border-radius: 6px;
-  padding: 5px 10px;
-  cursor: pointer;
-}
-.workflow-gate-card {
-  margin: 8px var(--pad);
-  padding: 10px;
-  border-radius: 8px;
-  border: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.35));
-  background: var(--vscode-editorWidget-background, var(--vscode-sideBar-background));
-}
-.workflow-gate-card .gate-header {
-  font-weight: 600;
-  margin-bottom: 6px;
-}
-.workflow-gate-card .gate-unreported {
-  color: var(--vscode-errorForeground);
-}
-.workflow-gate-card .gate-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 8px;
-}
-.workflow-gate-card .gate-actions button,
-.plan-notice-action {
-  background: var(--vscode-button-background);
-  color: var(--vscode-button-foreground);
-  border: none;
-  border-radius: 6px;
-  padding: 5px 10px;
-  cursor: pointer;
-}
-.workflow-gate-card .gate-notes {
-  width: 100%;
-  margin-top: 8px;
-  background: var(--vscode-input-background);
-  color: var(--vscode-input-foreground);
-  border: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.35));
-  border-radius: 6px;
-  padding: 6px;
-}
-.workflow-gate-card .gate-stale {
-  color: var(--vscode-editorWarning-foreground, var(--vscode-errorForeground));
-}
+.cx-dock:not(:has(> :not([hidden]))) { display: none; }
 
-.history-row-type {
-  margin-left: 6px;
-  padding: 0 5px;
-  border-radius: 3px;
-  font-size: 9px;
-  line-height: 14px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--vscode-descriptionForeground);
-  border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.35));
-  flex: 0 0 auto;
-}
-
-/* AP-16 — companion subagent cards. The purple subagent row is reused as is
-   (§6.11); these rules only add what a host-driven delegation shows on top:
-   the permission profile, and the notices that explain a decision the host
-   made which the agent did not ask for. */
-.companion-subagent .companion-profile {
+.cx-rail {
+  --cx-accent: transparent;
   flex: none;
-  font-size: 10px;
-  line-height: 15px;
-  padding: 0 5px;
-  border-radius: 3px;
-  border: 1px solid currentColor;
-  opacity: 0.75;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--cx-border);
+  border-radius: var(--cx-radius);
+  background: var(--cx-surface);
+  box-shadow: inset 2px 0 0 var(--cx-accent);
+  overflow: hidden;
+  font-size: var(--cx-fs);
+}
+.cx-rail--purple { --cx-accent: var(--cx-purple); }
+.cx-rail-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  padding-right: 4px;
+}
+.cx-rail-toggle {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 0;
+  background: none;
+  color: var(--vscode-foreground);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+button.cx-rail-toggle:hover { background: var(--cx-hover); }
+.cx-rail-toggle.is-static { cursor: default; }
+.cx-rail-caret {
+  display: inline-flex;
+  width: 12px;
+  color: var(--cx-muted);
+  transition: transform 0.12s ease;
+}
+.cx-rail.is-collapsed .cx-rail-caret { transform: rotate(-90deg); }
+.cx-rail-icon { display: inline-flex; color: var(--cx-muted); }
+.cx-rail-icon svg { width: 13px; height: 13px; }
+.cx-rail-title { font-weight: 600; white-space: nowrap; }
+.cx-rail-meta {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--cx-muted);
+  font-size: var(--cx-fs-sm);
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.companion-subagent .companion-notes {
-  margin: 4px 0 0 22px;
-  font-size: 11px;
-  opacity: 0.85;
+.cx-rail-actions { display: flex; align-items: center; gap: 4px; flex: none; }
+.cx-rail-bar { height: 2px; background: var(--cx-border-soft); }
+.cx-rail-bar > span {
+  display: block;
+  width: 0;
+  height: 100%;
+  background: var(--cx-ok);
+  transition: width 0.25s ease;
 }
-.companion-subagent .companion-note + .companion-note { margin-top: 2px; }
-.companion-subagent .companion-section { margin: 6px 0 0 22px; }
-.companion-subagent .companion-section-heading {
-  font-weight: 600;
-  font-size: 11px;
-  opacity: 0.9;
-  margin-bottom: 2px;
-}
-.companion-subagent .companion-section-line {
-  font-family: var(--vscode-editor-font-family, monospace);
-  font-size: 11px;
-  overflow-wrap: anywhere;
-}
-/* Files the host saw change that the child never mentioned. The dangerous
-   direction, so it is the one that carries a colour. */
-.companion-subagent .companion-warn .companion-section-heading,
-.companion-subagent .companion-warn .companion-section-line {
-  color: var(--vscode-editorWarning-foreground, var(--vscode-charts-orange, #cca700));
-}
-
-/* AP-16 §6.10 — the subagent tray. It sits above the composer while a turn is
-   waiting on its children, and its only job is answering "why is this still
-   working?" — so it is a list of who, on what, with a way to stop each one. */
-.subagent-tray {
-  margin: 0 var(--pad) 4px;
-  padding: 5px 8px;
-  border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.3));
-  border-left: 2px solid var(--vscode-charts-purple, #b180d7);
-  border-radius: 0 6px 6px 0;
-  background: var(--vscode-textBlockQuote-background, rgba(177, 128, 215, 0.08));
-  font-size: 11px;
-}
-.subagent-tray-title {
-  font-weight: 600;
-  color: var(--vscode-descriptionForeground);
-}
-.subagent-tray-list {
-  list-style: none;
-  margin: 4px 0 0;
-  padding: 0;
+.cx-rail-bar > span.is-failed { background: var(--cx-danger); }
+.cx-rail.is-collapsed .cx-rail-bar { display: none; }
+.cx-rail-section { display: flex; flex-direction: column; }
+.cx-rail-toolbar {
   display: flex;
-  flex-direction: column;
-  gap: 3px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px 6px;
 }
-.subagent-tray-row {
+.cx-rail-body {
+  margin: 0;
+  padding: 3px 0;
+  border-top: 1px solid var(--cx-border-soft);
+  max-height: 13.5em;
+  overflow-y: auto;
+}
+.cx-rail-foot {
   display: flex;
   align-items: center;
   gap: 8px;
+  padding: 6px 8px;
+  border-top: 1px solid var(--cx-border-soft);
+}
+.cx-hint { flex: 1 1 auto; color: var(--cx-muted); font-size: var(--cx-fs-sm); }
+.cx-list-plain { list-style: none; }
+.cx-empty { margin: 0; padding: 6px 10px; color: var(--cx-muted); font-size: var(--cx-fs-sm); list-style: none; }
+
+/* ---- rows ---- */
+
+.cx-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  padding: 2px 8px;
   min-width: 0;
 }
-.subagent-tray-name {
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.cx-row:hover { background: var(--cx-hover); }
+.cx-row--button {
+  width: 100%;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
-.subagent-tray-target {
-  color: var(--vscode-descriptionForeground);
-  white-space: nowrap;
+.cx-row--button:disabled { cursor: default; }
+.cx-row--button:disabled:hover { background: none; }
+.cx-row-icon { display: inline-flex; flex: none; color: var(--cx-muted); }
+.cx-row-main {
   flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+}
+.cx-row-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cx-row > .cx-row-title { flex: 1 1 auto; }
+/* The name keeps its width; the secondary text gives way first. */
+.cx-row-main > .cx-row-title { flex: 0 1 auto; max-width: 75%; }
+.cx-row-sub {
+  flex: 1 1 0;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--cx-muted);
+  font-size: var(--cx-fs-sm);
 }
-.subagent-tray-cancel {
+/* A directory keeps its END visible — the part that tells two files apart. */
+.cx-row-sub--path { direction: rtl; text-align: left; }
+.cx-row-end {
   flex: none;
-  appearance: none;
-  border: 0;
-  background: transparent;
-  color: var(--vscode-textLink-foreground);
-  font: inherit;
-  cursor: pointer;
-  padding: 0 2px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--cx-muted);
+  font-size: var(--cx-fs-sm);
+  font-variant-numeric: tabular-nums;
 }
-.subagent-tray-cancel:hover { text-decoration: underline; }
+.cx-row-actions { display: inline-flex; gap: 2px; flex: none; }
+.cx-row.is-busy { opacity: 0.55; }
 
-/* AP-16 P6 — card origin line and actions.
-   The origin only appears when the delegation came from somewhere other than
-   the conversation the card sits in (a crew stage, or a child that delegated
-   once more); in the ordinary case saying it would be noise. */
-.companion-subagent .companion-origin {
-  margin: 3px 0 0 22px;
-  font-size: 10px;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  color: var(--vscode-descriptionForeground);
-  opacity: 0.85;
-}
-.companion-subagent .companion-actions {
+/* Tasks: done work steps back, the current step leads. */
+.todo-completed .cx-row-title { color: var(--cx-muted); text-decoration: line-through; text-decoration-thickness: 1px; }
+.todo-pending .cx-row-title { color: var(--cx-muted); }
+.todo-active .cx-row-title { font-weight: 600; color: var(--vscode-foreground); }
+
+/* Crew steps and workflow stages. */
+.cx-step.is-current .cx-row-title,
+.crew-step-running .cx-row-title { font-weight: 600; }
+.crew-step-pending .cx-row-title { color: var(--cx-muted); }
+.crew-step-failed .cx-row-title { color: var(--cx-danger); }
+
+/* ---- workflow picker (new Crew session) ---- */
+
+.cx-choice-list { display: flex; flex-direction: column; padding: 3px 0; border-top: 1px solid var(--cx-border-soft); max-height: 15em; overflow-y: auto; }
+.cx-choice {
   display: flex;
-  gap: 10px;
-  margin: 6px 0 0 22px;
-}
-.companion-subagent .companion-action {
-  appearance: none;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 10px;
   border: 0;
-  background: transparent;
-  color: var(--vscode-textLink-foreground);
+  background: none;
+  color: inherit;
   font: inherit;
-  font-size: 11px;
+  text-align: left;
   cursor: pointer;
-  padding: 0;
 }
-.companion-subagent .companion-action:hover { text-decoration: underline; }
+.cx-choice:hover { background: var(--cx-hover); }
+.cx-choice.is-selected { background: color-mix(in srgb, var(--vscode-focusBorder) 12%, transparent); }
+.cx-choice-dot {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  margin-top: 2px;
+  border: 1.5px solid var(--cx-muted);
+  border-radius: 50%;
+}
+.cx-choice.is-selected .cx-choice-dot {
+  border-color: var(--vscode-focusBorder);
+  background: radial-gradient(circle, var(--vscode-focusBorder) 0 3px, transparent 3.5px);
+}
+.cx-choice-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.cx-choice-title { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-weight: 600; }
+.cx-choice-desc { color: var(--cx-muted); font-size: var(--cx-fs-sm); line-height: 1.35; }
+
+/* ---- cards ---- */
+
+.cx-card {
+  --cx-accent: var(--cx-info);
+  margin: 6px 0;
+  border: 1px solid var(--cx-border);
+  border-left: 3px solid var(--cx-accent);
+  border-radius: var(--cx-radius);
+  background: var(--cx-surface);
+  font-size: var(--cx-fs);
+  overflow: hidden;
+}
+.cx-card--info { --cx-accent: var(--cx-info); }
+.cx-card--warn { --cx-accent: var(--cx-warn); }
+.cx-card--danger { --cx-accent: var(--cx-danger); }
+.cx-card--orange { --cx-accent: var(--cx-orange); }
+.cx-card--muted { --cx-accent: var(--cx-border); }
+.cx-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px 10px 0;
+}
+.cx-card-head:last-child { padding-bottom: 9px; }
+.cx-card-icon { flex: none; display: inline-flex; margin-top: 1px; color: var(--cx-accent); }
+.cx-card-icon svg { width: 15px; height: 15px; }
+.cx-card-heading { flex: 1 1 auto; min-width: 0; }
+.cx-card-title { font-size: 13px; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
+.cx-card-sub { margin-top: 1px; color: var(--cx-muted); font-size: var(--cx-fs-sm); overflow-wrap: anywhere; }
+.cx-card-status { flex: none; display: inline-flex; align-items: center; gap: 4px; }
+.cx-card-status:empty { display: none; }
+.cx-card-body { display: flex; flex-direction: column; gap: 9px; padding: 8px 10px 10px; }
+.cx-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border-top: 1px solid var(--cx-border-soft);
+  background: color-mix(in srgb, var(--vscode-foreground) 3%, transparent);
+}
+.cx-card.is-resolved { --cx-accent: var(--cx-border); }
+.cx-card.is-resolved .cx-card-icon { color: var(--cx-muted); }
+.cx-meta { display: flex; flex-wrap: wrap; gap: 4px; }
+.cx-text { line-height: 1.45; overflow-wrap: anywhere; white-space: pre-wrap; margin: 0; }
+.cx-quote {
+  margin: 0;
+  color: var(--vscode-foreground);
+  border: 0;
+  padding: 6px 9px;
+  border-radius: var(--cx-radius-sm);
+  background: var(--cx-tint);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.cx-section { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.cx-section-label {
+  color: var(--cx-muted);
+  font-size: var(--cx-fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.cx-section--warn .cx-section-label { color: var(--cx-warn); }
+.cx-section--danger .cx-section-label { color: var(--cx-danger); }
+.cx-list { margin: 0; padding-left: 16px; line-height: 1.4; }
+.cx-list li + li { margin-top: 2px; }
+.cx-files { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 1px; }
+.cx-file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: var(--cx-fs-sm);
+}
+.cx-file--warn .cx-file-link,
+.cx-file--warn .cx-row-icon { color: var(--cx-warn); }
+.cx-code {
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--chat-surface-code, var(--cx-tint));
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: var(--cx-fs-sm);
+  overflow-wrap: anywhere;
+}
+.cx-pre {
+  margin: 4px 0 0;
+  padding: 6px 8px;
+  max-height: 11em;
+  overflow: auto;
+  border-radius: var(--cx-radius-sm);
+  background: var(--chat-surface-code, var(--cx-tint));
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: var(--cx-fs-sm);
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.cx-details > summary { cursor: pointer; color: var(--cx-muted); font-size: var(--cx-fs-sm); width: fit-content; }
+.cx-details > summary:hover { color: var(--vscode-foreground); }
+.cx-verify { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.cx-findings { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
+.cx-finding { display: flex; align-items: baseline; gap: 6px; line-height: 1.4; }
+.cx-finding-text { min-width: 0; overflow-wrap: anywhere; }
+.cx-finding-loc { font-family: var(--vscode-editor-font-family, monospace); font-size: var(--cx-fs-sm); }
+.cx-unavailable { margin: -3px 0 0; padding: 0; list-style: none; color: var(--cx-muted); font-size: var(--cx-fs-sm); }
+.cx-unavailable-name { text-decoration: line-through; }
+.cx-countdown { color: var(--cx-muted); font-size: var(--cx-fs-sm); font-variant-numeric: tabular-nums; }
+
+/* ---- form controls ---- */
+
+.cx-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }
+.cx-field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.cx-field-label { color: var(--cx-muted); font-size: var(--cx-fs-sm); }
+.cx-select,
+.cx-textarea {
+  width: 100%;
+  min-height: 24px;
+  padding: 3px 6px;
+  border: 1px solid var(--vscode-input-border, var(--cx-border));
+  border-radius: var(--cx-radius-sm);
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  font: inherit;
+  font-size: var(--cx-fs);
+}
+.cx-select {
+  border-color: var(--vscode-dropdown-border, var(--vscode-input-border, var(--cx-border)));
+  background: var(--vscode-dropdown-background, var(--vscode-input-background));
+  color: var(--vscode-dropdown-foreground, var(--vscode-input-foreground));
+}
+.cx-textarea { min-height: 44px; line-height: 1.4; resize: vertical; }
+.cx-textarea::placeholder { color: var(--vscode-input-placeholderForeground, var(--cx-muted)); }
+.cx-select:focus,
+.cx-textarea:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; border-color: var(--vscode-focusBorder); }
+
+/* ---- notices ---- */
+
+.cx-notice {
+  --cx-tone: var(--cx-info);
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 9px;
+  border: 1px solid color-mix(in srgb, var(--cx-tone) 35%, transparent);
+  border-radius: var(--cx-radius-sm);
+  background: color-mix(in srgb, var(--cx-tone) 9%, transparent);
+  color: var(--vscode-foreground);
+  font-size: var(--cx-fs);
+  line-height: 1.45;
+}
+.cx-notice--warning { --cx-tone: var(--cx-warn); }
+.cx-notice--error { --cx-tone: var(--cx-danger); }
+.cx-notice-icon { flex: none; display: inline-flex; margin-top: 2px; color: var(--cx-tone); }
+.cx-notice-icon svg { width: 13px; height: 13px; }
+.cx-notice-body { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.cx-notice-body .cx-list { margin-top: 3px; }
+.cx-notice-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.host-notice { margin: 6px 0; }
+/* The /subagents report and other multi-line notices are markdown. */
+.cx-notice-body.is-rich > :first-child { margin-top: 0; }
+.cx-notice-body.is-rich > :last-child { margin-bottom: 0; }
+.cx-notice-body.is-rich p,
+.cx-notice-body.is-rich ul { margin: 4px 0; }
+.cx-notice-body.is-rich ul { padding-left: 18px; }
+.cx-notice-body.is-rich h1,
+.cx-notice-body.is-rich h2,
+.cx-notice-body.is-rich h3 { margin: 0 0 4px; font-size: 1em; font-weight: 600; }
+.cx-notice-body code {
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--chat-surface-code, var(--cx-tint));
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 0.92em;
+}
+.cx-paste { cursor: pointer; }
+.cx-paste:hover { background: var(--cx-tint-strong); }
+.cx-inline-error { margin-left: 8px; color: var(--cx-danger); font-size: var(--cx-fs-sm); }
+
+/* ---- turn footer additions ---- */
+
+.msg-duration-cancelled { color: var(--cx-muted); font-style: italic; }
+/* Disabled rather than hidden (the AP-01 rule), so the footer does not shift
+   under the cursor when a turn happens to change nothing. */
+.msg-second-opinion-btn:disabled { opacity: 0.4; cursor: default; }
+
+/* ---- permission card: "Always allow" rules (AP-07) ---- */
+/* Outside .card-actions on purpose — the card's own answer row stays exactly
+   what it was when the host sends no suggestions. */
+.perm-rule-suggestions {
+  display: flex;
+  flex-direction: column;
+  margin: 4px -10px -10px;
+  border-top: 1px solid var(--vscode-editorWidget-border);
+}
+.perm-rule-suggestions-label {
+  padding: 6px 10px 2px;
+  color: var(--cx-muted);
+  font-size: var(--cx-fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.perm-rule-suggestion {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  border: 0;
+  border-top: 1px solid var(--cx-border-soft);
+  background: transparent;
+  color: var(--vscode-foreground);
+  font: inherit;
+  font-size: var(--vscode-font-size, 13px);
+  text-align: left;
+  cursor: pointer;
+}
+.perm-rule-suggestion:hover { background: var(--vscode-list-hoverBackground); }
+.perm-rule-suggestion-label { flex: 1 1 auto; min-width: 0; font-family: var(--vscode-editor-font-family, monospace); font-size: 0.92em; overflow-wrap: anywhere; }
+
+/* ---- companion subagent card (AP-16) ---- */
+/* The purple .subagent-card is the frame; the companion head wraps onto two
+   lines instead of truncating the one fact it exists to show — who ran it. */
+.companion-subagent .companion-head { align-items: flex-start; }
+.companion-subagent .subagent-badge { margin-top: 1px; }
+.companion-heading { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.companion-name { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.companion-name .subagent-title { color: var(--vscode-foreground); font-weight: 600; }
+.companion-subagent .subagent-label { font-weight: 500; color: var(--cx-purple); font-size: var(--cx-fs-sm); }
+.companion-target {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  color: var(--cx-muted);
+  font-size: var(--cx-fs-sm);
+}
+.companion-status { flex: none; display: inline-flex; align-items: center; gap: 6px; font-size: var(--cx-fs-sm); }
+.companion-origin,
+.companion-notes,
+.companion-subagent .subagent-result,
+.companion-actions { margin-left: 20px; }
+.companion-origin { margin-top: 4px; color: var(--cx-muted); font-size: var(--cx-fs-sm); }
+.companion-notes {
+  margin-top: 5px;
+  margin-bottom: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--cx-fs-sm);
+}
+.companion-note { display: flex; gap: 5px; align-items: baseline; }
+.companion-note-icon { flex: none; display: inline-flex; color: var(--cx-muted); transform: translateY(2px); }
+.companion-note-icon svg { width: 11px; height: 11px; }
+.companion-subagent .subagent-result { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.companion-subagent .subagent-result[hidden] { display: none; }
+.companion-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; padding-bottom: 2px; }
+.companion-actions[hidden] { display: none; }
+
+/* ---- history list: Crew rows ---- */
+/* Agent rows are unbadged, so the list looks exactly as it always has for
+   anyone who never opens a Crew session. */
+.history-row-type {
+  margin-left: 6px;
+  padding: 0 6px;
+  height: 15px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--cx-info) 14%, transparent);
+  color: var(--cx-info);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  flex: 0 0 auto;
+}

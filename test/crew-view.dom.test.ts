@@ -45,7 +45,7 @@ describe("crew view (real chat.js in a DOM)", () => {
     dispatch(window, { type: "crewRun", run: run() });
     const panel = doc.getElementById("crew-run")!;
     expect(panel.hidden).toBe(false);
-    expect(doc.getElementById("crew-run-count")!.textContent).toBe("1/2 · running");
+    expect(doc.getElementById("crew-run-count")!.textContent).toBe("1/2 Running");
     expect(doc.getElementById("crew-run-count")!.textContent).not.toMatch(/\$/);
     const items = [...doc.querySelectorAll("#crew-run-list .crew-step")];
     expect(items).toHaveLength(2);
@@ -66,6 +66,9 @@ describe("crew view (real chat.js in a DOM)", () => {
   it("Stop posts stopCrew", () => {
     const { window, doc, posted } = bootWebview();
     dispatch(window, { type: "crewRun", run: run() });
+    // Stop asks twice — it holds the whole run, not one step.
+    click(window, doc.getElementById("crew-run-stop")!);
+    expect(posted.some((m) => m.type === "stopCrew")).toBe(false);
     click(window, doc.getElementById("crew-run-stop")!);
     expect(posted.some((m) => m.type === "stopCrew")).toBe(true);
   });

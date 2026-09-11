@@ -79,7 +79,8 @@ describe("Workflows settings", () => {
     expect(panel.textContent).toContain("Idea to done");
     expect(panel.textContent).toContain("built-in");
     expect(panel.textContent).toContain("default");
-    expect(panel.textContent).toContain("Generate workflow…");
+    // The section's actions sit in its heading, beside the title.
+    expect((root as unknown as { textContent: string }).textContent).toContain("Generate workflow…");
   });
 
   it("opens the generator with the copy-deck placeholder and Generate", () => {

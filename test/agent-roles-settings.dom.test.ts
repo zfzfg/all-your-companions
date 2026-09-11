@@ -337,7 +337,7 @@ describe("Agents & Crew — the role editor", () => {
     when.value = "edited text";
     when.dispatchEvent(new window.Event("input"));
     click(q(root, ".settings-agent-save"));
-    surface.update({ agentRolesError: "A role called `reviewer` already exists here.", agentRolesErrorId: "reviewer" });
+    surface.update({ agentRolesError: "A role called `reviewer` already exists here.", agentRolesErrorId: "role:reviewer" });
 
     expect((q(root, ".settings-agent-error") as unknown as { textContent: string }).textContent).toContain("already exists");
     const still = q(root, '.settings-agent-form [data-field="whenToUse"]') as unknown as { value: string };
@@ -425,12 +425,13 @@ describe("Agents & Crew — the flow editor", () => {
   it("posts the parallel flag as edited", () => {
     const { root, posted, window } = mount();
     openFlow(root, "default");
-    const box = q(root, '.settings-agent-form input[data-field="parallel"]') as unknown as {
-      checked: boolean;
-      dispatchEvent: (e: unknown) => void;
+    // An on/off in the editor is the page's switch, not a bare checkbox.
+    const toggle = q(root, '.settings-agent-form [role="switch"][data-field="parallel"]') as unknown as {
+      getAttribute: (n: string) => string | null;
     };
-    box.checked = true;
-    box.dispatchEvent(new window.Event("change"));
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    click(toggle);
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
     click(q(root, ".settings-flow-save"));
     const save = posted.find((m) => m.type === "saveCrewFlow") as Record<string, unknown>;
     expect((save.draft as Record<string, unknown>).parallel).toBe(true);

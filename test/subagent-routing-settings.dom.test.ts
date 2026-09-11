@@ -90,12 +90,40 @@ describe("Routing rules settings", () => {
     expect(selects[2].value).toBe("low");
   });
 
-  it("adds an empty rule for the user to fill in", () => {
+  it("adds a draft rule, and saves it only once it has words and a companion", () => {
+    // The host drops a rule with no keywords or no target (parseRoutingRules),
+    // so posting the empty row made it vanish on the next frame: "Add rule"
+    // looked like it did nothing.
+    const { window, root, posted } = mount();
+    (q(root, ".settings-routing-new") as { click: () => void }).click();
+    expect(routingSaves(posted)).toHaveLength(0);
+    const draft = q(document, '.settings-routing-row[data-routing-draft="1"]') as {
+      querySelector: (s: string) => { value: string; dispatchEvent: (e: unknown) => void };
+    };
+    expect(draft).toBeTruthy();
+    const keywords = draft.querySelector(".settings-routing-keywords");
+    keywords.value = "grep, map";
+    keywords.dispatchEvent(new window.Event("input"));
+    keywords.dispatchEvent(new window.Event("blur"));
+    // Words but no companion yet: still a draft, still nothing posted.
+    expect(routingSaves(posted)).toHaveLength(0);
+    const again = q(document, '.settings-routing-row[data-routing-draft="1"]') as {
+      querySelector: (s: string) => { value: string; dispatchEvent: (e: unknown) => void };
+    };
+    const provider = again.querySelector('[data-routing-field="provider"]');
+    provider.value = "gemini";
+    provider.dispatchEvent(new window.Event("change"));
+    expect(routingSaves(posted).at(-1)!.rules).toEqual([
+      { match: ["grep", "map"], provider: "gemini", model: "", effort: "" },
+    ]);
+  });
+
+  it("discards a draft rule without writing anything", () => {
     const { root, posted } = mount();
     (q(root, ".settings-routing-new") as { click: () => void }).click();
-    expect(routingSaves(posted).at(-1)!.rules).toEqual([
-      { match: [], provider: "", model: "", effort: "" },
-    ]);
+    (q(document, '.settings-routing-row[data-routing-draft="1"] .settings-routing-remove') as { click: () => void }).click();
+    expect(q(document, '.settings-routing-row[data-routing-draft="1"]')).toBeNull();
+    expect(routingSaves(posted)).toHaveLength(0);
   });
 
   it("saves keywords on blur rather than on every keystroke", () => {
@@ -187,12 +215,8 @@ describe("The subagent roster (AP-16 §6.2)", () => {
 
   it("turns a companion off", () => {
     const { window, root, posted } = mount({ subagentRoster: [rosterRow()] });
-    const toggle = q(root, '[data-roster-field="enabled"]') as {
-      checked: boolean;
-      dispatchEvent: (e: unknown) => void;
-    };
-    toggle.checked = false;
-    toggle.dispatchEvent(new window.Event("change"));
+    const toggle = q(root, '[role="switch"][data-roster-field="enabled"]') as { click: () => void };
+    toggle.click();
     expect(rosterSaves(posted).at(-1)).toMatchObject({
       provider: "gemini",
       patch: { enabled: false },

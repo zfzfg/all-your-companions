@@ -16,6 +16,7 @@
 import { _electron as electron } from "playwright";
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
+import { themeCss } from "./ui-harness/themes.mjs";
 import * as path from "node:path";
 import { createRequire } from "node:module";
 
@@ -29,8 +30,9 @@ const log = (m) => console.log(`[welcome-tip] ${m}`);
 // shell's VS Code palette.
 const harness = fs.readFileSync(path.join(root, "test", "webview-harness.ts"), "utf8");
 const BODY = harness.match(/export const BODY = `([\s\S]*?)`;/)[1];
-const shell = fs.readFileSync(path.join(root, "src", "desktop", "electron-webview.ts"), "utf8");
-const PALETTE = shell.match(/:root \{[\s\S]*?\n\}/)[0];
+// The desktop shell that used to carry this palette is gone from this fork;
+// the UI harness owns the VS Code theme values now.
+const PALETTE = themeCss("dark");
 
 fs.mkdirSync(OUT, { recursive: true });
 // Inside the repo, not os.tmpdir(): the scaffold's main.js does

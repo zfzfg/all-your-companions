@@ -530,146 +530,6 @@ body.settings-page .settings-surface {
   border-top: 1px solid var(--vscode-widget-border, rgba(127, 127, 127, .2));
 }
 
-/* AP-04 rule/instruction-file panel — same shape as .settings-mcp-list /
-   .settings-mcp-server, kept as its own class family since it is a different
-   feature (see media/settings.js renderRuleFiles). */
-.settings-rules-list,
-.settings-agent-roles-list {
-  overflow: hidden;
-  border: 1px solid var(--vscode-widget-border, rgba(127, 127, 127, .25));
-  border-radius: 8px;
-}
-
-.settings-rules-row,
-.settings-agent-roles-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 6px 12px;
-  align-items: center;
-  min-height: 46px;
-  padding: 12px 14px;
-}
-
-.settings-rules-row + .settings-rules-row,
-.settings-agent-roles-row + .settings-agent-roles-row {
-  border-top: 1px solid var(--vscode-widget-border, rgba(127, 127, 127, .2));
-}
-
-/* A candidate that does not exist yet — greyed row, "Create" button. */
-.settings-rules-row.is-missing {
-  color: var(--vscode-descriptionForeground);
-}
-
-.settings-rules-row.is-missing .settings-rules-name {
-  opacity: 0.7;
-}
-
-.settings-rules-copy,
-.settings-agent-roles-copy {
-  min-width: 0;
-}
-
-.settings-rules-copy .settings-row-desc,
-.settings-agent-roles-copy .settings-row-desc {
-  overflow-wrap: anywhere;
-}
-
-.settings-rules-name,
-.settings-agent-roles-name {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-  min-width: 0;
-}
-
-.settings-rules-badge,
-.settings-agent-roles-badge {
-  flex: none;
-  padding: 1px 6px;
-  border-radius: 10px;
-  border: 1px solid var(--vscode-widget-border, rgba(127, 127, 127, .3));
-  color: var(--vscode-descriptionForeground);
-  font-size: 11px;
-  font-weight: 400;
-  line-height: 1.6;
-}
-
-/* "may be read" — no documented provider, shown for reference only, never a
-   guess (see rules-files.ts's module doc comment). Dashed border keeps it
-   visually distinct from a cited provider badge. */
-.settings-rules-badge.is-uncertain {
-  border-style: dashed;
-  font-style: italic;
-}
-
-/* AP-07 permission-rule engine. The evaluation-order sentence is the
-   security surface — it must stay readable, not collapsed into a tooltip. */
-.settings-perm-order {
-  margin: 0 0 10px;
-  color: var(--vscode-descriptionForeground);
-  font-size: 12px;
-  line-height: 1.45;
-}
-
-.settings-perm-pending {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  gap: 8px 10px;
-  align-items: center;
-  margin: 0 0 12px;
-  padding: 10px 12px;
-  border: 1px dashed var(--vscode-inputValidation-warningBorder, rgba(200, 160, 0, .6));
-  border-radius: 8px;
-}
-
-.settings-perm-list {
-  overflow: hidden;
-  border: 1px solid var(--vscode-widget-border, rgba(127, 127, 127, .25));
-  border-radius: 8px;
-}
-
-.settings-perm-section {
-  padding: 8px 14px 4px;
-  color: var(--vscode-descriptionForeground);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-}
-
-.settings-perm-section + .settings-perm-row,
-.settings-perm-section + .settings-perm-empty {
-  border-top: 1px solid var(--vscode-widget-border, rgba(127, 127, 127, .2));
-}
-
-.settings-perm-empty {
-  padding: 10px 14px 12px;
-  color: var(--vscode-descriptionForeground);
-  font-size: 12px;
-}
-
-.settings-perm-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 6px 12px;
-  align-items: center;
-  min-height: 46px;
-  padding: 12px 14px;
-}
-
-.settings-perm-row + .settings-perm-row {
-  border-top: 1px solid var(--vscode-widget-border, rgba(127, 127, 127, .2));
-}
-
-.settings-perm-row.is-floor {
-  color: var(--vscode-descriptionForeground);
-}
-
-.settings-rules-badge.is-floor {
-  border-style: solid;
-}
-
 .settings-connector:has(.settings-connector-key) {
   align-items: start;
 }
@@ -1579,36 +1439,144 @@ a.settings-github-flow-open {
   gap: 8px;
 }
 
-/* ---------------------------------------------------------------------------
-   Settings → Agents & Crew (AP-10 / AP-12)
+/* ===========================================================================
+   Companion settings — the fork's own pages and lists
+   ===========================================================================
+   Agents & Crew (roles, subagents, routing, crew flows, workflows) and the
+   two Advanced lists (permission rules, rule files). One card language, one
+   list language, and the upstream controls (.settings-action, .settings-switch,
+   .settings-select) wherever a control already exists. Colours come only from
+   --vscode-* tokens. */
 
-   Card list of roles and crew flows, each opening into an editor. Follows the
-   `.settings-routine-*` block above rather than inventing a second card
-   language: same border, same tinted ground, same collapsed-row grid.
-   --------------------------------------------------------------------------- */
-
-.settings-agent-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+.settings-body {
+  --sx-radius: 6px;
+  --sx-border: var(--vscode-editorWidget-border, var(--vscode-widget-border, rgba(127, 127, 127, .3)));
+  --sx-border-soft: color-mix(in oklab, var(--vscode-foreground) 10%, transparent);
+  --sx-surface: color-mix(in oklab, var(--vscode-foreground) 3%, transparent);
+  --sx-surface-hover: color-mix(in oklab, var(--vscode-foreground) 6%, transparent);
+  --sx-ok: var(--vscode-testing-iconPassed, var(--vscode-charts-green, #73c991));
+  --sx-warn: var(--vscode-editorWarning-foreground, var(--vscode-charts-yellow, #cca700));
+  --sx-danger: var(--vscode-errorForeground, #f14c4c);
+  --sx-info: var(--vscode-charts-blue, var(--vscode-textLink-foreground, #3794ff));
 }
 
+/* ---- a list-shaped setting under its own heading ---- */
+
+.settings-list-section {
+  padding: 18px 0 16px;
+  border-bottom: 1px solid var(--sx-border-soft);
+}
+.settings-list-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+.settings-list-section-copy { min-width: 0; max-width: 62ch; }
+.settings-list-section-title {
+  margin: 0 0 2px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.settings-list-section-copy .settings-row-desc { margin: 0; }
+.settings-section-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex: none;
+}
+.settings-section-actions.is-foot { margin-top: 10px; }
+
+/* ---- buttons: sizes the upstream .settings-action does not have ---- */
+
+.settings-action:disabled,
+.settings-action[disabled] { opacity: .5; cursor: default; }
+.settings-action.is-primary:hover:not(:disabled) { background: var(--vscode-button-hoverBackground, var(--vscode-button-background)); }
+.settings-action.is-danger:hover:not(:disabled) { background: color-mix(in oklab, var(--sx-danger) 12%, transparent); }
+.settings-action.is-icon { min-width: 26px; padding: 2px 6px; line-height: 1.2; }
+/* The armed second click of a delete. Colour is not the only signal — the
+   label already says what it is about to remove. */
+.settings-action.is-confirming,
+.settings-action.is-confirming:hover {
+  background: var(--sx-danger);
+  border-color: var(--sx-danger);
+  color: var(--vscode-button-foreground, #fff);
+}
+.settings-agent-head:focus-visible,
+.settings-agent-input:focus-visible,
+.settings-agent-more > summary:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder);
+  outline-offset: -2px;
+}
+
+/* ---- badges ---- */
+
+.settings-agent-badge,
+.settings-rules-badge {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  height: 18px;
+  padding: 0 7px;
+  border: 1px solid var(--sx-border-soft);
+  border-radius: 9px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1;
+  white-space: nowrap;
+}
+.settings-agent-badge.is-code {
+  font-family: var(--vscode-editor-font-family, ui-monospace, monospace);
+  font-size: 10.5px;
+  background: var(--sx-surface);
+}
+/* Scope answers "which file actually wins", so it reads differently from the
+   neutral badges rather than blending into them. */
+.settings-agent-badge.is-scope-project {
+  border-color: color-mix(in oklab, var(--sx-info) 45%, transparent);
+  color: var(--sx-info);
+}
+.settings-agent-badge.is-scope-global {
+  border-color: color-mix(in oklab, var(--vscode-charts-purple, #b180d7) 45%, transparent);
+  color: var(--vscode-charts-purple, #b180d7);
+}
+.settings-agent-badge.is-override { border-style: dashed; }
+.settings-agent-badge.is-default {
+  border-color: transparent;
+  background: color-mix(in oklab, var(--sx-ok) 16%, transparent);
+  color: var(--sx-ok);
+}
+.settings-agent-badge.is-invalid {
+  border-color: transparent;
+  background: color-mix(in oklab, var(--sx-danger) 16%, transparent);
+  color: var(--sx-danger);
+}
+/* "may be read" — no documented provider, shown for reference only, never a
+   guess (see rules-files.ts). */
+.settings-rules-badge.is-uncertain { border-style: dashed; font-style: italic; }
+
+/* ---- cards (roles, flows, workflows) ---- */
+
+.settings-agent-list { display: flex; flex-direction: column; gap: 8px; }
 .settings-agent-card {
-  border: 1px solid var(--vscode-editorWidget-border, var(--vscode-panel-border));
-  border-radius: 5px;
-  background: color-mix(in oklab, var(--vscode-foreground) 3%, transparent);
+  border: 1px solid var(--sx-border);
+  border-radius: var(--sx-radius);
+  background: var(--sx-surface);
   overflow: hidden;
 }
-
-.settings-agent-card.is-new {
-  border-style: dashed;
-}
-
-.settings-agent-toggle,
-.settings-flow-toggle {
-  display: block;
+.settings-agent-card.is-open { border-color: color-mix(in oklab, var(--vscode-focusBorder) 55%, var(--sx-border)); }
+.settings-agent-card.is-new { border-style: dashed; margin-bottom: 8px; }
+.settings-agent-card-top { display: flex; align-items: center; gap: 8px; padding-right: 12px; }
+.settings-agent-card-top > .settings-agent-head { flex: 1 1 auto; min-width: 0; }
+.settings-agent-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
   width: 100%;
-  padding: 12px 14px;
+  padding: 11px 14px 11px 10px;
   border: 0;
   background: none;
   color: inherit;
@@ -1616,319 +1584,407 @@ a.settings-github-flow-open {
   text-align: left;
   cursor: pointer;
 }
+.settings-agent-head:hover { background: var(--sx-surface-hover); }
+.settings-agent-chev { margin-top: 1px; }
+.settings-agent-card.is-open .settings-agent-chev { transform: rotate(90deg); }
+.settings-agent-copy { flex: 1 1 auto; min-width: 0; }
+.settings-agent-copy .settings-row-desc { overflow-wrap: anywhere; margin-top: 3px; }
+.settings-agent-name { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.settings-agent-card-head { padding: 12px 14px 0; }
+.settings-agent-card-head .settings-row-desc { margin-top: 3px; }
 
-.settings-agent-toggle:hover,
-.settings-flow-toggle:hover {
-  background: color-mix(in oklab, var(--vscode-foreground) 5%, transparent);
-}
-
-.settings-agent-copy {
-  min-width: 0;
-}
-
-.settings-agent-copy .settings-row-desc {
-  overflow-wrap: anywhere;
-}
-
-.settings-agent-name {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-  min-width: 0;
-}
-
-.settings-agent-badge {
-  flex: none;
-  padding: 1px 6px;
-  border-radius: 10px;
-  border: 1px solid var(--vscode-widget-border, rgba(127, 127, 127, .3));
-  color: var(--vscode-descriptionForeground);
-  font-size: 11px;
-  font-weight: 400;
-  line-height: 1.6;
-}
-
-/* Scope is the answer to "which file actually wins", so it reads differently
-   from the neutral badges rather than blending into them. */
-.settings-agent-badge.is-scope-project {
-  border-color: color-mix(in oklab, var(--vscode-textLink-foreground) 45%, transparent);
-  color: var(--vscode-textLink-foreground);
-}
-
-.settings-agent-badge.is-override {
-  border-style: dashed;
-}
-
-.settings-workflow-mermaid,
-.settings-workflow-progress,
-.settings-workflow-json {
-  max-height: 240px;
-  overflow: auto;
-  white-space: pre-wrap;
-  font-family: var(--vscode-editor-font-family, ui-monospace, monospace);
-  font-size: 11px;
-  line-height: 1.45;
-  padding: 8px;
-  border: 1px solid var(--vscode-widget-border, rgba(127, 127, 127, .2));
-  border-radius: 3px;
-  background: var(--vscode-editor-background);
-}
-
-.settings-workflow-issues {
-  font-size: 12px;
-}
-
-.settings-workflow-issues ul {
-  margin: 4px 0 0;
-  padding-left: 1.2em;
-}
-
-.settings-workflow-issues.is-errors {
-  color: var(--vscode-errorForeground, #f14c4c);
-}
-
-.settings-workflow-default {
-  margin: 0 14px 10px;
-}
-
+/* The editor inside an open card. */
 .settings-agent-form {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 0 14px 14px;
-  border-top: 1px solid var(--vscode-widget-border, rgba(127, 127, 127, .2));
-  padding-top: 14px;
+  gap: 14px;
+  padding: 14px;
+  border-top: 1px solid var(--sx-border-soft);
+  background: color-mix(in oklab, var(--vscode-editor-background) 55%, transparent);
 }
-
+.settings-agent-card-head + .settings-agent-form { border-top: 0; }
 .settings-agent-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px 14px;
 }
-
-.settings-agent-field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-}
-
-.settings-agent-field-label {
-  font-weight: 600;
-  font-size: 12px;
-}
-
-.settings-agent-field-hint {
-  color: var(--vscode-descriptionForeground);
-  font-size: 11px;
-  line-height: 1.5;
-}
-
+.settings-agent-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.settings-agent-field-label { font-size: 12px; font-weight: 600; color: var(--vscode-foreground); }
+.settings-agent-field-hint { color: var(--vscode-descriptionForeground); font-size: 11.5px; line-height: 1.45; }
+.settings-agent-field-error { color: var(--sx-danger); font-size: 11.5px; }
 .settings-agent-input {
   width: 100%;
+  min-height: 26px;
   box-sizing: border-box;
-  padding: 4px 6px;
-  border: 1px solid var(--vscode-input-border, var(--vscode-widget-border, rgba(127, 127, 127, .3)));
-  border-radius: 3px;
+  padding: 3px 8px;
+  border: 1px solid var(--vscode-input-border, var(--sx-border));
+  border-radius: 4px;
   background: var(--vscode-input-background);
   color: var(--vscode-input-foreground);
   font: inherit;
 }
-
-.settings-agent-textarea {
-  resize: vertical;
-  min-height: 44px;
-  font-family: var(--vscode-editor-font-family, monospace);
-  font-size: 12px;
+select.settings-agent-input {
+  min-width: 0;
+  border-color: var(--vscode-dropdown-border, var(--vscode-input-border, var(--sx-border)));
+  background: var(--vscode-dropdown-background, var(--vscode-input-background));
+  color: var(--vscode-dropdown-foreground, var(--vscode-input-foreground));
 }
+.settings-agent-input:focus { outline: none; border-color: var(--vscode-focusBorder); }
+.settings-agent-input[aria-invalid="true"] { border-color: var(--vscode-inputValidation-errorBorder, var(--sx-danger)); }
+.settings-agent-input::placeholder { color: var(--vscode-input-placeholderForeground, var(--vscode-descriptionForeground)); }
+.settings-agent-textarea { resize: vertical; min-height: 52px; line-height: 1.45; }
+.settings-agent-input.is-mono { font-family: var(--vscode-editor-font-family, ui-monospace, monospace); font-size: 12px; }
 
-.settings-agent-check {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+/* On/off inside an editor: the upstream switch, beside its words. */
+.settings-agent-switch { display: flex; align-items: flex-start; gap: 10px; }
+.settings-agent-switch .settings-switch { flex: none; margin-top: 1px; }
+.settings-agent-switch-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.settings-agent-switch-label { font-size: 12.5px; }
+
+/* Rarely-touched groups fold away. */
+.settings-agent-more > summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--vscode-descriptionForeground);
   font-size: 12px;
+  font-weight: 600;
+  list-style-position: outside;
 }
+.settings-agent-more > summary:hover { color: var(--vscode-foreground); }
+.settings-agent-more[open] > summary { margin-bottom: 10px; }
 
-.settings-agent-actions {
+/* Where Save writes — beside Save, as a decision about the file. */
+.settings-agent-store {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  align-items: center;
+  gap: 6px 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--sx-border-soft);
 }
-
-/* Second click of a two-click delete. Colour is not the only signal — the
-   label already says what it is about to remove. */
-.settings-agent-remove.is-confirming,
-.settings-flow-remove.is-confirming {
-  border-color: var(--vscode-inputValidation-errorBorder, #be1100);
-  color: var(--vscode-errorForeground, #f48771);
-}
+.settings-agent-store-label { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; }
+.settings-agent-store-select { width: auto; min-width: 210px; font-weight: 400; }
+.settings-agent-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.settings-agent-actions.is-secondary { padding-top: 10px; border-top: 1px dashed var(--sx-border-soft); }
+.settings-agent-spacer { flex: 1 1 auto; }
 
 .settings-agent-error {
   margin: 0;
   padding: 8px 10px;
-  border: 1px solid var(--vscode-inputValidation-errorBorder, #be1100);
+  border: 1px solid var(--vscode-inputValidation-errorBorder, var(--sx-danger));
   border-radius: 4px;
   background: var(--vscode-inputValidation-errorBackground, transparent);
-  color: var(--vscode-errorForeground, inherit);
+  color: var(--vscode-foreground);
   font-size: 12px;
 }
-
+.settings-agent-note {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--sx-warn);
+  border-radius: 0 4px 4px 0;
+  background: color-mix(in oklab, var(--sx-warn) 8%, transparent);
+  font-size: 12px;
+}
 /* A role file that will not parse. Visible on the page rather than only as a
    chat notice when you happen to run /agent. */
 .settings-agent-problems {
   margin-bottom: 12px;
-  padding: 8px 10px;
-  border: 1px solid var(--vscode-inputValidation-warningBorder, #b89500);
+  padding: 8px 12px;
+  border: 1px solid var(--vscode-inputValidation-warningBorder, var(--sx-warn));
   border-radius: 4px;
   background: var(--vscode-inputValidation-warningBackground, transparent);
   font-size: 12px;
 }
-
-.settings-agent-problems-head {
-  font-weight: 600;
-  margin-bottom: 4px;
-}
-
-.settings-agent-problems-list {
-  margin: 0;
-  padding-left: 18px;
-  overflow-wrap: anywhere;
-}
-
-.settings-agent-pool {
+.settings-agent-problems-head { font-weight: 600; margin-bottom: 4px; }
+.settings-agent-problems-list { margin: 0; padding-left: 18px; overflow-wrap: anywhere; }
+.settings-agent-empty {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 3px;
+  padding: 16px;
+  border: 1px dashed var(--sx-border);
+  border-radius: var(--sx-radius);
+  text-align: center;
 }
+.settings-agent-empty + .settings-agent-list:empty { display: none; }
+.settings-agent-empty-title { font-weight: 600; }
 
-.settings-agent-pool-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
+/* Crew flow role pool: an ordered list with its own controls. */
+.settings-agent-pool { display: flex; flex-direction: column; gap: 6px; }
+.settings-agent-pool-list { display: flex; flex-direction: column; gap: 4px; }
 .settings-agent-pool-row {
   display: flex;
   align-items: center;
   gap: 6px;
+  padding: 4px 6px;
+  border: 1px solid var(--sx-border-soft);
+  border-radius: 4px;
+  background: var(--vscode-input-background);
 }
+.settings-agent-pool-name { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.settings-agent-pool-add { align-self: flex-start; width: auto; max-width: 260px; }
 
-.settings-agent-pool-name {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
+/* ---- workflows ---- */
 
-.settings-agent-pool-add {
-  align-self: flex-start;
-  max-width: 240px;
-}
-
-.settings-agent-new,
-.settings-flow-new {
-  align-self: flex-start;
-  margin-top: 10px;
-}
-
-/* AP-16 — the subagent roster. One row per companion, always listed: a
-   companion you have not signed into yet is still one you may want to
-   configure ahead of time. */
-.settings-roster {
+.settings-workflow-default { flex: none; }
+.settings-workflow-preview { display: flex; flex-direction: column; gap: 8px; }
+.settings-workflow-flow {
   display: flex;
-  flex-direction: column;
-  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: stage;
 }
-.settings-roster-row {
-  border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.25));
-  border-radius: 6px;
+.settings-workflow-stage {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px 3px 4px;
+  border: 1px solid var(--sx-border-soft);
+  border-radius: 14px;
+  background: var(--vscode-input-background);
+  counter-increment: stage;
+  font-size: 12px;
+}
+.settings-workflow-stage::before {
+  content: counter(stage);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: color-mix(in oklab, var(--sx-info) 18%, transparent);
+  color: var(--sx-info);
+  font-size: 10.5px;
+  font-weight: 700;
+}
+.settings-workflow-stage + .settings-workflow-stage { position: relative; margin-left: 10px; }
+.settings-workflow-stage + .settings-workflow-stage::after {
+  content: "→";
+  position: absolute;
+  left: -14px;
+  color: var(--vscode-descriptionForeground);
+}
+.settings-workflow-mermaid,
+.settings-workflow-progress {
+  margin: 0;
+  max-height: 240px;
+  overflow: auto;
   padding: 8px 10px;
+  border: 1px solid var(--sx-border-soft);
+  border-radius: 4px;
+  background: var(--vscode-editor-background);
+  font-family: var(--vscode-editor-font-family, ui-monospace, monospace);
+  font-size: 11.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
 }
-/* A companion that is off is still readable — it is a setting, not an error. */
-.settings-roster-row.is-off { opacity: 0.6; }
+.settings-workflow-json { min-height: 180px; }
+.settings-workflow-ok {
+  margin: 0;
+  padding: 6px 10px;
+  border-left: 3px solid var(--sx-ok);
+  border-radius: 0 4px 4px 0;
+  background: color-mix(in oklab, var(--sx-ok) 10%, transparent);
+  font-size: 12px;
+}
+.settings-workflow-issues {
+  padding: 8px 10px;
+  border-left: 3px solid var(--sx-danger);
+  border-radius: 0 4px 4px 0;
+  background: color-mix(in oklab, var(--sx-danger) 8%, transparent);
+  font-size: 12px;
+}
+.settings-workflow-issues.is-warnings {
+  border-left-color: var(--sx-warn);
+  background: color-mix(in oklab, var(--sx-warn) 8%, transparent);
+}
+.settings-workflow-issues ul { margin: 4px 0 0; padding-left: 1.2em; }
+.settings-workflow-issues li + li { margin-top: 2px; }
+.settings-workflow-issues code {
+  font-family: var(--vscode-editor-font-family, ui-monospace, monospace);
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
+.settings-agent-remote-hint { margin: 0; }
+
+/* ---- subagent roster ---- */
+
+.settings-roster { display: flex; flex-direction: column; gap: 8px; }
+.settings-roster-row {
+  border: 1px solid var(--sx-border);
+  border-radius: var(--sx-radius);
+  background: var(--sx-surface);
+}
 .settings-roster-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-.settings-roster-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  cursor: pointer;
+  gap: 10px;
+  padding: 10px 14px;
 }
 .settings-roster-name { font-weight: 600; }
 .settings-roster-status {
-  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   color: var(--vscode-descriptionForeground);
+  font-size: 11.5px;
   white-space: nowrap;
 }
-.settings-roster-status.is-usable { color: var(--vscode-charts-green, #89d185); }
-.settings-roster-status.is-needs-login { color: var(--vscode-editorWarning-foreground, #cca700); }
+.settings-roster-status::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.settings-roster-status.is-usable { color: var(--sx-ok); }
+.settings-roster-status.is-needs-login { color: var(--sx-warn); }
+.settings-roster-saved {
+  margin-left: auto;
+  color: var(--sx-ok);
+  font-size: 11.5px;
+  opacity: 0;
+  transition: opacity .2s ease;
+}
+.settings-roster-saved.is-shown { opacity: 1; }
 .settings-roster-body {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-  gap: 8px 12px;
-  margin-top: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px 14px;
+  padding: 12px 14px 14px;
+  border-top: 1px solid var(--sx-border-soft);
 }
-.settings-roster-field {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 0;
-}
-/* The notes field is the load-bearing one — it is what the agent reads when it
-   picks a companion — so it gets the full width wherever the grid allows. */
+/* Off is a setting, not an error: the name steps back, the controls stay
+   legible and reachable. */
+.settings-roster-row.is-off .settings-roster-name { color: var(--vscode-descriptionForeground); }
+.settings-roster-row.is-off .settings-roster-body { display: none; }
+.settings-roster-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.settings-roster-field-label { font-size: 12px; font-weight: 600; }
+/* The notes field is the load-bearing one — it is what the agent reads when
+   it picks a companion — so it gets the full width. */
 .settings-roster-field-wide { grid-column: 1 / -1; }
-.settings-roster-field-label {
-  font-size: 11px;
-  color: var(--vscode-descriptionForeground);
-}
-.settings-roster-select,
-.settings-roster-notes { width: 100%; min-width: 0; }
-.settings-roster-checkbox { display: inline-flex; align-items: center; height: 24px; }
+.settings-roster-write { align-self: end; padding-bottom: 2px; }
 
-/* AP-16 §6.2 P6 — routing rules. Order is precedence, so the rows carry a
-   move-up control: a narrow rule above a broad one is how a rule list is meant
-   to behave, and that is an edit rather than cosmetics. */
-.settings-routing {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.settings-routing-head,
+/* ---- routing rules ---- */
+
+.settings-routing { display: flex; flex-direction: column; gap: 6px; }
 .settings-routing-row {
+  /* Words on their own line; companion, model and effort share the next with
+     the order controls. Fits the settings column at any width. */
   display: grid;
-  grid-template-columns: minmax(140px, 2fr) minmax(90px, 1fr) minmax(90px, 1fr) minmax(80px, 1fr) auto auto;
-  gap: 6px;
-  align-items: center;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  gap: 8px 10px;
+  align-items: end;
+  padding: 10px 12px;
+  border: 1px solid var(--sx-border);
+  border-radius: var(--sx-radius);
+  background: var(--sx-surface);
 }
-.settings-routing-head {
-  font-size: 11px;
+.settings-routing-row.is-draft { border-style: dashed; }
+.settings-routing-cell { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.settings-routing-cell.is-keywords { grid-column: 1 / -1; }
+.settings-routing-cell-label { color: var(--vscode-descriptionForeground); font-size: 11px; }
+.settings-routing-tools { display: flex; gap: 4px; align-items: center; }
+.settings-routing-draft-note { grid-column: 1 / -1; color: var(--vscode-descriptionForeground); font-size: 11.5px; }
+@media (max-width: 480px) {
+  .settings-routing-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .settings-routing-tools { grid-column: 1 / -1; justify-content: flex-end; }
+}
+
+/* ---- Advanced: permission rules ---- */
+/* The evaluation-order sentence is the security surface — it stays readable,
+   not collapsed into a tooltip. */
+.settings-perm-order {
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--sx-info);
+  border-radius: 0 4px 4px 0;
+  background: color-mix(in oklab, var(--sx-info) 7%, transparent);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.settings-perm-pending {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--vscode-inputValidation-warningBorder, var(--sx-warn));
+  border-radius: var(--sx-radius);
+  background: color-mix(in oklab, var(--sx-warn) 8%, transparent);
+}
+.settings-perm-pending-copy { flex: 1 1 280px; min-width: 0; }
+.settings-perm-pending-title { font-weight: 600; margin-bottom: 2px; }
+.settings-perm-pending-actions { display: flex; gap: 8px; flex: none; }
+.settings-perm-state {
+  padding: 10px 0;
   color: var(--vscode-descriptionForeground);
 }
-.settings-routing-keywords { min-width: 0; }
-.settings-routing-move,
-.settings-routing-remove {
-  appearance: none;
-  border: 0;
-  background: transparent;
-  color: var(--vscode-textLink-foreground);
-  font: inherit;
+
+/* One list language for both Advanced lists. */
+.settings-perm-list,
+.settings-rules-list {
+  overflow: hidden;
+  border: 1px solid var(--sx-border);
+  border-radius: var(--sx-radius);
+}
+.settings-perm-section {
+  padding: 8px 14px 6px;
+  background: var(--sx-surface);
+  color: var(--vscode-descriptionForeground);
   font-size: 11px;
-  cursor: pointer;
-  padding: 0 2px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
-.settings-routing-move:disabled {
-  color: var(--vscode-disabledForeground, var(--vscode-descriptionForeground));
-  cursor: default;
+.settings-perm-section:not(:first-child) { border-top: 1px solid var(--sx-border-soft); }
+.settings-perm-empty { padding: 12px 14px; color: var(--vscode-descriptionForeground); font-size: 12px; border-top: 1px solid var(--sx-border-soft); }
+.settings-perm-row,
+.settings-rules-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 12px;
+  align-items: center;
+  min-height: 44px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--sx-border-soft);
 }
-.settings-routing-move:not(:disabled):hover,
-.settings-routing-remove:hover { text-decoration: underline; }
-/* At phone width the grid would squeeze every select to nothing. */
+.settings-rules-row:first-child { border-top: 0; }
+.settings-perm-row { grid-template-columns: 54px minmax(0, 1fr) auto; }
+.settings-perm-row.is-floor { color: var(--vscode-descriptionForeground); }
+.settings-perm-action {
+  justify-self: start;
+  padding: 1px 7px;
+  border-radius: 9px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  background: var(--sx-surface-hover);
+  color: var(--vscode-descriptionForeground);
+}
+.settings-perm-action.is-allow { background: color-mix(in oklab, var(--sx-ok) 16%, transparent); color: var(--sx-ok); }
+.settings-perm-action.is-ask { background: color-mix(in oklab, var(--sx-warn) 16%, transparent); color: var(--sx-warn); }
+.settings-perm-action.is-deny { background: color-mix(in oklab, var(--sx-danger) 16%, transparent); color: var(--sx-danger); }
+.settings-rules-badge.is-floor { border-style: solid; }
+
+/* ---- Advanced: rule files ---- */
+/* A candidate that does not exist yet — greyed row, "Create" button. */
+.settings-rules-row.is-missing { color: var(--vscode-descriptionForeground); }
+.settings-rules-row.is-missing .settings-rules-name { opacity: 0.75; }
+.settings-rules-copy { min-width: 0; }
+.settings-rules-copy .settings-row-desc { overflow-wrap: anywhere; font-family: var(--vscode-editor-font-family, ui-monospace, monospace); font-size: 11.5px; }
+.settings-rules-name { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
+
 @media (max-width: 560px) {
-  .settings-routing-head { display: none; }
-  .settings-routing-row { grid-template-columns: 1fr 1fr; }
-  .settings-routing-keywords { grid-column: 1 / -1; }
+  .settings-list-section-head { flex-direction: column; }
+  .settings-perm-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .settings-perm-action { grid-column: 1 / -1; }
+  .settings-agent-card-top { flex-wrap: wrap; padding: 0 12px 10px 0; }
 }

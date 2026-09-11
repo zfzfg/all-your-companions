@@ -1279,6 +1279,18 @@ export class GrokSidebar {
     "setDefaultWorkflow",
     "addWorkflowStagesBlock",
     "runWorkflow",
+    // The rest of Agents & Crew and Advanced: roster, routing, the two
+    // toggles, rule files, permission rules, and workflow Export.
+    "subagentRosterSave",
+    "subagentRoutingSave",
+    "setSubagentsEnabled",
+    "setCrewStageSubagents",
+    "listRuleFiles",
+    "openRuleFile",
+    "listPermissionRules",
+    "deletePermissionRule",
+    "adoptPermissionRules",
+    "openText",
     "setShowThinking",
     "setAppPurpose",
     "setExpandCommandOutputs",
@@ -4180,7 +4192,7 @@ export class GrokSidebar {
   private async handleSaveAgentRole(
     msg: { scope: RoleScope; originalName?: string; originalScope?: RoleScope; draft: AgentRoleDraft },
   ): Promise<void> {
-    const id = msg.originalName || msg.draft?.name || "new";
+    const id = agentCardErrorId("role", msg.originalName);
     const dir = this.companionsWriteDir(msg.scope, "agents");
     if (!dir) {
       this.refuseAgentRoles(id, "Open a project folder first — a project role needs somewhere to live.");
@@ -4219,7 +4231,7 @@ export class GrokSidebar {
   private async handleSaveCrewFlow(
     msg: { scope: RoleScope; originalName?: string; originalScope?: RoleScope; draft: CrewFlowDraft },
   ): Promise<void> {
-    const id = msg.originalName || msg.draft?.name || "new";
+    const id = agentCardErrorId("flow", msg.originalName);
     const dir = this.companionsWriteDir(msg.scope, "crews");
     if (!dir) {
       this.refuseAgentRoles(id, "Open a project folder first — a project crew flow needs somewhere to live.");
@@ -4313,7 +4325,7 @@ export class GrokSidebar {
     draft: WorkflowDraft;
     setDefault?: boolean;
   }): Promise<void> {
-    const id = msg.originalName || msg.draft?.name || "new";
+    const id = agentCardErrorId("workflow", msg.originalName);
     const dir = this.companionsWriteDir(msg.scope, "crews");
     if (!dir) {
       this.refuseAgentRoles(id, "Open a project folder first — a project workflow needs somewhere to live.");
@@ -4365,11 +4377,11 @@ export class GrokSidebar {
   private async handleAddWorkflowStagesBlock(scope: RoleScope, name: string): Promise<void> {
     const preset = this.crewPresetSet(this.sessionCwd()).presets.find((p) => p.name === name);
     if (!preset) {
-      this.refuseAgentRoles(name, "That workflow is not loaded.");
+      this.refuseAgentRoles(agentCardErrorId("workflow", name), "That workflow is not loaded.");
       return;
     }
     if (preset.stages !== undefined) {
-      this.refuseAgentRoles(name, "This workflow already has a stages block.");
+      this.refuseAgentRoles(agentCardErrorId("workflow", name), "This workflow already has a stages block.");
       return;
     }
     const graph = presetToStageGraph(preset);
@@ -4520,18 +4532,18 @@ export class GrokSidebar {
   private handleDeleteCompanionFile(scope: RoleScope, kind: "agents" | "crews", rawName: string): void {
     const name = String(rawName ?? "").trim().toLowerCase();
     if (!isValidRoleName(name)) {
-      this.refuseAgentRoles(rawName, "That is not a name this can delete.");
+      this.refuseAgentRoles(undefined, "That is not a name this can delete.");
       return;
     }
     const root = this.companionsRoot(scope, this.sessionCwd());
     if (!root) {
-      this.refuseAgentRoles(name, "There is no project open, so there is no project file to remove.");
+      this.refuseAgentRoles(undefined, "There is no project open, so there is no project file to remove.");
       return;
     }
     try {
       fs.rmSync(path.join(root, kind, `${name}.md`), { force: true });
     } catch (error) {
-      this.refuseAgentRoles(name, `Could not remove the file — ${(error as Error).message}`);
+      this.refuseAgentRoles(undefined, `Could not remove ${name}.md — ${(error as Error).message}`);
       return;
     }
     this.agentRolesError = undefined;
@@ -26569,7 +26581,20 @@ ${directives.block}`;
             workflows: Array.isArray(msg.workflows) ? msg.workflows : [],
             defaultWorkflow: msg.defaultWorkflow || "idea-to-done",
             subagentRoster: Array.isArray(msg.subagentRoster) ? msg.subagentRoster : [],
-            subagentsEnabled: msg.subagentsEnabled !== false
+            subagentsEnabled: msg.subagentsEnabled !== false,
+            subagentRouting: Array.isArray(msg.subagentRouting) ? msg.subagentRouting : [],
+            crewStagesMayUseSubagents: msg.crewStagesMayUseSubagents === true,
+            efforts: Array.isArray(msg.efforts) ? msg.efforts : []
+          });
+        }
+        if (msg.type === "ruleFiles") {
+          surface.update({ ruleFiles: Array.isArray(msg.files) ? msg.files : [] });
+        }
+        if (msg.type === "permissionRules") {
+          surface.update({
+            permissionRules: Array.isArray(msg.rules) ? msg.rules : [],
+            permissionRulesOrderCopy: typeof msg.orderCopy === "string" ? msg.orderCopy : "",
+            permissionRulesPending: msg.pendingAdoption && typeof msg.pendingAdoption === "object" ? msg.pendingAdoption : null
           });
         }
         if (msg.type === "workflowGenerator") {
@@ -26726,11 +26751,11 @@ ${openMain}
          NOT the composer's Agent/Plan/Auto-accept picker — that one decides what
          the agent may do in a turn, this one decides what the conversation is.
          The removed prototype's #mode-switch-bar must not come back here. -->
-    <div id="session-type-picker" class="session-type-picker" role="radiogroup" aria-label="Session type" title="Session type decides how this conversation works. The Agent/Plan picker decides what the agent may do in a turn." hidden>
-      <button id="session-type-agent" class="session-type-opt" type="button" role="radio" aria-checked="true" data-session-type="agent">Agent</button>
-      <button id="session-type-crew" class="session-type-opt" type="button" role="radio" aria-checked="false" data-session-type="crew">Crew</button>
+    <div id="session-type-picker" class="cx-seg cx-session-type" role="radiogroup" aria-label="Session type" title="Session type decides how this conversation works. The Agent/Plan picker decides what the agent may do in a turn." hidden>
+      <button id="session-type-agent" class="cx-seg-opt session-type-opt" type="button" role="radio" aria-checked="true" tabindex="0" data-session-type="agent">Agent</button>
+      <button id="session-type-crew" class="cx-seg-opt session-type-opt" type="button" role="radio" aria-checked="false" tabindex="-1" data-session-type="crew">Crew</button>
     </div>
-    <span id="session-type-badge" class="session-type-badge" hidden></span>
+    <span id="session-type-badge" class="cx-pill cx-pill--outline cx-session-badge" hidden></span>
     <button id="repo-btn" class="repo-chip" type="button" title="Choose repository"></button>
     <button id="remote-btn" class="icon-btn remote-btn" title="Continue remotely" hidden></button>
     <button id="history-btn" class="icon-btn" title="Session history"></button>
@@ -26753,53 +26778,92 @@ ${fileShellOpen}
 
   <footer class="composer">
     <button id="scroll-bottom-btn" class="scroll-bottom-btn" type="button" title="Scroll to bottom"></button>
-    <!-- Agent step checklist (AP-02). Present but hidden until a structured
-         plan update with entries arrives; providers that send plan TEXT
-         never fill it. -->
-    <div id="todo-rail" class="todo-rail" hidden>
-      <button id="todo-rail-head" class="todo-rail-head" type="button" aria-expanded="true" aria-controls="todo-rail-list">
-        <span id="todo-rail-caret" class="todo-rail-caret" aria-hidden="true"></span>
-        <span class="todo-rail-title">Tasks</span>
-        <span id="todo-rail-count" class="todo-rail-count"></span>
-      </button>
-      <ol id="todo-rail-list" class="todo-rail-list"></ol>
-    </div>
-    <!-- AP-16 §6.10 point 5. Answers "why is this still working?" while a turn
-         waits on its subagents, and disappears when the last one is done. -->
-    <div id="subagent-tray" class="subagent-tray" hidden>
-      <div class="subagent-tray-head">
-        <span id="subagent-tray-title" class="subagent-tray-title"></span>
-      </div>
-      <ol id="subagent-tray-list" class="subagent-tray-list"></ol>
-    </div>
-    <div id="crew-run" class="crew-run" hidden>
-      <div class="crew-run-head">
-        <button id="crew-run-toggle" class="crew-run-toggle" type="button" aria-expanded="true" aria-controls="crew-run-list">
-          <span id="crew-run-caret" class="crew-run-caret" aria-hidden="true"></span>
-          <span class="crew-run-title">Crew</span>
-          <span id="crew-run-count" class="crew-run-count"></span>
-        </button>
-        <button id="crew-run-stop" class="crew-run-stop" type="button">Stop</button>
-      </div>
-      <ol id="crew-run-list" class="crew-run-list"></ol>
-    </div>
-    <!-- Multi-file change overview (AP-09). Hidden until a turn produces
-         diffs; empty list hides it rather than painting a blank card. -->
-    <div id="review-center" class="review-center" hidden>
-      <div class="review-center-head">
-        <button id="review-center-toggle" class="review-center-toggle" type="button" aria-expanded="true" aria-controls="review-center-list">
-          <span id="review-center-caret" class="review-center-caret" aria-hidden="true"></span>
-          <span class="review-center-title">Review</span>
-          <span id="review-center-count" class="review-center-count"></span>
-        </button>
-        <div class="review-center-scope" role="tablist" aria-label="Review scope">
-          <button id="review-scope-turn" class="review-scope-btn" type="button" aria-pressed="true">This turn</button>
-          <button id="review-scope-session" class="review-scope-btn" type="button" aria-pressed="false">Session</button>
+    <!-- The dock: every companion panel that pins above the composer shares
+         one bounded, scrollable column, so four of them open at once cannot
+         push the input off the panel. Each panel is hidden until it has
+         something to say; an empty dock takes no space. -->
+    <div id="cx-dock" class="cx-dock">
+      <!-- AP-15/AP-17. A new Crew session picks its workflow here before the
+           first message; the composer below is where the idea is typed. -->
+      <section id="crew-empty" class="cx-rail cx-crew-start" aria-label="Start a crew run" hidden>
+        <div class="cx-rail-head">
+          <span class="cx-rail-toggle is-static">
+            <span class="cx-rail-icon" aria-hidden="true" data-icon="users"></span>
+            <span class="cx-rail-title">Choose a workflow</span>
+          </span>
         </div>
-        <button id="review-handoff" class="review-handoff" type="button">Hand off</button>
-        <button id="review-revert-all" class="review-revert-all" type="button">Discard all</button>
-      </div>
-      <ul id="review-center-list" class="review-center-list"></ul>
+        <div id="crew-workflow-list" class="cx-choice-list" role="radiogroup" aria-label="Workflow"></div>
+        <div class="cx-rail-foot">
+          <span class="cx-hint">Describe the idea below, then start.</span>
+          <button id="crew-start" class="cx-btn cx-btn--primary cx-btn--sm" type="button">Start workflow</button>
+        </div>
+      </section>
+      <!-- Agent step checklist (AP-02). Present but hidden until a structured
+           plan update with entries arrives; providers that send plan TEXT
+           never fill it. -->
+      <section id="todo-rail" class="cx-rail" aria-label="Tasks" hidden>
+        <div class="cx-rail-head">
+          <button id="todo-rail-head" class="cx-rail-toggle" type="button" aria-expanded="true" aria-controls="todo-rail-list">
+            <span class="cx-rail-caret" aria-hidden="true" data-icon="chevronDown"></span>
+            <span class="cx-rail-icon" aria-hidden="true" data-icon="listChecks"></span>
+            <span class="cx-rail-title">Tasks</span>
+            <span id="todo-rail-count" class="cx-rail-meta"></span>
+          </button>
+        </div>
+        <div class="cx-rail-bar" aria-hidden="true"><span id="todo-rail-bar"></span></div>
+        <ol id="todo-rail-list" class="cx-rail-body cx-list-plain"></ol>
+      </section>
+      <!-- AP-16 §6.10 point 5. Answers "why is this still working?" while a
+           turn waits on its subagents, and disappears when the last one is done. -->
+      <section id="subagent-tray" class="cx-rail cx-rail--purple" aria-label="Running subagents" hidden>
+        <div class="cx-rail-head">
+          <span class="cx-rail-toggle is-static">
+            <span class="cx-rail-icon" aria-hidden="true" data-icon="bot"></span>
+            <span class="cx-rail-title">Subagents</span>
+            <span id="subagent-tray-title" class="cx-rail-meta"></span>
+          </span>
+        </div>
+        <ol id="subagent-tray-list" class="cx-rail-body cx-list-plain"></ol>
+      </section>
+      <section id="crew-run" class="cx-rail" aria-label="Crew run" hidden>
+        <div class="cx-rail-head">
+          <button id="crew-run-toggle" class="cx-rail-toggle" type="button" aria-expanded="true" aria-controls="crew-run-list">
+            <span class="cx-rail-caret" aria-hidden="true" data-icon="chevronDown"></span>
+            <span class="cx-rail-icon" aria-hidden="true" data-icon="users"></span>
+            <span id="crew-run-title" class="cx-rail-title">Crew</span>
+            <span id="crew-run-count" class="cx-rail-meta"></span>
+          </button>
+          <div class="cx-rail-actions">
+            <button id="crew-run-stop" class="cx-btn cx-btn--danger cx-btn--sm" type="button">Stop</button>
+          </div>
+        </div>
+        <div class="cx-rail-bar" aria-hidden="true"><span id="crew-run-bar"></span></div>
+        <ol id="crew-run-list" class="cx-rail-body cx-list-plain cx-steps"></ol>
+      </section>
+      <!-- Multi-file change overview (AP-09). Hidden until a turn produces
+           diffs; empty list hides it rather than painting a blank card. -->
+      <section id="review-center" class="cx-rail" aria-label="Review changes" hidden>
+        <div class="cx-rail-head">
+          <button id="review-center-toggle" class="cx-rail-toggle" type="button" aria-expanded="true" aria-controls="review-center-body">
+            <span class="cx-rail-caret" aria-hidden="true" data-icon="chevronDown"></span>
+            <span class="cx-rail-icon" aria-hidden="true" data-icon="gitCompare"></span>
+            <span class="cx-rail-title">Review</span>
+            <span id="review-center-count" class="cx-rail-meta"></span>
+          </button>
+        </div>
+        <div id="review-center-body" class="cx-rail-section">
+          <div class="cx-rail-toolbar">
+            <div class="cx-seg" role="tablist" aria-label="Review scope">
+              <button id="review-scope-turn" class="cx-seg-opt" type="button" role="tab" aria-selected="true" aria-controls="review-center-list">This turn</button>
+              <button id="review-scope-session" class="cx-seg-opt" type="button" role="tab" aria-selected="false" aria-controls="review-center-list">Session</button>
+            </div>
+            <span class="cx-spacer"></span>
+            <button id="review-handoff" class="cx-btn cx-btn--sm" type="button">Hand off</button>
+            <button id="review-revert-all" class="cx-btn cx-btn--danger cx-btn--sm" type="button">Discard all</button>
+          </div>
+          <ul id="review-center-list" class="cx-rail-body cx-list-plain" role="tabpanel"></ul>
+        </div>
+      </section>
     </div>
     <div class="composer-card">
       <div id="attachments" class="attachments"></div>
@@ -26864,6 +26928,15 @@ ${closeMain}
 </body>
 </html>`;
   }
+}
+
+/**
+ * Which Agents & Crew card a refusal belongs to. Prefixed by kind because a
+ * role, a crew flow and a workflow may share a name, and an unsaved card has
+ * no name at all. media/settings.js `agentCardId` builds the same string.
+ */
+export function agentCardErrorId(kind: "role" | "flow" | "workflow", name?: string): string {
+  return kind + ":" + (name || "*new*");
 }
 
 function getNonce(): string {

@@ -39,10 +39,11 @@ describe("companion subagent card (real chat.js in a DOM)", () => {
     expect(el).not.toBeNull();
     // §6.11: a delegation looks like a delegation, whoever started it.
     expect(el.classList.contains("subagent-card")).toBe(true);
-    const title = el.querySelector(".subagent-title")!.textContent;
-    expect(title).toContain("Auth inspector");
-    expect(title).toContain("Google Antigravity m-fast");
-    expect(title).toContain("effort low");
+    // The name leads; who ran it gets its own line instead of an ellipsis.
+    expect(el.querySelector(".subagent-title")!.textContent).toBe("Auth inspector");
+    const target = el.querySelector(".companion-target")!.textContent;
+    expect(target).toContain("Google Antigravity m-fast");
+    expect(target).toContain("effort low");
     expect(el.querySelector(".companion-profile")!.textContent).toBe("read-only");
   });
 
@@ -138,7 +139,7 @@ describe("companion subagent card (real chat.js in a DOM)", () => {
       const { window, doc } = bootWebview();
       dispatch(window, card({ status: "failed", endedAt: 3_000 }));
       expect(cardEl(doc).classList.contains("subagent-failed")).toBe(true);
-      expect(cardEl(doc).querySelector(".subagent-time")!.textContent).toContain("failed");
+      expect(cardEl(doc).querySelector(".companion-status")!.textContent).toContain("failed");
     });
 
     it("marks a user cancel muted rather than red", () => {
@@ -228,7 +229,7 @@ describe("the subagent tray (§6.10 point 5)", () => {
       ],
     });
     expect(tray(doc).hidden).toBe(false);
-    expect(doc.getElementById("subagent-tray-title")!.textContent).toBe("Waiting for 2 subagent(s)");
+    expect(doc.getElementById("subagent-tray-title")!.textContent).toBe("2 running");
     expect(tray(doc).textContent).toContain("Auth inspector");
     expect(tray(doc).textContent).toContain("Google Antigravity m-fast");
   });
@@ -256,6 +257,8 @@ describe("the subagent tray (§6.10 point 5)", () => {
       ],
     });
     const second = doc.querySelectorAll(".subagent-tray-row")[1];
+    // Cancel asks twice: a stopped child's work is lost.
+    click(window, second.querySelector(".subagent-tray-cancel")!);
     click(window, second.querySelector(".subagent-tray-cancel")!);
     expect(posted).toContainEqual({
       type: "companionSubagentAction",

@@ -1088,7 +1088,8 @@
     "prepackage": "node -e \"const fs=require('fs'); for (const f of fs.readdirSync('.')) if (f.endsWith('.vsix')) fs.unlinkSync(f); fs.rmSync('out',{recursive:true,force:true})\" && npm run check:vsix",
     "package": "vsce package --readme-path README.marketplace.md",
     "publish": "vsce publish --readme-path README.marketplace.md",
-    "publish:ovsx": "node scripts/publish-ovsx.mjs"
+    "publish:ovsx": "node scripts/publish-ovsx.mjs",
+    "ui:screens": "node scripts/ui-harness/run.mjs"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",

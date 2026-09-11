@@ -133,15 +133,15 @@ describe("the result card says what commissioned the run", () => {
   it("labels a second opinion", () => {
     const { window, doc } = bootWebview();
     dispatch(window, { ...RESULT, origin: "second-opinion" });
-    expect(doc.querySelector(".card.agent-result .card-subtitle")!.textContent)
-      .toContain("second opinion");
+    expect(doc.querySelector(".agent-result .agent-result-origin")!.textContent)
+      .toBe("Second opinion");
   });
 
   it("labels a handoff", () => {
     const { window, doc } = bootWebview();
     dispatch(window, { ...RESULT, origin: "handoff" });
-    expect(doc.querySelector(".card.agent-result .card-subtitle")!.textContent)
-      .toContain("handoff");
+    expect(doc.querySelector(".agent-result .agent-result-origin")!.textContent)
+      .toBe("Handoff");
   });
 
   it("renders a card from before AP-11, which carries no origin at all", () => {
@@ -149,10 +149,9 @@ describe("the result card says what commissioned the run", () => {
     // additive, so its absence must read as "typed", not as a blank chip.
     const { window, doc } = bootWebview();
     dispatch(window, RESULT);
-    const meta = doc.querySelector(".card.agent-result .card-subtitle")!.textContent!;
-    expect(meta).toContain("Claude");
-    expect(meta).not.toContain("handoff");
-    expect(meta).not.toContain("second opinion");
-    expect(meta).not.toContain("undefined");
+    const card = doc.querySelector(".agent-result")!;
+    expect(card.querySelector(".cx-card-sub")!.textContent).toContain("Claude");
+    expect(card.querySelector(".agent-result-origin")).toBeNull();
+    expect(card.textContent).not.toContain("undefined");
   });
 });

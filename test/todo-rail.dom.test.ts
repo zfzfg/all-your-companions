@@ -50,9 +50,9 @@ describe("todo rail (real chat.js in a DOM)", () => {
       "Write the DOM test",
     ]);
     expect(items(doc).map((li) => li.className)).toEqual([
-      "todo-item todo-completed",
-      "todo-item todo-in-progress todo-active",
-      "todo-item todo-pending",
+      "cx-row todo-item todo-completed",
+      "cx-row todo-item todo-in-progress todo-active",
+      "cx-row todo-item todo-pending",
     ]);
   });
 

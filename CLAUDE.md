@@ -42,6 +42,7 @@ npm install
 npm test         # 4832 tests (215 files), ~20s, vitest — all binary-free (incl. happy-dom DOM tests + fake-CLI ACP integration tests)
 npm run test:perf # opt-in session-history perf simulation (NOT in npm test/CI; see § History pagination)
 npm run test:integration # real VS Code Extension Host, 59 tests (~40s). NOT part of `npm test`; CI runs it as a second required job.
+npm run ui:screens # screenshot harness: every companion surface × Dark/Light/HC → .screens/ui/<label>/index.html (Electron, no browser download; --only, --theme, --label)
 npm run package  # → all-your-companions-<version>.vsix (`prepackage` deletes EVERY *.vsix, wipes out/, then runs check:vsix)
 ```
 
