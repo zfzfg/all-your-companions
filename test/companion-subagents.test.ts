@@ -18,6 +18,8 @@ import {
   profileBadge,
   runningTargets,
   subagentCardHeader,
+  subagentForbidden,
+  subagentPermissionOverlay,
   uncollectedFollowUpText,
   type SubagentRecord,
   type SubagentStatus,
@@ -458,5 +460,45 @@ describe("card copy", () => {
     expect(profileBadge("read-only")).toBe("read-only");
     expect(profileBadge("scoped-edit")).toBe("scoped edit");
     expect(profileBadge("inherit")).toBe("inherits permissions");
+  });
+});
+
+describe("scoped-edit does not leave execute at the user's default trust", () => {
+  it("asks before any shell/terminal command, on top of the scope's edit rules", () => {
+    expect(subagentPermissionOverlay("scoped-edit", ["docs/**"], [])).toEqual([
+      { kind: "edit", action: "deny", pattern: "**" },
+      { kind: "edit", action: "allow", pattern: "docs/**" },
+      { kind: "execute", action: "ask", pattern: "**" },
+    ]);
+  });
+
+  it("still asks even with no scope globs at all", () => {
+    expect(subagentPermissionOverlay("scoped-edit", [], [])).toEqual([
+      { kind: "edit", action: "deny", pattern: "**" },
+      { kind: "execute", action: "ask", pattern: "**" },
+    ]);
+  });
+
+  it("leaves read-only and inherit unchanged", () => {
+    expect(subagentPermissionOverlay("read-only", [], ["git log"])).toEqual([
+      { kind: "execute", action: "allow", pattern: "git log" },
+      { kind: "edit", action: "deny", pattern: "**" },
+      { kind: "execute", action: "ask", pattern: "**" },
+    ]);
+    expect(subagentPermissionOverlay("inherit", ["docs/**"], [])).toEqual([]);
+  });
+
+  it("tells the child to prefer its edit tool over shell redirection", () => {
+    const lines = subagentForbidden("scoped-edit");
+    expect(lines).toContain("Do not edit files outside the scope given above.");
+    expect(lines.some((line) => /shell redirection/.test(line))).toBe(true);
+  });
+
+  it("leaves read-only's and inherit's forbidden lines unchanged", () => {
+    expect(subagentForbidden("read-only")).toEqual([
+      "Do not edit, create or delete files.",
+      "Do not run commands that modify the workspace.",
+    ]);
+    expect(subagentForbidden("inherit")).toEqual([]);
   });
 });

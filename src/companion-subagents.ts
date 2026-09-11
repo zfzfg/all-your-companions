@@ -319,7 +319,12 @@ export function subagentForbidden(profile: PermissionProfile): string[] {
     ];
   }
   if (profile === "scoped-edit") {
-    return ["Do not edit files outside the scope given above."];
+    return [
+      "Do not edit files outside the scope given above.",
+      "Make file edits through your editor/file tools, not shell redirection "
+        + "(e.g. `cat >`, `sed -i`, `echo >`) — the host can only verify edits "
+        + "made that way.",
+    ];
   }
   return [];
 }
@@ -330,9 +335,11 @@ export function subagentForbidden(profile: PermissionProfile): string[] {
  * Deny still wins over everything here, and the safety floor cannot be
  * overridden — this only ever narrows. `read-only` denies edits outright and
  * allows the read commands the user listed; `scoped-edit` allows edits inside
- * the given globs and leaves everything else to the normal card flow;
- * `inherit` adds nothing, because the parent's own rules already apply and a
- * child is never granted more than its parent.
+ * the given globs and asks before any shell/terminal execution, so a scoped
+ * child cannot use a command to write outside its scope with the trust of
+ * whatever the user's own default execute rule happens to be; `inherit` adds
+ * nothing, because the parent's own rules already apply and a child is never
+ * granted more than its parent.
  */
 export function subagentPermissionOverlay(
   profile: PermissionProfile,
@@ -356,6 +363,7 @@ export function subagentPermissionOverlay(
     return [
       { kind: "edit" as const, action: "deny" as const, pattern: "**" },
       ...globs.map((glob) => ({ kind: "edit" as const, action: "allow" as const, pattern: glob })),
+      { kind: "execute" as const, action: "ask" as const, pattern: "**" },
     ];
   }
   return [];
