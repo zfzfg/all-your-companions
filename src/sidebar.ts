@@ -317,7 +317,7 @@ import {
   type QueuedSendEntry,
 } from "./queued-send";
 
-import { EXTENSION_HOST_SLASH_COMMANDS, matchSlashCommand, parseAgentCommand, parseCrewCommand, parseHandoffCommand } from "./slash-filter";
+import { EXTENSION_HOST_SLASH_COMMANDS, matchSlashCommand, parseAgentCommand, parseCrewCommand, parseHandoffCommand, parseSubagentsCommand } from "./slash-filter";
 import {
   applyStepOutcome,
   assignStepRole,
@@ -364,7 +364,7 @@ import {
   COMPANIONS_WORKFLOW_SCHEMA_TOOL,
   extractCompanionsWorkflow,
   generatorMetaPrompt,
-  isGeneratorTool,
+  isGeneratorOnlyTool,
   makeGeneratorState,
   recordValidation,
   workflowArg,
@@ -630,15 +630,19 @@ import {
   SUBAGENT_MAX_DEPTH_CAP,
   SubagentRegistry,
   carveChildLimits,
+  companionsSkipNotice,
+  decideCompanionsMcp,
+  formatSubagentDiagnosis,
   deriveSubagentLabel,
-  mayDelegateAtDepth,
   resolveMaxDepth,
   isTerminalSubagentStatus,
   profileBadge,
+  shouldAnnounceCompanionsSkip,
   subagentForbidden,
   subagentPermissionOverlay,
   subagentReturnFormat,
   uncollectedFollowUpText,
+  type CompanionsSkipReason,
 } from "./companion-subagents";
 import {
   EFFORT_ORDER,
@@ -1832,6 +1836,42 @@ export class GrokSidebar {
   private agentNotice(session: Session, level: "info" | "warning", text: string): void {
     this.host.appendLine(`[agent] ${text}`);
     this.emit(session, { type: "hostNotice", level, text });
+  }
+
+  /**
+   * `/subagents` — live roster and injection diagnose (AP-16).
+   *
+   * Host-answered; never a billed prompt. Reads the flag stamped at
+   * `session/new`, not the settings the user may have flipped since.
+   */
+  private handleSubagentsCommand(text: string, session: Session): void {
+    this.emit(session, { type: "userMessage", text, chips: [] });
+    const turnId = this.currentTurnId(session);
+    const eligibility = this.eligibilityInput(session, turnId);
+    const geminiRoster = eligibility.roster.gemini;
+    const geminiSpawn = resolveTarget({ provider: "gemini", profile: "read-only" }, eligibility);
+    const hostMcp = providerCapability(session.provider, "hostMcp");
+    const report = formatSubagentDiagnosis({
+      sessionType: session.sessionType ?? "agent",
+      subagentsEnabled: this.subagentsCouldBeUsedIn(session),
+      mcpInjected: session.companionsMcpInjected === true,
+      ...(session.companionsSkipReason ? { skipReason: session.companionsSkipReason } : {}),
+      parentProvider: session.provider,
+      parentHostMcp: hostMcp.state,
+      geminiUsable: this.usableProviders().includes("gemini"),
+      geminiRosterEnabled: geminiRoster?.enabled !== false,
+      geminiSpawn: geminiSpawn.ok
+        ? { ok: true, ...(geminiSpawn.target.model ? { model: geminiSpawn.target.model } : {}) }
+        : { ok: false, code: geminiSpawn.code, message: geminiSpawn.message },
+      limits: {
+        running: eligibility.limits.running,
+        maxConcurrent: eligibility.limits.maxConcurrent,
+        thisTurn: eligibility.limits.thisTurn,
+        maxPerTurn: eligibility.limits.maxPerTurn,
+      },
+    });
+    this.host.appendLine(`[companions] /subagents\n${report}`);
+    this.emit(session, { type: "hostNotice", level: "info", text: report });
   }
 
   /**
@@ -9897,28 +9937,43 @@ Only continue if you trust this code.`,
   private async companionsMcpServer(session: Session): Promise<AcpMcpStdioServer | undefined> {
     const hidden = session.pendingHiddenChild?.hiddenReason
       ?? this.sessionTypeMetaFor(session)?.hiddenReason;
-    // Generator sessions get the authoring tool set even when subagents are
-    // off — the generator is not delegation, and the master switch must not
-    // disable Settings → Generate workflow. It never gets spawn/await (§12.3).
-    if (hidden === "workflow-generator") {
-      return this.spawnCompanionsServer(session, "generator");
+    const stored = this.sessionTypeMetaFor(session)?.subagentsEnabled;
+    const decision = decideCompanionsMcp({
+      ...(hidden ? { hiddenReason: hidden } : {}),
+      sessionType: session.sessionType ?? "agent",
+      // The type gate lives in decideCompanionsMcp; pass the switch alone so
+      // a Crew session is `crew-orchestrator`, not `subagents-disabled`.
+      subagentsEnabled: stored ?? this.subagentsEnabledGlobally(),
+      stageMayDelegate: this.stageMayDelegate(session),
+      depth: session.pendingHiddenChild?.depth
+        ?? this.sessionTypeMetaFor(session)?.depth
+        ?? 0,
+      maxDepth: this.subagentMaxDepth(),
+    });
+    if (decision.kind === "skip") {
+      this.noteCompanionsSkip(session, decision.reason);
+      return undefined;
     }
-    if (!this.subagentsCouldBeUsedIn(session)) return undefined;
-    // A Crew session is the orchestrator, not a chatting agent that delegates.
-    if (session.sessionType === "crew" && !hidden) return undefined;
-    // §7.9 — a crew STAGE may delegate, but only when the user turned it on
-    // globally AND the workflow's own stage asked for it. Two switches because
-    // they answer different questions: the setting is "do I want nested runs at
-    // all", the stage flag is "does this particular stage need one".
-    if (hidden === "crew-stage" && !this.stageMayDelegate(session)) return undefined;
-    // D10 / §12.3 — depth. At the shipped `maxDepth: 1` only the user's own
-    // session delegates, which is what P2–P5 enforced as "hidden children never
-    // get the server"; at 2 a depth-1 child may delegate once more.
-    const depth = session.pendingHiddenChild?.depth
-      ?? this.sessionTypeMetaFor(session)?.depth
-      ?? 0;
-    if (!mayDelegateAtDepth(depth, this.subagentMaxDepth())) return undefined;
-    return this.spawnCompanionsServer(session, "delegate");
+    return this.spawnCompanionsServer(session, decision.mode);
+  }
+
+  /**
+   * Record a withheld delegation server. Surprising reasons become a chat
+   * notice once; expected gates (crew, depth, stage) stay in the log.
+   */
+  private noteCompanionsSkip(session: Session, reason: CompanionsSkipReason): void {
+    session.companionsMcpInjected = false;
+    session.companionsSkipReason = reason;
+    this.host.appendLine(`[companions] not offering delegation: ${reason}`);
+    const hidden = session.pendingHiddenChild?.hiddenReason
+      ?? this.sessionTypeMetaFor(session)?.hiddenReason;
+    if (!shouldAnnounceCompanionsSkip(reason, hidden) || session.companionsSkipAnnounced) return;
+    session.companionsSkipAnnounced = true;
+    this.emit(session, {
+      type: "hostNotice",
+      level: "warning",
+      text: companionsSkipNotice(reason),
+    });
   }
 
   /**
@@ -9962,23 +10017,29 @@ Only continue if you trust this code.`,
     mode: "delegate" | "generator",
   ): Promise<AcpMcpStdioServer | undefined> {
     if (providerCapability(session.provider, "hostMcp").state !== "yes") {
-      this.host.appendLine(
-        `[companions] not offering ${mode} MCP on ${session.provider}: host MCP support is unproven`,
-      );
+      this.noteCompanionsSkip(session, "host-mcp-unproven");
       return undefined;
     }
     const reserved = this.reservedMcpIdentityFor(session);
     if (reserved.names.some((name) => normalizeMcpName(name) === COMPANIONS_SERVER_NAME)) {
-      this.host.appendLine(
-        `[companions] a provider MCP server is already named "${COMPANIONS_SERVER_NAME}" — not adding ours`,
-      );
+      this.noteCompanionsSkip(session, "name-collision");
       return undefined;
     }
     const channel = this.companions();
-    if (!(await channel.listen())) return undefined;
+    if (!(await channel.listen())) {
+      this.noteCompanionsSkip(session, "pipe-failed");
+      return undefined;
+    }
     this.revokeCompanionsToken(session);
     session.companionsToken = channel.register(mode);
-    return channel.spawnSpec(session.companionsToken);
+    const spec = channel.spawnSpec(session.companionsToken);
+    if (!spec) {
+      this.noteCompanionsSkip(session, "pipe-failed");
+      return undefined;
+    }
+    session.companionsMcpInjected = true;
+    session.companionsSkipReason = undefined;
+    return spec;
   }
 
   /**
@@ -10200,7 +10261,7 @@ Only continue if you trust this code.`,
     try {
       const hidden = session.pendingHiddenChild?.hiddenReason
         ?? this.sessionTypeMetaFor(session)?.hiddenReason;
-      if (hidden === "workflow-generator" || isGeneratorTool(call.tool)) {
+      if (hidden === "workflow-generator" || isGeneratorOnlyTool(call.tool)) {
         this.handleGeneratorTool(session, call);
         return;
       }
@@ -15653,6 +15714,10 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
           await this.handleCrewCommand(msg.text, session, origin);
           break;
         }
+        if (parseSubagentsCommand(msg.text).kind !== "none") {
+          this.handleSubagentsCommand(msg.text, session);
+          break;
+        }
         let queuedSendCommit: { text: string; items: QueuedSendEntry[] } | undefined;
         if (origin === "remote" && msg.queuedSendId) {
           if (session.completedQueuedSendIds.includes(msg.queuedSendId)) {
@@ -17451,6 +17516,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       if (companions) servers.push(companions);
     } catch (error) {
       this.host.appendLine(`[companions] not offering delegation: ${(error as Error).message}`);
+      if (!session.companionsMcpInjected) this.noteCompanionsSkip(session, "pipe-failed");
     }
     return servers;
   }
@@ -21768,6 +21834,10 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     }
     if (parseCrewCommand(text).kind !== "none") {
       await this.handleCrewCommand(text, session, origin);
+      return;
+    }
+    if (parseSubagentsCommand(text).kind !== "none") {
+      this.handleSubagentsCommand(text, session);
       return;
     }
     if (session.sessionType === "crew" && !session.pendingHiddenChild) {

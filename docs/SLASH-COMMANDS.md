@@ -40,6 +40,17 @@ Present in subscription mode, not on API-key auth.
 
 Since v1.4.0 the extension **renders the result inline** — `/imagine` output shows as an image (click to open the source file), `/imagine-video` as a playable `<video>`. Grok writes the file into its session directory and the extension serves it to the webview via `asWebviewUri` (streamed from disk; a base64 `data:` URI is used only as a fallback for files outside grok's served roots). Inline media is capped at 320px, and hovering an image/video reveals **Copy path** / **Open in VS Code** actions pinned to the media. When `/imagine` is given a source image to edit, grok runs an `image_edit` tool call, which the extension detects and renders the same way. See [research/image-generation.md](../research/image-generation.md) for the wire format.
 
+## Host (extension)
+
+These are answered by All your Companions and never forwarded to a CLI. Type `/` in the composer — they appear alongside the CLI’s own commands.
+
+| Command | Effect |
+|---|---|
+| `/agent` / `/agents` | Run or list named agent roles |
+| `/crew` | Walk a workflow with a team of roles |
+| `/handoff` / `/second-opinion` | Hand off or request an independent review |
+| `/subagents` | Show whether **this** session can start a companion subagent (injection, Gemini roster, live limits). Restart the session if the switch is on but tools were not attached. |
+
 ## Not slash commands
 
 A few things look like slash commands but are surfaced through the extension UI, not the CLI:

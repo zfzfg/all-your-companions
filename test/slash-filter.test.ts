@@ -9,6 +9,7 @@ import {
   isAdvertisedSkill,
   matchSlashCommand,
   parseCrewCommand,
+  parseSubagentsCommand,
 } from "../src/slash-filter";
 
 describe("getSlashQuery", () => {
@@ -279,5 +280,22 @@ describe("parseCrewCommand (AP-12)", () => {
 
   it("does not match prose that merely mentions /crew", () => {
     expect(parseCrewCommand("see /crew docs")).toEqual({ kind: "none" });
+  });
+});
+
+describe("parseSubagentsCommand", () => {
+  it("is a host slash command and is never forwarded", () => {
+    expect(HOST_SLASH_COMMANDS.has("subagents")).toBe(true);
+  });
+
+  it("matches /subagents at the start of the message", () => {
+    expect(parseSubagentsCommand("/subagents")).toEqual({ kind: "diagnose" });
+    expect(parseSubagentsCommand("/subagents gemini")).toEqual({ kind: "diagnose" });
+  });
+
+  it("does not match /agent, /subagent:gemini, or prose", () => {
+    expect(parseSubagentsCommand("/agent reviewer look")).toEqual({ kind: "none" });
+    expect(parseSubagentsCommand("@subagent:gemini")).toEqual({ kind: "none" });
+    expect(parseSubagentsCommand("run /subagents later")).toEqual({ kind: "none" });
   });
 });

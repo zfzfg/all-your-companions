@@ -38,6 +38,15 @@ export function isGeneratorTool(name: string): name is GeneratorToolName {
   return (GENERATOR_TOOL_NAMES as readonly string[]).includes(name);
 }
 
+/**
+ * Tools that exist only on the generator surface. List is shared with
+ * delegation sessions (`companions_list_subagent_targets`); treating it as
+ * generator-only made every normal-session list fail.
+ */
+export function isGeneratorOnlyTool(name: string): boolean {
+  return isGeneratorTool(name) && name !== COMPANIONS_LIST_TOOL;
+}
+
 /** Compact authoring guide — NOT the full JSON Schema. The validator is the authority. */
 export const WORKFLOW_AUTHORING_GUIDE = [
   "A workflow is JSON: schemaVersion 1, name [a-z0-9-]+, title, whenToUse, defaults, roles, stages, contracts, start.",

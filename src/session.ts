@@ -1,5 +1,6 @@
 import { AcpClient } from "./acp";
 import type { SubagentDirective } from "./subagent-directives";
+import type { CompanionsSkipReason } from "./companion-subagents";
 import { isSessionTypeLocked, type SessionType } from "./session-type";
 import type { HostMsg, WorkflowRunView } from "./protocol";
 import type { ContextChip } from "./context-chips";
@@ -327,6 +328,19 @@ export class Session {
 
   /** Per-session token for the AP-16 delegation pipe. Revoked on restart. */
   companionsToken?: string;
+
+  /**
+   * Whether `session/new` was handed the `companions_subagents` MCP server.
+   *
+   * Fixed at spawn: turning the gear switch on later cannot add the server
+   * without a restart. The diagnose command reads this instead of guessing
+   * from settings.
+   */
+  companionsMcpInjected?: boolean;
+  /** Why the server was withheld, when {@link companionsMcpInjected} is not true. */
+  companionsSkipReason?: CompanionsSkipReason;
+  /** The surprising skip was already shown as a hostNotice this process. */
+  companionsSkipAnnounced?: boolean;
 
   /**
    * This session is a crew stage whose workflow set `allowSubagents` (§7.9, P6).

@@ -417,6 +417,143 @@ export function mayDelegateAtDepth(depth: number, maxDepth: 1 | 2): boolean {
 }
 
 /**
+ * Why a session was not handed the `companions_subagents` MCP server.
+ *
+ * The server list is fixed at `session/new`, so a skip here is permanent for
+ * that process. The host logs every reason; only the surprising ones become a
+ * chat notice — crew, depth and stage gates are the design, not a failure.
+ */
+export type CompanionsSkipReason =
+  | "subagents-disabled"
+  | "not-agent"
+  | "crew-orchestrator"
+  | "stage-not-allowed"
+  | "depth-capped"
+  | "host-mcp-unproven"
+  | "name-collision"
+  | "pipe-failed";
+
+export type CompanionsMcpMode = "delegate" | "generator";
+
+export type CompanionsMcpDecision =
+  | { kind: "offer"; mode: CompanionsMcpMode }
+  | { kind: "skip"; reason: CompanionsSkipReason };
+
+export interface CompanionsMcpOfferInput {
+  /** `companion-subagent` | `crew-stage` | `workflow-generator`, if hidden. */
+  hiddenReason?: string;
+  sessionType: string;
+  /** Global or session-gear switch, already resolved. Agent-type is separate. */
+  subagentsEnabled: boolean;
+  stageMayDelegate: boolean;
+  depth: number;
+  maxDepth: 1 | 2;
+}
+
+/**
+ * Whether this session should get the delegation (or generator) MCP server.
+ *
+ * Spawn-time failures (pipe, name collision, unproven host MCP) are not
+ * decided here — those need a live process. This is the §6.4.1 gate that is
+ * knowable from session type, settings and depth alone.
+ */
+export function decideCompanionsMcp(input: CompanionsMcpOfferInput): CompanionsMcpDecision {
+  if (input.hiddenReason === "workflow-generator") return { kind: "offer", mode: "generator" };
+  if (input.sessionType === "crew" && !input.hiddenReason) {
+    return { kind: "skip", reason: "crew-orchestrator" };
+  }
+  if (input.sessionType !== "agent") return { kind: "skip", reason: "not-agent" };
+  if (!input.subagentsEnabled) return { kind: "skip", reason: "subagents-disabled" };
+  if (input.hiddenReason === "crew-stage" && !input.stageMayDelegate) {
+    return { kind: "skip", reason: "stage-not-allowed" };
+  }
+  if (!mayDelegateAtDepth(input.depth, input.maxDepth)) {
+    return { kind: "skip", reason: "depth-capped" };
+  }
+  return { kind: "offer", mode: "delegate" };
+}
+
+/** Chat copy for a skip the user would otherwise only see as "no MCP tools". */
+export function companionsSkipNotice(reason: CompanionsSkipReason): string {
+  switch (reason) {
+    case "subagents-disabled":
+      return "Companion subagents are off for this session. Turn them on in Settings or the session gear, then start a new session so the tools can attach.";
+    case "host-mcp-unproven":
+      return "This companion cannot host subagent tools yet (host MCP support is unproven). It can still run as a subagent child of another companion.";
+    case "name-collision":
+      return "A provider MCP server already uses the name companions_subagents, so delegation tools were not added to this session.";
+    case "pipe-failed":
+      return "Could not open the companion-subagent channel. This session can still chat; it cannot start companion subagents.";
+    case "not-agent":
+      return "Companion subagents are only available in Agent sessions.";
+    case "crew-orchestrator":
+      return "Crew sessions orchestrate a workflow and do not get companion-subagent tools. A stage can, when both switches allow it.";
+    case "stage-not-allowed":
+      return "This crew stage cannot start subagents. Turn on “Crew stages may use subagents” and set the stage’s own flag.";
+    case "depth-capped":
+      return "This session is already as deep as companion subagents are allowed to nest.";
+  }
+}
+
+/**
+ * A skip the person (and the parent model) would otherwise misread as a
+ * missing feature. Expected gates — crew, depth, stage — stay in the log.
+ */
+export function shouldAnnounceCompanionsSkip(
+  reason: CompanionsSkipReason,
+  hiddenReason?: string,
+): boolean {
+  if (reason === "host-mcp-unproven" || reason === "name-collision" || reason === "pipe-failed") {
+    return true;
+  }
+  if (reason === "subagents-disabled") return !hiddenReason;
+  return false;
+}
+
+/** Snapshot `/subagents` prints. Assembled by the host, formatted here. */
+export interface SubagentDiagnosis {
+  sessionType: string;
+  subagentsEnabled: boolean;
+  mcpInjected: boolean;
+  skipReason?: CompanionsSkipReason;
+  parentProvider: string;
+  parentHostMcp: string;
+  geminiUsable: boolean;
+  geminiRosterEnabled: boolean;
+  geminiSpawn?: { ok: true; model?: string } | { ok: false; code: string; message: string };
+  limits: { running: number; maxConcurrent: number; thisTurn: number; maxPerTurn: number };
+}
+
+export function formatSubagentDiagnosis(d: SubagentDiagnosis): string {
+  const yn = (ok: boolean) => (ok ? "yes" : "no");
+  const gemini = d.geminiSpawn?.ok
+    ? `would accept (model ${d.geminiSpawn.model ?? "provider default"})`
+    : d.geminiSpawn
+      ? `${d.geminiSpawn.code}: ${d.geminiSpawn.message}`
+      : "not checked";
+  const restart = !d.mcpInjected && d.subagentsEnabled && d.sessionType === "agent"
+    ? "\n\nThe tools attach at session start. Restart this session (keep transcript) after turning subagents on."
+    : "";
+  const verdict = d.mcpInjected && d.geminiSpawn?.ok
+    ? "Spawn would accept **gemini**."
+    : "Spawn would **not** start a Gemini subagent from this session.";
+  return [
+    "### Companion subagents",
+    "",
+    verdict + restart,
+    "",
+    `- ${yn(d.sessionType === "agent")} — **Session type**: \`${d.sessionType}\``,
+    `- ${yn(d.subagentsEnabled)} — **Subagents switch**: ${d.subagentsEnabled ? "on" : "off"}`,
+    `- ${yn(d.mcpInjected)} — **\`companions_subagents\` injected**: ${d.mcpInjected ? "yes" : d.skipReason ? d.skipReason : "no"}`,
+    `- ${yn(d.parentHostMcp === "yes")} — **${d.parentProvider} host MCP**: \`${d.parentHostMcp}\``,
+    `- ${yn(d.geminiUsable)} — **Gemini usable** (connected, located, logged in)`,
+    `- ${yn(d.geminiRosterEnabled)} — **Gemini on the subagent roster**`,
+    `- ${yn(!!d.geminiSpawn?.ok)} — **resolveTarget gemini**: ${gemini}`,
+    `- limits: ${d.limits.running}/${d.limits.maxConcurrent} running, ${d.limits.thisTurn}/${d.limits.maxPerTurn} this turn`,
+  ].join("\n");
+}
+
+/**
  * A grandchild's budget, carved out of what the parent has left (§12.3, D10).
  *
  * The point of the carve-out is that depth 2 must not multiply the cost of a

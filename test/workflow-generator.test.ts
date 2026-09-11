@@ -9,6 +9,7 @@ import {
   GENERATOR_TOOLS,
   generatorMetaPrompt,
   isGeneratorTool,
+  isGeneratorOnlyTool,
   makeGeneratorState,
   recordValidation,
   canRepair,
@@ -24,6 +25,10 @@ describe("generator tools", () => {
     expect([...GENERATOR_TOOL_NAMES]).toContain("companions_submit_workflow");
     expect([...GENERATOR_TOOL_NAMES]).toContain("companions_list_subagent_targets");
     expect(isGeneratorTool("companions_spawn_subagent")).toBe(false);
+    expect(isGeneratorTool("companions_list_subagent_targets")).toBe(true);
+    expect(isGeneratorOnlyTool("companions_list_subagent_targets")).toBe(false);
+    expect(isGeneratorOnlyTool("companions_workflow_schema")).toBe(true);
+    expect(isGeneratorOnlyTool("companions_spawn_subagent")).toBe(false);
     expect(GENERATOR_TOOLS.map((t) => t.name)).toEqual([...GENERATOR_TOOL_NAMES]);
     expect(GENERATOR_TOOLS.some((t) => t.name === COMPANIONS_SPAWN_TOOL)).toBe(false);
   });

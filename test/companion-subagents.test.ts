@@ -8,6 +8,10 @@ import {
   SubagentRegistry,
   carveChildLimits,
   mayDelegateAtDepth,
+  decideCompanionsMcp,
+  shouldAnnounceCompanionsSkip,
+  companionsSkipNotice,
+  formatSubagentDiagnosis,
   resolveMaxDepth,
   deriveSubagentLabel,
   isTerminalSubagentStatus,
@@ -260,6 +264,122 @@ describe("delegation depth (D10, §12.3) — P6", () => {
   it("treats a missing or broken depth as the user's own session", () => {
     expect(mayDelegateAtDepth(NaN, 1)).toBe(true);
     expect(mayDelegateAtDepth(-1, 1)).toBe(true);
+  });
+});
+
+describe("who is offered the companions MCP server", () => {
+  const agent = {
+    sessionType: "agent",
+    subagentsEnabled: true,
+    stageMayDelegate: false,
+    depth: 0,
+    maxDepth: 1 as const,
+  };
+
+  it("offers delegate to a user's Agent session", () => {
+    expect(decideCompanionsMcp(agent)).toEqual({ kind: "offer", mode: "delegate" });
+  });
+
+  it("offers generator even when the master switch is off", () => {
+    expect(decideCompanionsMcp({
+      ...agent,
+      hiddenReason: "workflow-generator",
+      subagentsEnabled: false,
+      depth: 1,
+    })).toEqual({ kind: "offer", mode: "generator" });
+  });
+
+  it("skips a Crew orchestrator as crew-orchestrator, not as disabled", () => {
+    expect(decideCompanionsMcp({ ...agent, sessionType: "crew" })).toEqual({
+      kind: "skip",
+      reason: "crew-orchestrator",
+    });
+  });
+
+  it("skips an Agent session whose switch is off", () => {
+    expect(decideCompanionsMcp({ ...agent, subagentsEnabled: false })).toEqual({
+      kind: "skip",
+      reason: "subagents-disabled",
+    });
+  });
+
+  it("skips a depth-1 child at the default maxDepth", () => {
+    expect(decideCompanionsMcp({
+      ...agent,
+      hiddenReason: "companion-subagent",
+      depth: 1,
+    })).toEqual({ kind: "skip", reason: "depth-capped" });
+  });
+
+  it("offers delegate to a depth-1 child when maxDepth is 2", () => {
+    expect(decideCompanionsMcp({
+      ...agent,
+      hiddenReason: "companion-subagent",
+      depth: 1,
+      maxDepth: 2,
+    })).toEqual({ kind: "offer", mode: "delegate" });
+  });
+
+  it("skips a crew stage unless both switches allow it", () => {
+    expect(decideCompanionsMcp({
+      ...agent,
+      hiddenReason: "crew-stage",
+      stageMayDelegate: false,
+      depth: 1,
+      maxDepth: 2,
+    })).toEqual({ kind: "skip", reason: "stage-not-allowed" });
+    expect(decideCompanionsMcp({
+      ...agent,
+      hiddenReason: "crew-stage",
+      stageMayDelegate: true,
+      depth: 1,
+      maxDepth: 2,
+    })).toEqual({ kind: "offer", mode: "delegate" });
+  });
+
+  it("announces surprising skips and not the designed gates", () => {
+    expect(shouldAnnounceCompanionsSkip("pipe-failed")).toBe(true);
+    expect(shouldAnnounceCompanionsSkip("name-collision")).toBe(true);
+    expect(shouldAnnounceCompanionsSkip("host-mcp-unproven")).toBe(true);
+    expect(shouldAnnounceCompanionsSkip("subagents-disabled")).toBe(true);
+    expect(shouldAnnounceCompanionsSkip("subagents-disabled", "companion-subagent")).toBe(false);
+    expect(shouldAnnounceCompanionsSkip("crew-orchestrator")).toBe(false);
+    expect(shouldAnnounceCompanionsSkip("depth-capped")).toBe(false);
+    expect(shouldAnnounceCompanionsSkip("stage-not-allowed")).toBe(false);
+    expect(companionsSkipNotice("pipe-failed")).toMatch(/cannot start companion subagents/i);
+  });
+
+  it("formats a Gemini-ready diagnose as an accept verdict", () => {
+    const text = formatSubagentDiagnosis({
+      sessionType: "agent",
+      subagentsEnabled: true,
+      mcpInjected: true,
+      parentProvider: "grok",
+      parentHostMcp: "yes",
+      geminiUsable: true,
+      geminiRosterEnabled: true,
+      geminiSpawn: { ok: true, model: "gemini-3.8-flash" },
+      limits: { running: 0, maxConcurrent: 3, thisTurn: 0, maxPerTurn: 4 },
+    });
+    expect(text).toContain("Spawn would accept **gemini**");
+    expect(text).not.toContain("Restart this session");
+  });
+
+  it("tells the user to restart when the switch is on but the server was not injected", () => {
+    const text = formatSubagentDiagnosis({
+      sessionType: "agent",
+      subagentsEnabled: true,
+      mcpInjected: false,
+      skipReason: "pipe-failed",
+      parentProvider: "grok",
+      parentHostMcp: "yes",
+      geminiUsable: true,
+      geminiRosterEnabled: true,
+      geminiSpawn: { ok: false, code: "subagents-disabled", message: "off" },
+      limits: { running: 0, maxConcurrent: 3, thisTurn: 0, maxPerTurn: 4 },
+    });
+    expect(text).toContain("Restart this session");
+    expect(text).toContain("pipe-failed");
   });
 });
 

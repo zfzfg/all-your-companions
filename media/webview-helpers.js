@@ -75,6 +75,10 @@
       name: "second-opinion",
       description: "Request an independent review of recent changes from another model/reviewer",
     },
+    {
+      name: "subagents",
+      description: "Show whether this session can start a companion subagent (e.g. Gemini)",
+    },
   ];
   const HOST_MESSAGE_TYPE_SET = new Set(HOST_MESSAGE_TYPES);
   /** True when `type` is a host->webview message the contract knows about. A

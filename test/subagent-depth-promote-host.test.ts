@@ -182,6 +182,106 @@ describe("who is handed the delegation server (D10, §7.9)", () => {
     } as Partial<Session>);
     expect(await sidebar.companionsMcpServer(generator)).toMatchObject({ name: "generator" });
   });
+
+  it("records crew as crew-orchestrator and does not notice", async () => {
+    const { sidebar, emitted } = makeSidebar();
+    const crew = agentSession();
+    crew.sessionType = "crew";
+    expect(await sidebar.companionsMcpServer(crew)).toBeUndefined();
+    expect(crew.companionsSkipReason).toBe("crew-orchestrator");
+    expect(crew.companionsMcpInjected).toBe(false);
+    expect(emitted.some((m) => m.type === "hostNotice")).toBe(false);
+  });
+
+  it("notices once when an Agent session has subagents off", async () => {
+    const { sidebar, emitted } = makeSidebar({ "subagents.enabled": false });
+    const session = agentSession();
+    expect(await sidebar.companionsMcpServer(session)).toBeUndefined();
+    expect(session.companionsSkipReason).toBe("subagents-disabled");
+    expect(emitted.filter((m) => m.type === "hostNotice")).toHaveLength(1);
+    expect(emitted[0]).toMatchObject({
+      type: "hostNotice",
+      level: "warning",
+    });
+    expect(await sidebar.companionsMcpServer(session)).toBeUndefined();
+    expect(emitted.filter((m) => m.type === "hostNotice")).toHaveLength(1);
+  });
+
+  it("does not notice a depth-capped child", async () => {
+    const { sidebar, emitted } = makeSidebar();
+    const child = agentSession({
+      pendingHiddenChild: {
+        parentSessionId: "parent-1",
+        subagentId: "sa_1",
+        hiddenReason: "companion-subagent",
+        depth: 1,
+      },
+    } as Partial<Session>);
+    expect(await sidebar.companionsMcpServer(child)).toBeUndefined();
+    expect(child.companionsSkipReason).toBe("depth-capped");
+    expect(emitted.some((m) => m.type === "hostNotice")).toBe(false);
+  });
+
+  it("notices a name collision instead of silently dropping the server", async () => {
+    const { sidebar, emitted } = makeSidebar();
+    sidebar.reservedMcpIdentityFor = vi.fn(() => ({ names: ["companions_subagents"] }));
+    sidebar.spawnCompanionsServer = GrokSidebar.prototype.spawnCompanionsServer;
+    const session = agentSession();
+    expect(await sidebar.companionsMcpServer(session)).toBeUndefined();
+    expect(session.companionsSkipReason).toBe("name-collision");
+    expect(emitted.some((m) => m.type === "hostNotice" && "text" in m
+      && String(m.text).includes("companions_subagents"))).toBe(true);
+  });
+
+  it("notices unproven host MCP (gemini as parent) and still marks the skip", async () => {
+    const { sidebar, emitted } = makeSidebar();
+    sidebar.spawnCompanionsServer = GrokSidebar.prototype.spawnCompanionsServer;
+    const session = agentSession();
+    session.provider = "gemini";
+    expect(await sidebar.companionsMcpServer(session)).toBeUndefined();
+    expect(session.companionsSkipReason).toBe("host-mcp-unproven");
+    expect(emitted.some((m) => m.type === "hostNotice")).toBe(true);
+  });
+
+  it("hands grok a companions_subagents spec with the token in env, not argv", async () => {
+    const { sidebar } = makeSidebar();
+    sidebar.spawnCompanionsServer = GrokSidebar.prototype.spawnCompanionsServer;
+    sidebar.revokeCompanionsToken = vi.fn();
+    sidebar.companions = vi.fn(() => ({
+      listen: async () => "\\\\.\\pipe\\companions-delegate-test",
+      register: () => "secret-token",
+      spawnSpec: (token: string) => ({
+        name: "companions_subagents",
+        command: "node",
+        args: ["companions-server.cjs"],
+        env: [
+          { name: "COMPANIONS_DELEGATE_ADDRESS", value: "\\\\.\\pipe\\companions-delegate-test" },
+          { name: "COMPANIONS_DELEGATE_TOKEN", value: token },
+        ],
+      }),
+    }));
+    const session = agentSession();
+    const spec = await sidebar.companionsMcpServer(session);
+    expect(spec).toMatchObject({
+      name: "companions_subagents",
+      args: ["companions-server.cjs"],
+    });
+    const env = spec.env as Array<{ name: string; value: string }>;
+    expect(env.find((row) => row.name === "COMPANIONS_DELEGATE_ADDRESS")?.value).toBeTruthy();
+    expect(env.find((row) => row.name === "COMPANIONS_DELEGATE_TOKEN")?.value).toBe("secret-token");
+    expect(spec.args.join(" ")).not.toContain("secret-token");
+    expect(session.companionsMcpInjected).toBe(true);
+    expect(session.companionsSkipReason).toBeUndefined();
+  });
+});
+
+describe("/subagents is answered by the host", () => {
+  it("is dispatched from both send paths without an unconditional await", () => {
+    const source = require("node:fs").readFileSync(new URL("../src/sidebar.ts", import.meta.url), "utf8") as string;
+    expect(source).toContain('if (parseSubagentsCommand(msg.text).kind !== "none")');
+    expect(source).toContain('if (parseSubagentsCommand(text).kind !== "none")');
+    expect(source).not.toMatch(/if \(await this\.handleSubagentsCommand/);
+  });
 });
 
 describe("promote to a session of its own (§6.6 point 8)", () => {

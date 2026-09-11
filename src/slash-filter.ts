@@ -51,6 +51,9 @@ export const HOST_SLASH_COMMANDS: ReadonlySet<string> = new Set([
   // AP-12. A chain is N billed sessions; forwarding `/crew` would be one more,
   // in which the model improvises an orchestration it cannot actually run.
   "crew",
+  // AP-16 diagnose. Forwarding would bill a turn in which the model guesses
+  // at Gemini eligibility instead of reading the host's live roster.
+  "subagents",
 ]);
 
 /** Host slash commands advertised in autocomplete popovers with clear descriptions */
@@ -74,6 +77,10 @@ export const EXTENSION_HOST_SLASH_COMMANDS: SlashCmd[] = [
   {
     name: "second-opinion",
     description: "Request an independent review of recent changes from another model/reviewer",
+  },
+  {
+    name: "subagents",
+    description: "Show whether this session can start a companion subagent (e.g. Gemini)",
   },
 ];
 
@@ -276,6 +283,15 @@ export function applySlashPick(
   const slashIndex = before.length - m[0].length;
   const newBefore = before.slice(0, slashIndex) + `/${name} `;
   return { text: newBefore + after, caret: newBefore.length };
+}
+
+export type SubagentsCommandParse = { kind: "none" } | { kind: "diagnose" };
+
+/** `/subagents` — host diagnose, never forwarded. Extra words are ignored. */
+export function parseSubagentsCommand(text: string): SubagentsCommandParse {
+  return /^\/subagents(?:\s|$)/.test(String(text ?? "").trim())
+    ? { kind: "diagnose" }
+    : { kind: "none" };
 }
 
 /**
