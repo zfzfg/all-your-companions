@@ -343,6 +343,18 @@ export class AcpClient extends EventEmitter {
   lastMeta?: PromptResultMeta;
   private lastContextUsed?: number;
   private lastContextWindow?: number;
+  /**
+   * Remembered -32601 for `_x.ai/git/worktree/list`.
+   *
+   * A running CLI cannot grow a method, so the answer is settled for this
+   * client's life. It is cached because this one is on a HOT path in a way the
+   * other optional methods are not: `refreshWorktreeCache()` fires on every
+   * `listSessions()`, so a CLI without the method paid a round trip and wrote a
+   * log line every time the session list was built — bursts of identical
+   * "CLI does not support" lines, seconds apart, drowning everything else in
+   * the desktop log (owner-hit, 2026-09-21).
+   */
+  private worktreeListUnsupported = false;
   private currentSessionTitle?: string;
   /**
    * The session's effective reasoning effort. Seeded from the spawn flag
@@ -934,11 +946,14 @@ export class AcpClient extends EventEmitter {
 
   /** List tracked worktrees. Empty params = all; optional filters pass through. */
   async listWorktrees(params: Record<string, unknown> = {}): Promise<WorktreeRecord[] | "unsupported"> {
+    // Asked and answered, for the life of this process. See the field.
+    if (this.worktreeListUnsupported) return "unsupported";
     try {
       const r = await this.request("_x.ai/git/worktree/list", params);
       return parseWorktreeList(r);
     } catch (e: any) {
       if (isMethodNotFoundError(e)) {
+        this.worktreeListUnsupported = true;
         this.opts.log("[worktree] CLI does not support _x.ai/git/worktree/list");
         return "unsupported";
       }

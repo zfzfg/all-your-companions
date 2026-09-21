@@ -913,3 +913,33 @@ describe("adapter config_option_update", () => {
     expect(client.currentModeId).toBe("agent-full-access");
   });
 });
+
+describe("AcpClient worktree/list latch", () => {
+  /**
+   * `refreshWorktreeCache()` runs on every `listSessions()`, so a CLI without
+   * the method used to pay a round trip and a log line every time the session
+   * list was built (upstream e99cd37).
+   */
+  it("asks for the worktree list once and latches unsupported quietly", async () => {
+    const { client } = clientWithFakeProc();
+    const log = vi.fn();
+    (client as any).opts.log = log;
+    const request = vi.fn().mockRejectedValue({ code: -32601, message: "Method not found" });
+    (client as any).request = request;
+    await expect(client.listWorktrees({})).resolves.toBe("unsupported");
+    await expect(client.listWorktrees({})).resolves.toBe("unsupported");
+    await expect(client.listWorktrees({})).resolves.toBe("unsupported");
+    expect(request).toHaveBeenCalledOnce();
+    expect(log).toHaveBeenCalledOnce();
+  });
+
+  /** Only -32601 settles the question; a transport blip must ask again. */
+  it("does not latch on a non -32601 failure", async () => {
+    const { client } = clientWithFakeProc();
+    const request = vi.fn().mockRejectedValue({ code: -32603, message: "Internal error" });
+    (client as any).request = request;
+    await expect(client.listWorktrees({})).rejects.toMatchObject({ code: -32603 });
+    await expect(client.listWorktrees({})).rejects.toMatchObject({ code: -32603 });
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+});
