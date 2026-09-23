@@ -32,6 +32,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { builtinModules } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { checkEsmPackageGraph } from "./check-esm-package-graph.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -60,7 +61,9 @@ for (const f of packed) {
 }
 
 const builtins = new Set(builtinModules);
-const problems = [];
+// Spawned entries are not reachable from a CJS require. Check their existence
+// and recursively resolve their ESM imports against the actual packed files.
+const problems = checkEsmPackageGraph(root, packed, ["out/muse-adapter/main.mjs"]);
 
 // Production install of @agentclientprotocol/codex-acp also pulls its
 // declared tree, including optional @openai/codex platform binaries.
@@ -72,14 +75,15 @@ const ALLOWED_PACKED_DEPS = new Set([
   "@agentclientprotocol/codex-acp",
   "@agentclientprotocol/claude-agent-acp",
   "@agentclientprotocol/sdk",
+  "@muse-code/sdk",
   "@anthropic-ai/claude-agent-sdk",
   "zod",
 ]);
 for (const name of packedDeps) {
   if (!ALLOWED_PACKED_DEPS.has(name)) {
     problems.push(
-      `node_modules/${name}/ is packed, but only ws, jpeg-js, the Codex adapter, and the Claude adapter JS tree belong in the vsix.\n` +
-        `    Narrow .vscodeignore; do not re-include adapter nested node_modules, @openai/codex, or Claude native binaries.`,
+      `node_modules/${name}/ is packed but is not an allowed runtime dependency.\n` +
+        `    Narrow .vscodeignore to the supported runtime dependencies.`,
     );
   }
 }

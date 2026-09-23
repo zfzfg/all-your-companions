@@ -223,10 +223,15 @@ export function activate(context: vscode.ExtensionContext): GrokExtensionApi {
   );
 
   const registerPair = (companionsCmd: string, grokCmd: string, handler: (...args: any[]) => any) => {
-    context.subscriptions.push(
-      vscode.commands.registerCommand(companionsCmd, handler),
-      vscode.commands.registerCommand(grokCmd, handler),
-    );
+    context.subscriptions.push(vscode.commands.registerCommand(companionsCmd, handler));
+    // The legacy `grok.*` alias is a convenience. When the original Grok Build
+    // extension is installed alongside, it owns those ids and registering them
+    // again throws — which would abort this activation half-way.
+    try {
+      context.subscriptions.push(vscode.commands.registerCommand(grokCmd, handler));
+    } catch {
+      output.appendLine(`[activate] ${grokCmd} is owned by another extension; using ${companionsCmd} only`);
+    }
   };
 
   registerPair("companions.open", "grok.open", async () => {
