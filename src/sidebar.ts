@@ -783,7 +783,10 @@ import {
 // imported above. See that file for why.
 
 const SESSION_META_KEY = "grok.sessionMeta";
-const PROVIDER_CONNECTIONS_KEY = "grok.providerConnections";
+// Older booleans included silent credential-probe promotions (#171), so they
+// carry no provenance and are never imported: a v2 key starts clean. Only the
+// connection flags reset; no credential is touched.
+const PROVIDER_CONNECTIONS_KEY = "grok.providerConnections.v2";
 const PROVIDER_MODEL_CACHE_KEY = "grok.providerModelCache";
 const PROJECT_PROVIDER_DEFAULTS_KEY = "grok.projectProviderDefaults";
 const REPO_PINS_KEY = "grok.repoPins";
@@ -4654,6 +4657,19 @@ export class GrokSidebar {
     return this.providerConnectionState;
   }
 
+  /**
+   * Whether the person has CONNECTED this agent (#171, upstream 4444697).
+   *
+   * Connection is a fact stated by pressing Connect/Sign in, read from storage
+   * and never discovered: nothing here may run a vendor's binary for an agent
+   * that is not connected — no credential probe, model catalog, version read
+   * or history listing. Finding the CLI on disk is a filesystem check and
+   * still runs, because Connect cannot be offered for something not seen.
+   */
+  private hasProviderConsent(provider: AcpProvider): boolean {
+    return this.providerConnections()?.[provider] === true;
+  }
+
   /** Session-start snapshot of `grok.acp.*` timeouts (#117). */
   private acpClientTimeouts() {
     const cfg = this.host.getConfiguration("grok");
@@ -4796,20 +4812,9 @@ export class GrokSidebar {
   private migrateProviderConnections(): ProviderConnections {
     const existing = this.state.get<ProviderConnections>(PROVIDER_CONNECTIONS_KEY);
     if (existing !== undefined) return existing;
-    const home = resolveGrokHome(process.env);
-    const overrides = this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
-    const configured = !!this.host.getConfiguration("grok").get<string>("cliPath", "").trim();
-    const usedBefore = configured || Object.keys(overrides).length > 0 || [
-      path.join(home, "auth.json"),
-      path.join(home, "config.toml"),
-      path.join(home, "sessions"),
-    ].some((candidate) => fs.existsSync(candidate));
-    const migrated: ProviderConnections = {
-      grok: usedBefore && !!this.locateProvider("grok"),
-      codex: false,
-      claude: false,
-      gemini: false,
-    };
+    // Nothing is inferred from what is installed or signed in on disk:
+    // connecting is one press, and guessing it is what #171 was about.
+    const migrated: ProviderConnections = {};
     void this.state.update(PROVIDER_CONNECTIONS_KEY, migrated);
     return migrated;
   }
@@ -4876,6 +4881,7 @@ export class GrokSidebar {
   }
 
   private async warmConnectedCodexModels(): Promise<boolean> {
+    if (!this.hasProviderConsent("codex")) return false;
     const cliPath = this.locateProvider("codex");
     if (!cliPath) return false;
     try {
@@ -4912,6 +4918,7 @@ export class GrokSidebar {
   }
 
   private async warmConnectedClaudeModels(): Promise<boolean> {
+    if (!this.hasProviderConsent("claude")) return false;
     const cliPath = this.locateProvider("claude");
     if (!cliPath) return false;
     try {
@@ -4944,6 +4951,7 @@ export class GrokSidebar {
   }
 
   private async warmConnectedGeminiModels(): Promise<boolean> {
+    if (!this.hasProviderConsent("gemini")) return false;
     const cliPath = this.locateProvider("gemini");
     if (!cliPath) return false;
     try {
@@ -4975,6 +4983,7 @@ export class GrokSidebar {
   /** Explicit credential observation. Unlike history refresh this never obeys
    * the listing freshness clock, so a completed sign-in is visible at once. */
   private async reprobeProviderCredentials(provider: AcpProvider): Promise<boolean> {
+    if (!this.hasProviderConsent(provider)) return false;
     if (provider === "codex") return this.warmConnectedCodexModels();
     if (provider === "claude") return this.warmConnectedClaudeModels();
     if (provider === "gemini") return this.warmConnectedGeminiModels();
@@ -5557,8 +5566,10 @@ export class GrokSidebar {
       this.geminiCliPath = undefined;
       // Read AFTER dropping the paths, so a CLI that appeared since boot counts.
       const located = this.locatedProviders();
-      const installed = ACP_PROVIDERS.filter((provider) => located[provider]);
-      const connectedBefore = this.providerConnections();
+      // NEITHER probe nor promotion for an agent that is not connected (#171):
+      // promoting whichever installed CLI answered was the extension deciding,
+      // on the person's behalf, to run a vendor's binary and keep the result.
+      const installed = ACP_PROVIDERS.filter((provider) => located[provider] && this.hasProviderConsent(provider));
       // Failures are the answer here, not an error: a rejected probe is how a
       // lapsed account gets its needsLogin flag. reprobeProviderCredentials
       // already classifies and records that, so nothing is swallowed.
@@ -5567,14 +5578,7 @@ export class GrokSidebar {
       // activation by design, they do not appear on this page, and every
       // connected account already probes its version when it connects.
       await Promise.all(installed.map(async (provider) => {
-        const authenticated = await this.reprobeProviderCredentials(provider).catch(() => false);
-        // Promote on a SUCCESSFUL probe only. This is the sign-in that happened
-        // somewhere the desk could not see; the probe is what makes it a fact
-        // rather than a guess. Persisted, so it survives a reload the way the
-        // connect flow's own state does.
-        if (authenticated && connectedBefore[provider] !== true) {
-          await this.setProviderConnected(provider, true);
-        }
+        await this.reprobeProviderCredentials(provider).catch(() => false);
       }));
     } finally {
       this.providerRefreshInFlight = false;
@@ -13739,6 +13743,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
   }
 
   private probeProviderVersion(provider: AcpProvider): Promise<string> {
+    if (!this.hasProviderConsent(provider)) return Promise.resolve("");
     if (provider === "codex") return this.probeCodexVersion();
     if (provider === "claude") return this.probeClaudeVersion();
     if (provider === "gemini") return this.probeGeminiVersion();
@@ -16827,6 +16832,9 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         // only the second is about the conversation on screen. Read the flag
         // before any probe below can clear it (upstream 61e0c57).
         const renewing = !!this.providerNeedsLogin?.[provider];
+        // Pressing Connect / Sign in IS the consent, recorded before any CLI
+        // runs (#171). Everything after may now execute this agent's binary.
+        await this.setProviderConnected(provider, true);
         // Official CLI owns login. For Claude and Gemini this is `auth login`.
         const loginArgs = (provider === "claude" || provider === "gemini") ? ["auth", "login"] : ["login"];
         const term = this.host.createTerminal({
@@ -16948,8 +16956,9 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         //
         // A failure never demotes, either: a lapsed account keeps its row and
         // gets the sign-in action, which is what needsLogin is for.
-        const rechecked = await this.reprobeProviderCredentials(provider);
-        if (rechecked) await this.setProviderConnected(provider, true);
+        // Consent was stated by Connect; a re-check only re-reads it (#171).
+        if (!this.hasProviderConsent(provider)) break;
+        await this.reprobeProviderCredentials(provider);
         await this.adoptSessionsForConnectedProvider(provider, session);
         break;
       }
@@ -18200,7 +18209,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
   }
 
   private async refreshAdapterHistory(provider: AcpProvider, cwd: string, key = projectProviderKey(cwd)): Promise<void> {
-    if (!isAdapterProvider(provider)) return;
+    if (!isAdapterProvider(provider) || !this.hasProviderConsent(provider)) return;
     const history = this.adapterHistory(provider);
     const cliPath = this.locateProvider(provider);
     const backend = this.createProviderBackend(provider);
@@ -24812,6 +24821,9 @@ ${directives.block}`;
     liveClient?: AcpClient,
   ): Promise<boolean> {
     if (!id || !isAdapterProvider(provider)) return false;
+    // A live client proves this conversation already ran; a temporary one may
+    // only be spawned for a connected agent (#171).
+    if (!liveClient && !this.hasProviderConsent(provider)) return false;
     let temporary: AcpClient | undefined;
     try {
       let client = liveClient;

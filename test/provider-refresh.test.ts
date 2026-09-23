@@ -49,13 +49,13 @@ const refresh = (sidebar: AnySidebar): Promise<void> =>
   (GrokSidebar.prototype as AnySidebar).refreshProviderStates.call(sidebar);
 
 describe("Settings → Providers refresh", () => {
-  it("probes every INSTALLED agent, not just the ones marked connected", async () => {
-    // The reported bug: approve Grok in a browser, press Refresh, nothing
-    // happens — because the stale flag said "not connected" so it was skipped.
+  it("does not probe installed agents without a saved connection (#171)", async () => {
+    // Refresh re-reads what the person said; it never runs a vendor's binary
+    // for an agent they did not connect.
     const sidebar = makeSidebar({ grok: false, codex: false, claude: false });
     await refresh(sidebar);
     const probed = sidebar.reprobeProviderCredentials.mock.calls.map(([id]: [string]) => id);
-    expect(probed.sort()).toEqual(["claude", "codex", "grok"]);
+    expect(probed).toEqual([]);
   });
 
   it("skips an agent whose CLI is not installed — nothing to run", async () => {
@@ -66,12 +66,12 @@ describe("Settings → Providers refresh", () => {
     expect(probed).toEqual(["grok"]);
   });
 
-  it("promotes an agent that signed in elsewhere, once the probe proves it", async () => {
+  it("never promotes an agent that signed in elsewhere (#171)", async () => {
     const sidebar = makeSidebar({ grok: false, codex: false, claude: false });
     sidebar.locatedProviders = vi.fn(() => ({ grok: true, codex: false, claude: false }));
     sidebar.reprobeProviderCredentials = vi.fn(async () => true);
     await refresh(sidebar);
-    expect(sidebar.setProviderConnected).toHaveBeenCalledWith("grok", true);
+    expect(sidebar.setProviderConnected).not.toHaveBeenCalled();
   });
 
   it("a failed probe never invents a connection", async () => {

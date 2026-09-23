@@ -337,6 +337,9 @@ describe("startup refusal cleanup", () => {
     sidebar.isAuthorizedCwd = vi.fn(() => false);
     sidebar.locateProvider = vi.fn(() => "codex");
     sidebar.setProviderConnected = vi.fn(async () => {});
+    // Connect restores the saved consent; a re-check only re-reads an
+    // account the person already said to use (#171).
+    sidebar.providerConnectionState = { ...sidebar.providerConnectionState, codex: true };
     sidebar.reprobeProviderCredentials = vi.fn(async () => true);
     const emitted: HostMsg[] = [];
     sidebar.emit = vi.fn((_session: Session, message: HostMsg) => emitted.push(message));
@@ -501,6 +504,9 @@ describe("signing back in after the last provider signed out", () => {
     sidebar.locateProvider = vi.fn(() => "grok");
     sidebar.setProviderConnected = vi.fn(async () => {});
     sidebar.warmConnectedCodexModels = vi.fn(async () => {});
+    // Connect restores the saved consent; a re-check only re-reads an
+    // account the person already said to use (#171).
+    sidebar.providerConnectionState = { ...sidebar.providerConnectionState, grok: true };
     sidebar.reprobeProviderCredentials = vi.fn(async () => true);
     sidebar.startSession = vi.fn(async (_resumeId: undefined, session: Session) => {
       session.needsProvider = false;
@@ -559,6 +565,9 @@ describe("signing back in after the last provider signed out", () => {
     sidebar.connectedProviders = vi.fn(() => ["grok"]);
     sidebar.locateProvider = vi.fn(() => "grok");
     sidebar.setProviderConnected = vi.fn(async () => {});
+    // Connect restores the saved consent; a re-check only re-reads an
+    // account the person already said to use (#171).
+    sidebar.providerConnectionState = { ...sidebar.providerConnectionState, grok: true };
     sidebar.reprobeProviderCredentials = vi.fn(async () => true);
     sidebar.startSession = vi.fn(async () => undefined);
     const restored: HostMsg[] = [];
