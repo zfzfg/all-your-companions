@@ -299,6 +299,7 @@ export const INBOUND_DISPOSITION: Record<WebviewMsg["type"], InboundDisposition>
   setEffort: "propose",
   setModel: "propose",
   installCodex: "host-local",
+  updateProviderCli: "host-local",
   cancelCodexInstall: "host-local",
   questionAnswer: "propose",
   // A draft is not an answer: it changes nothing until the card settles, and
@@ -642,6 +643,7 @@ export const REMOTE_REQUIRES_BOUND_SESSION: Record<WebviewMsg["type"], boolean> 
   setEffort: true,
   setModel: true,
   installCodex: false,
+  updateProviderCli: false,
   cancelCodexInstall: false,
   questionAnswer: true,
   questionCancel: true,

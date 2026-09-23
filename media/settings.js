@@ -1230,6 +1230,25 @@
       },
     },
     {
+      // The CLI update lives where the version is read (upstream 22443dc):
+      // an npm install goes back into its own prefix, anything else runs the
+      // CLI's own updater, in a visible terminal. Refresh re-reads the version.
+      id: "updateCodexCli",
+      category: "about",
+      title: "Update Codex CLI",
+      description: "",
+      kind: "action",
+      actionLabel: "Update",
+      describe: (s) => {
+        const p = codexProvider(s);
+        return p && p.updateAvailable && p.latestCliVersion
+          ? "Version " + p.latestCliVersion + " is the one this build is tested with."
+          : "Runs the update in a terminal.";
+      },
+      visible: (s, env) => !!(env && !env.isRemote && codexProvider(s) && codexProvider(s).connected),
+      message: () => ({ type: "updateProviderCli", provider: "codex" }),
+    },
+    {
       id: "aboutClaudeCli",
       category: "about",
       title: "Claude Code CLI",
@@ -1239,6 +1258,17 @@
         const p = claudeProvider(s);
         return versionLabel(p && p.cliVersion);
       },
+    },
+    {
+      id: "updateClaudeCli",
+      category: "about",
+      title: "Update Claude Code CLI",
+      description: "",
+      kind: "action",
+      actionLabel: "Update",
+      describe: () => "Runs the update in a terminal.",
+      visible: (s, env) => !!(env && !env.isRemote && claudeProvider(s) && claudeProvider(s).connected),
+      message: () => ({ type: "updateProviderCli", provider: "claude" }),
     },
     {
       id: "aboutGeminiCli",

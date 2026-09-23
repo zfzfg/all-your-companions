@@ -202,6 +202,7 @@ import {
 import { SubscriptionUsageBinding, SubscriptionUsageCache, subscriptionCredentialContext, type SubscriptionWindow } from "./subscription-usage";
 import { readCodexSubscriptionWindows } from "./codex-usage";
 import { providerConfigFiles, type ProviderConfigFile } from "./provider-config";
+import { CLI_NPM_PACKAGE, cliUpdatePlan, selfUpdateArgs } from "./cli-update-plan";
 import { captureGitTurnBaseline, GitRunGate, readGitTurnFileBefore, type GitTurnBaseline } from "./git-run";
 import { probeClaudeAuthStatus, runDeviceLogin } from "./device-login-run";
 import { githubDeviceLoginFailureText, runGithubDeviceLogin } from "./github-device-login";
@@ -13808,6 +13809,46 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
 
   /** Read `codex --version` once per activation. The adapter handshake reports
    * its own package version, not the binary it launches. */
+  /**
+   * Update the Codex or Claude CLI the way it was INSTALLED (upstream 22443dc,
+   * a896ba1): an npm global install is reinstalled into its own prefix (npm's
+   * configured prefix can differ and fail with EACCES), anything else runs the
+   * CLI's own updater, and the Codex we manage goes through our installer.
+   * In VS Code it runs in a visible terminal — these are the person's own
+   * global installs, so nothing happens silently. Refresh re-reads the version.
+   */
+  private async updateProviderCli(provider: unknown): Promise<void> {
+    if (provider !== "codex" && provider !== "claude") return;
+    if (!this.hasProviderConsent(provider)) return;
+    const cliPath = this.locateProvider(provider);
+    if (!cliPath) return;
+    let realPath = cliPath;
+    try { realPath = fs.realpathSync(cliPath); } catch { /* keep the located path */ }
+    const managedRoot = this.context.globalStorageUri.fsPath;
+    const managed = provider === "codex" && pathsEqual(realPath.slice(0, managedRoot.length), managedRoot);
+    if (managed) {
+      await this.installManagedCodexCli();
+      return;
+    }
+    const plan = cliUpdatePlan({
+      managed: false,
+      realPath,
+      packageName: CLI_NPM_PACKAGE[provider],
+      targetVersion: provider === "codex" ? CODEX_MANAGED_VERSION : undefined,
+    });
+    const quote = (value: string) => `"${value.replace(/"/g, '\\"')}"`;
+    const command = plan.kind === "npm"
+      ? `npm install -g --prefix ${quote(plan.prefix)} ${plan.packageSpec}`
+      : [quote(cliPath), ...selfUpdateArgs(provider, plan.kind === "self" ? plan.target : undefined)].join(" ");
+    const term = this.host.createTerminal({ name: `Update ${providerDisplayName(provider)} CLI` });
+    term.show();
+    term.sendText(command);
+    this.host.appendLine(`[${provider}] CLI update started in a terminal: ${command}`);
+    // The next version read must not be the memoized one from before.
+    if (provider === "codex") this.codexVersionProbe = undefined;
+    else this.claudeVersionProbe = undefined;
+  }
+
   private probeCodexVersion(): Promise<string> {
     if (this.codexVersionProbe) return this.codexVersionProbe;
     this.codexVersionProbe = (async () => {
@@ -16451,6 +16492,9 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       }
       case "installCodex":
         await this.installManagedCodexCli();
+        break;
+      case "updateProviderCli":
+        await this.updateProviderCli(msg.provider);
         break;
       case "cancelCodexInstall":
         this.codexInstallAbort?.abort(new Error("Installation cancelled."));

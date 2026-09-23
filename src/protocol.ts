@@ -1851,6 +1851,8 @@ export type WebviewMsg =
   | { type: "questionDraft"; requestId: number | string; answers?: Record<string, string>; annotations?: Record<string, { notes?: string; preview?: string }>; complete?: boolean }
   | { type: "setModel"; modelId: string; provider?: AcpProvider }
   | { type: "installCodex" }
+  /** Update the person's own Codex / Claude CLI in a visible terminal. */
+  | { type: "updateProviderCli"; provider: "codex" | "claude" }
   | { type: "cancelCodexInstall" }
   | { type: "runInstallCmd" }
   | { type: "runGrokLogin"; provider?: AcpProvider }
@@ -2111,7 +2113,7 @@ const WEBVIEW_MESSAGE_TYPE_MAP: Record<WebviewMsg["type"], true> = {
   setShowThinking: true, setAppPurpose: true, setExpandCommandOutputs: true, setSteerByDefault: true,
   setSoundNotifications: true, setProcessingSound: true, setReadRepliesAloud: true, setSummarizeRepliesAloud: true, setVoiceSendPhrase: true, setVoiceKeyterms: true, setTelemetryEnabled: true, setThumbsFeedback: true, summarizeSpeech: true, requestImageFull: true, composerFocus: true,
   dropFile: true, permissionAnswer: true, listPermissionRules: true, deletePermissionRule: true, adoptPermissionRules: true, exitPlanAnswer: true, questionAnswer: true, limitOfferAnswer: true,
-  questionCancel: true, questionDraft: true, setModel: true, installCodex: true, cancelCodexInstall: true, runInstallCmd: true, runGrokLogin: true,
+  questionCancel: true, questionDraft: true, setModel: true, installCodex: true, updateProviderCli: true, cancelCodexInstall: true, runInstallCmd: true, runGrokLogin: true,
   cancelDeviceLogin: true, submitDeviceLoginCode: true,
   logout: true, checkGrokUpdate: true, updateGrok: true, recheckConnection: true, refreshProviders: true, retryProviderSession: true,
   listSessions: true, listRepoSessions: true, selectRepo: true, toggleRepoPin: true, toggleSessionPin: true,
