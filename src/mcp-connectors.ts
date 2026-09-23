@@ -13,6 +13,8 @@
  * are the same collision, just under a prefix.
  */
 
+import type { AcpProvider } from "./acp-backend";
+
 export const MCP_CONNECTORS_KEY = "grok.mcpConnectors";
 
 /**
@@ -816,7 +818,7 @@ export function collectReservedMcpIdentity(text: string): ReservedMcpIdentity {
 
 export function mcpConfigPaths(opts: {
   cwd: string;
-  provider: "grok" | "codex" | "claude" | "gemini";
+  provider: AcpProvider;
   grokHome: string;
   userHome: string;
 }): string[] {
@@ -869,7 +871,7 @@ export type McpConfigLayer = "project" | "user";
  */
 export function mcpConfigLayer(
   filePath: string,
-  opts: { cwd: string; provider: "grok" | "codex" | "claude" | "gemini" },
+  opts: { cwd: string; provider: AcpProvider },
 ): McpConfigLayer {
   const cwd = opts.cwd.replace(/[\\/]+$/, "");
   if (filePath === `${cwd}/.mcp.json` || filePath === `${cwd}/.grok/config.toml`) {

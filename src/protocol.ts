@@ -658,7 +658,7 @@ export type HostMsg =
    * `checking` is a re-observation in flight (Settings → Providers Refresh). It
    * is the ONLY source of that spinner: a client must never latch it locally,
    * or an older host that ignores `refreshProviders` would spin forever. */
-  | { type: "providerState"; providers: { id: "grok" | "codex" | "claude" | "gemini"; connected: boolean; needsLogin?: boolean; cliVersion?: string; adapterVersion?: string; latestCliVersion?: string; updateAvailable?: boolean }[]; checking?: boolean }
+  | { type: "providerState"; providers: { id: AcpProvider; connected: boolean; needsLogin?: boolean; cliVersion?: string; adapterVersion?: string; latestCliVersion?: string; updateAvailable?: boolean }[]; checking?: boolean }
   /**
    * Complete capability matrix for the session's active provider (AP-01).
    * Informs the webview whether each capability is supported, unsupported
@@ -841,10 +841,10 @@ export type HostMsg =
   | { type: "updateAvailable"; version: string; url: string }
   /** Desktop in-app update is downloaded and waiting for restart. Host-local. */
   | { type: "updateReady"; version: string }
-  | { type: "initialized"; info: { cliPath: string; cwd: string; version: string | null; provider?: "grok" | "codex" | "claude" | "gemini"; init: { protocolVersion?: unknown } } }
+  | { type: "initialized"; info: { cliPath: string; cwd: string; version: string | null; provider?: AcpProvider; init: { protocolVersion?: unknown } } }
   | { type: "cliUpdating" }
   // `worktree` gates the gear's Apply/Remove worktree items to worktree sessions.
-  | { type: "session"; sessionId: string; models: ModelInfo[]; currentModelId: string | undefined; worktree?: boolean; provider?: "grok" | "codex" | "claude" | "gemini" }
+  | { type: "session"; sessionId: string; models: ModelInfo[]; currentModelId: string | undefined; worktree?: boolean; provider?: AcpProvider }
   // The focused conversation's display name, using the same precedence as a
   // history row. It is separate from `sessions` because VS Code does not keep
   // that browser-only list populated while the history popover is closed.
@@ -1245,7 +1245,7 @@ export type HostMsg =
       state: "connect-agent" | "missing-cli" | "auth-required" | "missing-codex" | "codex-login" | "missing-claude" | "claude-login" | "missing-gemini" | "gemini-login" | "provider-connected" | "no-project";
       platform?: string;
       reason?: string;
-      provider?: "grok" | "codex" | "claude" | "gemini";
+      provider?: AcpProvider;
       launched?: boolean;
       device?: {
         /** starting: spawned, nothing printed yet. waiting: URL and code are on
@@ -1840,31 +1840,31 @@ export type WebviewMsg =
    *  already marked instead of discarding it. `complete` means every question
    *  in the card has an answer — a partial draft is never sent on. */
   | { type: "questionDraft"; requestId: number | string; answers?: Record<string, string>; annotations?: Record<string, { notes?: string; preview?: string }>; complete?: boolean }
-  | { type: "setModel"; modelId: string; provider?: "grok" | "codex" | "claude" | "gemini" }
+  | { type: "setModel"; modelId: string; provider?: AcpProvider }
   | { type: "installCodex" }
   | { type: "cancelCodexInstall" }
   | { type: "runInstallCmd" }
-  | { type: "runGrokLogin"; provider?: "grok" | "codex" | "claude" | "gemini" }
+  | { type: "runGrokLogin"; provider?: AcpProvider }
   // Stop a headless sign-in the host is running. Only reachable while one is in
   // flight, and it kills a child process this same user started moments ago.
   // `github` is the clone-form / Settings `gh auth login --web` child, not an
   // agent; an older host that does not know the value no-ops rather than
   // cancelling Grok.
-  | { type: "cancelDeviceLogin"; provider?: "grok" | "codex" | "claude" | "gemini" | "github" }
+  | { type: "cancelDeviceLogin"; provider?: AcpProvider | "github" }
   // Paste-code half of a headless sign-in: the person typed the vendor's code
   // into the card and we write it to the CLI's stdin. Additive — an older host
   // simply has no handler, and an older client never posts it.
-  | { type: "submitDeviceLoginCode"; provider?: "grok" | "codex" | "claude" | "gemini"; code: string }
-  | { type: "logout"; provider?: "grok" | "codex" | "claude" | "gemini" }
+  | { type: "submitDeviceLoginCode"; provider?: AcpProvider; code: string }
+  | { type: "logout"; provider?: AcpProvider }
   | { type: "checkGrokUpdate" }
   | { type: "updateGrok" }
-  | { type: "recheckConnection"; provider?: "grok" | "codex" | "claude" | "gemini" }
+  | { type: "recheckConnection"; provider?: AcpProvider }
   /** Re-observe every account without asserting anything about it. Unlike
    *  `recheckConnection` this never marks a provider connected — it re-runs the
    *  CLI locators and re-probes the credentials of accounts already connected,
    *  so Settings → Providers can be made to tell the truth on demand. */
   | { type: "refreshProviders" }
-  | { type: "retryProviderSession"; provider?: "grok" | "codex" | "claude" | "gemini" }
+  | { type: "retryProviderSession"; provider?: AcpProvider }
   | { type: "listSessions"; offset?: number; limit?: number; providerCursor?: { grokOffset: number; codexHighWater?: { updatedAt: number; id: string } }; query?: string }
   // Preview rows for a repo the client is NOT currently in — the projects rail
   // shows a few sessions per repo without switching to it. `cwd` is matched

@@ -9,13 +9,15 @@ import {
 } from "../src/provider-capabilities";
 
 describe("provider-capabilities (AP-01)", () => {
-  it("defines all 15 capabilities explicitly across all 4 ACP providers with no missing cells", () => {
+  it("defines all 20 capabilities explicitly across all 4 ACP providers with no missing cells", () => {
     // 15 since AP-16 added `hostMcp`, `companionSubagentTarget` and
-    // `delegationShim` on top of AP-11's `structuredPlan`. The number is
+    // `delegationShim` on top of AP-11's `structuredPlan`; 20 since the
+    // upstream sync folded PROVIDER_ACTIONS in (`deleteHistory`,
+    // `adapterHistory`, `modeSwitching`, `perCallContext`, `clientMcp`). The number is
     // asserted rather than derived so that adding a capability is a deliberate
     // act: every new cell is a claim about a provider that someone has to
     // substantiate.
-    expect(PROVIDER_CAPABILITY_NAMES).toHaveLength(15);
+    expect(PROVIDER_CAPABILITY_NAMES).toHaveLength(20);
     expect(ACP_PROVIDERS).toHaveLength(4);
 
     for (const provider of ACP_PROVIDERS) {
@@ -148,10 +150,12 @@ describe("provider-capabilities (AP-01)", () => {
   });
 
   it("handles unknown provider and unknown capability defensively", () => {
-    expect(providerCapability("unknown" as any, "steer")).toEqual({
-      state: "no",
-      reason: "Unknown provider 'unknown'.",
-    });
+    // Total on purpose (upstream 4f8c9a1): a provider-less client stub must
+    // get an answer, and grok's row is the wire's fallback everywhere else.
+    expect(providerCapability("unknown" as any, "adapterHistory")).toEqual(
+      PROVIDER_CAPABILITIES.grok.adapterHistory,
+    );
+    expect(providerCapability(undefined as any, "deleteHistory")).toEqual({ state: "yes" });
 
     expect(providerCapability("grok", "unknownCapability" as any)).toEqual({
       state: "no",

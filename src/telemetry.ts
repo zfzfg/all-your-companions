@@ -11,6 +11,7 @@
 // and `postEvent` never throws or blocks the caller. `sanitizeSessionStartProps`
 // is the only path into the event props object — unknown keys and path-like /
 // free-text values are dropped.
+import type { AcpProvider } from "./acp-backend";
 import * as https from "node:https";
 
 // Aptabase ingestion app keys (region-prefixed write-only keys meant to ship in
@@ -41,7 +42,7 @@ export type TelemetryMode = "agent" | "plan" | "yolo";
 export type TelemetryEffort = "" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
 export type TelemetrySessionOrigin = "local" | "remote";
 export type TelemetryClientDevice = "desktop" | "mobile";
-export type TelemetryProvider = "grok" | "codex" | "claude" | "gemini";
+export type TelemetryProvider = AcpProvider;
 
 export interface SessionStartProps {
   /** Anonymous, per-install GUID — a property like model/effort, not an identity. */

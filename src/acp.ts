@@ -1,3 +1,4 @@
+import { supportsSessionDeletion } from "./acp-backend";
 import { ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { createInterface, Interface } from "node:readline";
 import { EventEmitter } from "node:events";
@@ -798,7 +799,7 @@ export class AcpClient extends EventEmitter {
   }
 
   async deleteSession(sessionId: string): Promise<void> {
-    if (this.provider === "grok") throw new Error("This backend does not support ACP session deletion.");
+    if (!supportsSessionDeletion(this.provider)) throw new Error("This backend does not support ACP session deletion.");
     await this.request("session/delete", { sessionId });
   }
 

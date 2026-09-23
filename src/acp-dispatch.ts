@@ -6,6 +6,7 @@
  * a child process.
  */
 
+import type { AcpProvider } from "./acp-backend";
 import { fileUriToPath } from "./file-ref";
 
 export type DispatchEvent =
@@ -194,7 +195,7 @@ export function collectToolImages(payload: any): MediaRef[] {
 /** MIRRORED in media/webview-helpers.js so the webview can gate a failure hint
  *  without a host rewrite. KEEP THE TWO IN STEP: test/media-gen-mirror.test.ts
  *  drives one fixture set through both and fails if either changes alone. */
-export function isMediaGenToolCall(payload: any, provider: "grok" | "codex" | "claude" | "gemini" = "grok"): boolean {
+export function isMediaGenToolCall(payload: any, provider: AcpProvider = "grok"): boolean {
   if (!payload || typeof payload !== "object") return false;
   const title = String(payload.title ?? "");
   if (provider === "codex") {

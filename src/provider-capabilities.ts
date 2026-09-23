@@ -23,7 +23,14 @@ export type ProviderCapability =
   | "structuredPlan" // ACP `plan` update carries entries[], not prose (AP-02)
   | "hostMcp"        // Consumes host-supplied MCP servers via session/new (AP-16)
   | "companionSubagentTarget" // May be started as a companion subagent (AP-16)
-  | "delegationShim"; // Needs the fenced-block delegation shim instead of host MCP (§6.4.4)
+  | "delegationShim" // Needs the fenced-block delegation shim instead of host MCP (§6.4.4)
+  // Host actions (upstream's PROVIDER_ACTIONS table, folded in so there is one
+  // source of truth; read through the helpers in acp-backend.ts).
+  | "deleteHistory"  // The host can delete this provider's stored conversations
+  | "adapterHistory" // Conversations live in an adapter catalog, not ~/.grok
+  | "modeSwitching"  // session/set_mode (Agent / Auto-accept / Plan) is honoured
+  | "perCallContext" // usage_update.used is billed per model call, not occupancy
+  | "clientMcp";     // The host sends its MCP servers on session/new
 
 export type CapabilitySupport =
   | { state: "yes" }
@@ -46,6 +53,11 @@ export const PROVIDER_CAPABILITY_NAMES: readonly ProviderCapability[] = [
   "hostMcp",
   "companionSubagentTarget",
   "delegationShim",
+  "deleteHistory",
+  "adapterHistory",
+  "modeSwitching",
+  "perCallContext",
+  "clientMcp",
 ] as const;
 
 /**
@@ -93,6 +105,12 @@ export const PROVIDER_CAPABILITIES: Record<
     companionSubagentTarget: { state: "yes" },
     // Not needed: the MCP channel works.
     delegationShim: { state: "no", reason: "Grok consumes host MCP servers, so the shim is unnecessary." },
+    deleteHistory: { state: "yes" },
+    adapterHistory: { state: "no", reason: "Grok keeps its conversations in ~/.grok, not in an adapter catalog." },
+    modeSwitching: { state: "yes" },
+    // grok reports context occupancy (session/info, signals.json), not per-call billing.
+    perCallContext: { state: "no", reason: "Grok reports context occupancy directly." },
+    clientMcp: { state: "yes" },
   },
   codex: {
     // Steer not implemented by OpenAI Codex ACP adapter; answers -32601 (media/chat.js:4150)
@@ -143,6 +161,11 @@ export const PROVIDER_CAPABILITIES: Record<
     hostMcp: { state: "yes" },
     companionSubagentTarget: { state: "yes" },
     delegationShim: { state: "no", reason: "Codex consumes host MCP servers, so the shim is unnecessary." },
+    deleteHistory: { state: "yes" },
+    adapterHistory: { state: "yes" },
+    modeSwitching: { state: "yes" },
+    perCallContext: { state: "yes" },
+    clientMcp: { state: "yes" },
   },
   claude: {
     // Claude Code has no interjection RPC; queued send is used instead (media/chat.js:4151)
@@ -194,6 +217,11 @@ export const PROVIDER_CAPABILITIES: Record<
     hostMcp: { state: "yes" },
     companionSubagentTarget: { state: "yes" },
     delegationShim: { state: "no", reason: "Claude consumes host MCP servers, so the shim is unnecessary." },
+    deleteHistory: { state: "yes" },
+    adapterHistory: { state: "yes" },
+    modeSwitching: { state: "yes" },
+    perCallContext: { state: "yes" },
+    clientMcp: { state: "yes" },
   },
   gemini: {
     // Steer not supported by Gemini / Antigravity (media/chat.js:4158)
@@ -262,6 +290,15 @@ export const PROVIDER_CAPABILITIES: Record<
       state: "probe",
       reason: "Depends on the hostMcp probe: the shim is only needed if host MCP servers are not consumed.",
     },
+    // agy-acp-adapter.ts answers session/delete.
+    deleteHistory: { state: "yes" },
+    adapterHistory: { state: "yes" },
+    // set_mode agent / yolo / plan (sidebar setMode branch shared with Claude).
+    modeSwitching: { state: "yes" },
+    // Like grok: occupancy comes from session info, not per-call usage.
+    perCallContext: { state: "no", reason: "Antigravity reports context occupancy directly." },
+    // Sent on session/new; whether it is consumed is the hostMcp probe.
+    clientMcp: { state: "yes" },
   },
 };
 
@@ -289,10 +326,11 @@ export function providerCapability(
   cap: ProviderCapability,
   runtime?: RuntimeCapabilityContext,
 ): CapabilitySupport {
-  const providerMatrix = PROVIDER_CAPABILITIES[provider];
-  if (!providerMatrix) {
-    return { state: "no", reason: `Unknown provider '${String(provider)}'.` };
-  }
+  // Total on purpose (upstream 4f8c9a1): the host parks provider-less client
+  // stubs on some sessions, and a capability question about one must answer
+  // rather than throw. Grok's row is what the rest of the wire already does
+  // with a provider it does not recognise.
+  const providerMatrix = PROVIDER_CAPABILITIES[provider] ?? PROVIDER_CAPABILITIES.grok;
 
   const baseSupport = providerMatrix[cap];
   if (!baseSupport) {

@@ -1,15 +1,47 @@
 import type { EffortLevel } from "./acp";
+import { providerCapability, type ProviderCapability } from "./provider-capabilities";
 
 export const ACP_PROVIDERS = ["grok", "codex", "claude", "gemini"] as const;
 export type AcpProvider = (typeof ACP_PROVIDERS)[number];
 
 export function isAcpProvider(value: unknown): value is AcpProvider {
-  return value === "grok" || value === "codex" || value === "claude" || value === "gemini";
+  return typeof value === "string" && (ACP_PROVIDERS as readonly string[]).includes(value);
+}
+
+function can(provider: AcpProvider, cap: ProviderCapability): boolean {
+  return providerCapability(provider, cap).state === "yes";
 }
 
 /** Providers whose conversations live in an adapter catalog, not ~/.grok. */
-export function isAdapterProvider(provider: AcpProvider): boolean {
-  return provider === "codex" || provider === "claude" || provider === "gemini";
+export function usesAdapterHistory(provider: AcpProvider): boolean {
+  return can(provider, "adapterHistory");
+}
+
+export const isAdapterProvider = usesAdapterHistory;
+
+export function supportsHistoryDeletion(provider: AcpProvider): boolean {
+  return can(provider, "deleteHistory");
+}
+
+export function supportsCompaction(provider: AcpProvider): boolean {
+  return can(provider, "manualCompact");
+}
+
+/** ACP `session/delete` — only adapter catalogs answer it. */
+export function supportsSessionDeletion(provider: AcpProvider): boolean {
+  return usesAdapterHistory(provider) && supportsHistoryDeletion(provider);
+}
+
+export function supportsModeSwitching(provider: AcpProvider): boolean {
+  return can(provider, "modeSwitching");
+}
+
+export function usesPerCallContextOccupancy(provider: AcpProvider): boolean {
+  return can(provider, "perCallContext");
+}
+
+export function supportsClientMcpServers(provider: AcpProvider): boolean {
+  return can(provider, "clientMcp");
 }
 
 export interface BackendSpawnOptions {
