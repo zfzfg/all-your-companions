@@ -1,6 +1,8 @@
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { grokCliNeedsShell, probeCliVersion } from "../src/cli-process";
+import { execGrokCli, grokCliNeedsShell, probeCliVersion, shellSafeCommand } from "../src/cli-process";
 
 describe("grok CLI process invocation", () => {
   it("uses a shell only for Windows command shims", () => {
@@ -37,6 +39,33 @@ describe("grok CLI process invocation", () => {
     // Node.js executable itself supports --version
     const nodeVer = probeCliVersion(process.execPath);
     expect(nodeVer).toMatch(/^v\d+\.\d+/);
+  });
+});
+
+describe("a Windows install path with a space in it (upstream 9a5c1a1)", () => {
+  it("quotes the executable only when a shell will parse it", () => {
+    expect(shellSafeCommand("C:\\Users\\First Last\\grok.cmd", "win32"))
+      .toBe('"C:\\Users\\First Last\\grok.cmd"');
+    expect(shellSafeCommand('"C:\\a b\\grok.cmd"', "win32")).toBe('"C:\\a b\\grok.cmd"');
+    expect(shellSafeCommand("C:\\Users\\First Last\\grok.exe", "win32"))
+      .toBe("C:\\Users\\First Last\\grok.exe");
+    expect(shellSafeCommand("/home/a b/grok.cmd", "linux")).toBe("/home/a b/grok.cmd");
+  });
+
+  // A test that exercises only an unspaced path is what let this ship.
+  it.runIf(process.platform === "win32")("runs a real .cmd shim from a spaced directory", async () => {
+    const root = mkdtempSync(join(tmpdir(), "cli path "));
+    try {
+      const dir = join(root, "with space");
+      mkdirSync(dir);
+      const shim = join(dir, "fake-cli.cmd");
+      writeFileSync(shim, "@echo fake-cli 1.2.3\r\n");
+      expect(probeCliVersion(shim)).toBe("fake-cli 1.2.3");
+      const { stdout } = await execGrokCli(shim, ["--version"]);
+      expect(stdout.trim()).toBe("fake-cli 1.2.3");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

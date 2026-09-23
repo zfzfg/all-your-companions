@@ -430,7 +430,12 @@ export class AcpClient extends EventEmitter {
     // Node 18+ refuses to spawn .cmd/.bat without `shell: true` on Windows
     // (CVE-2024-27980). Enable shell mode for those so installs that resolve to
     // a .cmd shim (e.g. some package managers, our test fake-CLI) still work.
-    this.proc = spawn(spawnSpec.command, args, {
+    // Node joins a shell command unquoted, so the executable is quoted or an
+    // install path with a space in it splits (upstream 9a5c1a1).
+    const command = needsShell && !/^".*"$/.test(spawnSpec.command)
+      ? `"${spawnSpec.command}"`
+      : spawnSpec.command;
+    this.proc = spawn(command, args, {
       cwd: this.opts.cwd,
       env: spawnSpec.env,
       shell: needsShell,

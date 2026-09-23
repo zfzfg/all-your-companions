@@ -8,6 +8,21 @@ export function grokCliNeedsShell(
   return platform === "win32" && /\.(cmd|bat)$/i.test(cliPath);
 }
 
+/**
+ * The executable to hand `spawn`/`execFile` when {@link grokCliNeedsShell} is
+ * true. Node joins a `shell: true` command and its args with spaces and no
+ * quoting, so an install under `C:\Users\First Last\` split at the space and
+ * cmd reported `'C:\Users\First' is not recognized` (upstream 9a5c1a1). Quote
+ * the executable when, and only when, a shell will parse it.
+ */
+export function shellSafeCommand(
+  cliPath: string,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  if (!grokCliNeedsShell(cliPath, platform) || /^".*"$/.test(cliPath)) return cliPath;
+  return `"${cliPath}"`;
+}
+
 export type GrokCliExecOptions = Pick<
   ExecFileOptions,
   "cwd" | "env" | "timeout" | "windowsHide"
@@ -25,7 +40,7 @@ export function execGrokCli(
 ): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     execFile(
-      cliPath,
+      shellSafeCommand(cliPath),
       [...args],
       {
         ...options,
@@ -56,7 +71,7 @@ export function probeCliVersion(
 ): string | undefined {
   if (!cliPath) return undefined;
   try {
-    const out = execFileSync(cliPath, ["--version"], {
+    const out = execFileSync(shellSafeCommand(cliPath, platform), ["--version"], {
       encoding: "utf8",
       windowsHide: true,
       timeout: timeoutMs,

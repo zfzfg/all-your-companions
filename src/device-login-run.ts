@@ -10,6 +10,7 @@
  * local question with a local answer and therefore survives the purge.
  */
 import { spawn as nodeSpawn } from "node:child_process";
+import { grokCliNeedsShell, shellSafeCommand } from "./cli-process";
 import type { DeviceLoginCallbacks, DeviceLoginHandle } from "./device-login";
 
 export function runDeviceLogin(
@@ -35,7 +36,10 @@ export function runDeviceLogin(
 export async function probeClaudeAuthStatus(cliPath: string): Promise<boolean | undefined> {
   return new Promise((resolve) => {
     try {
-      const child = nodeSpawn(cliPath, ["auth", "status"], {
+      // A `claude.cmd` shim needs a shell on Windows (Node refuses .cmd
+      // without one), and that shell needs the path quoted.
+      const child = nodeSpawn(shellSafeCommand(cliPath), ["auth", "status"], {
+        shell: grokCliNeedsShell(cliPath),
         stdio: ["ignore", "pipe", "pipe"],
         windowsHide: true,
       });
