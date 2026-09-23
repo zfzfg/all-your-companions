@@ -9,17 +9,23 @@ function candidateNames(): string[] {
   return IS_WIN ? ["grok.cmd", "grok.exe", "grok.bat", "grok"] : ["grok"];
 }
 
-function effectiveHome(): string {
+function effectiveHome(env: NodeJS.ProcessEnv): string {
   // Respect env overrides first so tests + users can redirect the home lookup.
-  const fromEnv = IS_WIN ? process.env.USERPROFILE : process.env.HOME;
+  const fromEnv = IS_WIN ? env.USERPROFILE : env.HOME;
   return fromEnv || homedir();
 }
 
-export function locateGrokCli(configuredPath: string): string | undefined {
+/** `env` is injectable for the same reason locateCodexCli and locateClaudeCli
+ *  take one: vitest runs test FILES as threads in one process, so a test that
+ *  assigns `process.env` reaches into every other file mid-test (upstream). */
+export function locateGrokCli(
+  configuredPath: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string | undefined {
   if (configuredPath) {
     return isCliFile(configuredPath) ? configuredPath : undefined;
   }
-  const homeBin = path.join(effectiveHome(), ".grok", "bin");
+  const homeBin = path.join(effectiveHome(env), ".grok", "bin");
   for (const name of candidateNames()) {
     const candidate = path.join(homeBin, name);
     if (isCliFile(candidate)) return candidate;
@@ -27,14 +33,14 @@ export function locateGrokCli(configuredPath: string): string | undefined {
   // The extensioned names carry this platform's launch order (`grok.cmd` before
   // `grok.exe` on Windows), so scan them in that order before letting
   // findCliOnPath's own PATHEXT order — and then a shell — have the last word.
-  const pathVar = process.env.PATH || process.env.Path || "";
+  const pathVar = env.PATH || env.Path || "";
   for (const dir of pathVar.split(IS_WIN ? ";" : ":")) {
     if (!dir) continue;
     for (const name of candidateNames()) {
       if (isCliFile(path.join(dir, name))) return path.join(dir, name);
     }
   }
-  return findCliOnPath("grok", process.env, process.platform);
+  return findCliOnPath("grok", env, process.platform);
 }
 
 /** Whether this activation follows a previously-recorded extension version. */

@@ -61,7 +61,11 @@ export function findCliOnPath(
     const found = execSync(command, {
       encoding: "utf8", windowsHide: true, stdio: ["pipe", "pipe", "ignore"],
     }).trim().split(/\r?\n/)[0]?.trim();
-    return found && isFile(found) ? found : undefined;
+    // `where` can return an extensionless POSIX launcher even on Windows
+    // (upstream 4c1a7b4), so the hit must be one of the PATHEXT names too.
+    const matchesName = found && (!win || names.some((candidateName) =>
+      candidateName.toLowerCase() === paths.basename(found).toLowerCase()));
+    return found && matchesName && isFile(found) ? found : undefined;
   } catch {
     return undefined;
   }

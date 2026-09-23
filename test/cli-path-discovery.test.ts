@@ -3,11 +3,10 @@ import { execSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
-import { locateGrokCli } from "../src/cli-locator";
 import { locateClaudeCli } from "../src/claude-cli-locator";
 import { locateCodexCli } from "../src/codex-cli-locator";
 import { locateGeminiCli } from "../src/gemini-cli-locator";
-import { findCliOnPath } from "../src/cli-path";
+import { findCliOnPath, isCliFile } from "../src/cli-path";
 
 vi.mock("node:child_process", async (importOriginal) => ({
   ...await importOriginal<typeof import("node:child_process")>(),
@@ -16,7 +15,6 @@ vi.mock("node:child_process", async (importOriginal) => ({
 
 const dirs: string[] = [];
 afterEach(() => {
-  vi.unstubAllEnvs();
   vi.mocked(execSync).mockReset().mockImplementation(() => { throw new Error("not on PATH"); });
   for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
   dirs.length = 0;
@@ -35,13 +33,32 @@ describe("CLI PATH discovery without a shell (#151)", () => {
     expect(execSync).not.toHaveBeenCalled();
   });
 
+  it.each(["grok", "claude", "codex", "agy"])("holds the Windows where fallback for %s to PATHEXT names", (name) => {
+    const env = { PATH: "C:\\missing", PathExt: ".CMD;.CUSTOM" };
+    const lookup = () => findCliOnPath(name, env, "win32", candidate => candidate.startsWith("C:\\shell\\"));
+    for (const suffix of ["", ".exe", ".cmd.extra"]) {
+      vi.mocked(execSync).mockReturnValue(`C:\\shell\\${name}${suffix}\r\n`);
+      expect(lookup()).toBeUndefined();
+    }
+    for (const suffix of [".CMD", ".CuStOm"]) {
+      const binary = `C:\\shell\\${name.toUpperCase()}${suffix}`;
+      vi.mocked(execSync).mockReturnValue(`${binary}\r\n`);
+      expect(lookup()).toBe(binary);
+    }
+  });
+
+  it.each(["grok.cmd", "codex.exe", "claude.exe"])("retains explicitly suffixed Windows fallback lookup for %s", name => {
+    const binary = `C:\\shell\\${name}`;
+    vi.mocked(execSync).mockReturnValue(`${binary}\r\n`);
+    expect(findCliOnPath(name, { PATH: "", PATHEXT: ".CUSTOM" }, "win32", candidate => candidate === binary)).toBe(binary);
+  });
+
   it.each(["claude", "codex"] as const)("finds a Windows %s.cmd and ignores an earlier directory with that name", (provider) => {
     const shim = `C:\\npm\\${provider}.cmd`;
     const native = `C:\\npm\\package\\${provider}.exe`;
     const isFile = (candidate: string) => [shim, native].some((p) => p.toLowerCase() === candidate.toLowerCase());
     const options = {
       platform: "win32" as const,
-      // A quoted PATH entry is legal on Windows and must still be searched.
       env: { Path: "C:\\directory;\"C:\\npm\"", PATHEXT: ".COM;.EXE;.CMD;.BAT" },
       home: "C:\\empty",
       fs: {
@@ -94,22 +111,28 @@ describe("CLI PATH discovery without a shell (#151)", () => {
     const first = path.join(dir, "directory");
     const second = path.join(dir, "bin");
     const name = process.platform === "win32" ? "grok.cmd" : "grok";
-    mkdirSync(path.join(first, name), { recursive: true }); // a directory named like the binary
+    mkdirSync(path.join(first, name), { recursive: true });
     mkdirSync(second);
     const binary = path.join(second, name);
     writeFileSync(binary, "", { mode: 0o755 });
-    vi.stubEnv("HOME", dir);
-    vi.stubEnv("USERPROFILE", dir);
-    vi.stubEnv("PATH", [first, second].join(path.delimiter));
-    vi.stubEnv("PATHEXT", ".COM;.EXE;.CMD;.BAT");
+    // Inject the environment rather than stubbing process.env, the way every
+    // other test in this file already does. Vitest runs test FILES as threads in
+    // ONE process, so process.env is shared: a stub here - and the
+    // unstubAllEnvs that cleans it up - reaches into whatever else is mid-test.
+    // cli-locator.test.ts assigns HOME/USERPROFILE around its own assertions and
+    // restores them in a finally, and the two clobbered each other. The flake is
+    // invisible exactly where it is checked: with the stub lost, the lookup
+    // falls through to the real ~/.grok/bin, which every dev box has and no CI
+    // box does, so the suite is green in CI and red on the machine releasing it.
+    const env = { PATH: [first, second].join(path.delimiter), PATHEXT: ".COM;.EXE;.CMD;.BAT" };
 
-    expect(locateGrokCli("")?.toLowerCase()).toBe(binary.toLowerCase());
+    expect(findCliOnPath("grok", env, process.platform)?.toLowerCase()).toBe(binary.toLowerCase());
     expect(execSync).not.toHaveBeenCalled();
-    expect(locateGrokCli(path.join(first, name))).toBeUndefined();
+    // A directory named exactly like the binary is not a hit.
+    expect(isCliFile(path.join(first, name))).toBe(false);
 
-    vi.stubEnv("PATH", "");
-    vi.mocked(execSync).mockReturnValue(`${binary}\n`);
-    expect(locateGrokCli("")).toBe(binary);
+    vi.mocked(execSync).mockReturnValue(binary + "\n");
+    expect(findCliOnPath("grok", { PATH: "" }, process.platform)).toBe(binary);
     expect(execSync).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ windowsHide: true }));
   });
 });
