@@ -1253,15 +1253,15 @@ describe("settings overlay (chat.js)", () => {
         .filter((row) => row.category === "general")
         .map((row) => row.id);
     expect(generalIds(fullEnv({ isDesktop: true, isRemote: false }))).toEqual([
-      "appPurpose", "chatFontScale", "showThinking", "expandCommandOutputs", "steerByDefault",
+      "appPurpose", "chatFontScale", "showThinking", "expandCommandOutputs", "steerByDefault", "promptNav",
       "telemetryDesktop", "thumbsFeedback",
     ]);
     expect(generalIds(fullEnv({ isDesktop: false, isRemote: false, clientOwnsFontScale: false }))).toEqual([
-      "appPurpose", "openChatFontScale", "showThinking", "expandCommandOutputs", "steerByDefault",
+      "appPurpose", "openChatFontScale", "showThinking", "expandCommandOutputs", "steerByDefault", "promptNav",
       "telemetryVsCode", "thumbsFeedback",
     ]);
     expect(generalIds(fullEnv({ isDesktop: true, isRemote: true }))).toEqual([
-      "appPurpose", "chatFontScale", "showThinking", "expandCommandOutputs", "steerByDefault",
+      "appPurpose", "chatFontScale", "showThinking", "expandCommandOutputs", "steerByDefault", "promptNav",
       "telemetryRemote", "thumbsFeedbackRemote",
     ]);
   });

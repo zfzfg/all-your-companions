@@ -762,6 +762,11 @@
           "default": false,
           "description": "Inject typed messages straight into running turns instead of queueing."
         },
+        "companions.promptNav": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Show a **Previous prompt** button above the message box: it jumps back to the prompt before the one you are reading and highlights it, so you can find what you asked without scrolling."
+        },
         "companions.soundNotifications": {
           "type": "boolean",
           "default": false,

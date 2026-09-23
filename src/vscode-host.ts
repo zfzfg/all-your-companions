@@ -748,8 +748,16 @@ export function createVsCodeHost(
     onDidChangeConfiguration(listener) {
       return vscode.workspace.onDidChangeConfiguration((e) => {
         listener({
+          // Settings live under `companions.*` with `grok.*` as the legacy
+          // fallback (wrapDualConfiguration), and most listeners still ask
+          // about `grok.X`. A change to either spelling is a change to the
+          // setting, or the live reaction never fires for `companions.X`.
           affectsConfiguration(section: string) {
-            return e.affectsConfiguration(section);
+            if (e.affectsConfiguration(section)) return true;
+            const alias = section.startsWith("grok.") ? "companions." + section.slice(5)
+              : section.startsWith("companions.") ? "grok." + section.slice(11)
+                : section === "grok" ? "companions" : section === "companions" ? "grok" : "";
+            return !!alias && e.affectsConfiguration(alias);
           },
         });
       });

@@ -968,6 +968,8 @@
     // grok is working SKIPS the queue and is interjected into the running turn.
     // False = today's behavior (queue, with an on-demand Steer button).
     steerByDefault: false,
+    // companions.promptNav — the Previous-prompt button; on unless turned off.
+    promptNav: true,
     // grok.soundNotifications (persisted, global): when true a short synth tone
     // plays on turn completion / error, but only when the Grok panel isn't
     // focused (#59). Off by default. Host posts the value on init + config change.
@@ -1445,6 +1447,16 @@
   gearBtn.innerHTML = ICON.gear;
   addBtn.innerHTML = ICON.plus;
   scrollBottomBtn.innerHTML = `${ICON.arrowDown}<span class="scroll-bottom-label">Scroll to bottom</span>`;
+  // Previous prompt (upstream #150): built here, a sibling of the scroll pill.
+  const promptPrevBtn = document.createElement("button");
+  promptPrevBtn.id = "prompt-prev-btn";
+  promptPrevBtn.className = "prompt-prev-btn";
+  promptPrevBtn.type = "button";
+  promptPrevBtn.title = "Previous prompt";
+  promptPrevBtn.setAttribute("aria-label", "Previous prompt");
+  promptPrevBtn.disabled = true;
+  promptPrevBtn.innerHTML = ICON.chevronUp;
+  scrollBottomBtn.before(promptPrevBtn);
   updateModeBtn("agent");
 
   // ---------- markdown ----------
@@ -13233,7 +13245,7 @@
         } else {
           img.title = "View " + mediaLabel;
           img.style.cursor = "pointer";
-          img.onclick = () => openImagePreview(msg.src, mediaLabel);
+          img.onclick = () => openImagePreview(msg.src, mediaLabel, msg.fullId, String(msg.src || "").startsWith("data:image/"));
         }
         el.appendChild(img);
       }
@@ -14787,7 +14799,74 @@
   // scale and stays pinned above the input area at any font scale.
   function updateScrollBtn() {
     scrollBottomBtn.classList.toggle("visible", !state.stickToBottom);
+    scrollBottomBtn.disabled = state.stickToBottom;
+    updatePromptNav();
   }
+
+  // The prompt a jump landed on. The control is at the bottom, where the thumb
+  // is, and the prompt it finds arrives at the top, where the eye goes - this
+  // mark is what joins the two, and without it a short jump looks like nothing
+  // happened. Any real scroll gesture drops it. It holds the ELEMENT, not an
+  // index, so loading earlier history - which shifts every index - cannot
+  // mis-point it.
+  let promptNavPin = null;
+  function setPromptNavPin(el) {
+    if (promptNavPin === el) return;
+    if (promptNavPin) promptNavPin.classList.remove("prompt-nav-target");
+    promptNavPin = el || null;
+    if (promptNavPin) promptNavPin.classList.add("prompt-nav-target");
+  }
+
+  function promptPosition() {
+    // Count the DOM, not history ordinals: a remote snapshot has only its tail.
+    const prompts = liveTranscriptQueryAll(".msg.user:not(.queued)");
+    const rect = messagesEl.getBoundingClientRect();
+    const scale = rect.height / messagesEl.offsetHeight || 1;
+    const inset = parseFloat(getComputedStyle(messagesEl).paddingTop) || 0;
+    const tops = prompts.map((el) => (el.getBoundingClientRect().top - rect.top) / scale - inset);
+    let current = -1;
+    let previous = -1;
+    for (let i = 0; i < tops.length; i++) {
+      if (tops[i] <= 2) current = i;
+      // Inside a long answer, its own prompt is the previous landmark.
+      if (tops[i] < -2) previous = i;
+    }
+    return { prompts, tops, current: Math.max(0, current), previous };
+  }
+
+  function updatePromptNav() {
+    // Shown whenever there is an earlier prompt to go back to - INCLUDING while
+    // stuck to the bottom, which is the control's best moment rather than its
+    // worst: watching a long answer arrive is exactly when "what did I ask?"
+    // comes up. That is also why it is not part of the scroll-to-bottom pill,
+    // which correctly has nothing to say down there.
+    const available = !!state.promptNav && promptPosition().previous >= 0;
+    promptPrevBtn.classList.toggle("visible", available);
+    promptPrevBtn.disabled = !available;
+  }
+
+  // Previous only, deliberately. Going FORWARD is the direction that could not
+  // be made to work: the last screenful of prompts all share the terminal
+  // scrollTop, so no scroll brings them to the top of the viewport and a
+  // forward step looks like it did nothing (the owner's "it still says 6/7").
+  // Backwards always has somewhere to go, and it is the whole job that was
+  // asked for - take me back to what I asked.
+  function jumpPrompt() {
+    const { prompts, tops, previous } = promptPosition();
+    if (previous < 0) return;
+    // Deliberate navigation supersedes a wheel flick still inside its 750ms
+    // latch, which would otherwise clear the mark from the inertial scroll
+    // events that arrive after this click.
+    userScrollIntentUntil = 0;
+    messagesEl.scrollTo({ top: messagesEl.scrollTop + tops[previous], behavior: "instant" });
+    setPromptNavPin(prompts[previous]);
+    // We are demonstrably no longer at the bottom, and saying so is not
+    // cosmetic: leaving the pin set would have the next content growth yank the
+    // reader straight back down, undoing the jump they just made.
+    setStickToBottom(false);
+    updateScrollBtn();
+  }
+  promptPrevBtn.onclick = jumpPrompt;
 
   // Always pull the view to the bottom and re-pin. For interactive activity the
   // user needs to see regardless of where they've scrolled: permission/question
@@ -14795,6 +14874,7 @@
   // historyReplay frame follows the pin instead of re-pinning.
   function forceScrollToBottom() {
     if (state.replaying) return;
+    setPromptNavPin(null);
     setStickToBottom(true);
     messagesEl.scrollTop = messagesEl.scrollHeight;
     updateScrollBtn();
@@ -14832,10 +14912,11 @@
   // pinned; a deliberate scroll-up has cleared stickToBottom and is untouched.
   let contentFollowFrame = 0;
   new MutationObserver(() => {
-    if (state.replaying || state.historyHydrating || prependLock || !state.stickToBottom || contentFollowFrame) return;
+    if (state.replaying || state.historyHydrating || prependLock || contentFollowFrame) return;
     contentFollowFrame = requestAnimationFrame(() => {
       contentFollowFrame = 0;
       if (state.stickToBottom && !state.replaying && !prependLock) messagesEl.scrollTop = messagesEl.scrollHeight;
+      updatePromptNav();
     });
   }).observe(messagesEl, {
     childList: true,
@@ -14902,13 +14983,16 @@
         messagesEl.scrollTop, messagesEl.scrollHeight, messagesEl.clientHeight,
         currentStickThreshold(),
       ));
+      setPromptNavPin(null);
       updateScrollBtn();
     }
+    updatePromptNav();
     maybeLoadEarlierHistory();
   });
 
   scrollBottomBtn.onclick = () => {
     autoScrolling = true;
+    setPromptNavPin(null);
     setStickToBottom(true);
     updateScrollBtn();
     messagesEl.scrollTo({ top: messagesEl.scrollHeight, behavior: "smooth" });
@@ -15945,6 +16029,87 @@
 
   // ---------- chips ----------
 
+  let imageCopySequence = 0;
+  let pendingImageCopy = null;
+
+  function imageClipboardBlob(src) {
+    if (!/^data:image\/(png|jpeg|gif|webp|bmp);base64,/i.test(src || "")) {
+      return Promise.reject(new Error("Original image unavailable"));
+    }
+    if (src.startsWith("data:image/png;base64,")) {
+      const bytes = Uint8Array.from(atob(src.slice(src.indexOf(",") + 1)), (c) => c.charCodeAt(0));
+      return Promise.resolve(new Blob([bytes], { type: "image/png" }));
+    }
+    // Clipboard image support is PNG. Decode the original data URI on THIS
+    // device and retain its natural dimensions, never the overlay/thumbnail size.
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("Cannot decode original image"));
+      img.onload = () => {
+        try {
+          const canvas = document.createElement("canvas");
+          canvas.width = img.naturalWidth;
+          canvas.height = img.naturalHeight;
+          const ctx = canvas.getContext("2d");
+          if (!ctx || !canvas.width || !canvas.height) throw new Error("Cannot decode original image");
+          ctx.drawImage(img, 0, 0);
+          canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("Cannot encode image")), "image/png");
+        } catch (error) { reject(error); }
+      };
+      img.src = src;
+    });
+  }
+
+  function cancelImageCopy() {
+    if (!pendingImageCopy) return;
+    clearTimeout(pendingImageCopy.timer);
+    pendingImageCopy.reject(new Error("Image preview closed"));
+    pendingImageCopy = null;
+  }
+
+  function copyPreviewImage(overlay, fullId, originalSrc) {
+    const button = overlay.querySelector(".image-preview-copy");
+    if (button.disabled) return;
+    const status = overlay.querySelector(".image-preview-status");
+    button.disabled = true;
+    status.textContent = "Copying image…";
+    const job = { requestId: ++imageCopySequence, fullId, timer: null, reject: null, resolve: null };
+    pendingImageCopy = job;
+    const blob = new Promise((resolve, reject) => {
+      job.reject = reject;
+      job.resolve = (src) => {
+        Promise.resolve().then(() => imageClipboardBlob(src)).then((pixels) => {
+          if (pendingImageCopy === job) resolve(pixels);
+          else reject(new Error("Image preview closed"));
+        }, reject);
+      };
+      // Old hosts/relays ignore the additive request; never fall back to pixels
+      // from imageFull, whose contract permits a resized preview.
+      job.timer = setTimeout(() => reject(new Error("Original image unavailable")), 20000);
+    });
+    // WebKit requires write() in the click, with a promised Blob for async work.
+    // Waiting for the host first loses the gesture on a phone.
+    blob.catch(() => {});
+    let write;
+    try {
+      write = navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+      if (fullId) vscode.postMessage({ type: "requestImageOriginal", fullId, requestId: job.requestId });
+      else job.resolve(originalSrc);
+    } catch (error) { write = Promise.reject(error); }
+    Promise.resolve(write).then(() => {
+      if (pendingImageCopy === job) status.textContent = "Image copied";
+    }, () => {
+      if (pendingImageCopy === job) status.textContent = "Could not copy image. Full resolution may be unavailable or clipboard access was denied.";
+    }).finally(() => {
+      clearTimeout(job.timer);
+      job.reject(new Error("Image copy finished"));
+      if (pendingImageCopy === job) {
+        pendingImageCopy = null;
+        button.disabled = false;
+      }
+    });
+  }
+
   /** Toggle the "rendering the full size" disc over the open preview.
    *  The timeout is not decoration: an unrecognised handle is answered with
    *  SILENCE on purpose, so that probing reveals nothing about what is on disk —
@@ -15970,6 +16135,7 @@
    *  outlives the transcript, so a focus swap must not leave the previous
    *  session's image sitting over the next one. */
   function closeImagePreview() {
+    cancelImageCopy();
     const overlay = document.querySelector(".image-preview-overlay");
     if (overlay) {
       overlay.hidden = true;
@@ -15983,14 +16149,16 @@
     state.pendingImageFullId = null;
   }
 
-  function openImagePreview(src, label, fullId) {
+  function openImagePreview(src, label, fullId, isOriginal = false) {
     if (!src) return;
+    cancelImageCopy();
     let overlay = document.querySelector(".image-preview-overlay");
     if (!overlay) {
       overlay = document.createElement("div");
       overlay.className = "image-preview-overlay";
       overlay.hidden = true;
       overlay.innerHTML = `<button type="button" class="image-preview-close" aria-label="Close image preview">&times;</button><img>`
+        + `<div class="image-preview-actions"><button type="button" class="image-preview-copy" title="Copy full-resolution image">${ICON.copy}<span>Copy image</span></button><span class="image-preview-status" role="status"></span></div>`
         + `<div class="image-preview-spinner" role="status" aria-label="Loading full-size image" hidden>${ICON.spinner}</div>`;
       overlay.onclick = (e) => { if (e.target === overlay) closeImagePreview(); };
       overlay.querySelector(".image-preview-close").onclick = closeImagePreview;
@@ -16001,6 +16169,16 @@
     img.alt = label || "Attached image";
     overlay.hidden = false;
     overlay.querySelector(".image-preview-close").focus();
+    // Copy image (upstream #150): the original bytes, not the preview size.
+    const copy = overlay.querySelector(".image-preview-copy");
+    const canCopy = !!(navigator.clipboard && navigator.clipboard.write && typeof ClipboardItem !== "undefined");
+    const originalSrc = isOriginal && src.startsWith("data:image/") ? src : null;
+    const hostFullId = originalSrc ? null : fullId;
+    copy.disabled = !canCopy || !(hostFullId || originalSrc);
+    overlay.querySelector(".image-preview-status").textContent = !canCopy
+      ? "Image copying is unavailable in this browser."
+      : !(hostFullId || originalSrc) ? "Full-resolution image unavailable." : "";
+    copy.onclick = () => copyPreviewImage(overlay, hostFullId, originalSrc);
 
     // A remote only ever holds a 320px thumbnail, so enlarging it shows a blurry
     // copy of what was already on screen. Ask the host for a real render and
@@ -18108,6 +18286,7 @@
         if (typeof msg.showThinking === "boolean") state.showThinking = msg.showThinking;
         if (typeof msg.expandCommandOutputs === "boolean") state.expandCommandOutputs = msg.expandCommandOutputs;
         if (typeof msg.steerByDefault === "boolean") state.steerByDefault = msg.steerByDefault;
+        if (typeof msg.promptNav === "boolean") { state.promptNav = msg.promptNav; updatePromptNav(); }
         if (typeof msg.soundNotifications === "boolean") state.soundNotifications = msg.soundNotifications;
         if (typeof msg.processingSound === "boolean") state.processingSound = msg.processingSound;
         releaseAudioIfSilent();
@@ -18394,6 +18573,11 @@
         // the case this guards): repaint so the section appears rather than
         // waiting for the next open.
         if (!gearPopover.hidden && state.gearView === "main") renderGearMain();
+        break;
+      case "promptNav":
+        state.promptNav = !!msg.value;
+        if (!state.promptNav) setPromptNavPin(null);
+        updatePromptNav();
         break;
       case "steerByDefault":
         // Live toggle (grok.steerByDefault). Pure policy for the next send —
@@ -18974,6 +19158,11 @@
         if (msg.src && overlay && !overlay.hidden) overlay.querySelector("img").src = msg.src;
         setImagePreviewLoading(false);
         state.pendingImageFullId = null;
+        break;
+      }
+      case "imageOriginal": {
+        const job = pendingImageCopy;
+        if (job && job.fullId === msg.fullId && job.requestId === msg.requestId) job.resolve(msg.src);
         break;
       }
       case "historyReplay":

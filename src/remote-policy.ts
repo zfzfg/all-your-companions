@@ -554,6 +554,7 @@ export const INBOUND_DISPOSITION: Record<WebviewMsg["type"], InboundDisposition>
   setShowThinking: "host-local",
   setExpandCommandOutputs: "host-local",
   setSteerByDefault: "host-local",
+  setPromptNav: "host-local",
   setSoundNotifications: "host-local",
   setProcessingSound: "host-local",
   setReadRepliesAloud: "host-local",
@@ -578,6 +579,7 @@ export const INBOUND_DISPOSITION: Record<WebviewMsg["type"], InboundDisposition>
   // for a picture it already sent this tab, so it grants no reach the remote did
   // not already have. Path-based would be a different question entirely.
   requestImageFull: "propose",
+  requestImageOriginal: "propose",
   composerFocus: "host-local",
   // relay account actions (link/unlink/portal) manage THIS machine's device
   // token — only the local webview may drive them
@@ -758,6 +760,7 @@ export const REMOTE_REQUIRES_BOUND_SESSION: Record<WebviewMsg["type"], boolean> 
   setShowThinking: false,
   setExpandCommandOutputs: false,
   setSteerByDefault: false,
+  setPromptNav: false,
   setSoundNotifications: false,
   setProcessingSound: false,
   setReadRepliesAloud: false,
@@ -769,6 +772,7 @@ export const REMOTE_REQUIRES_BOUND_SESSION: Record<WebviewMsg["type"], boolean> 
   setAppPurpose: false,
   summarizeSpeech: true,
   requestImageFull: true,
+  requestImageOriginal: true,
   composerFocus: false,
   remoteSignIn: false,
   remoteSignOut: false,
@@ -1128,6 +1132,7 @@ export const OUTBOUND_DISPOSITION: Record<HostMsg["type"], OutboundDisposition> 
   commandOutput: "mirror",
   expandCommandOutputs: "mirror",
   steerByDefault: "mirror",
+  promptNav: "mirror",
   soundNotifications: "mirror",
   processingSound: "host-local",
   readRepliesAloud: "host-local",
@@ -1137,6 +1142,7 @@ export const OUTBOUND_DISPOSITION: Record<HostMsg["type"], OutboundDisposition> 
   // Like speechSummary: sidebar targets it at the requesting tab only, so one
   // phone's enlarged picture never lands in another tab's overlay.
   imageFull: "mirror",
+  imageOriginal: "mirror",
   moveComposerCaret: "host-local",
   remoteStatus: "host-local",
   setAllToolDetails: "mirror",
@@ -1217,6 +1223,7 @@ export const OUTBOUND_PROJECT_AUTH: Record<HostMsg["type"], OutboundProjectAuth>
   codexInstallProgress: "none",
   expandCommandOutputs: "none",
   steerByDefault: "none",
+  promptNav: "none",
   soundNotifications: "none",
   processingSound: "none",
   readRepliesAloud: "none",
@@ -1284,6 +1291,7 @@ export const OUTBOUND_PROJECT_AUTH: Record<HostMsg["type"], OutboundProjectAuth>
   userMessageChunk: "scope",
   media: "scope",
   imageFull: "scope",
+  imageOriginal: "scope",
   speechSummary: "scope",
   historyReplay: "scope",
   historyBatch: "scope",

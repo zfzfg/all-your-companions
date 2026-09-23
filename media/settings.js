@@ -505,6 +505,16 @@
       message: (value) => ({ type: "setSteerByDefault", value }),
     },
     {
+      id: "promptNav",
+      category: "general",
+      title: "Previous prompt button",
+      description: "Show a button above the message box that jumps back to your previous prompt and highlights it.",
+      kind: "toggle",
+      defaultValue: true,
+      get: (s) => !(s && s.promptNav === false),
+      message: (value) => ({ type: "setPromptNav", value }),
+    },
+    {
       id: "telemetryDesktop",
       category: "general",
       title: "Anonymous usage stats",
@@ -1547,6 +1557,9 @@
         break;
       case "steerByDefault":
         next.steerByDefault = !!value;
+        break;
+      case "promptNav":
+        next.promptNav = !!value;
         break;
       case "readRepliesAloud":
         next.readRepliesAloud = !!value;

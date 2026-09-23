@@ -5877,6 +5877,11 @@ export class GrokSidebar {
           value: this.host.getConfiguration("grok").get<boolean>("steerByDefault", false),
         });
       }
+      if (e.affectsConfiguration("grok.promptNav")) {
+        const value = this.host.getConfiguration("grok").get<boolean>("promptNav", true) !== false;
+        this.post({ type: "promptNav", value });
+        void this.settingsEditor?.webview.postMessage({ type: "promptNav", value });
+      }
       if (e.affectsConfiguration("grok.soundNotifications")) {
         this.post({
           type: "soundNotifications",
@@ -13151,7 +13156,12 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       const webview = this.view?.webview;
       if (webview) {
         const src = webview.asWebviewUri(Uri.file(m.path));
-        this.emit(session, { type: "media", media: m.media, src, mimeType: mime, path: m.path });
+        // Copy image needs pixels; mint a handle through the same predicate
+        // the fetch will ask, or the button would enable and then fail.
+        const fullId = m.media === "image" && m.path && this.isImagePathAuthorizedNow(m.path, session)
+          ? this.registerFullImage(m.path)
+          : undefined;
+        this.emit(session, { type: "media", media: m.media, src, mimeType: mime, path: m.path, fullId });
         return;
       }
       // The path passed canonical containment but this surface has no served
@@ -15902,6 +15912,19 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         else this.postLocal(response);
         break;
       }
+      case "requestImageOriginal": {
+        // Copy image (upstream #150): a webview can DISPLAY a vscode-resource
+        // image but not read its pixels back, so the host sends the original
+        // bytes for an authorized handle. Never resized.
+        const source = this.fullImagePaths.get(msg.fullId);
+        if (!source || !this.isImagePathAuthorizedNow(source, session)) break;
+        const src = await this.readOriginalImage(source);
+        if (!this.isImagePathAuthorizedNow(source, session)) break;
+        const response: HostMsg = { type: "imageOriginal", fullId: msg.fullId, requestId: msg.requestId, src };
+        if (requester) this.sendRemoteRequester(requester, response);
+        else this.postLocal(response);
+        break;
+      }
       case "requestImageFull": {
         // Local webviews open the real file directly, so this exists for remotes,
         // which otherwise can only enlarge the 320px thumbnail.
@@ -16877,6 +16900,10 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       case "setSteerByDefault":
         await this.host.getConfiguration("grok")
           .update("steerByDefault", !!msg.value, "global");
+        break;
+      case "setPromptNav":
+        await this.host.getConfiguration("grok")
+          .update("promptNav", !!msg.value, "global");
         break;
       case "setSoundNotifications":
         await this.host.getConfiguration("grok")
@@ -22847,6 +22874,7 @@ ${directives.block}`;
       showThinking: cfg.get("showThinking", false),
       expandCommandOutputs: cfg.get("expandCommandOutputs", false),
       steerByDefault: cfg.get("steerByDefault", false),
+      promptNav: cfg.get<boolean>("promptNav", true) !== false,
       soundNotifications: cfg.get("soundNotifications", false),
       processingSound: cfg.get("processingSound", false),
       readRepliesAloud: cfg.get("readRepliesAloud", false),
@@ -23065,7 +23093,7 @@ ${directives.block}`;
   private localPreviewChips(session: Session, webview: HostWebview): ContextChip[] {
     return session.chips.map((chip) => isFileChip(chip) && isImageChip(chip)
       // Staging paths are genuine local disk (Uri.file roots).
-      ? { ...chip, previewSrc: webview.asWebviewUri(Uri.file(chip.path)) }
+      ? { ...chip, previewSrc: webview.asWebviewUri(Uri.file(chip.path)), fullId: this.registerFullImage(chip.path) }
       : chip);
   }
 
@@ -23073,7 +23101,7 @@ ${directives.block}`;
     if (message.type === "userMessage" && message.chips) {
       return { ...message, chips: message.chips.map((chip) => isFileChip(chip) && isImageChip(chip)
         ? { ...chip, ...(fs.existsSync(chip.path)
-          ? { previewSrc: webview.asWebviewUri(Uri.file(chip.path)) }
+          ? { previewSrc: webview.asWebviewUri(Uri.file(chip.path)), fullId: this.registerFullImage(chip.path) }
           : {}) }
         : chip) };
     }
@@ -23084,7 +23112,7 @@ ${directives.block}`;
           ...item,
           ...(item.chips ? { chips: item.chips.map((chip) => isFileChip(chip) && isImageChip(chip)
             ? { ...chip, ...(fs.existsSync(chip.path)
-              ? { previewSrc: webview.asWebviewUri(Uri.file(chip.path)) }
+              ? { previewSrc: webview.asWebviewUri(Uri.file(chip.path)), fullId: this.registerFullImage(chip.path) }
               : {}) }
             : chip) } : {}),
         })),
@@ -23094,7 +23122,7 @@ ${directives.block}`;
       return {
         ...message,
         images: message.images.map((image) => image.path && fs.existsSync(image.path)
-          ? { ...image, previewSrc: webview.asWebviewUri(Uri.file(image.path)) }
+          ? { ...image, previewSrc: webview.asWebviewUri(Uri.file(image.path)), fullId: this.registerFullImage(image.path) }
           : image),
       };
     }
@@ -26432,7 +26460,40 @@ ${directives.block}`;
   }
 
   /** Fetch-time revalidation for remote image handles (open-set + session media). */
-  private isImagePathAuthorizedNow(imagePath: string): boolean {
+  private isImagePathAuthorizedNow(imagePath: string, session?: Session): boolean {
+    if (this.isImagePathInOpenSet(imagePath)) return true;
+    // Pasted attachments live in global storage, outside the project. Require
+    // staging containment AND a reference in the asking session, so one
+    // session cannot read another's images (upstream 330e709).
+    if (!session || !this.isAuthorizedCwd(this.sessionCwd(session))) return false;
+    try {
+      if (!pathBoundToClosedFolder(fs.realpathSync(imagePath), fs.realpathSync(this.imageStagingDir()), pathsEqual)) return false;
+    } catch { return false; }
+    const owns = (images: readonly unknown[]) => images.some((image) => (image as { path?: unknown }).path === imagePath);
+    return owns(session.chips)
+      || session.queuedSends.some((item) => owns(item.chips))
+      || session.buffer.some((m) =>
+        m.type === "userMessage" ? owns(m.chips ?? [])
+          : m.type === "userMessageChunk" ? owns((m as { images?: { path?: string }[] }).images ?? []) : false);
+  }
+
+  /** Whole original image as a data URI, for the clipboard. Undefined when
+   *  unsupported or over the budget: never resized to fit. */
+  private async readOriginalImage(imagePath: string): Promise<string | undefined> {
+    try {
+      const mime = guessMediaMime(imagePath);
+      if (!/^image\/(png|jpeg|gif|webp|bmp)$/.test(mime)) return undefined;
+      const limit = 25 * 1024 * 1024;
+      if ((await fs.promises.stat(imagePath)).size > limit) return undefined;
+      const bytes = await fs.promises.readFile(imagePath);
+      if (!bytes.length || bytes.length > limit) return undefined;
+      return `data:${mime};base64,${bytes.toString("base64")}`;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private isImagePathInOpenSet(imagePath: string): boolean {
     const authorized = this.authorizedSessionCwds();
     let home: string | undefined;
     try {
@@ -26987,6 +27048,7 @@ ${directives.block}`;
         showThinking: cfg.get("showThinking", false),
         expandCommandOutputs: cfg.get("expandCommandOutputs", false),
         steerByDefault: cfg.get("steerByDefault", false),
+        promptNav: cfg.get<boolean>("promptNav", true) !== false,
         fontScale: this.chatFontScale(),
         soundNotifications: cfg.get("soundNotifications", false),
         processingSound: cfg.get("processingSound", false),
