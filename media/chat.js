@@ -3219,6 +3219,8 @@
       voiceConfigured: !!state.voiceConfigured,
       voiceSendPhrase: typeof state.voiceSendPhrase === "string" ? state.voiceSendPhrase : "grok send",
       voiceKeyterms: Array.isArray(state.voiceKeyterms) ? state.voiceKeyterms : [],
+      voiceBackendState: state.voiceBackendState,
+      promptNav: state.promptNav !== false,
       telemetryEnabled: state.telemetryEnabled,
       thumbsFeedback: !!state.thumbsFeedback,
       providers: state.providers || [],
@@ -3376,6 +3378,7 @@
 
   function openSettingsOverlay(opener, opts) {
     const api = window.GrokSettings;
+    window.GrokVoiceSettings?.install(api);
     if (!api || typeof api.mount !== "function") return;
     closeSettingsOverlay();
     closePopovers();
@@ -16770,6 +16773,9 @@
   // setup failure (no API key, ffmpeg missing), sends "voiceError" to reset us.
   function renderMic() {
     if (!micBtn) return;
+    if (state.voiceBackendState?.backends) {
+      state.voiceConfigured = !!state.voiceBackendState.backends[state.activeProvider || "grok"];
+    }
     micBtn.classList.toggle("listening", state.mic === "listening");
     micBtn.classList.toggle("transcribing", state.mic === "transcribing");
     micBtn.classList.toggle("connecting", state.mic === "connecting");
@@ -16803,7 +16809,7 @@
         ? "Voice control"
         : voiceNeedsGrokAccount()
           ? "Voice needs Grok connected"
-          : "Voice control — click to set up (needs an xAI API key)";
+          : "Voice control — click to set up (needs an OpenAI or xAI credential)";
       micBtn.disabled = false;
     }
     // "needs setup" dot only when idle, clickable, and no key is configured.
@@ -16811,7 +16817,7 @@
   }
 
   function voiceNeedsGrokAccount() {
-    return !!state.providersKnown && !state.voiceConfigured
+    return !state.voiceBackendState && !!state.providersKnown && !state.voiceConfigured
       && !state.providers.some((provider) => provider.id === "grok" && provider.connected);
   }
 
@@ -18876,6 +18882,7 @@
         renderQueuedBlocks();
         syncFeedbackButtons();
         syncProviderVoice();
+        if (typeof renderMic === "function") renderMic();
         if (state.railTransition?.kind === "new") renderRail();
         state.isWorktree = !!msg.worktree; // gates the gear Apply/Remove worktree items
         state.availableModels = msg.models || [];
@@ -18987,10 +18994,12 @@
         break;
       case "voiceConfigured":
         state.voiceConfigured = !!msg.value;
+        state.voiceBackendState = msg.backendState;
         if (typeof msg.sendPhrase === "string") state.voiceSendPhrase = msg.sendPhrase;
         if (Array.isArray(msg.keyterms)) state.voiceKeyterms = msg.keyterms.filter((t) => typeof t === "string");
         renderMic();
         renderInputHighlight();
+        refreshSettingsOverlay();
         break;
       case "voicePartial":
         if (state.voiceDiscarded) break;

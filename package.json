@@ -1011,7 +1011,7 @@
         "grok.voiceApiKey": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Optional override key for voice Speech-to-Text (`api.x.ai/v1/stt`). **Leave empty and it just works** — the extension reuses your `grok login` token automatically. Set this (or `GROK_VOICE_API_KEY` / `XAI_API_KEY` in your workspace `.env`) only to use a dedicated [console.x.ai](https://console.x.ai) developer key instead. Setup + costs: [docs/voice-setup.md](https://github.com/PawelHuryn/grok-vscode/blob/main/docs/voice-setup.md)."
+          "markdownDescription": "Optional xAI override key for speech-to-text. Empty uses `GROK_VOICE_API_KEY`, `XAI_API_KEY`, or the cached `grok login` token. For OpenAI dictation use `grok.voiceOpenAiApiKey` or `OPENAI_API_KEY`. See [voice setup](https://github.com/PawelHuryn/grok-vscode/blob/main/docs/voice-setup.md)."
         },
         "grok.ffmpegPath": {
           "type": "string",
@@ -1039,7 +1039,7 @@
         "grok.voiceLanguage": {
           "type": "string",
           "default": "",
-          "description": "Optional language code for streaming voice text formatting (for example, \"en\", \"fr\", \"de\", or \"ja\"). When set, xAI converts spoken numbers, currencies, and units to written forms. Leave empty to keep Inverse Text Normalization off and preserve spoken-form text. Supports User and Workspace scope."
+          "description": "Optional recognition language code (for example en, pl, fr). OpenAI uses it as a language hint; xAI also enables written formatting of numbers, currencies and units. Empty uses the backend default. Supports User and Workspace scope."
         },
         "grok.voiceStreaming": {
           "type": "boolean",
@@ -1068,6 +1068,32 @@
           "type": "string",
           "default": "",
           "description": "Optional custom agent configuration (JSON object) or agent name for Claude Code (sets _meta.claudeCode.options.agents or .agent)."
+        },
+        "companions.voiceBackend": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "xai",
+            "openai"
+          ],
+          "default": "auto",
+          "description": "Speech-to-text backend. Auto prefers OpenAI for Codex and xAI for Grok or Claude, using the other when only its credential is available. An explicit choice requires its credential. Applies to the next recording."
+        },
+        "companions.voiceOpenAiApiKey": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "OpenAI API-platform key for dictation. Empty uses `OPENAI_API_KEY` from the workspace `.env` or host environment. Codex / ChatGPT sign-in does not include transcription API access. API usage is billed separately."
+        },
+        "companions.voiceOpenAiModel": {
+          "type": "string",
+          "enum": [
+            "gpt-live-transcribe",
+            "gpt-4o-transcribe",
+            "gpt-4o-mini-transcribe",
+            "whisper-1"
+          ],
+          "default": "gpt-live-transcribe",
+          "description": "OpenAI Realtime transcription model. Dictionary terms become model-specific vocabulary hints. The explicit batch mode uses gpt-4o-transcribe."
         }
       }
     }

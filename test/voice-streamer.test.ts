@@ -99,6 +99,37 @@ describe("PcmVoiceStreamer stop", () => {
     vi.useRealTimers();
   });
 
+  it("keeps xAI chunk finals so a later utterance-final send phrase still works", async () => {
+    const streamer = new PcmVoiceStreamer(); const events: any[] = [];
+    streamer.on("partial", ev => events.push(ev));
+    const started = streamer.start({ apiKey: "test" }); const ws = wsMock.sockets[0];
+    ws.emit("message", Buffer.from(JSON.stringify({ type: "transcript.created" })), false); await started;
+    ws.emit("message", Buffer.from(JSON.stringify({ type: "transcript.partial", start: 0, text: "a long sentence", is_final: true, speech_final: false })), false);
+    expect(events.at(-1).speechFinal).toBe(false);
+    ws.emit("message", Buffer.from(JSON.stringify({ type: "transcript.partial", start: 3, text: "grok send", is_final: true, speech_final: true })), false);
+    expect(events.at(-1)).toEqual({ text: "a long sentence grok send", speechFinal: true });
+    streamer.cancel();
+  });
+
+  it("supports final-only xAI text and marks the whole transcript finalized", async () => {
+    const streamer = new PcmVoiceStreamer();
+    const started = streamer.start({ apiKey: "test" }); const ws = wsMock.sockets[0];
+    ws.emit("message", Buffer.from(JSON.stringify({ type: "transcript.created" })), false); await started;
+    const stopped = streamer.stop();
+    ws.emit("message", Buffer.from(JSON.stringify({ type: "transcript.done", text: "final only" })), false);
+    await expect(stopped).resolves.toBe("final only"); expect(streamer.finalizedTranscript).toBe("final only");
+  });
+
+  it("cancel settles Stop and rejects late finals from the disposed socket", async () => {
+    const streamer = new PcmVoiceStreamer(); const events: any[] = [];
+    streamer.on("partial", ev => events.push(ev));
+    const started = streamer.start({ apiKey: "test" }); const ws = wsMock.sockets[0];
+    ws.emit("message", Buffer.from(JSON.stringify({ type: "transcript.created" })), false); await started;
+    const stopped = streamer.stop(); expect(streamer.stop()).toBe(stopped); streamer.cancel();
+    ws.emit("message", Buffer.from(JSON.stringify({ type: "transcript.done", text: "late grok send" })), false);
+    await expect(stopped).resolves.toBe(""); expect(events).toEqual([]);
+  });
+
   it("waits for transcript.done instead of cutting off a late final result", async () => {
     const streamer = new PcmVoiceStreamer();
     const started = streamer.start({ apiKey: "test" });
@@ -185,6 +216,15 @@ describe("VoiceStreamer in-stream failure", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("does not start local capture after cancel during the WebSocket handshake", async () => {
+    const streamer = new VoiceStreamer();
+    const started = streamer.start({ apiKey: "test", ffmpegPath: "ffmpeg", device: "test mic" });
+    const rejected = expect(started).rejects.toThrow("cancelled"); streamer.cancel();
+    wsMock.sockets[0].emit("message", Buffer.from(JSON.stringify({ type: "transcript.created" })), false);
+    await rejected; await vi.advanceTimersByTimeAsync(8000);
+    expect(childMock.spawn).not.toHaveBeenCalled(); expect(streamer.active).toBe(false);
   });
 
   it("tears down the STT socket and local capture after transcript.created", async () => {

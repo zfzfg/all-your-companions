@@ -1,4 +1,31 @@
 (function (root) {
+  // Both the standalone VS Code Settings webview and the chat mount this
+  // catalog extension. Rows stay hidden until the host supplies availability.
+  root.GrokVoiceSettings = {
+    install(api) {
+      if (!api || api.ROWS.some(row => row.id === "voiceBackend")) return;
+      const known = s => !!(s && s.voiceBackendState);
+      api.ROWS.splice(api.ROWS.findIndex(row => row.id === "voiceSendPhrase"), 0, {
+        id: "voiceBackend", category: "voice", title: "Transcription backend", kind: "select",
+        description: "Auto prefers OpenAI for Codex and xAI for Grok or Claude, using the other when its credential is available. A change applies to the next recording.",
+        options: [{ value: "auto", label: "Auto" }, { value: "xai", label: "xAI" }, { value: "openai", label: "OpenAI" }],
+        defaultValue: "auto", visible: known,
+        get: s => s.voiceBackendState.preference,
+        message: value => ({ type: "setVoiceBackend", value }),
+      }, {
+        id: "voiceBackendAvailability", category: "voice", title: "Transcription credentials", kind: "status",
+        visible: known,
+        describe: s => "OpenAI: " + (s.voiceBackendState.hasOpenAi ? "key available" : "needs an API key")
+          + ". xAI: " + (s.voiceBackendState.hasXai ? "credential available" : "needs a key or Grok sign-in")
+          + ". Codex / ChatGPT sign-in does not include transcription API access. OpenAI API usage is billed separately.",
+      }, {
+        id: "configureOpenAiVoice", category: "voice", title: "OpenAI voice API key", kind: "action",
+        description: "Set the key on this host, or use OPENAI_API_KEY in its environment. The key is never sent to the chat or remote clients.",
+        actionLabel: "Set API key", hostLocal: true, visible: known,
+        message: () => ({ type: "configureOpenAiVoice" }),
+      });
+    },
+  };
   const FILE_EXTS = new Set([
     "ts","tsx","js","jsx","mjs","cjs","json","md","mdx","toml","yml","yaml",
     "css","scss","sass","less","html","htm","xml","svg",
@@ -47,7 +74,7 @@
     "setModel", "installCodex", "updateProviderCli", "cancelCodexInstall", "runInstallCmd", "runGrokLogin", "cancelDeviceLogin", "submitDeviceLoginCode", "logout", "checkGrokUpdate", "updateGrok",
     "recheckConnection", "refreshProviders", "retryProviderSession", "listSessions", "listRepoSessions", "selectRepo", "toggleRepoPin", "setRepoArchived", "setRepoColor", "toggleSessionPin", "openAgentArtifact", "openCrewSession", "stopCrew", "requestHandoff", "resumeSession", "renameSession", "deleteSession",
       "clearAllSessions", "pickFile", "mentionQuery", "addMentionFile", "addContextChip", "openContextChipSource", "listProjectDir", "readProjectFile", "writeProjectFile", "pasteImage", "uploadFile", "voiceStart", "voiceStop",
-      "remoteVoiceStart", "remoteVoiceChunk", "remoteVoiceStop",
+      "remoteVoiceStart", "remoteVoiceChunk", "remoteVoiceStop", "setVoiceBackend", "configureOpenAiVoice",
     "queueSend", "dequeueSend", "clearQueuedSends", "steerSend", "turnFeedback", "forkSession", "setSteerByDefault", "setPromptNav",
     "setSoundNotifications", "setProcessingSound", "setReadRepliesAloud", "setSummarizeRepliesAloud", "setVoiceSendPhrase", "setVoiceKeyterms", "setTelemetryEnabled", "setThumbsFeedback", "summarizeSpeech", "requestImageFull", "requestImageOriginal", "composerFocus",
     "newWorktreeSession", "applyWorktree", "removeWorktree", "rewindSession", "editLastMessage", "uiConfirmAnswer", "workflowControl", "refreshContextDetails", "refreshSubscriptionUsage",

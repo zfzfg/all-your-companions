@@ -1,6 +1,6 @@
 // Real-time STT. PcmVoiceStreamer owns the xAI WebSocket and accepts raw
 // PCM16/16 kHz/mono bytes from any producer. VoiceStreamer composes it with
-// ffmpeg for the local microphone; AFK Pilot feeds PcmVoiceStreamer directly.
+// ffmpeg for the local microphone; AFK Pilot feeds the selected PCM adapter.
 import { spawn, ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import WebSocket from "ws";
@@ -11,17 +11,21 @@ import {
   joinSegments,
   classifySttError,
   TranscriptSegment,
+  SttBackend,
 } from "./voice";
 import { resolveWindowsAudioDevice } from "./voice-recorder";
+import { OpenAiPcmVoiceStreamer } from "./openai-voice";
 
 export interface PcmStreamStartOpts {
   apiKey: string;
   language?: string;
   keyterms?: string[];
+  model?: string;
   log?: (msg: string) => void;
 }
 
 export interface StreamStartOpts extends PcmStreamStartOpts {
+  backend?: SttBackend;
   ffmpegPath: string;
   device?: string;
 }
@@ -39,14 +43,33 @@ export function redactVoiceStreamUrl(url: string): string {
 
 export interface PartialEvent {
   text: string;
+  /** True only if ALL text in this cumulative partial is finalized. */
   speechFinal: boolean;
+}
+
+export interface PcmSttStream extends EventEmitter {
+  readonly active: boolean;
+  readonly transcript: string;
+  readonly finalizedTranscript: string;
+  start(opts: PcmStreamStartOpts): Promise<void>;
+  writePcm(bytes: Uint8Array): boolean;
+  stop(): Promise<string>;
+  cancel(): void;
+}
+
+export function createPcmVoiceStreamer(backend: SttBackend): PcmSttStream {
+  return backend === "openai" ? new OpenAiPcmVoiceStreamer() : new PcmVoiceStreamer();
 }
 
 export class PcmVoiceStreamer extends EventEmitter {
   private static readonly FINAL_RESULT_TIMEOUT_MS = 5000;
   private ws?: WebSocket;
   private segments: TranscriptSegment[] = [];
+  private finalized = new Set<number>();
+  private rejectStart?: (err: Error) => void;
+  private stopPromise?: Promise<string>;
   private stopping = false;
+  private cancelled = false;
   private terminal?: { promise: Promise<void>; resolve: () => void };
 
   get active(): boolean {
@@ -57,10 +80,17 @@ export class PcmVoiceStreamer extends EventEmitter {
     return joinSegments(this.segments);
   }
 
+  get finalizedTranscript(): string {
+    return this.segments.every(s => this.finalized.has(s.start)) ? this.transcript : "";
+  }
+
   start(opts: PcmStreamStartOpts): Promise<void> {
     if (this.ws) return Promise.reject(new Error("Speech-to-Text stream is already active."));
     this.stopping = false;
     this.segments = [];
+    this.finalized.clear();
+    this.cancelled = false;
+    this.stopPromise = undefined;
     let resolveTerminal!: () => void;
     const terminalPromise = new Promise<void>((resolve) => { resolveTerminal = resolve; });
     this.terminal = { promise: terminalPromise, resolve: resolveTerminal };
@@ -90,23 +120,28 @@ export class PcmVoiceStreamer extends EventEmitter {
         () => fail(new Error("Speech-to-Text streaming did not start (timeout). Check your network and API key.")),
         8000,
       );
+      this.rejectStart = (err) => { clearTimeout(timer); if (!settled) { settled = true; reject(err); } };
 
       ws.on("message", (data: WebSocket.RawData, isBinary: boolean) => {
-        if (isBinary) return;
+        if (this.ws !== ws || isBinary) return;
         let ev: any;
         try { ev = JSON.parse(data.toString()); } catch { return; }
         if (ev.type === "transcript.created") {
           if (!settled) {
             settled = true;
             clearTimeout(timer);
+            this.rejectStart = undefined;
             resolve();
           }
         } else if (ev.type === "transcript.partial") {
           this.segments = applySegment(this.segments, ev);
-          this.emit("partial", { text: joinSegments(this.segments), speechFinal: !!ev.speech_final } as PartialEvent);
+          if (ev.is_final || ev.speech_final) this.finalized.add(ev.start);
+          else this.finalized.delete(ev.start);
+          this.emit("partial", { text: this.transcript, speechFinal: !!ev.speech_final && this.finalizedTranscript === this.transcript } as PartialEvent);
         } else if (ev.type === "transcript.done") {
           if (this.segments.length === 0 && typeof ev.text === "string" && ev.text.trim()) {
             this.segments = applySegment(this.segments, { start: 0, text: ev.text });
+            this.finalized.add(0);
             this.emit("partial", { text: joinSegments(this.segments), speechFinal: true } as PartialEvent);
           }
           this.finishTerminal();
@@ -115,14 +150,17 @@ export class PcmVoiceStreamer extends EventEmitter {
         }
       });
       ws.on("unexpected-response", (_req, res: { statusCode?: number }) => {
+        if (this.ws !== ws) return;
         const status = res && res.statusCode;
         fail(new Error(status ? classifySttError(status) : "Speech-to-Text streaming failed to connect."));
       });
       ws.on("error", (e: Error) => {
+        if (this.ws !== ws) return;
         const m = /\b(401|403)\b/.exec(e.message || "");
         fail(m ? new Error(classifySttError(Number(m[1]))) : e);
       });
       ws.on("close", () => {
+        if (this.ws !== ws) return;
         clearTimeout(timer);
         this.ws = undefined;
         this.finishTerminal();
@@ -146,7 +184,12 @@ export class PcmVoiceStreamer extends EventEmitter {
     }
   }
 
-  async stop(): Promise<string> {
+  stop(): Promise<string> {
+    return this.stopPromise ??= this.finish();
+  }
+
+  private async finish(): Promise<string> {
+    if (this.rejectStart) { this.cancel(); return ""; }
     this.stopping = true;
     const ws = this.ws;
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -163,13 +206,16 @@ export class PcmVoiceStreamer extends EventEmitter {
         });
       });
     }
-    const text = this.transcript;
+    const text = this.cancelled ? "" : this.transcript;
     this.dispose();
     return text;
   }
 
   cancel(): void {
     this.stopping = true;
+    this.rejectStart?.(new Error("Voice recording cancelled."));
+    this.cancelled = true;
+    this.rejectStart = undefined;
     this.dispose();
   }
 
@@ -188,9 +234,10 @@ export class PcmVoiceStreamer extends EventEmitter {
 }
 
 export class VoiceStreamer extends EventEmitter {
-  private pcm?: PcmVoiceStreamer;
+  private pcm?: PcmSttStream;
   private proc?: ChildProcess;
   private stopping = false;
+  private stopPromise?: Promise<string>;
 
   get active(): boolean {
     return !!this.pcm || !!this.proc;
@@ -200,10 +247,15 @@ export class VoiceStreamer extends EventEmitter {
     return this.pcm?.transcript ?? "";
   }
 
+  get finalizedTranscript(): string { return this.pcm?.finalizedTranscript ?? this.finalText; }
+  private finalText = "";
+
   async start(opts: StreamStartOpts): Promise<void> {
     if (this.active) throw new Error("Voice stream is already active.");
     this.stopping = false;
-    const pcm = new PcmVoiceStreamer();
+    this.stopPromise = undefined;
+    this.finalText = "";
+    const pcm = createPcmVoiceStreamer(opts.backend ?? "xai");
     this.pcm = pcm;
     pcm.on("partial", (ev: PartialEvent) => this.emit("partial", ev));
     pcm.on("ended", () => {
@@ -217,6 +269,7 @@ export class VoiceStreamer extends EventEmitter {
     });
     try {
       await pcm.start(opts);
+      if (this.stopping || this.pcm !== pcm) return;
       await this.beginCapture(opts, pcm);
     } catch (e) {
       this.cancel();
@@ -224,7 +277,7 @@ export class VoiceStreamer extends EventEmitter {
     }
   }
 
-  private async beginCapture(opts: StreamStartOpts, pcm: PcmVoiceStreamer): Promise<void> {
+  private async beginCapture(opts: StreamStartOpts, pcm: PcmSttStream): Promise<void> {
     let device = opts.device;
     if (process.platform === "win32" && !device) {
       device = await resolveWindowsAudioDevice(opts.ffmpegPath, opts.log);
@@ -232,6 +285,7 @@ export class VoiceStreamer extends EventEmitter {
         throw new Error("No microphone (DirectShow audio device) was found. Set grok.voiceInputDevice to its name.");
       }
     }
+    if (this.stopping || this.pcm !== pcm) return;
     const args = buildFfmpegStreamArgs(process.platform, { device });
     opts.log?.(`[voice-stream] capture: ${opts.ffmpegPath} ${args.join(" ")}`);
     const proc = spawn(opts.ffmpegPath, args, { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
@@ -252,12 +306,17 @@ export class VoiceStreamer extends EventEmitter {
     });
   }
 
-  async stop(): Promise<string> {
+  stop(): Promise<string> {
+    return this.stopPromise ??= this.finish();
+  }
+
+  private async finish(): Promise<string> {
     this.stopping = true;
     await this.drainCapture();
     const pcm = this.pcm;
-    this.pcm = undefined;
     const text = pcm ? await pcm.stop() : "";
+    this.finalText = pcm?.finalizedTranscript ?? "";
+    if (this.pcm === pcm) this.pcm = undefined;
     return text;
   }
 
@@ -274,10 +333,11 @@ export class VoiceStreamer extends EventEmitter {
     if (!proc) return Promise.resolve();
     return new Promise<void>((resolve) => {
       let done = false;
-      const finish = () => { if (!done) { done = true; resolve(); } };
+      let timer: ReturnType<typeof setTimeout>;
+      const finish = () => { if (!done) { done = true; clearTimeout(timer); resolve(); } };
       proc.on("close", finish);
       try { proc.stdin?.write("q"); proc.stdin?.end(); } catch { /* fall through */ }
-      setTimeout(() => { try { proc.kill("SIGKILL"); } catch { /* gone */ } finish(); }, 2500);
+      timer = setTimeout(() => { try { proc.kill("SIGKILL"); } catch { /* gone */ } finish(); }, 2500);
     });
   }
 

@@ -395,6 +395,7 @@ suite("repo selection: isolated per remote tab, workspace-local in VS Code", () 
         { type: "historyReplay", active: true },
         { type: "historyBatch", messages: [{ type: "messageChunk", text: "partial load" }] },
         { type: "historyReplay", active: false },
+        { type: "subscriptionUsage", windows: [] },
       ],
     );
     hooks.remoteClientLeft(clientId);

@@ -11,8 +11,11 @@ function stubVoiceSidebar(opts: { focusedCwd?: string } = {}) {
   sidebar.focused.cwd = opts.focusedCwd ?? "/desk";
   sidebar.sessionCwd = vi.fn((session: Session) => session.cwd || opts.focusedCwd || "/desk");
   sidebar.resolveVoiceApiKey = vi.fn(() => "key");
+  sidebar.defaultProviderForProject = () => "grok";
+  sidebar.readDotEnv = () => ({});
   sidebar.voiceSetting = vi.fn((_c: string, _k: string, fb: unknown) => fb);
   sidebar.postLocal = vi.fn();
+  sidebar.settingsEditor = { webview: { postMessage: vi.fn() } };
   sidebar.sendRemoteClient = vi.fn();
   sidebar.remoteClients = new RemoteClientState<Session>("");
   sidebar.lastVoiceConfiguredByCwd = new Map();
@@ -31,6 +34,7 @@ describe("postVoiceConfigured dedupes identical frames", () => {
     sidebar.postVoiceConfigured();
 
     expect(sidebar.postLocal).toHaveBeenCalledTimes(1);
+    expect(sidebar.settingsEditor.webview.postMessage).toHaveBeenCalledTimes(1);
     expect(sidebar.sendRemoteClient).toHaveBeenCalledTimes(1);
     expect(sidebar.sendRemoteClient).toHaveBeenCalledWith(
       "phone",

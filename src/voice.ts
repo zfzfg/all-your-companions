@@ -12,6 +12,41 @@
 
 export const STT_ENDPOINT = "https://api.x.ai/v1/stt";
 
+export type SttBackend = "xai" | "openai";
+export type SttPreference = "auto" | SttBackend;
+
+/** An explicit choice is strict. Automatic fallback is credential-based only. */
+export function pickSttBackend(opts: {
+  provider: "grok" | "codex" | "claude" | "gemini";
+  hasXai: boolean;
+  hasOpenAi: boolean;
+  preference?: SttPreference;
+}): SttBackend | undefined {
+  const available = { xai: opts.hasXai, openai: opts.hasOpenAi };
+  if (opts.preference === "xai" || opts.preference === "openai") {
+    return available[opts.preference] ? opts.preference : undefined;
+  }
+  const preferred = opts.provider === "codex" ? "openai" : "xai";
+  const backup = preferred === "openai" ? "xai" : "openai";
+  return available[preferred] ? preferred : available[backup] ? backup : undefined;
+}
+
+export function resolveOpenAiVoiceKey(opts: {
+  setting?: string;
+  env?: Record<string, string | undefined>;
+}): string | undefined {
+  return opts.setting?.trim() || opts.env?.OPENAI_API_KEY?.trim() || undefined;
+}
+
+export interface VoiceBackendState {
+  provider: "grok" | "codex" | "claude" | "gemini";
+  preference: SttPreference;
+  backend?: SttBackend;
+  hasXai: boolean;
+  hasOpenAi: boolean;
+  backends: Record<"grok" | "codex" | "claude" | "gemini", SttBackend | null>;
+}
+
 /** Hard cap on a single recording (seconds). ffmpeg self-terminates at this, so
  *  a forgotten "listening" session can't record forever or balloon the upload. */
 export const MAX_RECORDING_SECONDS = 120;
@@ -379,11 +414,13 @@ export function voiceConfiguredFingerprint(payload: {
   value: boolean;
   sendPhrase?: string;
   keyterms?: readonly string[];
+  backendState?: VoiceBackendState;
 }): string {
   return JSON.stringify({
     value: !!payload.value,
     sendPhrase: typeof payload.sendPhrase === "string" ? payload.sendPhrase : "",
     keyterms: Array.isArray(payload.keyterms) ? [...payload.keyterms] : [],
+    backendState: payload.backendState,
   });
 }
 
@@ -392,6 +429,11 @@ export interface VoiceCommandResult {
   text: string;
   /** True when the transcript ended with the send phrase. */
   send: boolean;
+}
+
+/** A timeout may leave useful draft text, but that draft must never submit. */
+export function parseFinalVoiceCommand(text: string, finalizedText: string, phrase: string): VoiceCommandResult {
+  return text === finalizedText ? parseVoiceCommand(text, phrase) : { text, send: false };
 }
 
 /**

@@ -428,15 +428,13 @@ describe("voice control: API-key setup hint", () => {
       .toContain("Providers");
   });
 
-  it("host guidance for a missing Grok account is an information prompt, not an error", () => {
-    expect(sidebarSrc).toContain("Voice needs Grok connected. It uses the same xAI account for speech-to-text.");
-    expect(sidebarSrc).toMatch(/showInformationMessage\(\s*"Voice needs Grok connected/);
-    const setup = sidebarSrc.slice(
-      sidebarSrc.indexOf("private async promptVoiceKeySetup"),
-      sidebarSrc.indexOf("private rejectVoiceStart"),
-    );
-    expect(setup).toContain('showInformationMessage');
-    expect(setup).not.toMatch(/showErrorMessage\(\s*"Voice needs Grok/);
+  it("host setup guidance accepts either vendor and explains API access", () => {
+    const setup = sidebarSrc.slice(sidebarSrc.indexOf("private async promptVoiceKeySetup"), sidebarSrc.indexOf("private rejectVoiceStart"));
+    expect(setup).toContain("showInformationMessage");
+    expect(setup).toContain("OPENAI_API_KEY");
+    expect(setup).toContain("xAI key / Grok sign-in");
+    expect(setup).toContain("do not include transcription API access");
+    expect(setup).not.toContain("runGrokLogin");
   });
 
   it("still starts when a dedicated key is configured even if Grok is disconnected", () => {

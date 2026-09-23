@@ -72,14 +72,53 @@ Separate from telemetry: when **Thumbs feedback to SpaceXAI** is on (`grok.thumb
 
 ## Voice input (Speech-to-Text)
 
-Separate from telemetry: **voice input** sends data to SpaceXAI (formerly xAI), but only when you use it. It is **opt-in per use** — nothing is captured until you click the microphone button. In VS Code, ffmpeg captures locally in the extension host. In AFK Pilot, the browser sends ephemeral raw PCM through the linked relay connection to that same host; it is never persisted or content-logged. The host then sends the following to **SpaceXAI's Speech-to-Text endpoint** (`api.x.ai/v1/stt`) to produce the transcript:
+Separate from telemetry: **voice input** sends data to one transcription vendor —
+**SpaceXAI** (formerly xAI) or **OpenAI** — but only when you use it. It is
+**opt-in per use**: nothing is captured until you click the microphone button. In
+VS Code and on the desktop, ffmpeg captures locally in the extension host. In AFK
+Pilot, the browser sends ephemeral raw PCM through the linked relay connection to
+that same host; it is never persisted or content-logged. Explicit local batch mode
+writes a temporary WAV and removes it after transcription.
+
+The host then sends the following to the selected backend — SpaceXAI's
+Speech-to-Text endpoint (`api.x.ai/v1/stt`) or OpenAI's realtime transcription
+endpoint (`api.openai.com/v1/realtime`) — to produce the transcript:
 
 - your **audio** (the recording, streamed live or as a clip);
-- an **STT credential** — the dedicated key you configured (`grok.voiceApiKey` / `GROK_VOICE_API_KEY` / `XAI_API_KEY`) if set, otherwise the token from your `grok login` (`~/.grok/auth.json`), reused so voice works without a separate key;
-- for streaming voice, the configured **language code** (`grok.voiceLanguage`), when set; and
-- for streaming voice, the **recognition keyterms**: the send phrase, `Grok`, and entries from `grok.voiceKeyterms`. These can include project vocabulary, so treat the setting as data sent to SpaceXAI.
+- an **STT credential**, and which one depends on the backend:
+  - **SpaceXAI** — the dedicated key you configured (`grok.voiceApiKey` /
+    `GROK_VOICE_API_KEY` / `XAI_API_KEY`) if set, otherwise the token from your
+    `grok login` (`~/.grok/auth.json`), reused so voice works without a separate
+    key;
+  - **OpenAI** — `grok.voiceOpenAiApiKey` or `OPENAI_API_KEY`, and nothing else.
+    Your **Codex sign-in is never read or forwarded**: there is no fallback to
+    those OAuth credentials, so with no key set this backend is simply
+    unavailable;
+- for streaming voice, the configured **language code** (`grok.voiceLanguage`),
+  when set; and
+- for streaming voice, the **recognition keyterms**: the send phrase, `Grok`, and
+  entries from `grok.voiceKeyterms`. These can include project vocabulary, so
+  treat the setting as data sent to whichever vendor is selected.
 
-The STT credential stays in the extension host and is never sent to AFK Pilot or the browser. Remote microphone audio necessarily crosses AFK Pilot on its way back to your linked host; the host-to-SpaceXAI STT request is otherwise the same as local voice. Voice connection diagnostics log the endpoint and query-parameter names, but redact all query values. If you never use voice, none of this happens. To avoid sending your login token to SpaceXAI specifically, set a dedicated `grok.voiceApiKey`. Setup + details: [docs/voice-setup.md](voice-setup.md).
+The STT credential stays in the extension host and is never sent to AFK Pilot, the
+browser, or the availability frames the chat and remote clients read. Remote
+microphone audio necessarily crosses AFK Pilot on its way back to your linked
+host; the host-to-vendor STT request is otherwise the same as local voice. Voice
+connection diagnostics log the endpoint and query-parameter names, but redact all
+query values, including language and vocabulary. If you never use voice, none of
+this happens.
+
+**To avoid sending your `grok login` token to SpaceXAI specifically, set a
+dedicated `grok.voiceApiKey`** — or pick the OpenAI backend, which never has a
+login token to fall back on.
+
+Which vendor gets the audio: Auto prefers OpenAI on Codex and SpaceXAI on
+Grok/Claude, falling back to the other when the preferred one's credential is
+absent. An explicit choice in settings takes precedence and is never overridden —
+if that backend has no credential, voice is unavailable rather than silently sent
+elsewhere. The chosen vendor is fixed for the whole of a recording, including
+hands-free restarts and errors. Setup + details:
+[docs/voice-setup.md](voice-setup.md).
 
 ## Read simplified summaries
 

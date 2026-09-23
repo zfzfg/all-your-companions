@@ -1,6 +1,6 @@
 // Impure side of voice control: spawn ffmpeg to capture the mic in the extension
-// host (webviews can't reach the microphone), and POST the clip to xAI's
-// Speech-to-Text API. The deterministic bits (arg building, device parsing,
+// host (webviews can't reach the microphone), and POST an explicitly batch-mode
+// clip to the selected STT backend. The deterministic bits (arg building, device parsing,
 // response/error handling) live in voice.ts and are unit-tested; this file is
 // the thin spawn/fetch shell, smoke-tested manually via research/voice-stt-probe.cjs.
 import { spawn, ChildProcess } from "node:child_process";
@@ -14,7 +14,9 @@ import {
   cleanTranscript,
   parseDshowAudioDevices,
   parseSttResponse,
+  SttBackend,
 } from "./voice";
+import { classifyOpenAiSttError } from "./openai-voice";
 
 export interface StartOpts {
   ffmpegPath: string;
@@ -150,26 +152,30 @@ export class VoiceRecorder {
 }
 
 /**
- * POST a recorded WAV to the xAI Speech-to-Text API and return the transcript.
+ * POST a recorded WAV to the selected Speech-to-Text API and return the transcript.
  * Throws a user-facing message on any failure (bad key, empty clip, HTTP error).
  */
 export async function transcribeAudio(
   wavPath: string,
   apiKey: string,
   log?: (msg: string) => void,
+  backend: SttBackend = "xai",
 ): Promise<string> {
   const bytes = readFileSync(wavPath);
   // A valid WAV header alone is 44 bytes; anything this small captured no audio.
   if (bytes.length < 2048) {
     throw new Error("The recording was empty — no audio was captured. Check your microphone and try again.");
   }
-  const { url, headers } = buildSttRequest({ key: apiKey });
+  const { url, headers } = backend === "openai"
+    ? { url: "https://api.openai.com/v1/audio/transcriptions", headers: { Authorization: `Bearer ${apiKey}` } }
+    : buildSttRequest({ key: apiKey });
   const form = new FormData();
   form.append("file", new Blob([bytes], { type: "audio/wav" }), "recording.wav");
+  if (backend === "openai") form.append("model", "gpt-4o-transcribe");
   log?.(`[voice] POST ${url} (${bytes.length} bytes)`);
   const res = await fetch(url, { method: "POST", headers, body: form });
   const bodyText = await res.text();
-  if (!res.ok) throw new Error(classifySttError(res.status, bodyText));
+  if (!res.ok) throw new Error(backend === "openai" ? classifyOpenAiSttError(res.status) : classifySttError(res.status, bodyText));
   let json: unknown;
   try {
     json = JSON.parse(bodyText);

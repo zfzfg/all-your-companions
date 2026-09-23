@@ -564,6 +564,8 @@ export const INBOUND_DISPOSITION: Record<WebviewMsg["type"], InboundDisposition>
   // (like setAppPurpose), not a desk-only account or file action.
   setVoiceSendPhrase: "propose",
   setVoiceKeyterms: "propose",
+  setVoiceBackend: "propose",
+  configureOpenAiVoice: "host-local",
   // Remote surface is read-only for telemetry; the desk owns the switch.
   setTelemetryEnabled: "host-local",
   // Same class as the other General host prefs: the desk owns the switch,
@@ -767,6 +769,8 @@ export const REMOTE_REQUIRES_BOUND_SESSION: Record<WebviewMsg["type"], boolean> 
   setSummarizeRepliesAloud: false,
   setVoiceSendPhrase: false,
   setVoiceKeyterms: false,
+  setVoiceBackend: false,
+  configureOpenAiVoice: false,
   setTelemetryEnabled: false,
   setThumbsFeedback: false,
   setAppPurpose: false,

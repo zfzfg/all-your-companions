@@ -1706,7 +1706,7 @@ describe("review lows (settings / telemetry / voice write scope)", () => {
       "utf8",
     );
     const start = src.indexOf('case "setVoiceSendPhrase"');
-    const end = src.indexOf('case "setTelemetryEnabled"');
+    const end = src.indexOf('case "setVoiceBackend"');
     expect(start).toBeGreaterThan(-1);
     expect(end).toBeGreaterThan(start);
     const body = src.slice(start, end);
