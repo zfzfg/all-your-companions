@@ -1,7 +1,18 @@
+import { cpus } from "node:os";
 import { defineConfig } from "vitest/config";
+
+// Leave the machine some headroom (upstream): one worker per core starved the
+// reporter, and what that produced was a test file that never reported at all.
+const WORKERS = Math.max(2, Math.floor(cpus().length * 0.75));
 
 export default defineConfig({
   test: {
+    maxWorkers: WORKERS,
+    minWorkers: 1,
+    // Every collected file must end in pass, fail or skip: "216 of 217" is not
+    // 216 passed and 1 failed, and a gate that can drop a file silently is not
+    // a gate (test-support/complete-accounting.mjs).
+    reporters: ["default", "./test-support/complete-accounting.mjs"],
     include: ["test/**/*.test.ts"],
     // Electron e2e lives under test/desktop and needs a real BrowserWindow —
     // run via `npm run test:desktop` only (not npm test / CI unit job).
