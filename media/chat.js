@@ -9287,13 +9287,20 @@
         e.stopPropagation();
         const diff = reviewFileDiff(file);
         if (!diff) return;
-        requestDiffPreview({
+        const payload = {
           path: file.path,
           oldText: diff.oldText || "",
           newText: diff.newText || "",
           sites: Array.isArray(diff.sites) ? diff.sites : [],
           replaceAll: !!diff.replaceAll,
-        });
+        };
+        // Turn scope asks the host for ONE diff of everything this turn did
+        // to the file (git baseline); it falls back to this tool-call diff.
+        if (state.reviewScope === "turn" && !hostPreviewsInApp()) {
+          vscode.postMessage({ ...openDiffMessage(payload), turnScope: true });
+        } else {
+          requestDiffPreview(payload);
+        }
       };
       const done = state.reviewScope === "turn" ? file.turnCompleted : file.completed;
       const discard = h("button", { class: "cx-btn cx-btn--ghost cx-btn--icon cx-btn--danger-ghost review-discard", type: "button",

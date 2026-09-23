@@ -1572,6 +1572,8 @@ export type WebviewMsg =
   | { type: "openText"; content: string; language?: string; filename?: string }
   | {
       type: "openDiff";
+      /** Review Center, turn scope: prefer one git-baseline diff of the whole turn. */
+      turnScope?: boolean;
       path: string;
       oldText: string;
       newText: string;

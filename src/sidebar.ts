@@ -198,6 +198,7 @@ import {
   deviceLoginUnavailable,
   type DeviceLoginHandle,
 } from "./device-login";
+import { captureGitTurnBaseline, GitRunGate, readGitTurnFileBefore, type GitTurnBaseline } from "./git-run";
 import { probeClaudeAuthStatus, runDeviceLogin } from "./device-login-run";
 import { githubDeviceLoginFailureText, runGithubDeviceLogin } from "./github-device-login";
 import {
@@ -1461,6 +1462,22 @@ export class GrokSidebar {
    * that confirm reverts files on disk.
    */
   private readonly pendingConfirms = new Map<string, { session: Session; resolve: (ok: boolean) => void }>();
+  /**
+   * Per-session git baseline for the CURRENT turn (upstream 2a8ffb0 / #168):
+   * `git stash create` right after the turn begins records the before-state
+   * without touching the tree, index or refs. It lets the Review Center open
+   * ONE diff per file covering everything the turn did — shell edits included —
+   * instead of the last tool call's edit. Absent, non-git or spoiled, the
+   * Review Center falls back to its own tool-call diff.
+   */
+  private readonly turnGitBaselines = new WeakMap<Session, {
+    turnId: string;
+    root: string;
+    turn: object;
+    pending: boolean;
+    baseline?: GitTurnBaseline;
+  }>();
+  private readonly gitRunGate = new GitRunGate();
   private confirmSeq = 0;
 
   /** Session names, pins, archives and the install id — held in `~/.grok` so a
@@ -16151,6 +16168,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         break;
       }
       case "openDiff":
+        if (msg.turnScope && await this.openTurnGitDiff(session, msg.path)) break;
         await this.openDiffEditor(
           session,
           msg.path,
@@ -20935,6 +20953,58 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     }
   }
 
+  private startTurnGitBaseline(session: Session, turn: object): void {
+    // Prototype-built test sidebars have no fields; a real one always does.
+    if (session.replaying || !this.turnGitBaselines || !this.gitRunGate) return;
+    const root = this.sessionCwd(session);
+    if (!root) return;
+    const entry = { turnId: String(session.userMessageCount), root, turn, pending: true } as {
+      turnId: string; root: string; turn: object; pending: boolean; baseline?: GitTurnBaseline;
+    };
+    this.turnGitBaselines.set(session, entry);
+    // Skip a busy repo rather than queue a snapshot of a later working tree.
+    if (!this.gitRunGate.tryAcquire(root)) { entry.pending = false; return; }
+    void captureGitTurnBaseline(root).then((captured) => {
+      if (entry.pending && entry.turn === turn && this.turnGitBaselines.get(session) === entry) {
+        entry.baseline = captured;
+      }
+    }).catch(() => {
+      // Best effort: no baseline keeps the Review Center's tool-call diff.
+    }).finally(() => {
+      entry.pending = false;
+      this.gitRunGate.release(root);
+    });
+  }
+
+  /**
+   * The Review Center's "Open diff" in turn scope: one editor tab covering
+   * everything this turn did to the file, against the git baseline taken as
+   * the turn began (upstream 033360c). False when there is no trustworthy
+   * baseline, so the caller falls back to the tool-call diff.
+   */
+  private async openTurnGitDiff(session: Session, relPath: string): Promise<boolean> {
+    const entry = this.turnGitBaselines?.get(session);
+    if (!entry?.baseline || entry.pending) return false;
+    if (entry.turnId !== String(session.userMessageCount)) return false;
+    if (!pathsEqual(entry.root, this.sessionCwd(session))) return false;
+    const abs = path.isAbsolute(relPath) ? relPath : path.join(entry.root, relPath);
+    const rel = path.relative(entry.root, abs).split(path.sep).join("/");
+    if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) return false;
+    const before = await readGitTurnFileBefore(entry.root, rel, entry.baseline);
+    if (!before.ok) return false;
+    // A deleted file is an empty after-side; an unreadable one is not a deletion.
+    const after = fs.existsSync(abs) ? this.readFileForDiff(session, abs) : "";
+    if (after === undefined) return false;
+    const base = path.basename(rel);
+    const key = String(this.diffSeq++);
+    const left = Uri.from({ scheme: GROK_DIFF_SCHEME, path: `/${key}/before/${base}` });
+    const right = Uri.from({ scheme: GROK_DIFF_SCHEME, path: `/${key}/after/${base}` });
+    this.diffProvider.set(left, before.text);
+    this.diffProvider.set(right, after);
+    await this.host.openDiff(left, right, `Turn diff: ${base}`, { preview: false, preserveFocus: true });
+    return true;
+  }
+
   private beginCheckpointTurn(session: Session, text: string): void {
     if (session.replaying) return;
     session.checkpointTurn = {
@@ -22197,6 +22267,7 @@ ${directives.block}`;
     // The token, not the status, is what says a turn is running from here on —
     // and only whoever holds it may end this one.
     const turn = beginTurn(session);
+    this.startTurnGitBaseline(session, turn);
     this.setStatus(session, "working");
     // The send IS the activity — the rail should not wait ~2s for the CLI to
     // write a transcript before admitting you are working in this conversation.
@@ -22504,6 +22575,7 @@ ${directives.block}`;
     // The resend is a turn in its own right — it gets its own token, and the
     // outer turn's `finally` can no longer end it (the tokens differ).
     const turn = beginTurn(session);
+    this.startTurnGitBaseline(session, turn);
     this.setStatus(session, "working");
     session.adapterTurnCallUsed = [];
     try {
@@ -23572,6 +23644,16 @@ ${directives.block}`;
    * focused one, so this is behaviorally identical to `post`.)
    */
   private emit(session: Session, message: HostMsg): void {
+    // A baseline capture still running when tools start may already contain
+    // their writes; a wrong "before" is worse than none (upstream 2a8ffb0).
+    if (message.type === "toolCall" || message.type === "toolCallUpdate" || message.type === "permissionRequest") {
+      const pendingBaseline = this.turnGitBaselines?.get(session);
+      if (pendingBaseline?.pending) {
+        pendingBaseline.pending = false;
+        pendingBaseline.baseline = undefined;
+        pendingBaseline.turn = {};
+      }
+    }
     if (session.suppressContent && GrokSidebar.SUPPRESS_TYPES.has(message.type)) return;
     if (message.type === "clearMessages") session.buffer = [];
     else if (!GrokSidebar.TRANSIENT_TYPES.has(message.type)) session.buffer.push(message);
