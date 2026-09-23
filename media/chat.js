@@ -1019,6 +1019,11 @@
 
   // ---------- icons ----------
 
+  // Fences whose body is prose rather than code (#181, upstream 8f1734a): a
+  // sentence sheared off at the right edge is lost, wrapped code only loses
+  // alignment. Prose wraps by default; the per-block toggle covers the rest.
+  const PROSE_FENCES = new Set(["", "md", "markdown", "text", "txt", "plain", "plaintext"]);
+
   const ICON = {
     eye: `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>`,
     eyeOff: `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" x2="22" y1="2" y2="22"/></svg>`,
@@ -1915,11 +1920,17 @@
         return `\x00B${i}\x00`;
       }
       const isDiff = lang === "diff";
+      // A diff's alignment IS its content, so it never wraps and gets no toggle.
+      const wraps = !isDiff && PROSE_FENCES.has(lang || "");
       const inner = isDiff
         ? renderDiffCode(code)
         : `<code>${escapeHtml(code).trimEnd()}</code>`;
       codeBlocks.push(
-        `<div class="code-block${isDiff ? " diff" : ""}">` +
+        `<div class="code-block${isDiff ? " diff" : ""}${wraps ? " wrap" : ""}">` +
+          (isDiff ? "" :
+            `<button class="code-wrap-btn" type="button" title="Toggle word wrap" aria-label="Toggle word wrap" aria-pressed="${wraps}">` +
+              `<span class="code-wrap-glyph">${ICON.cornerDownRight}</span>` +
+            `</button>`) +
           `<button class="code-copy-btn" type="button" title="Copy code" aria-label="Copy code">` +
             `<span class="code-copy-glyph">${ICON.copy}</span>` +
           `</button>` +
@@ -20704,6 +20715,15 @@
         else if (act === "download" && IS_REMOTE) void exportExprBrowser(host, exprBtn);
         else if (act === "download" || act === "open") void exportExpr(host, act);
       }
+      return;
+    }
+    const wrapBtn = e.target.closest(".code-wrap-btn");
+    if (wrapBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const block = wrapBtn.closest(".code-block");
+      const on = block ? block.classList.toggle("wrap") : false;
+      wrapBtn.setAttribute("aria-pressed", String(on));
       return;
     }
     const copyBtn = e.target.closest(".code-copy-btn");

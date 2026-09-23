@@ -3072,7 +3072,13 @@ blockquote {
      can mute the latter, and code should read at editor contrast. */
   color: var(--vscode-editor-foreground, var(--vscode-foreground));
 }
-.code-copy-btn {
+/* Prose in a fence wraps; real code scrolls (upstream 8f1734a). */
+.code-block.wrap pre code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.code-copy-btn,
+.code-wrap-btn {
   position: absolute;
   top: 6px;
   right: 6px;
@@ -3099,7 +3105,19 @@ blockquote {
   z-index: 1;
   line-height: 1;
 }
-.code-copy-btn svg { width: 16px; height: 16px; }
+/* Left of Copy, so Copy keeps its corner. */
+.code-wrap-btn { right: 38px; }
+.code-wrap-btn .code-wrap-glyph { display: inline-flex; align-items: center; }
+.code-block:hover .code-wrap-btn,
+.code-wrap-btn:hover,
+.code-wrap-btn:focus-visible { opacity: 1; }
+.code-wrap-btn:hover,
+.code-wrap-btn:focus-visible {
+  background: color-mix(in srgb, var(--vscode-foreground) 12%, var(--vscode-sideBar-background));
+  color: var(--vscode-foreground);
+}
+.code-wrap-btn[aria-pressed="true"] { color: var(--vscode-foreground); }
+.code-copy-btn svg, .code-wrap-btn svg { width: 16px; height: 16px; }
 .code-copy-btn .code-copy-glyph {
   display: inline-flex;
   align-items: center;
