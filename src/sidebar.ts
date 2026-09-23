@@ -21317,6 +21317,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
    *  down on every surface (upstream e2e8458). Before this, a confirm asked
    *  just before a restart awaited an answer nobody could give. */
   private drainPendingConfirms(session: Session): void {
+    if (!this.pendingConfirms) return;
     for (const [requestId, pending] of this.pendingConfirms) {
       if (pending.session !== session) continue;
       this.pendingConfirms.delete(requestId);
