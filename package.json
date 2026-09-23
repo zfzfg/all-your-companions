@@ -1106,8 +1106,8 @@
     "vitest": "^1.6.0"
   },
   "dependencies": {
-    "@agentclientprotocol/claude-agent-acp": "0.69.0",
-    "@agentclientprotocol/codex-acp": "1.1.14",
+    "@agentclientprotocol/claude-agent-acp": "0.76.0",
+    "@agentclientprotocol/codex-acp": "1.11.0",
     "jpeg-js": "^0.4.4",
     "ws": "^8.21.0"
   }
