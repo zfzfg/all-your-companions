@@ -25,6 +25,8 @@ export type LimitOfferRecommended = "continue" | "retry";
 export interface LimitOfferTarget {
   id: AcpProvider;
   name: string;
+  /** Measured free share of the target's tightest subscription window, when known. */
+  freePercent?: number;
 }
 
 /**
@@ -161,14 +163,38 @@ export function failoverTargets(
   return PROVIDER_ORDER.filter((id) => id !== source && usableSet.has(id));
 }
 
+/** Below this much free capacity a partner is offered last, not first. */
+export const LOW_FREE_CAPACITY_PERCENT = 10;
+
+/**
+ * Partners to continue with, best first. With measured subscription usage
+ * (#159) a partner that has room leads and one that is nearly out goes last;
+ * a partner nothing is known about keeps the default order in between —
+ * absence is not zero, so it is never ranked as exhausted.
+ */
 export function limitOfferTargets(
   source: AcpProvider,
   usable: readonly AcpProvider[],
+  freePercent: (provider: AcpProvider) => number | undefined = () => undefined,
 ): LimitOfferTarget[] {
-  return failoverTargets(source, usable).map((id) => ({
-    id,
-    name: providerDisplayName(id),
-  }));
+  const targets = failoverTargets(source, usable).map((id, order) => {
+    const free = freePercent(id);
+    return { id, name: providerDisplayName(id), order, ...(free === undefined ? {} : { freePercent: free }) };
+  });
+  const band = (t: { freePercent?: number }) =>
+    t.freePercent === undefined ? 1 : t.freePercent < LOW_FREE_CAPACITY_PERCENT ? 2 : 0;
+  return targets
+    .sort((a, b) => band(a) - band(b)
+      || (band(a) === 0 ? (b.freePercent! - a.freePercent!) : 0)
+      || a.order - b.order)
+    .map(({ order: _order, ...target }) => target);
+}
+
+/** The tightest window decides: 80% left of the week means little if the
+ *  five-hour window is at 2%. Undefined when nothing was measured. */
+export function freePercentFromWindows(windows: readonly { usedPercent: number }[]): number | undefined {
+  const used = windows.map((w) => w.usedPercent).filter((p) => Number.isFinite(p) && p >= 0 && p <= 100);
+  return used.length ? 100 - Math.max(...used) : undefined;
 }
 
 /** Quota with a partner → continue; otherwise wait. */

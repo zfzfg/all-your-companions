@@ -13,6 +13,7 @@ import {
   failoverTargets,
   limitOfferHint,
   limitOfferTargets,
+  freePercentFromWindows,
   limitOfferTitle,
   recommendedLimitAction,
   switchTranscriptLine,
@@ -178,5 +179,23 @@ describe("recommendedLimitAction + copy", () => {
     expect(switchTranscriptLine("grok", "claude")).toBe(
       "Switched from Grok to Claude after a usage limit.",
     );
+  });
+});
+
+describe("ranking partners by measured subscription capacity (#159)", () => {
+  it("leads with room, keeps unknowns in default order, and puts nearly-out last", () => {
+    const free: Record<string, number | undefined> = { codex: 5, claude: 60, gemini: undefined };
+    const ids = limitOfferTargets("grok", ["codex", "claude", "gemini"], (p) => free[p]).map((t) => t.id);
+    expect(ids).toEqual(["claude", "gemini", "codex"]);
+  });
+
+  it("never treats an unmeasured partner as exhausted", () => {
+    const ids = limitOfferTargets("grok", ["codex", "claude"]).map((t) => t.id);
+    expect(ids).toEqual(failoverTargets("grok", ["codex", "claude"]));
+  });
+
+  it("uses the tightest window", () => {
+    expect(freePercentFromWindows([{ usedPercent: 20 }, { usedPercent: 98 }])).toBe(2);
+    expect(freePercentFromWindows([])).toBeUndefined();
   });
 });

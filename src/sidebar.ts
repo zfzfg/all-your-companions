@@ -165,6 +165,7 @@ import {
   classifyLimitError,
   limitOfferHint,
   limitOfferTargets,
+  freePercentFromWindows,
   limitOfferTitle,
   recommendedLimitAction,
   switchTranscriptLine,
@@ -22473,7 +22474,7 @@ ${directives.block}`;
     if (kind !== "rate" && kind !== "quota") return false;
     const id = randomUUID();
     const source = session.provider;
-    const targets = limitOfferTargets(source, this.usableProviders());
+    const targets = limitOfferTargets(source, this.usableProviders(), (provider) => this.measuredFreePercent(provider));
     const recommended = recommendedLimitAction(kind, targets);
     session.pendingLimitOffer = { id, kind, source, text: displayText, chips: chips.slice() };
     this.emit(session, {
@@ -25179,6 +25180,16 @@ ${directives.block}`;
     session.subscriptionUsage = new SubscriptionUsageBinding(cache, key, () =>
       subscriptionCredentialContext(provider, provider === "grok"
         ? { ...process.env, ...this.readDotEnv(cwd) } : process.env));
+  }
+
+  /** Free share of a provider's tightest known window, from any live binding. */
+  private measuredFreePercent(provider: AcpProvider): number | undefined {
+    for (const session of new Set([this.focused, ...(this.pool ?? [])])) {
+      if (session?.provider !== provider || !session.subscriptionUsage) continue;
+      const free = freePercentFromWindows(session.subscriptionUsage.snapshot());
+      if (free !== undefined) return free;
+    }
+    return undefined;
   }
 
   private invalidateSubscriptionUsage(provider: AcpProvider): void {
