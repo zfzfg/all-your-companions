@@ -841,7 +841,7 @@ export type HostMsg =
   | { type: "updateAvailable"; version: string; url: string }
   /** Desktop in-app update is downloaded and waiting for restart. Host-local. */
   | { type: "updateReady"; version: string }
-  | { type: "initialized"; info: { cliPath: string; cwd: string; version: string | null; provider?: AcpProvider; init: { protocolVersion?: unknown } } }
+  | { type: "initialized"; info: { cliPath: string; cwd: string; version: string | null; provider?: AcpProvider; steeringSupported?: boolean; init: { protocolVersion?: unknown } } }
   | { type: "cliUpdating" }
   // `worktree` gates the gear's Apply/Remove worktree items to worktree sessions.
   | { type: "session"; sessionId: string; models: ModelInfo[]; currentModelId: string | undefined; worktree?: boolean; provider?: AcpProvider }

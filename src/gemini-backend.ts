@@ -499,6 +499,16 @@ export class GeminiBackend implements AcpBackend {
     return { method: "session/set_mode", params: { sessionId, modeId } };
   }
 
+  // Neither Antigravity's adapter nor Gemini CLI takes a mid-turn correction.
+  steeringCapabilities() {
+    return { supported: false, acceptsContent: false };
+  }
+
+  interject(): null { return null; }
+
+  // Unreachable: steeringCapabilities answers no, so no steering RPC is sent.
+  steerDelivered(): boolean { return true; }
+
   configState(response: any, fallback: BackendConfigState): BackendConfigState {
     return configStateFromGeminiOptions(response, fallback);
   }

@@ -95,10 +95,16 @@ describe("provider-capabilities (AP-01)", () => {
     for (const provider of ["codex", "claude", "gemini"] as const) {
       const pName = provider === "codex" ? "Codex" : provider === "claude" ? "Claude" : "Gemini";
 
-      expect(providerCapability(provider, "steer")).toEqual({
-        state: "no",
-        reason: `Steer is not supported by ${pName} — your message will be sent after the turn.`,
-      });
+      if (provider === "codex") {
+        // codex-acp advertises `_session/steering` at initialize; the static
+        // cell is a probe and the live backend settles it (upstream 2f67d9a).
+        expect(providerCapability(provider, "steer").state).toBe("probe");
+      } else {
+        expect(providerCapability(provider, "steer")).toEqual({
+          state: "no",
+          reason: `Steer is not supported by ${pName} — your message will be sent after the turn.`,
+        });
+      }
 
       expect(providerCapability(provider, "rewind")).toEqual({ state: "yes" });
 
@@ -145,8 +151,19 @@ describe("provider-capabilities (AP-01)", () => {
   it("allProviderCapabilities returns a complete map of every dimension", () => {
     const caps = allProviderCapabilities("codex");
     expect(Object.keys(caps).sort()).toEqual([...PROVIDER_CAPABILITY_NAMES].sort());
-    expect(caps.steer.state).toBe("no");
+    expect(caps.steer.state).toBe("probe");
     expect(caps.vision.state).toBe("yes");
+  });
+
+  it("lets the live backend's initialize answer settle steer", () => {
+    expect(providerCapability("codex", "steer", { steeringSupported: true })).toEqual({ state: "yes" });
+    expect(providerCapability("codex", "steer", { steeringSupported: false }).state).toBe("no");
+    // An old grok that answered -32601 latches off even though the cell says yes.
+    expect(providerCapability("grok", "steer", { steeringSupported: false }).state).toBe("no");
+    // A backend that can never steer keeps its own, more specific reason.
+    expect(providerCapability("claude", "steer", { steeringSupported: false })).toEqual(
+      providerCapability("claude", "steer"),
+    );
   });
 
   it("handles unknown provider and unknown capability defensively", () => {

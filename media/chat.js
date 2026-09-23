@@ -599,10 +599,13 @@
     rejectedSubmissionText: "",
     // Remote-only placeholder bubble shown between a send and the host's echo.
     optimisticSendEl: null,
-    // Steer (#52). Optimistic: `_x.ai/interject` is unadvertised, so we can't ask
-    // whether it works — we offer it and let the host latch this off the first
-    // time the CLI answers -32601 (the text falls back to the queue, never lost).
+    // Steer (#52). `steerSupported` is the per-webview latch the host lowers on
+    // -32601 (`steerUnavailable`). `hostSteerSupported` is the backend's own
+    // answer at initialize for `steeringProvider` (upstream 2f67d9a) and wins
+    // over the static matrix cell, which cannot know the adapter version.
     steerSupported: true,
+    hostSteerSupported: undefined,
+    steeringProvider: null,
     // Grok thumbs (#114). Off until the host advertises feedbackAvailability.
     // Only the live-process turn that just finished is rateable (not session/load).
     feedbackAvailable: false,
@@ -4453,7 +4456,15 @@
    *
    * An absent provider means an older host that only ever ran Grok.
    */
+  /** The initialize answer for the provider on screen, or undefined. */
+  function hostSteerAnswer() {
+    if (typeof state.hostSteerSupported !== "boolean") return undefined;
+    return state.steeringProvider === state.activeProvider ? state.hostSteerSupported : undefined;
+  }
+
   function steerableProvider() {
+    const host = hostSteerAnswer();
+    if (host !== undefined) return host;
     if (state.providerCapabilities && state.providerCapabilities.steer) {
       return state.providerCapabilities.steer.state === "yes";
     }
@@ -4461,8 +4472,15 @@
   }
 
   function steerCapability() {
-    if (state.providerCapabilities && state.providerCapabilities.steer) {
-      return state.providerCapabilities.steer;
+    const host = hostSteerAnswer();
+    const cell = state.providerCapabilities && state.providerCapabilities.steer;
+    if (host === true) return { state: "yes" };
+    if (host === false && (!cell || cell.state !== "no")) {
+      const p = providerDisplayName(state.activeProvider);
+      return { state: "no", reason: `Steer is not available on this ${p} version — your message will be sent after the turn.` };
+    }
+    if (cell) {
+      return cell;
     }
     if (state.activeProvider === "claude" || state.activeProvider === "codex" || state.activeProvider === "gemini") {
       const p = providerDisplayName(state.activeProvider);
@@ -9805,6 +9823,11 @@
     state.userMsgCount = 0;
     state.feedbackAvailable = false;
     state.turnRating = 0;
+    // A new session's client re-answers Steer at initialize; neither the old
+    // backend's answer nor its -32601 latch carries over (upstream 2f67d9a).
+    state.steerSupported = true;
+    state.hostSteerSupported = undefined;
+    state.steeringProvider = null;
     state.interjectionCount = 0;
     state.historyEventCount = 0;
     state.lastTurnUsage = null;
@@ -18390,6 +18413,17 @@
         break;
       }
       case "initialized": {
+        // A new client re-answers Steer for its own backend; an older host that
+        // omits the field leaves the matrix in charge.
+        state.steeringProvider = msg.info.provider || "grok";
+        if (typeof msg.info.steeringSupported === "boolean") {
+          state.hostSteerSupported = msg.info.steeringSupported;
+          if (msg.info.steeringSupported) state.steerSupported = true;
+        } else {
+          state.hostSteerSupported = undefined;
+        }
+        renderQueuedBlocks();
+        updateSendButton();
         // The ACP handshake is done, but session/new or session/load may still be
         // running. Keep showing Starting until the startup lock clears.
         if (!msg.info.provider || msg.info.provider === "grok") state.cliVersion = msg.info.version || "";
@@ -18411,6 +18445,7 @@
       case "session": {
         state.currentModelId = msg.currentModelId;
         state.activeProvider = msg.provider === "codex" || msg.provider === "claude" || msg.provider === "gemini" ? msg.provider : "grok";
+        renderQueuedBlocks();
         syncFeedbackButtons();
         syncProviderVoice();
         if (state.railTransition?.kind === "new") renderRail();

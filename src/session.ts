@@ -1009,6 +1009,7 @@ export function sessionUiSnapshot(
       planModeAvailable: session.planModeAvailable,
       cliVerified: session.planModeVersionVerified,
       planModeUnavailableReason: session.planModeUnavailableReason,
+      steeringSupported: session.client?.supportsInterject?.(),
     }),
   });
   // Replacing state, never buffered (GrokSidebar.TRANSIENT_TYPES) — so this is

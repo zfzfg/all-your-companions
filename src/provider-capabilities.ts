@@ -113,10 +113,12 @@ export const PROVIDER_CAPABILITIES: Record<
     clientMcp: { state: "yes" },
   },
   codex: {
-    // Steer not implemented by OpenAI Codex ACP adapter; answers -32601 (media/chat.js:4150)
+    // codex-acp >= 1.11 registers `_session/steering` and advertises it at
+    // initialize (`_meta.steering.supported`, upstream 2f67d9a). Resolved per
+    // session by `CodexBackend.steeringCapabilities`; static cell is a probe.
     steer: {
-      state: "no",
-      reason: "Steer is not supported by Codex — your message will be sent after the turn.",
+      state: "probe",
+      reason: "Steer depends on the Codex adapter advertising mid-turn steering.",
     },
     // Client-side file checkpoints + transcript truncate (AP-08). No native RPC.
     rewind: { state: "yes" },
@@ -315,6 +317,12 @@ export interface RuntimeCapabilityContext {
    * session may simply not have planned yet.
    */
   sawPlanEntries?: boolean;
+  /**
+   * The live backend's own answer at initialize (`AcpClient.supportsInterject`).
+   * Settles `steer` for every provider: the backend, not a table, knows
+   * whether this CLI/adapter version can hear a mid-turn correction.
+   */
+  steeringSupported?: boolean;
 }
 
 /**
@@ -351,6 +359,16 @@ export function providerCapability(
       return { state: "no", reason };
     }
     return { state: "probe", reason: "Checking Plan mode availability…" };
+  }
+
+  if (cap === "steer" && runtime?.steeringSupported !== undefined) {
+    if (runtime.steeringSupported) return { state: "yes" };
+    if (baseSupport.state !== "no") {
+      return {
+        state: "no",
+        reason: `Steer is not available on this ${provider} version — your message will be sent after the turn.`,
+      };
+    }
   }
 
   // `gemini` is one provider id over two CLIs that differ here (Gemini CLI

@@ -1,4 +1,4 @@
-import type { EffortLevel } from "./acp";
+import type { EffortLevel, PromptContentBlock } from "./acp";
 import { providerCapability, type ProviderCapability } from "./provider-capabilities";
 
 export const ACP_PROVIDERS = ["grok", "codex", "claude", "gemini"] as const;
@@ -91,6 +91,18 @@ export interface BackendSessionListResult {
   nextCursor?: string | null;
 }
 
+/** Whether this backend can hear a mid-turn correction, read at initialize. */
+export interface BackendSteeringCapabilities {
+  supported: boolean;
+  /** Structured content (images) is applied rather than silently dropped. */
+  acceptsContent: boolean;
+}
+
+export interface BackendSteeringOptions {
+  grokVersion?: string;
+  grokVersionVerified?: boolean;
+}
+
 export interface AcpBackend {
   readonly provider: AcpProvider;
   readonly processName: string;
@@ -111,5 +123,17 @@ export interface AcpBackend {
     platform: NodeJS.Platform,
   ): Promise<BackendSessionListResult>;
   isCredentialError(error: unknown): boolean;
+  /**
+   * Steer (upstream 2f67d9a): the backend reads its own capability from the
+   * initialize result and names the method, next to setModel/setMode.
+   */
+  steeringCapabilities(initializeResult: any, options: BackendSteeringOptions): BackendSteeringCapabilities;
+  interject(sessionId: string, text: string, content?: readonly PromptContentBlock[]): { method: string; params: any } | null;
+  /**
+   * Whether a steering RPC that RESOLVED actually delivered the text. Some
+   * adapters report a steering failure in-band, as a successful response
+   * (upstream 5088ce8).
+   */
+  steerDelivered(result: any): boolean;
   sessionNewMeta?(cwd: string): Record<string, unknown> | undefined;
 }

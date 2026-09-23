@@ -1,6 +1,7 @@
 import * as path from "node:path";
 import packageManifest from "../package.json";
 import { grokCliNeedsShell } from "./cli-process";
+import type { PromptContentBlock } from "./acp";
 import type {
   AcpBackend,
   BackendConfigState,
@@ -343,6 +344,29 @@ export class CodexBackend implements AcpBackend {
       return { method: "session/set_config_option", params: { sessionId, configId: "collaboration_mode", value: modeId } };
     }
     return { method: "session/set_config_option", params: { sessionId, configId: "mode", value: modeId } };
+  }
+
+  /** codex-acp registers `_session/steering` and advertises it at initialize
+   *  as `_meta.steering.supported`; its `prompt` array is the same block list
+   *  `session/prompt` carries images on (upstream 2f67d9a). */
+  steeringCapabilities(initializeResult: any) {
+    const supported = initializeResult?._meta?.steering?.supported === true;
+    return { supported, acceptsContent: supported };
+  }
+
+  interject(sessionId: string, text: string, content?: readonly PromptContentBlock[]) {
+    return {
+      method: "_session/steering",
+      params: { sessionId, prompt: content?.length ? [...content] : [{ type: "text", text }] },
+    };
+  }
+
+  /** The adapter documents three outcomes — injected, startedNewTurn, failed —
+   *  and answers `{ outcome: "failed" }` as a SUCCESSFUL RPC. Only that one is a
+   *  non-delivery; startedNewTurn did reach the agent and must not be re-queued
+   *  (upstream 5088ce8). */
+  steerDelivered(result: any): boolean {
+    return result?.outcome !== "failed";
   }
 
   configState(response: any, fallback: BackendConfigState): BackendConfigState {

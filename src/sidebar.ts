@@ -7446,7 +7446,7 @@ Only continue if you trust this code.`,
       this.reportRequester(
         requester,
         "warning",
-        "This Grok CLI cannot steer attachments mid-turn — your message was queued instead. It will send when the turn finishes.",
+        "This agent cannot steer attachments mid-turn — your message was queued instead. It will send when the turn finishes.",
       );
       return;
     }
@@ -7477,6 +7477,21 @@ Only continue if you trust this code.`,
       return;
     }
 
+    // The turn ended before the steer landed (while attachments were read).
+    // grok buffers an idle steer, but codex-acp's `performSteeringRequest`
+    // "otherwise starts a new turn" — one the host never began, with no Stop
+    // and no busy state. The queue is what Steer offered to skip, so it is the
+    // honest home; flushing it sends the ordinary tracked turn (upstream
+    // 19876a0). `turnInFlight`, not `status`: only the token can tell
+    // "working" from "was working and never settled". The text is already
+    // paid for, so the relay flag is cleared before the flush (upstream 4d74e90).
+    if (!turnIsInFlight(session)) {
+      putBackOnQueue();
+      session.queuedSendRequiresRelay = false;
+      void this.maybeFlushQueuedSends(session);
+      return;
+    }
+
     const displayText = queuedSendsText(contributions);
     const displayChips = contributions.flatMap((item) => item.chips);
     this.emit(session, {
@@ -7493,15 +7508,33 @@ Only continue if you trust this code.`,
         if (gen === session.gen && session.client === client) session.interjectionCount += 1;
       }, images.length ? built.blocks : undefined);
       if (r === "unsupported") {
-        // Pre-~0.2.96 CLI: latch the button off and hand the item to the queue,
-        // which is exactly the behavior Steer was offering to skip.
+        // Unsupported backend: latch the button off and hand the item to the
+        // queue, which is exactly the behavior Steer was offering to skip.
         this.emit(session, { type: "steerUnavailable" });
         this.emit(session, { type: "agentReset" });
         putBackOnQueue();
         this.reportRequester(
           requester,
           "warning",
-          "Steering needs a newer Grok Build CLI — your message was queued instead. Update via Settings → About.",
+          // Grok's method is unadvertised, so "unsupported" there means an old
+          // CLI that an update fixes. Every other backend advertises.
+          session.provider === "grok"
+            ? "Steering needs a newer Grok Build CLI — your message was queued instead. Update via Settings → About."
+            : "This agent cannot steer mid-turn — your message was queued instead. It will send when the turn finishes.",
+        );
+        return;
+      }
+      if (r === "failed") {
+        // The adapter answered and said it could not apply the correction.
+        // The turn is STILL RUNNING: no `agentReset` (that would delete the
+        // reply being read) and no `steerUnavailable` (one refusal is not a
+        // missing capability). The queue takes the text (upstream bb76a5a).
+        putBackOnQueue();
+        session.queuedSendRequiresRelay = false;
+        this.reportRequester(
+          requester,
+          "warning",
+          "The agent could not take that correction mid-turn — your message was queued instead. It will send when the turn finishes.",
         );
         return;
       }
@@ -13909,6 +13942,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         planModeAvailable: compatibility.planModeAvailable,
         cliVerified: compatibility.planModeVersionVerified,
         planModeUnavailableReason: compatibility.planModeUnavailableReason,
+        steeringSupported: session.client?.supportsInterject?.(),
       }),
     });
   }
@@ -14673,6 +14707,9 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
           version: handshakeVersion,
           provider: session.provider,
           init: { protocolVersion: init?.protocolVersion },
+          // Host-confirmed at initialize by the backend (upstream 2f67d9a):
+          // the webview stops guessing Steer from a provider list.
+          steeringSupported: client.supportsInterject?.() ?? false,
         },
       });
     });

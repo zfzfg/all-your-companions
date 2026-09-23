@@ -42,7 +42,7 @@ import { filterAdvertisedCommands } from "./slash-filter";
 import { grokCliNeedsShell, probeCliVersion } from "./cli-process";
 import { compareVersionTuple, parseGrokVersion } from "./cli-locator";
 import { resolvedTerminalShellDialect } from "./terminal-manager";
-import type { AcpBackend, AcpProvider, BackendSessionListResult } from "./acp-backend";
+import type { AcpBackend, AcpProvider, BackendSessionListResult, BackendSteeringCapabilities } from "./acp-backend";
 import { providerCapability } from "./provider-capabilities";
 import { buildGrokAgentArgs, grokBackend } from "./grok-backend";
 import {
@@ -84,46 +84,7 @@ export type PromptContentBlock =
   | { type: "text"; text: string }
   | { type: "image"; mimeType: string; data: string; path?: string };
 
-/**
- * Oldest grok whose `_x.ai/interject` honors `content` (text + image blocks).
- * 0.2.x accepts `{sessionId, text}` and ignores unknown fields, so images
- * would drop silently — the host refuses image-bearing Steer instead.
- * Fail closed unless the version is live-verified. Inspected on 1.0.5
- * (`InterjectRequest.content` in `extensions/interject.rs`).
- */
-export const GROK_INTERJECT_CONTENT_MIN_VERSION: [number, number, number] = [1, 0, 0];
-
-/** True only for a live-verified grok that will apply interject `content`. */
-export function cliHonorsInterjectContent(
-  grokVersion?: string | null,
-  versionVerified = false,
-): boolean {
-  if (!versionVerified) return false;
-  const parsed = parseGrokVersion(grokVersion ?? "");
-  if (!parsed) return false;
-  return compareVersionTuple(parsed, GROK_INTERJECT_CONTENT_MIN_VERSION) >= 0;
-}
-
-/**
- * `_x.ai/interject` params. `content` is omitted entirely when there are no
- * image blocks so the legacy `{sessionId, text}` wire stays byte-identical
- * (the TUI does the same). The Text block, when present, is the rewritten
- * prompt (`buildPromptWithImages`) and wins over `text` on a capable CLI.
- */
-export function buildInterjectParams(
-  sessionId: string,
-  text: string,
-  content?: readonly PromptContentBlock[],
-): { sessionId: string; text: string; content?: PromptContentBlock[] } {
-  const params: { sessionId: string; text: string; content?: PromptContentBlock[] } = {
-    sessionId,
-    text,
-  };
-  if (content && content.some((block) => block.type === "image")) {
-    params.content = [...content];
-  }
-  return params;
-}
+export { buildInterjectParams, cliHonorsInterjectContent, GROK_INTERJECT_CONTENT_MIN_VERSION } from "./grok-backend";
 
 export interface AcpClientOptions {
   cliPath: string;
@@ -331,6 +292,7 @@ export class AcpClient extends EventEmitter {
   private nextId = 1;
   private pending = new Map<number, Pending>();
   private readonly backend: AcpBackend;
+  private steering: BackendSteeringCapabilities;
   private readonly timeouts: AcpTimeouts;
 
   readonly provider: AcpProvider;
@@ -400,6 +362,7 @@ export class AcpClient extends EventEmitter {
   constructor(private opts: AcpClientOptions) {
     super();
     this.backend = opts.backend ?? grokBackend;
+    this.steering = this.backend.steeringCapabilities(undefined, opts);
     this.provider = this.backend.provider;
     this.usesClientPlanGate = this.backend.usesClientPlanGate;
     this.currentReasoningEffort = this.opts.effort || undefined;
@@ -495,6 +458,7 @@ export class AcpClient extends EventEmitter {
         this.opts.grokVersionVerified === true,
       ),
     });
+    this.steering = this.backend.steeringCapabilities(init, this.opts);
     isInitialized = true;
     this.emit("initialized", init);
   }
@@ -808,51 +772,56 @@ export class AcpClient extends EventEmitter {
   }
 
   /**
-   * Mid-turn steering (#52) — "Steer". Queues `text` into the session's pending
-   * interjection buffer, which the agent drains at its next safe point. It does
-   * **not** cancel the turn and loses no in-flight tool work: probed on 0.2.101
-   * against a live turn, the model changed course mid-stream and the turn still
-   * ended `end_turn` (research/grok-build-oss-findings.md § 3a).
+   * Mid-turn steering (#52) — "Steer". Injects into the running turn without
+   * cancelling it or losing in-flight tool work. The backend owns the method,
+   * content support and the initialize capability (upstream 2f67d9a):
+   * grok's unadvertised `_x.ai/interject` starts optimistic and latches off on
+   * -32601; Codex's `_session/steering` only once initialize advertised it.
    *
-   * `_x.ai/interject` is unadvertised, so a pre-~0.2.96 CLI answers -32601. That
-   * returns `"unsupported"` (not a throw) so the caller can fall back to queueing
-   * — the user's text must never be lost to a capability gap.
-   *
-   * `content` is additive: image-capable CLIs take structured text + image
-   * blocks (the Text block wins over `text`); older CLIs keep reading `text`.
-   * Omit it when there are no images so the legacy wire stays byte-identical.
-   * The host must not pass image blocks to a CLI that ignores `content`.
+   * "unsupported" (capability gap or -32601) and "failed" (the RPC resolved
+   * but the adapter said nothing was applied, upstream bb76a5a) are returned,
+   * not thrown, so the caller can queue the text — the user's words must never
+   * be lost to a capability gap. A throw means the call itself died.
    */
   async interject(
     text: string,
     onQueued?: () => void,
     content?: readonly PromptContentBlock[],
-  ): Promise<"ok" | "unsupported"> {
-    if (providerCapability(this.provider, "steer").state === "no") {
-      this.opts.log(`[interject] Provider ${this.provider} does not support steer; falling back to queue`);
+  ): Promise<"ok" | "unsupported" | "failed"> {
+    if (!this.supportsInterject()) {
+      this.opts.log(`[interject] ${this.provider} cannot steer; falling back to queue`);
+      return "unsupported";
+    }
+    if (content?.some((block) => block.type === "image") && !this.honorsInterjectContent()) {
       return "unsupported";
     }
     if (!this.sessionId) throw new Error("no session");
+    const call = this.backend.interject(this.sessionId, text, content);
+    if (!call) return "unsupported";
     try {
-      await this.request(
-        "_x.ai/interject",
-        buildInterjectParams(this.sessionId, text, content),
-        () => onQueued?.(),
-      );
+      const result = await this.request(call.method, call.params, () => onQueued?.());
+      // A steering RPC can RESOLVE and still report that nothing was applied.
+      // Deliberately not a throw: the turn is still streaming and fine.
+      if (!this.backend.steerDelivered(result)) return "failed";
       return "ok";
     } catch (e: any) {
       if (isMethodNotFoundError(e)) {
-        this.opts.log("[interject] CLI does not support _x.ai/interject; falling back to queue");
+        this.steering = { supported: false, acceptsContent: false };
+        this.opts.log(`[interject] CLI does not support ${call.method}; falling back to queue`);
         return "unsupported";
       }
       throw e;
     }
   }
 
-  /** Live-verified grok that will apply interject `content` rather than drop it. */
+  /** Host-confirmed: this backend can hear a mid-turn correction right now. */
+  supportsInterject(): boolean {
+    return this.steering.supported;
+  }
+
+  /** Whether this backend will apply structured steering content (images). */
   honorsInterjectContent(): boolean {
-    return this.provider === "grok"
-      && cliHonorsInterjectContent(this.opts.grokVersion, this.opts.grokVersionVerified === true);
+    return this.supportsInterject() && this.steering.acceptsContent;
   }
 
   /**

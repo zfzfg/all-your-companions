@@ -527,6 +527,16 @@ export class ClaudeBackend implements AcpBackend {
     return { method: "session/set_mode", params: { sessionId, modeId: claudeModeId(modeId) } };
   }
 
+  // Claude Code has no mid-turn interject at any adapter version.
+  steeringCapabilities() {
+    return { supported: false, acceptsContent: false };
+  }
+
+  interject(): null { return null; }
+
+  // Unreachable: steeringCapabilities answers no, so no steering RPC is sent.
+  steerDelivered(): boolean { return true; }
+
   configState(response: any, fallback: BackendConfigState): BackendConfigState {
     return configStateFromClaudeOptions(response, fallback);
   }
