@@ -24,6 +24,7 @@
 
 import { createHash } from "node:crypto";
 import * as nodePath from "node:path";
+import { commandStagesForGrant, type ShellDialect } from "./plan-gate";
 
 export type PermissionKind = "read" | "edit" | "execute" | "other";
 export type PermissionAction = "allow" | "ask" | "deny";
@@ -50,6 +51,8 @@ export interface PermissionRequestFacts {
   kind: PermissionKind;
   command?: string;
   paths: readonly string[];
+  /** Dialect the terminal runs {@link command} in; posix when absent. */
+  shellDialect?: ShellDialect;
 }
 
 export interface PermissionRuleSuggestion {
@@ -283,14 +286,42 @@ export function normalizePermissionKind(kind: string | undefined): PermissionKin
   return "other";
 }
 
-function commandMatchesPrefix(command: string | undefined, prefix: string, windows: boolean): boolean {
-  if (!prefix) return false;
+/**
+ * A command prefix is compared per shell stage, token by token, so an allow
+ * rule for `npm` never covers `npm test && rm -rf build`.
+ *
+ * - allow / ask: EVERY stage must start with the prefix. A command the
+ *   fail-closed grammar cannot split (substitution, file redirects, newlines,
+ *   globbed programs, `FOO=1 cmd`) never matches and falls back to the card.
+ * - deny: ANY stage matching is enough, and the raw string is checked too,
+ *   so an unparseable command cannot slip past a deny rule.
+ */
+function commandMatchesPrefix(
+  command: string | undefined,
+  prefix: string,
+  action: PermissionAction,
+  dialect: ShellDialect,
+  windows: boolean,
+): boolean {
   const cmd = collapseWs(String(command || ""));
-  const pre = collapseWs(prefix);
+  const pre = collapseWs(prefix || "");
   if (!cmd || !pre) return false;
-  const a = windows ? cmd.toLowerCase() : cmd;
-  const b = windows ? pre.toLowerCase() : pre;
-  return a === b || a.startsWith(b + " ");
+  const preTokens = pre.split(" ");
+  const stageMatches = (argv: readonly string[]) => argvStartsWith(argv, preTokens, windows);
+  // Parse the raw text: collapsing whitespace first would turn a newline
+  // (a second command) into an argument separator.
+  const stages = commandStagesForGrant(String(command).trim(), dialect);
+  if (action === "deny") return stageMatches(cmd.split(" ")) || !!stages?.some(stageMatches);
+  return !!stages && stages.every(stageMatches);
+}
+
+function argvStartsWith(argv: readonly string[], prefix: readonly string[], windows: boolean): boolean {
+  if (argv.length < prefix.length) return false;
+  return prefix.every((p, i) => {
+    // The program token compares like the suggestions derive it: npm.cmd ≡ npm.
+    if (i === 0) return stripExe(argv[0]) === stripExe(p);
+    return windows ? argv[i].toLowerCase() === p.toLowerCase() : argv[i] === p;
+  });
 }
 
 function collapseWs(s: string): string {
@@ -310,9 +341,10 @@ function ruleMatches(
   if (m.tool && !toolEquals(m.tool, req.tool)) return false;
   if (m.kind && m.kind !== req.kind) return false;
   if (m.commandPrefix) {
-    const win = /\.exe$|\.cmd$|\.bat$/i.test(req.command || "") ||
+    const dialect = req.shellDialect ?? "posix";
+    const win = dialect !== "posix" || /\.exe$|\.cmd$|\.bat$/i.test(req.command || "") ||
       (req.command || "").includes("\\");
-    if (!commandMatchesPrefix(req.command, m.commandPrefix, win)) return false;
+    if (!commandMatchesPrefix(req.command, m.commandPrefix, rule.action, dialect, win)) return false;
   }
   if (m.pathGlob) {
     if (req.paths.length === 0) return false;

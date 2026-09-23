@@ -7024,7 +7024,7 @@ Only continue if you trust this code.`,
     req: PermissionRequest,
     cwd: string,
   ): boolean {
-    const facts = extractPermissionFacts(req.toolCall);
+    const facts = { ...extractPermissionFacts(req.toolCall), shellDialect: resolvedTerminalShellDialect() };
     const loaded = this.loadPermissionRuleState(cwd);
     this.maybePromptWorkspaceRulesAdoption(session, cwd, loaded);
     const decision = decidePermission(
