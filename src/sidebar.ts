@@ -20287,13 +20287,15 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       const stale = this.openDiffsByRequest.set(session, requestId, { left, right });
       if (stale) this.closeDiffUris(stale);
     }
-    // preview:true reuses a single preview tab across grok's many small sequential
-    // edits; preserveFocus:true keeps focus on the chat so the permission card is
+    // preview:false — VS Code keeps ONE preview slot per group, so a preview
+    // diff evicted the file the user had single-clicked open (#167, upstream
+    // 033360c; pinned by test/proposed-diff-preview.test.ts).
+    // preserveFocus:true keeps focus on the chat so the permission card is
     // immediately clickable. `selection` opens a whole-file diff on the edit
     // instead of at line 1 (#66) — harmless at 0 when expansion fell back.
     const at = sides.firstChangedLine;
     await this.host.openDiff(left, right, `${providerDisplayName(session.provider)} proposed: ${base}`, {
-      preview: true,
+      preview: false,
       preserveFocus: true,
       selection: {
         start: { line: at, character: 0 },

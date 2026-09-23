@@ -4820,7 +4820,12 @@ mjx-container[display="true"] {
 .confirm-overlay {
   position: fixed;
   inset: 0;
-  z-index: 100;
+  /* A confirmation is the topmost thing on screen, by definition: it asks
+     about something the person cannot undo, so nothing may cover it. At 100
+     it sat under the file panel's menus, the rail and the image preview.
+     test/confirm-stacking.test.ts pins it above every declared layer
+     (upstream a933944). */
+  z-index: 10100;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -4832,10 +4837,6 @@ mjx-container[display="true"] {
    two links and a set of steps. At the confirm dialog's 340px that stack ran
    to 600px tall and the code wrapped awkwardly. Wider, and scrollable rather
    than clipped on a short phone screen. */
-/* Above the settings overlay (z-index 120), because Settings is one of the two
-   places this is opened FROM. At the confirm dialog's 100 it opened behind the
-   page that launched it — the very failure the wizard replaced. */
-.connect-wizard-overlay { z-index: 200; }
 
 .confirm-panel.connect-wizard-panel {
   width: min(460px, 100%);
