@@ -159,7 +159,7 @@ import { summarizeForSpeech } from "./speech-summary";
 import type { PromptResultMeta, PromptUsage, SessionInfoContext } from "./acp-dispatch";
 import { MediaRef, adapterCompactSignal, adapterContextOccupancy, agentTimestampMsFromMeta, autoCompactStartedNote, childStreamFromRoute, commandOutputForToolCall, commandOutputFromLiveTerminal, contextUsedFromCompactNotification, enforceCompleteSessionCost, errorDetail, gateZeroTokenMeta, isAuthErrorText, isCredentialError, isIncompatibleAgentError, isResumeNotFound, isSubagentLifecycleUpdate, occupancyFromAdapterTurn, parseSessionInfoContext, permissionOutcomeFor, promptErrorText, rateLimitNoticeText, replayedTurnDuration, sessionInfoCacheFresh, sumUsage, summarizeBackgroundCommand, turnStatusFromPromptResult, usageIsRealMeasurement, type TurnEndStatus, type UpdateRoute } from "./acp-dispatch";
 import { createMcpPrepareState, prepareMcpToolCall } from "./mcp-tool";
-import { modeToRemember, rememberedEffort, startsInYolo, withRememberedEffort, type EffortPrefs } from "./mode-prefs";
+import { configWriteTarget, modeToRemember, rememberedEffort, startsInYolo, withRememberedEffort, type EffortPrefs } from "./mode-prefs";
 import { beginAuthRecovery, oauthShadowsXaiApiKey } from "./auth-recovery";
 import {
   classifyLimitError,
@@ -6126,7 +6126,7 @@ export class GrokSidebar {
       if (session.hasHistory) return;
       const discardId = session.activeSessionId;
       await this.rememberProjectProvider(this.sessionCwd(session), provider, undefined);
-      if (provider === "grok") await cfg.update("defaultModel", "", "global");
+      if (provider === "grok") await this.rememberGrokConfig("defaultModel", "");
       else if (isAdapterProvider(provider)) await this.discardAdapterEmptySession(provider, discardId, this.sessionCwd(session), client);
       await this.startSession(undefined, session);
       if (provider === "grok") this.discardRestartedEmptySession(discardId, session);
@@ -6135,7 +6135,7 @@ export class GrokSidebar {
     try {
       await client.setModel(modelId);
       await this.rememberProjectProvider(this.sessionCwd(session), provider, modelId);
-      if (provider === "grok") await cfg.update("defaultModel", modelId, "global");
+      if (provider === "grok") await this.rememberGrokConfig("defaultModel", modelId);
     } catch (e) {
       if (!isIncompatibleAgentError(e)) {
         this.reportRequester(requester, "error", `Failed to set model: ${(e as Error).message}`);
@@ -6146,7 +6146,7 @@ export class GrokSidebar {
         // with a fresh grok id. There is nothing to summarize or preserve.
         // Drop it after the restart, carrying over any rename the user made.
         const discardId = session.activeSessionId;
-        await cfg.update("defaultModel", modelId, "global");
+        await this.rememberGrokConfig("defaultModel", modelId);
         await this.startSession(undefined, session);
         this.discardRestartedEmptySession(discardId, session);
         return;
@@ -6161,7 +6161,7 @@ export class GrokSidebar {
       }
       const mode = await this.pickRestartMode("Switching to this model requires a new session.");
       if (!mode) return; // dismissed — keep the current model
-      await cfg.update("defaultModel", modelId, "global");
+      await this.rememberGrokConfig("defaultModel", modelId);
       await this.restartSession(mode, session);
     }
   }
@@ -6418,8 +6418,7 @@ Only continue if you trust this code.`,
     // directly). `modeToRemember` drops Plan (a transient per-task choice).
     const remember = modeToRemember(modeId);
     if (remember) {
-      void this.host.getConfiguration("grok")
-        .update("defaultMode", remember, "global");
+      void this.rememberGrokConfig("defaultMode", remember);
     }
     if (modeId === "yolo") {
       session.autoApprove = true;
@@ -14147,6 +14146,14 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     return false;
   }
 
+  /** Persist a picker choice where the next read will actually find it: every
+   *  read here asks for the EFFECTIVE value, so a workspace value outranks a
+   *  Global write and the control snapped back to it (upstream #162). */
+  private async rememberGrokConfig(key: "defaultEffort" | "defaultModel" | "defaultMode", value: string): Promise<void> {
+    const cfg = this.host.getConfiguration("grok");
+    await cfg.update(key, value, configWriteTarget(cfg.inspect<string>(key)));
+  }
+
   /** Remember a reasoning-effort choice for the agent it was made in. The
    *  legacy single `grok.defaultEffort` is kept in step for grok so an existing
    *  setting keeps working and older hosts still read something sensible. */
@@ -14154,8 +14161,8 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     const cfg = this.host.getConfiguration("grok");
     const next = withRememberedEffort(cfg.get<EffortPrefs>("defaultEffortByProvider", {}), provider, level);
     try {
-      await cfg.update("defaultEffortByProvider", next, "global");
-      if (provider === "grok") await cfg.update("defaultEffort", level, "global");
+      await cfg.update("defaultEffortByProvider", next, configWriteTarget(cfg.inspect<EffortPrefs>("defaultEffortByProvider")));
+      if (provider === "grok") await this.rememberGrokConfig("defaultEffort", level);
     } catch {
       // Best-effort persistence: a host settings write failure should not break the session effort switch
     }
@@ -15439,15 +15446,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
           this.host.appendLine(
             `[startup] Default model '${defaultModel}' is not available; switching grok.defaultModel to '${client.currentModelId}'.`,
           );
-          const cfg = this.host.getConfiguration("grok");
-          const scope = cfg.inspect<string>("defaultModel");
-          const target =
-            scope?.workspaceFolderValue !== undefined
-              ? "workspaceFolder"
-              : scope?.workspaceValue !== undefined
-                ? "workspace"
-                : "global";
-          void cfg.update("defaultModel", client.currentModelId, target);
+          void this.rememberGrokConfig("defaultModel", client.currentModelId);
         }
       }
       if (session.provider === "grok") {

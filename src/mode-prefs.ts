@@ -2,6 +2,8 @@
 // so the policy — "remember the last Agent/Auto-accept switch, never Plan; apply
 // it to new sessions only" — is unit-testable without vscode/spawn.
 
+import type { ConfigTarget } from "./host";
+
 export type ModeId = "agent" | "plan" | "yolo";
 
 /**
@@ -21,6 +23,25 @@ export function modeToRemember(modeId: ModeId): "agent" | "yolo" | null {
  */
 export function startsInYolo(defaultMode: string | undefined, isResume: boolean): boolean {
   return !isResume && defaultMode === "yolo";
+}
+
+/**
+ * Where a write of `section` has to land for the next `get(section)` to read it
+ * back. `get` returns the EFFECTIVE value — folder > workspace > global — so a
+ * setting without a declared `scope` can be overridden per workspace. Writing
+ * Global underneath such an override persists a value nothing will ever read:
+ * the picker records the level, the next spawn re-reads the workspace's level,
+ * and the control snaps back to it on every change (upstream #162, d6ea8db).
+ *
+ * Deliberately writes where the value ALREADY lives rather than forcing Global:
+ * a per-workspace effort or model is a legitimate thing to have configured.
+ */
+export function configWriteTarget(
+  inspected: { workspaceValue?: unknown; workspaceFolderValue?: unknown } | undefined,
+): ConfigTarget {
+  if (inspected?.workspaceFolderValue !== undefined) return "workspaceFolder";
+  if (inspected?.workspaceValue !== undefined) return "workspace";
+  return "global";
 }
 
 /** Remembered reasoning effort, per agent. */
