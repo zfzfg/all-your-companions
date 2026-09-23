@@ -5656,7 +5656,13 @@ export class GrokSidebar {
     const clean = models.map(({ provider: _provider, defaultImplied: _default, ...model }: any) => model);
     const stored = this.state.update(PROVIDER_MODEL_CACHE_KEY, {
       ...current,
-      [provider]: { models: clean, currentModelId, seenAt: Date.now() },
+      [provider]: {
+        models: clean,
+        currentModelId,
+        seenAt: Date.now(),
+        // Stamp the CLI this catalog came from, so a later update can be seen.
+        cliVersion: this.providerCliVersions[provider],
+      },
     } satisfies ProviderModelCache);
     // The picker reads this cache, and an adapter's models arrive
     // ASYNCHRONOUSLY — the warm-up runs after the connect returns. Re-posting
@@ -13849,6 +13855,26 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     else this.claudeVersionProbe = undefined;
   }
 
+  /**
+   * Re-read a provider's model catalog when its CLI changed under us
+   * (upstream 8a72f31). The catalog is persisted, so an updated CLI's new
+   * models never appeared until a reconnect. Keyed on the OBSERVED version —
+   * the CLIs update themselves — and one attempt per version: the stamp is
+   * written before the probe.
+   */
+  private async refreshModelsIfCliChanged(provider: AcpProvider, version: string): Promise<void> {
+    if (!version || !this.hasProviderConsent(provider)) return;
+    const cache = this.state.get<ProviderModelCache>(PROVIDER_MODEL_CACHE_KEY, {});
+    const cached = cache[provider];
+    if (!cached || cached.cliVersion === version) return;
+    await this.state.update(PROVIDER_MODEL_CACHE_KEY, {
+      ...cache,
+      [provider]: { ...cached, cliVersion: version },
+    } satisfies ProviderModelCache);
+    this.host.appendLine(`[${provider}] CLI ${cached.cliVersion ?? "unknown"} -> ${version}; re-reading the model catalog`);
+    await this.reprobeProviderCredentials(provider);
+  }
+
   private probeCodexVersion(): Promise<string> {
     if (this.codexVersionProbe) return this.codexVersionProbe;
     this.codexVersionProbe = (async () => {
@@ -13863,6 +13889,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         if (!version) throw new Error("unrecognized version output");
         this.providerCliVersions.codex = version;
         this.postProviderState();
+        await this.refreshModelsIfCliChanged("codex", version);
         return version;
       } catch (error) {
         this.host.appendLine(`codex --version failed: ${(error as Error).message}`);
@@ -13889,6 +13916,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         if (!version) throw new Error("unrecognized version output");
         this.providerCliVersions.claude = version;
         this.postProviderState();
+        await this.refreshModelsIfCliChanged("claude", version);
         return version;
       } catch (error) {
         this.host.appendLine(`claude --version failed: ${(error as Error).message}`);

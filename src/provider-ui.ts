@@ -24,6 +24,9 @@ export interface ProviderModelCacheEntry {
   models: ModelInfo[];
   currentModelId?: string;
   seenAt: number;
+  /** The CLI version this catalog was read from, when known. A changed
+   *  version re-reads it once (upstream 8a72f31); absent reads as unknown. */
+  cliVersion?: string;
 }
 
 export type ProviderModelCache = Partial<Record<AcpProvider, ProviderModelCacheEntry>>;
