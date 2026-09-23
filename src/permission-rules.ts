@@ -55,12 +55,19 @@ export interface PermissionRequestFacts {
   shellDialect?: ShellDialect;
 }
 
+/**
+ * Where a card's "always allow" lands. `session` is upstream's session grant
+ * (0a528c5): held in memory on the conversation, never written anywhere, and
+ * gone when the session restarts.
+ */
+export type SuggestionScope = PermissionScope | "session";
+
 export interface PermissionRuleSuggestion {
   /** Ephemeral id for the submenu, not a persisted rule id. */
   id: string;
   label: string;
   match: PermissionRuleMatch;
-  scope: PermissionScope;
+  scope: SuggestionScope;
 }
 
 /** What the settings page paints. Ids starting `socket-` are the floor. */
@@ -600,6 +607,11 @@ export function suggestRules(
   if (facts.kind === "execute" && facts.command) {
     const two = commandTwoTokenPrefix(facts.command);
     const head = commandHead(facts.command);
+    // The lightest grant first: this program, this conversation only. Per-stage
+    // matching means it still never covers `head && something-else`.
+    if (head && isConcreteAllowMatch({ kind: "execute", commandPrefix: head })) {
+      out.push({ id: "cmd-session", label: head, match: { kind: "execute", commandPrefix: head }, scope: "session" });
+    }
     if (two) push("cmd-two", two, { kind: "execute", commandPrefix: two });
     if (head && head !== two) {
       push("cmd-head", `${head} *`, { kind: "execute", commandPrefix: head });

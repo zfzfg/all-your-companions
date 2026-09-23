@@ -188,3 +188,35 @@ describe("applyPermissionRules", () => {
     expect(h.replies[0].optionId).toBe("once");
   });
 });
+
+describe("session grants (upstream 0a528c5)", () => {
+  const NPM: PermissionRequest = {
+    id: 9,
+    sessionId: "s1",
+    toolCall: { toolCallId: "tc-npm", kind: "execute", title: "npm test", rawInput: { command: "npm test" } },
+    options: [
+      { optionId: "once", kind: "allow_once", name: "Allow once" },
+      { optionId: "reject", kind: "reject_once", name: "Reject" },
+    ],
+  };
+
+  it("answers a later matching card on this session only, and never writes a rule", () => {
+    const h = harness();
+    h.sidebar.addSessionAllowRule(h.session, { kind: "execute", commandPrefix: "npm" });
+    expect(h.sidebar.state.update).not.toHaveBeenCalled();
+    h.sidebar.handlePermissionRequest(h.session, h.client, NPM, "/workspace");
+    expect(h.replies).toEqual([{ id: 9, optionId: "once" }]);
+
+    const other = harness();
+    other.sidebar.handlePermissionRequest(other.session, other.client, NPM, "/workspace");
+    expect(other.replies).toEqual([]);
+  });
+
+  it("does not cover a chained command the grant never named", () => {
+    const h = harness();
+    h.sidebar.addSessionAllowRule(h.session, { kind: "execute", commandPrefix: "npm" });
+    const chained = { ...NPM, id: 10, toolCall: { ...NPM.toolCall!, rawInput: { command: "npm test && rm -rf build" } } };
+    h.sidebar.handlePermissionRequest(h.session, h.client, chained, "/workspace");
+    expect(h.replies).toEqual([]);
+  });
+});

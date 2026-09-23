@@ -351,7 +351,8 @@ describe("extractPermissionFacts + suggestions", () => {
 
   it("suggests npm test and npm * from a concrete command, never a bare execute", () => {
     const s = suggestRules(facts({ kind: "execute", command: "npm test --watch" }));
-    expect(s.map((x) => x.label)).toEqual(["npm test", "npm *"]);
+    // The session grant leads (upstream 0a528c5); the saved rules follow.
+    expect(s.map((x) => [x.label, x.scope])).toEqual([["npm", "session"], ["npm test", "workspace"], ["npm *", "workspace"]]);
     expect(s.every((x) => isConcreteAllowMatch(x.match))).toBe(true);
     expect(s.some((x) => !x.match.commandPrefix && !x.match.pathGlob)).toBe(false);
   });

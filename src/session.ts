@@ -426,6 +426,10 @@ export class Session {
    */
   rolePermissionRules?: PermissionRule[];
 
+  /** Session grants from the card ("allow npm this session"): in memory only,
+   *  cleared on every session start (upstream 0a528c5). */
+  sessionPermissionRules: PermissionRule[] = [];
+
   /** Live permission requests awaiting an answer, by request id. Set when the
    *  card is shown, read when the user answers so we can persist the resolved
    *  card (title + outcome) for replay on a resumed session, then deleted. */

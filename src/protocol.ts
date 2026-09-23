@@ -1821,7 +1821,7 @@ export type WebviewMsg =
    * (concrete commandPrefix or pathGlob required) and ignores a crafted
    * allow-everything payload. Older hosts ignore the field and just answer.
    */
-  | { type: "permissionAnswer"; requestId: number | string; optionId: string; rule?: PermissionRuleMatch }
+  | { type: "permissionAnswer"; requestId: number | string; optionId: string; rule?: PermissionRuleMatch; ruleScope?: "session" }
   /** AP-07: (re-)list active + pending permission rules. */
   | { type: "listPermissionRules" }
   /** AP-07: drop one user rule. Floor rows are not addressable. */

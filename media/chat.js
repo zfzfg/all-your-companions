@@ -14941,14 +14941,14 @@
     return list.find((o) => o.kind === "allow_once") || list.find((o) => o.kind === "allow_always");
   }
 
-  const RULE_SCOPE_WORDS = { workspace: "this project", global: "all projects" };
+  const RULE_SCOPE_WORDS = { session: "this session", workspace: "this project", global: "all projects" };
 
   function renderPermissionRuleSuggestions(el, requestId, cardTitle, suggestions) {
     const old = el.querySelector(".perm-rule-suggestions");
     if (old) old.remove();
     if (!Array.isArray(suggestions) || !suggestions.length) return;
     const wrap = h("div", { class: "perm-rule-suggestions", role: "group", "aria-label": "Always allow" },
-      h("div", { class: "perm-rule-suggestions-label" }, "Always allow — saved as a rule"));
+      h("div", { class: "perm-rule-suggestions-label" }, "Always allow"));
     suggestions.forEach((sug) => {
       if (!sug || !sug.match) return;
       // Where the rule is written is part of the decision: a project rule is
@@ -14965,6 +14965,7 @@
           requestId,
           optionId: opt.optionId,
           rule: sug.match,
+          ...(sug.scope === "session" ? { ruleScope: "session" } : {}),
         });
         resolvePermissionCardEl(el, opt, cardTitle);
         showGrokking();

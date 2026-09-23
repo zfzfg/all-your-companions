@@ -7081,7 +7081,7 @@ Only continue if you trust this code.`,
     const loaded = this.loadPermissionRuleState(cwd);
     this.maybePromptWorkspaceRulesAdoption(session, cwd, loaded);
     const decision = decidePermission(
-      [...loaded.active, ...(session.rolePermissionRules ?? [])],
+      [...loaded.active, ...(session.rolePermissionRules ?? []), ...(session.sessionPermissionRules ?? [])],
       facts,
       cwd,
     );
@@ -7207,6 +7207,21 @@ Only continue if you trust this code.`,
     };
     this.post(message);
     void this.settingsEditor?.webview.postMessage(message);
+  }
+
+  /** A session grant: same sanitizer and matcher as a saved rule, but held on
+   *  the conversation only and never written to disk. */
+  private addSessionAllowRule(session: Session, matchRaw: unknown): void {
+    const match = sanitizeWebviewAllowMatch(matchRaw);
+    if (!match) return;
+    session.sessionPermissionRules = [...(session.sessionPermissionRules ?? []), createRule({
+      id: `session-${randomUUID()}`,
+      createdAt: Date.now(),
+      action: "allow",
+      scope: "workspace",
+      match,
+      note: "this session only",
+    })];
   }
 
   private async persistAllowRuleFromCard(
@@ -14560,6 +14575,8 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     const configAutoApprove = session.provider === "grok" && this.configForcesAutoApprove(this.sessionCwd(session));
     session.autoApprove = rememberedYolo || configAutoApprove;
     session.planActive = false;
+    // Session grants never outlive the process they were given to.
+    session.sessionPermissionRules = [];
     // A resume is assumed to have history (which locks the provider) until a
     // successful replay proves otherwise — see replaySessionHistory.
     session.hasHistory = !!resumeId;
@@ -16231,7 +16248,8 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
           }
           if (!session.client?.respondPermission(msg.requestId, msg.optionId)) break;
           if (msg.rule && !isPlanReviewPermission(pending.toolKind)) {
-            void this.persistAllowRuleFromCard(session, msg.rule);
+            if (msg.ruleScope === "session") this.addSessionAllowRule(session, msg.rule);
+            else void this.persistAllowRuleFromCard(session, msg.rule);
           }
           // Record the resolution in the session buffer so re-focusing this session
           // replays the card collapsed instead of active (the live collapse is a
