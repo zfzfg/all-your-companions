@@ -2,6 +2,41 @@
 
 ## Unreleased
 
+**Caught up with Grok Build 4.3–4.11.** The improvements from upstream that apply to a VS Code-only, multi-companion extension are ported. Remote, phone and desktop-app changes are left out, because this fork doesn't have those parts.
+
+### Added
+
+- **Muse Code (Meta) is the fifth companion.** Connect it in Settings → Providers. It runs through its own ACP adapter. It has no Plan mode, no mode switching and no host MCP servers. Delegation to it uses the fenced-block shim.
+- **Codex can be steered mid-turn.** Whether Steer is offered is now decided by what the backend reports when it starts, not by a fixed list.
+- **Previous prompt.** A button above the message box jumps back to the prompt before the one you are reading and highlights it. You can turn it off with `companions.promptNav`.
+- **Copy image.** The image lightbox copies the original image at full resolution.
+- **Subscription usage** appears in the context popover: how much of your Grok, Claude or Codex subscription window is left. When a usage limit hits, the companion with the most room left is offered first.
+- **Whole-turn diffs in Review Center.** In turn scope, "Open diff" shows one diff per file for everything the turn did, including edits made by shell commands. It needs git; without git you get the tool-call diff as before.
+- **Session grants.** A permission card can allow a program for this conversation only. The grant is kept in memory, never written to disk, and is gone when the session restarts.
+- **Sign-in card.** When an account's sign-in expires, a card above the composer offers to sign in again. The flag only clears once the provider has accepted the credential.
+- **Speech-to-text through OpenAI** as well as xAI. It routes by companion. New settings: `companions.voiceBackend`, `companions.voiceOpenAiApiKey` and `companions.voiceOpenAiModel`.
+- **Update Codex / Claude CLI** from Settings → About. The update runs in a terminal, using the same install method the CLI was installed with.
+- **Provider config files.** Grok and Codex `config.toml`, Claude `settings.json` and Antigravity `settings.json` are listed under Rule files and can be opened from there.
+- **Prose in code fences wraps.** Each code block also gets its own wrap toggle.
+
+### Changed
+
+- **Privacy (#171): an agent you have not connected is never started.** This covers refreshes, settings pages and credential probes. Saved connections start over once. No credentials are touched, and reconnecting takes one press.
+- **Permission rules check each part of a chained command.** An allow rule for `npm` no longer covers `npm test && rm -rf build`.
+- The Claude ACP adapter is updated to 0.76, the Codex ACP adapter to 1.11, and managed Codex to 0.153.4.
+
+### Fixed
+
+- A diff no longer closes the file you had single-clicked open (#167).
+- Confirmation dialogs always appear on top.
+- A question card closes when the agent stops waiting for an answer. What you had typed can be moved to the composer.
+- Idle time is not counted while a card is waiting for you.
+- A CLI installed in a path that contains spaces can start on Windows.
+- Effort, model and mode are saved to the settings scope that is actually being read, so a picked value no longer snaps back (#162).
+- An old conversation with no messages can switch companion.
+- A Grok workflow whose "finished" message was missed is repaired from the run's own state file.
+- The Previous-prompt and other live settings now react when they are changed under `companions.*`.
+
 **Subagents you can keep, route and nest.** A subagent that turned out to be worth keeping can become a conversation of its own; a few keywords can steer which companion gets which kind of job; and — if you ask for it — a workflow stage or a subagent can delegate one level further.
 
 ### Added
