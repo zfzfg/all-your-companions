@@ -1072,6 +1072,7 @@
     "compile": "tsc -p .",
     "watch": "tsc -p . -w",
     "test": "vitest run",
+    "smoke:acp": "npm run compile && node scripts/acp-smoke.mjs",
     "test:watch": "vitest",
     "test:perf": "vitest run --config vitest.perf.config.ts",
     "compile:integration": "node -e \"require('fs').rmSync('out-integration',{recursive:true,force:true})\" && tsc -p integration/tsconfig.json",
