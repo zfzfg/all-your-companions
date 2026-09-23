@@ -6592,6 +6592,7 @@ Only continue if you trust this code.`,
 
     function commitVerdict(): void {
       session.pendingExitPlans.delete(requestId);
+      sidebar.syncHumanWait(session);
       sidebar.persistPlanVerdict(session, verdict, planText);
       // Same rule as answering a permission or a question: a plan verdict is
       // activity, but it only resumes the turn if nothing else is outstanding.
@@ -6882,6 +6883,7 @@ Only continue if you trust this code.`,
   private persistPermissionAnswer(session: Session, requestId: number | string, optionId: string): void {
     const pending = session.pendingPermissions.get(requestId);
     session.pendingPermissions.delete(requestId);
+    this.syncHumanWait(session);
     if (!pending) return;
     const sid = session.activeSessionId ?? session.client?.sessionId;
     if (!sid) return;
@@ -6997,6 +6999,7 @@ Only continue if you trust this code.`,
         name: o.name,
       })),
     }));
+    this.syncHumanWait(session);
     const ruleSuggestions = isPlanReviewPermission(req.toolCall?.kind)
       ? undefined
       : suggestRules(extractPermissionFacts(req.toolCall), cwd);
@@ -7614,6 +7617,7 @@ Only continue if you trust this code.`,
       this.dropPendingQuestions(session);
       session.pendingPermissions.clear();
       session.pendingExitPlans.clear();
+      this.syncHumanWait(session);
     }
     if (session.replaying || session.suppressContent) return;
     session.liveFeedbackEligible = true;
@@ -14459,6 +14463,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     // new/resumed/restarted session (covers New Session, history resume, and
     // model/effort restarts — all of which route through here).
     this.stopVoiceInput(session);
+    this.drainPendingConfirms(session);
     session.client = undefined;
     // Detach and dispose as one structural operation. Nothing that can return
     // belongs between these lines: the old ACP callbacks remain live until the
@@ -14658,6 +14663,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         : { backend: this.createProviderBackend(session.provider, effort) }),
     });
     session.client = client;
+    this.syncHumanWait(session);
     // A replacement process may have gained the capability after a CLI update.
     session.lastSessionInfoAt = 0;
     session.lastSessionInfoUsed = undefined;
@@ -14971,6 +14977,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     });
     client.on("toolCallUpdate", (u) => {
       if (gen !== session.gen) return;
+      this.closeQuestionsForToolCall(session, u);
       emitToolCallEvent("toolCallUpdate", u);
     });
     client.on("plan", (u) => {
@@ -15170,6 +15177,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       // request and is waiting on its own pipe for the response. `abandon` is
       // silent here on purpose — see QuestionResponder.
       this.showQuestion(session, req, {
+        toolCallId: req.toolCallId,
         answer: (answers, annotations) => client.respondQuestion(req.id, answers, annotations),
         cancel: () => client.respondQuestionCancelled(req.id),
         abandon: () => { /* the CLI settled its own request; saying more would be a stale reply */ },
@@ -15188,6 +15196,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       // replaced attempt's client away from the current attempt's pipe.
       if (session.priming) {
         if (session.client === client) {
+          this.drainPendingConfirms(session);
           session.client = undefined;
           this.pool.delete(session);
         }
@@ -15504,6 +15513,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         /timed out: (initialize|session\/(new|load))|exited \(code null\)/i.test(msg);
       const userFacing = credentialFailure || stdioRegression || replayBegan || attempt >= startSpawnAttempts;
       client.removeAllListeners("exit");
+      this.drainPendingConfirms(session);
       client.dispose();
       session.client = undefined;
       if (!userFacing) {
@@ -15940,9 +15950,11 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         // what a mismatch means is an answer for somebody else's conversation,
         // and dropping it is right. Ignoring it cannot hang the caller either:
         // the real answer still resolves, and an abandoned confirm already
-        // fails closed when the webview goes away.
+        // fails closed on session teardown or replacement.
         if (pending && pending.session === session) {
           this.pendingConfirms.delete(msg.id);
+          // The first answer from any surface dismisses it on the others.
+          this.emit(session, { type: "uiConfirmResolved", requestId: msg.id });
           pending.resolve(msg.ok === true);
         }
         break;
@@ -16176,6 +16188,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
               pending.plan,
             );
             session.pendingPermissions.delete(msg.requestId);
+            this.syncHumanWait(session);
           } else {
             // Persist it (title + outcome) so a cold reload replays a collapsed card —
             // the CLI doesn't replay request_permission on session/load.
@@ -16201,15 +16214,25 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         // turn ended. Answering it again would write a duplicate JSON-RPC
         // response and drag a settled session back to `working` — with no turn
         // left to ever end it, which on a rented machine bills for ever.
+        // The webview is told either way, so a stale card stops taking input
+        // and offers its draft to the composer (upstream e2e8458).
         if (this.answerQuestion(session, msg.requestId, msg.answers ?? {}, msg.annotations ?? {})) {
+          this.emit(session, { type: "questionResolved", requestId: msg.requestId, outcome: "accepted" });
           // Answering a QUESTION is not answering a permission card that is
           // also outstanding — the agent stays blocked on it, so `working`
           // would be wrong and would hold a rented machine awake indefinitely.
           this.noteAnswered(session);
+        } else {
+          this.emit(session, { type: "questionResolved", requestId: msg.requestId, outcome: "stale" });
         }
         break;
       case "questionCancel":
-        if (this.cancelQuestion(session, msg.requestId)) this.noteAnswered(session);
+        if (this.cancelQuestion(session, msg.requestId)) {
+          this.emit(session, { type: "questionResolved", requestId: msg.requestId, outcome: "accepted" });
+          this.noteAnswered(session);
+        } else {
+          this.emit(session, { type: "questionResolved", requestId: msg.requestId, outcome: "stale" });
+        }
         break;
       case "limitOfferAnswer":
         await this.answerLimitOffer(session, msg);
@@ -20825,6 +20848,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     // Host ownership begins only after the snapshot's generation check. Re-focus
     // can replay the card without consuming this pending request.
     session.pendingExitPlans.set(req.id, { planText: plan });
+    this.syncHumanWait(session);
     session.lastPlanText = "";
     this.emit(session, {
       type: "exitPlanRequest",
@@ -21275,8 +21299,8 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
    * because only the HOST knows whether files are at stake — hence the
    * round-trip.
    *
-   * Resolves false if the webview goes away before answering (reload, session
-   * teardown): a lost confirm must fail closed, never silently revert files.
+   * Session teardown/replacement resolves false (drainPendingConfirms): a
+   * lost confirm must fail closed, never silently revert files.
    */
   private confirmInChat(
     session: Session,
@@ -21287,6 +21311,18 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       this.pendingConfirms.set(id, { session, resolve });
       this.emit(session, { type: "uiConfirmRequest", id, ...opts });
     });
+  }
+
+  /** Fail every confirm this session still awaits closed, and take the modal
+   *  down on every surface (upstream e2e8458). Before this, a confirm asked
+   *  just before a restart awaited an answer nobody could give. */
+  private drainPendingConfirms(session: Session): void {
+    for (const [requestId, pending] of this.pendingConfirms) {
+      if (pending.session !== session) continue;
+      this.pendingConfirms.delete(requestId);
+      this.emit(session, { type: "uiConfirmResolved", requestId });
+      pending.resolve(false);
+    }
   }
 
   private async createPlanReviewSnapshot(plan: string, sessionId?: string): Promise<{ path: string; name: string }> {
@@ -22806,6 +22842,8 @@ ${directives.block}`;
    *  the mode picker on reconnect. */
   private static readonly TRANSIENT_TYPES = new Set([
     "restoreComposer", "focusInput", "findInSession", "openModePopover",
+    // Replaying a DESTRUCTIVE modal after a reconnect is the bug, not the fix.
+    "uiConfirmRequest", "uiConfirmResolved",
     // Replayed mid-buffer it would stamp the then-current footer, not the live
     // one. `sessionUiSnapshot` restores eligibility after historyReplay ends.
     "turnFeedbackAck",
@@ -24144,6 +24182,7 @@ ${directives.block}`;
   private detachClient(session: Session): AcpClient | undefined {
     const client = session.client;
     session.gen++;
+    this.drainPendingConfirms(session);
     session.client = undefined;
     session.turnToken = undefined;
     // ITS COMMANDS GO WITH IT.
@@ -24302,6 +24341,7 @@ ${directives.block}`;
    */
   showQuestion(session: Session, req: QuestionRequest, responder: QuestionResponder): void {
     session.pendingQuestions.set(req.id, responder);
+    this.syncHumanWait(session);
     const timeout = askTimeoutMs(this.host.getConfiguration("grok").get<string>("askTimeout", "off"));
     this.emit(session, { type: "questionRequest", req, ...(timeout === undefined ? {} : { autoContinueMs: timeout }) });
     this.setStatus(session, "needs-you");
@@ -24343,6 +24383,7 @@ ${directives.block}`;
 
   private forgetQuestion(session: Session, requestId: number | string): void {
     session.pendingQuestions.delete(requestId);
+    this.syncHumanWait(session);
     session.questionDrafts.delete(requestId);
     const timer = session.questionTimers.get(requestId);
     if (timer) { clearTimeout(timer); session.questionTimers.delete(requestId); }
@@ -24381,10 +24422,13 @@ ${directives.block}`;
    * block until the CLI is killed.
    */
   private dropPendingQuestions(session: Session): void {
-    for (const responder of session.pendingQuestions.values()) {
+    for (const [requestId, responder] of session.pendingQuestions) {
       try { responder.abandon(); } catch { /* teardown is not worth failing over */ }
+      // The card must stop taking input the moment nothing will read it.
+      this.emit(session, { type: "questionResolved", requestId, outcome: "closed" });
     }
     session.pendingQuestions.clear();
+    this.syncHumanWait(session);
     session.questionDrafts.clear();
     for (const timer of session.questionTimers.values()) clearTimeout(timer);
     session.questionTimers.clear();
@@ -24452,7 +24496,7 @@ ${directives.block}`;
           // The CLI withdrew the call or its process died. Take the card down
           // rather than leave a control that does nothing when pressed.
           this.forgetQuestion(session, id);
-          this.emit(session, { type: "questionResolved", requestId: id });
+          this.emit(session, { type: "questionResolved", requestId: id, outcome: "closed" });
           this.noteAnswered(session);
         },
       });
@@ -24496,6 +24540,42 @@ ${directives.block}`;
     this.revokeAskUserToken(session);
     session.askUserToken = channel.register();
     return channel.spawnSpec(session.askUserToken);
+  }
+
+  /**
+   * Suspend the prompt idle timer exactly while a person holds a card.
+   * Called wherever a question, permission or plan request is added or
+   * settled; the absolute cap is never suspended (upstream e2e8458).
+   */
+  private syncHumanWait(session: Session): void {
+    session.client?.setHumanWaitActive?.(
+      session.pendingQuestions.size > 0
+      || session.pendingPermissions.size > 0
+      || session.pendingExitPlans.size > 0,
+    );
+  }
+
+  /**
+   * A terminal tool update for a question's own tool call: the CLI stopped
+   * waiting (answered, or its ask timeout expired — the wire does not say
+   * which, and the prose is deliberately not read). Retire the card now
+   * rather than leave a Submit that writes into a dead channel (#160).
+   */
+  private closeQuestionsForToolCall(
+    session: Session,
+    call: { toolCallId?: unknown; status?: unknown } | null | undefined,
+  ): void {
+    const toolCallId = call?.toolCallId;
+    if (typeof toolCallId !== "string" || !toolCallId
+      || (call?.status !== "completed" && call?.status !== "failed")) return;
+    let closed = false;
+    for (const [requestId, responder] of [...session.pendingQuestions]) {
+      if (responder.toolCallId !== toolCallId) continue;
+      this.forgetQuestion(session, requestId);
+      this.emit(session, { type: "questionResolved", requestId, outcome: "closed" });
+      closed = true;
+    }
+    if (closed && turnIsInFlight(session)) this.noteAnswered(session);
   }
 
   /** True when any live pool member is mid-turn or waiting on the user. */

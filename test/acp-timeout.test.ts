@@ -90,3 +90,13 @@ describe("promptTimerDelayMs", () => {
     })).toBe(Number.POSITIVE_INFINITY);
   });
 });
+
+describe("human wait (upstream e2e8458)", () => {
+  it("suspends only idle detection during a human wait", () => {
+    const args = { startedAt: 0, lastActivityAt: 0, now: 5_000, idleMs: 1_000, absoluteMs: 10_000 };
+    expect(promptTimerDelayMs({ ...args, humanWaitActive: false })).toBe(0);
+    expect(promptTimerDelayMs({ ...args, humanWaitActive: true })).toBe(5_000);
+    expect(promptTimerDelayMs({ ...args, now: 10_000, humanWaitActive: true })).toBe(0);
+    expect(promptTimerDelayMs({ ...args, absoluteMs: 0, humanWaitActive: true })).toBe(Infinity);
+  });
+});

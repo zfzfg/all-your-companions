@@ -75,9 +75,11 @@ export function promptTimerDelayMs(args: {
   now: number;
   idleMs: number;
   absoluteMs: number;
+  /** Suspend only idle detection while the host holds a human request. */
+  humanWaitActive?: boolean;
 }): number {
   const idleRemaining =
-    args.idleMs <= 0
+    args.humanWaitActive || args.idleMs <= 0
       ? Number.POSITIVE_INFINITY
       : Math.max(0, args.idleMs - (args.now - args.lastActivityAt));
   const absRemaining =

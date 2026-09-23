@@ -265,3 +265,59 @@ describe("the sidebar source keeps the AP-05 wiring", () => {
     expect(method.slice(0, 2000)).toContain("catch (error)");
   });
 });
+
+// Upstream e2e8458 (#160): a card whose CLI stopped waiting must stop taking
+// input, and a person reading a card must not trip the prompt idle timer.
+describe("question lifecycle: closure by tool call, and human wait", () => {
+  function withClient(h: Harness) {
+    const client = { setHumanWaitActive: vi.fn() };
+    (h.session as any).client = client;
+    return client;
+  }
+
+  it("suspends the idle timer while a card is up and resumes it once settled", () => {
+    const h = harness();
+    const client = withClient(h);
+    h.sidebar.showQuestion(h.session, request(1), spyResponder());
+    expect(client.setHumanWaitActive).toHaveBeenLastCalledWith(true);
+    (h.sidebar as any).answerQuestion(h.session, 1, { "Which database?": "SQLite" }, {});
+    expect(client.setHumanWaitActive).toHaveBeenLastCalledWith(false);
+  });
+
+  it("stays suspended while a permission card is still outstanding", () => {
+    const h = harness();
+    const client = withClient(h);
+    h.session.pendingPermissions.set("perm", {} as any);
+    h.sidebar.showQuestion(h.session, request(1), spyResponder());
+    (h.sidebar as any).answerQuestion(h.session, 1, {}, {});
+    expect(client.setHumanWaitActive).toHaveBeenLastCalledWith(true);
+  });
+
+  it("closes the card whose own tool call reached a terminal status", () => {
+    const h = harness();
+    withClient(h);
+    const responder = { ...spyResponder(), toolCallId: "ask-1" };
+    h.sidebar.showQuestion(h.session, request(1), responder);
+    h.sidebar.showQuestion(h.session, request(2), { ...spyResponder(), toolCallId: "ask-2" });
+    h.posted.length = 0;
+    (h.sidebar as any).closeQuestionsForToolCall(h.session, { toolCallId: "ask-1", status: "in_progress" });
+    (h.sidebar as any).closeQuestionsForToolCall(h.session, { toolCallId: "other", status: "completed" });
+    expect(h.posted).toEqual([]);
+    (h.sidebar as any).closeQuestionsForToolCall(h.session, { toolCallId: "ask-1", status: "completed" });
+    expect(h.posted).toEqual([{ type: "questionResolved", requestId: 1, outcome: "closed" }]);
+    expect(h.session.pendingQuestions.has(1)).toBe(false);
+    expect(h.session.pendingQuestions.has(2)).toBe(true);
+    // The CLI settled its own request: nothing may be written back to it.
+    expect(responder.calls).toEqual([]);
+  });
+
+  it("tells every surface the cards are closed when they are dropped", () => {
+    const h = harness();
+    const client = withClient(h);
+    h.sidebar.showQuestion(h.session, request(1), spyResponder());
+    h.posted.length = 0;
+    (h.sidebar as any).dropPendingQuestions(h.session);
+    expect(h.posted).toEqual([{ type: "questionResolved", requestId: 1, outcome: "closed" }]);
+    expect(client.setHumanWaitActive).toHaveBeenLastCalledWith(false);
+  });
+});

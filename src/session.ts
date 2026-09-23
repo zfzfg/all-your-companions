@@ -68,6 +68,13 @@ export interface QuestionResponder {
   /** Deliver a dismissal. False means the response did not go out. */
   cancel(auto?: boolean): boolean;
   /**
+   * The ask tool's call id, when the transport knows it. A terminal
+   * (completed/failed) tool update for it means the CLI stopped waiting —
+   * answered elsewhere or its own ask timeout expired — so the card closes
+   * instead of taking input nothing will read (upstream e2e8458, #160).
+   */
+  readonly toolCallId?: string;
+  /**
    * The host is dropping this card without the user having acted — the turn
    * ended under it, or the session restarted.
    *

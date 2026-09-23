@@ -197,6 +197,9 @@ export interface QuestionItem {
 export interface QuestionRequest {
   id: number | string;
   sessionId: string;
+  /** The ask tool's call id when the CLI supplies it: a terminal tool update
+   *  for it means the CLI stopped waiting (answered or timed out). */
+  toolCallId?: string;
   questions: QuestionItem[];
 }
 
@@ -293,6 +296,7 @@ export class AcpClient extends EventEmitter {
   private pending = new Map<number, Pending>();
   private readonly backend: AcpBackend;
   private steering: BackendSteeringCapabilities;
+  private humanWaitActive = false;
   private readonly timeouts: AcpTimeouts;
 
   readonly provider: AcpProvider;
@@ -1109,6 +1113,7 @@ export class AcpClient extends EventEmitter {
    * callers can ignore the returned promise — the kill is still initiated now.
    */
   dispose(timeoutMs = 3000): Promise<void> {
+    this.setHumanWaitActive(false);
     this.rl?.close();
     const proc = this.proc;
     if (!proc || proc.exitCode !== null || proc.signalCode !== null) {
@@ -1229,6 +1234,7 @@ export class AcpClient extends EventEmitter {
             now: Date.now(),
             idleMs: this.timeouts.promptIdleTimeoutMs,
             absoluteMs: this.timeouts.promptAbsoluteTimeoutMs,
+            humanWaitActive: this.humanWaitActive,
           });
           if (!Number.isFinite(waitMs)) return;
         } else {
@@ -1243,6 +1249,22 @@ export class AcpClient extends EventEmitter {
       entry.armTimer = arm;
       arm();
     });
+  }
+
+  /**
+   * A person is looking at a question, permission or plan card. Suspends only
+   * the prompt IDLE timer — the absolute cap keeps running, so a wedged session
+   * still ends — and answering starts a fresh idle interval (upstream e2e8458).
+   */
+  setHumanWaitActive(active: boolean): void {
+    if (this.humanWaitActive === active) return;
+    this.humanWaitActive = active;
+    const now = Date.now();
+    for (const p of this.pending.values()) {
+      if (!p.isPrompt) continue;
+      if (!active) p.lastActivityAt = now;
+      p.armTimer?.();
+    }
   }
 
   /** Re-arm in-flight `session/prompt` idle timers on live ACP traffic. */
@@ -1561,6 +1583,8 @@ export class AcpClient extends EventEmitter {
         const req: QuestionRequest = {
           id,
           sessionId: params?.sessionId ?? this.sessionId ?? "",
+          ...(typeof params?.toolCallId === "string" && params.toolCallId
+            ? { toolCallId: params.toolCallId } : {}),
           questions: Array.isArray(params?.questions) ? params.questions : [],
         };
         this.emit("questionRequest", req);

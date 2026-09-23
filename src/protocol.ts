@@ -1078,7 +1078,10 @@ export type HostMsg =
    * complete draft selection was sent on the user's behalf; `auto` marks the
    * card as continued automatically rather than answered.
    */
-  | { type: "questionResolved"; requestId: number | string; answers?: Record<string, string>; auto?: boolean }
+  /** `outcome`: accepted = the host wrote the response; stale = the host no
+   *  longer holds the id; closed = a known closure (CLI stopped waiting, turn
+   *  ended, session replaced). Absent on the auto-continue path. */
+  | { type: "questionResolved"; requestId: number | string; answers?: Record<string, string>; auto?: boolean; outcome?: "accepted" | "stale" | "closed" }
   /** Answer to {@link WebviewMsg} `revertToolEdit`. `reason` is a short,
    *  user-facing explanation when `ok` is false (conflict, unreadable file,
    *  region no longer found) — never a raw error message. */
@@ -1359,6 +1362,7 @@ export type HostMsg =
    *  reverting files), so the webview can't decide to show `uiConfirm` itself.
    *  `id` correlates the answer; the host awaits a promise keyed on it. */
   | { type: "uiConfirmRequest"; id: string; title: string; body?: string; confirmLabel: string; danger?: boolean }
+  | { type: "uiConfirmResolved"; requestId: string }
   // nextOffset = the index offset the next load-more should request — ids CONSUMED
   // from the on-disk index, not entries shown (hidden subagent sessions occupy
   // slots without producing rows).
@@ -2084,7 +2088,7 @@ const HOST_MESSAGE_TYPE_MAP: Record<HostMsg["type"], true> = {
   sessionContext: true, clearMessages: true, onboarding: true, error: true, hostNotice: true,
   xaiNotification: true, subagentUpdate: true, childStream: true, runProgress: true, commandOutput: true, expandCommandOutputs: true, steerByDefault: true,
   soundNotifications: true, processingSound: true, readRepliesAloud: true, summarizeRepliesAloud: true, speechSummary: true, imageFull: true, moveComposerCaret: true, remoteStatus: true,
-  setAllToolDetails: true, focusInput: true, findInSession: true, restoreComposer: true, truncateMessages: true, uiConfirmRequest: true,
+  setAllToolDetails: true, focusInput: true, findInSession: true, restoreComposer: true, truncateMessages: true, uiConfirmRequest: true, uiConfirmResolved: true,
   sessions: true, sessionRemoved: true, repoSessions: true, pinnedSessions: true, repos: true, sessionDot: true, queuedSends: true, submitQueuedSend: true,
   steerUnavailable: true, feedbackAvailability: true, turnFeedbackAck: true, usage: true, providerCapabilities: true, planEntries: true, reviewCenter: true, crewRun: true, ruleFiles: true, permissionRules: true, agentRoles: true, workflowGenerator: true,
 };

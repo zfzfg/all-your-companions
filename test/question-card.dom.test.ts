@@ -55,7 +55,7 @@ describe("question card (real chat.js in a DOM)", () => {
     expect(card.classList.contains("resolved")).toBe(true);
     // Collapses to a clear answered state: heading flips, options gone, the
     // chosen label shown (the original gap — single-select gave no feedback).
-    expect(card.querySelector(".card-title")!.textContent).toBe("You answered");
+    expect(card.querySelector(".card-title")!.textContent).toBe("Submitted");
     expect(card.querySelector(".question-text")!.textContent).toBe("Pick one?");
     expect(card.querySelector(".question-answer")!.textContent).toBe("✓ Option B");
     expect(card.querySelectorAll(".question-option")).toHaveLength(0);
@@ -213,6 +213,117 @@ describe("question card (real chat.js in a DOM)", () => {
     expect(card.classList.contains("resolved")).toBe(true);
     expect(card.querySelector(".card-title")!.textContent).toBe("Skipped");
     expect(card.querySelector(".question-answer")!.textContent).toBe("(skipped)");
+  });
+});
+
+describe("question resolution and answer recovery (upstream e2e8458)", () => {
+  const draft = "First paragraph.\n\n- one\n- two";
+  function prepare(surface = "vscode") {
+    const h = bootWebview({
+      vscode: surface === "vscode",
+    });
+    dispatch(h.window, { type: "questionRequest", req: SINGLE });
+    const card = h.doc.querySelector(".card.question")!;
+    click(h.window, [...card.querySelectorAll(".question-option")].find((b) => b.textContent === "Other")!);
+    const field = card.querySelector("textarea") as HTMLTextAreaElement;
+    field.value = draft;
+    field.dispatchEvent(new h.window.Event("input", { bubbles: true }));
+    return { ...h, card };
+  }
+
+  it("works against an old host that never acknowledges Submit", () => {
+    const { window, doc, posted, card } = prepare();
+    click(window, card.querySelector(".primary")!);
+    expect(card.querySelector(".card-title")!.textContent).toBe("Submitted");
+    expect(card.querySelector(".question-answer")!.textContent).toContain(draft);
+    expect(card.querySelector("textarea")).toBeNull();
+    expect(posted.filter((m: any) => m.type === "questionAnswer")).toHaveLength(1);
+    const composer = doc.querySelector("#input") as HTMLTextAreaElement;
+    composer.value = "My next message";
+    composer.dispatchEvent(new window.Event("input", { bubbles: true }));
+    expect((doc.querySelector("#send-btn") as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it.each(["vscode"])("recovers stale answers inside chat and appends without sending (%s)", (surface) => {
+    const { window, doc, posted, card } = prepare(surface);
+    const composer = doc.querySelector("#input") as HTMLTextAreaElement;
+    composer.value = "  Existing draft\n";
+    click(window, card.querySelector(".primary")!);
+    dispatch(window, { type: "questionResolved", requestId: 3, outcome: "stale" });
+    dispatch(window, { type: "questionResolved", requestId: 3, outcome: "stale" });
+    expect(card.querySelector(".card-title")!.textContent).toBe("Question is no longer open");
+    const answer = card.querySelector(".question-answer")!;
+    expect(answer.textContent).toContain(draft);
+    const range = doc.createRange();
+    range.selectNodeContents(answer);
+    window.getSelection()!.addRange(range);
+    expect(window.getSelection()!.toString()).toContain(draft);
+    expect(card.querySelectorAll(".question-recover")).toHaveLength(1);
+    const before = posted.length;
+    click(window, card.querySelector(".question-recover")!);
+    expect(composer.value).toBe("  Existing draft\n\n\nPick one?\n" + draft);
+    expect(posted.slice(before).some((m: any) => m.type === "send" || m.type === "questionAnswer")).toBe(false);
+  });
+
+  it.each(["closed", "accepted"])("preserves an unsent draft when the request is %s elsewhere", (outcome) => {
+    const { window, card, posted } = prepare();
+    dispatch(window, { type: "questionResolved", requestId: 3, outcome });
+    expect(card.querySelector(".card-title")!.textContent).toBe("Question is no longer open");
+    expect(card.querySelector(".question-answer")!.textContent).toContain(draft);
+    expect(card.querySelector(".question-recover")).not.toBeNull();
+    expect(card.querySelectorAll("textarea, .question-option, .question-skip")).toHaveLength(0);
+    expect(posted.filter((m: any) => m.type === "questionAnswer")).toEqual([]);
+  });
+
+  it("refines Submitted on acceptance, but stale is terminal and never erases text", () => {
+    const { window, card } = prepare();
+    click(window, card.querySelector(".primary")!);
+    dispatch(window, { type: "questionResolved", requestId: 3, outcome: "accepted" });
+    expect(card.querySelector(".card-title")!.textContent).toBe("You answered");
+    dispatch(window, { type: "questionResolved", requestId: 3, outcome: "stale" });
+    dispatch(window, { type: "questionResolved", requestId: 3, outcome: "accepted" });
+    expect(card.querySelector(".card-title")!.textContent).toBe("Question is no longer open");
+    expect(card.querySelectorAll(".question-answer")).toHaveLength(1);
+    expect(card.querySelector(".question-answer")!.textContent).toContain(draft);
+  });
+
+  it("recovers each answer with its question, including a deselected Other draft", () => {
+    const { window, doc, posted } = bootWebview();
+    dispatch(window, { type: "questionRequest", req: { id: "many", questions: [
+      { question: "First?", multiSelect: true, options: [{ label: "A" }] },
+      { question: "Second?", options: [{ label: "B" }] },
+    ] } });
+    const blocks = [...doc.querySelectorAll(".question-block")];
+    const other = blocks[0].querySelectorAll(".question-option")[1];
+    click(window, other);
+    const field = blocks[0].querySelector("textarea") as HTMLTextAreaElement;
+    field.value = draft;
+    field.dispatchEvent(new window.Event("input", { bubbles: true }));
+    click(window, other); // Hide the field without deleting the typed text.
+    click(window, blocks[1].querySelector(".question-option")!);
+    dispatch(window, { type: "questionResolved", requestId: "many", outcome: "closed" });
+    click(window, doc.querySelector(".question-recover")!);
+    expect((doc.querySelector("#input") as HTMLTextAreaElement).value)
+      .toBe("First?\n" + draft + "\n\nSecond?\nB");
+    expect(posted.some((m: any) => m.type === "send" || m.type === "questionAnswer")).toBe(false);
+  });
+
+  it("labels a retained unselected draft separately from the submitted answer", () => {
+    const { window, card, posted } = prepare();
+    click(window, card.querySelector(".question-option")!); // A submits instead of Other.
+    expect(posted.find((m: any) => m.type === "questionAnswer")!.answers).toEqual({ "Pick one?": "Option A" });
+    expect([...card.querySelectorAll(".question-answer")].map((el) => el.textContent))
+      .toEqual(["✓ Option A", "Draft: " + draft]);
+  });
+
+  it("holds resolution with the question during buffered replay", () => {
+    const { window, doc } = bootWebview();
+    dispatch(window, { type: "historyReplay", active: true });
+    dispatch(window, { type: "questionRequest", req: SINGLE });
+    dispatch(window, { type: "questionResolved", requestId: 3, outcome: "closed" });
+    dispatch(window, { type: "historyReplay", active: false });
+    expect(doc.querySelector(".card.question .card-title")!.textContent).toBe("Question is no longer open");
+    expect(doc.querySelector(".card.question .question-option")).toBeNull();
   });
 });
 
@@ -551,7 +662,7 @@ describe("question card for a host-MCP question (AP-05)", () => {
     dispatch(window, { type: "questionResolved", requestId: MCP.id, auto: true });
 
     const card = doc.querySelector(".card.question")!;
-    expect(card.querySelector(".card-title")!.textContent).toBe("You answered");
+    expect(card.querySelector(".card-title")!.textContent).toBe("Submitted");
     expect(card.querySelector(".question-answer")!.textContent).toBe("✓ SQLite");
   });
 });

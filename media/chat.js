@@ -2565,6 +2565,7 @@
     return new Promise((resolve) => {
       const overlay = document.createElement("div");
       overlay.className = "confirm-overlay";
+      if (opts.requestId !== undefined) overlay.dataset.confirmReqId = String(opts.requestId);
       const panel = document.createElement("div");
       panel.className = "confirm-panel";
       const title = document.createElement("div");
@@ -2583,11 +2584,17 @@
       cancelBtn.type = "button";
       cancelBtn.className = "confirm-btn";
       cancelBtn.textContent = "Cancel";
+      let settled = false;
       const done = (v) => {
+        if (settled) return;
+        settled = true;
         document.removeEventListener("keydown", onKey, true);
         overlay.remove();
-        resolve(opts.booleanResult ? v === "confirm" : v);
+        resolve(v === undefined ? undefined : opts.booleanResult ? v === "confirm" : v);
       };
+      // The host settled it (another surface answered, or teardown): dismiss
+      // without sending a second decision.
+      overlay._resolveConfirm = () => done(undefined);
       const onKey = (e) => {
         if (e.key === "Escape") { e.stopPropagation(); done("cancel"); }
       };
@@ -15233,6 +15240,10 @@
 
     let submitBtn;
     let skip;
+    let submitted = false;
+    let skipped = false;
+    let recoveryAnswers = [];
+    let resolution;
     const updateSubmit = () => {
       const built = buildQuestionAnswers(questions, effectiveSelections());
       const otherComplete = otherSelected.every((selected, qi) => !selected || !!otherText[qi].trim());
@@ -15253,23 +15264,73 @@
     };
     // Collapse the card to its answered/skipped representation: drop the option
     // buttons + Submit + Skip, retitle, and append the chosen answer per block.
-    const collapse = (skipped) => {
+    // "Submitted", not "You answered": the host can say it sent the response,
+    // not that the CLI consumed it. A host `questionResolved` refines it
+    // (upstream e2e8458).
+    const collapse = () => {
+      if (el.classList.contains("resolved")) return;
+      // Keep even a half-written Other draft: recovery must not lose typing.
+      recoveryAnswers = selections.map((picked, qi) =>
+        [...picked, ...(otherText[qi] ? [otherText[qi]] : [])].join(", "));
       el.classList.add("resolved");
-      title.textContent = skipped ? "Skipped" : "You answered";
+      title.textContent = skipped ? "Skipped" : "Submitted";
       const actions = el.querySelector(".card-actions");
       if (actions) actions.remove();
       if (skip) skip.remove();
       [...el.querySelectorAll(".question-block")].forEach((block, qi) => {
         const opts = block.querySelector(".question-options");
         if (opts) opts.remove();
-        block.appendChild(answerLineEl(skipped ? "" : (effectiveSelections()[qi] || []).join(", ")));
+        const labels = submitted ? (effectiveSelections()[qi] || []).join(", ") : recoveryAnswers[qi];
+        const answer = answerLineEl(labels);
+        if (!labels && !skipped) answer.textContent = "No answer entered";
+        if (skipped && labels) answer.textContent = "Draft: " + labels;
+        block.appendChild(answer);
+        if (submitted && otherText[qi] && !otherSelected[qi]) {
+          const draft = answerLineEl(otherText[qi]);
+          draft.textContent = "Draft: " + otherText[qi];
+          block.appendChild(draft);
+        }
       });
     };
+    // A closed or stale card is not going down a live channel any more, but
+    // what the person picked or typed is not lost: it can go to the composer.
+    const offerRecovery = () => {
+      if (el.querySelector(".question-recover")) return;
+      const recover = document.createElement("button");
+      recover.className = "question-recover";
+      recover.textContent = "Add answers to composer";
+      recover.disabled = !recoveryAnswers.some((answer) => answer.length > 0);
+      recover.onclick = () => {
+        const block = questions.map((q, qi) => recoveryAnswers[qi]
+          ? questionText(q) + "\n" + recoveryAnswers[qi] : "").filter(Boolean).join("\n\n");
+        if (!block) return;
+        input.value = input.value ? input.value + "\n\n" + block : block;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.focus();
+        input.selectionStart = input.selectionEnd = input.value.length;
+      };
+      el.appendChild(recover);
+    };
+    el._resolveQuestion = (outcome) => {
+      if (!["accepted", "stale", "closed"].includes(outcome)) return;
+      // Once stale, a duplicate or reordered acknowledgement cannot resurrect it.
+      if (resolution === "stale" || resolution === outcome) return;
+      resolution = outcome;
+      collapse();
+      if (outcome === "stale" || (!submitted && !skipped)) {
+        title.textContent = "Question is no longer open";
+        offerRecovery();
+      } else if (outcome === "accepted") {
+        title.textContent = skipped ? "Skipped" : "You answered";
+      }
+    };
     const submit = () => {
+      if (el.classList.contains("resolved")) return;
       const { answers, allAnswered } = buildQuestionAnswers(questions, effectiveSelections());
       if (!allAnswered || otherSelected.some((selected, qi) => selected && !otherText[qi].trim())) return;
+      submitted = true;
+      collapse();
       vscode.postMessage({ type: "questionAnswer", requestId: req.id, answers, annotations: {} });
-      collapse(false);
     };
 
     questions.forEach((q, qi) => {
@@ -15407,8 +15468,10 @@
     skip.className = "question-skip";
     skip.textContent = "Skip";
     skip.onclick = () => {
+      if (el.classList.contains("resolved")) return;
+      skipped = true;
+      collapse();
       vscode.postMessage({ type: "questionCancel", requestId: req.id });
-      collapse(true);
     };
     el.appendChild(skip);
 
@@ -18285,15 +18348,31 @@
         // The host asks; the webview owns the dialog. Always answer, including
         // on dismissal — the host is awaiting this id and a rewind must fail
         // closed rather than hang.
+        // Never reopen a destructive modal from a replay; decline it so a host
+        // still awaiting the id fails closed instead of hanging.
+        if (state.replaying) {
+          vscode.postMessage({ type: "uiConfirmAnswer", id: msg.id, ok: false });
+          break;
+        }
+        if ([...document.querySelectorAll(".confirm-overlay")]
+          .some((el) => el.dataset.confirmReqId === String(msg.id))) break;
         uiConfirm({
+          requestId: msg.id,
           title: msg.title,
           body: msg.body,
           confirmLabel: msg.confirmLabel,
           danger: msg.danger,
         }).then((ok) => {
+          if (ok === undefined) return;
           vscode.postMessage({ type: "uiConfirmAnswer", id: msg.id, ok: !!ok });
         });
         break;
+      case "uiConfirmResolved": {
+        const el = [...document.querySelectorAll(".confirm-overlay")]
+          .find((node) => node.dataset.confirmReqId === String(msg.requestId));
+        if (el && typeof el._resolveConfirm === "function") el._resolveConfirm();
+        break;
+      }
       case "truncateMessages": {
         // Rewind/edit: drop only the discarded turns instead of clearing the
         // panel and replaying the whole conversation (which flashed the welcome
@@ -19109,6 +19188,15 @@
         // so it stops offering buttons that would now do nothing. Idempotent:
         // a card this client already answered is skipped by the class check.
         const cards = liveTranscriptQueryAll(".card.question");
+        // An `outcome` refines a card this client may already have collapsed
+        // (Submitted -> You answered, or -> no longer open with recovery).
+        if (msg.outcome && !msg.auto) {
+          const card = cards.find((c) => c.dataset.questionReqId === String(msg.requestId));
+          if (card && typeof card._resolveQuestion === "function") {
+            card._resolveQuestion(msg.outcome);
+            break;
+          }
+        }
         const el = cards.find((c) => c.dataset.questionReqId === String(msg.requestId)
           && !c.classList.contains("resolved"));
         if (el) resolveQuestionCardEl(el, msg.answers, msg.auto);
@@ -19482,6 +19570,11 @@
         addSessionContextBanner();
         break;
       case "clearMessages":
+        // A host-asked confirm belongs to the session being replaced: dismiss
+        // it without answering, so its decision cannot reach the next one.
+        for (const el of document.querySelectorAll(".confirm-overlay[data-confirm-req-id]")) {
+          if (typeof el._resolveConfirm === "function") el._resolveConfirm();
+        }
         resetForNewSession();
         break;
       case "onboarding":

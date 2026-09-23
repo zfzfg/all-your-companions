@@ -4209,7 +4209,8 @@ body.dragging { outline: 2px dashed var(--vscode-focusBorder); outline-offset: -
   outline: 1px solid var(--vscode-focusBorder);
   outline-offset: -1px;
 }
-.card button.question-skip {
+.card button.question-skip,
+.card button.question-recover {
   align-self: flex-start;
   background: transparent;
   color: var(--vscode-descriptionForeground);
@@ -4220,7 +4221,8 @@ body.dragging { outline: 2px dashed var(--vscode-focusBorder); outline-offset: -
   font-size: 11px;
   text-decoration: underline;
 }
-.card button.question-skip:disabled { opacity: 0.4; cursor: default; text-decoration: none; }
+.card button.question-skip:disabled,
+.card button.question-recover:disabled { opacity: 0.4; cursor: default; text-decoration: none; }
 
 /* ---- collapsible user messages ---- */
 
