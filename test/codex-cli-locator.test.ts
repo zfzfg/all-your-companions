@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as path from "node:path";
+import { CODEX_MANAGED_TAG } from "../src/codex-managed-installer";
 import { locateCodexCli, resolveCodexHome, type CodexLocatorFs } from "../src/codex-cli-locator";
 
 function fakeFs(files: string[], dirs: Record<string, string[]> = {}): CodexLocatorFs {
@@ -139,7 +140,7 @@ describe("locateCodexCli", () => {
   it("uses the managed copy only after PATH and every ChatGPT bundle", () => {
     const home = "C:\\Users\\Dev";
     const storage = "C:\\extension-storage";
-    const managed = path.join(storage, "codex-managed", "rust-v0.147.0", "bin", "codex.exe");
+    const managed = path.join(storage, "codex-managed", CODEX_MANAGED_TAG, "bin", "codex.exe");
     const extensions = path.join(home, ".vscode", "extensions");
     const bundleBin = path.join(extensions, "openai.chatgpt-3.0.0", "bin");
     const bundled = path.join(bundleBin, "windows-x86_64", "codex.exe");
@@ -154,6 +155,31 @@ describe("locateCodexCli", () => {
       .toBe(managed);
     expect(locateCodexCli({ home, platform: "win32", managedStorageRoot: storage, fs: fakeFs([managed, "C:\\path\\codex.exe"]), which: () => "C:\\path\\codex.exe" }))
       .toBe("C:\\path\\codex.exe");
+  });
+
+  it("keeps a managed install that a pin bump superseded", () => {
+    // Moving the pin renames the install directory. Someone who has no Codex of
+    // their own and installed it through us would otherwise watch it vanish,
+    // with no way back from a phone: installCodex is host-local.
+    const storage = "C:\\extension-storage";
+    const root = path.join(storage, "codex-managed");
+    const old = path.join(root, "rust-v0.147.0", "bin", "codex.exe");
+    expect(locateCodexCli({
+      home: "C:\\Users\\Dev", platform: "win32", managedStorageRoot: storage,
+      fs: fakeFs([old], { [root]: ["rust-v0.147.0"] }), which: () => undefined,
+    })).toBe(old);
+  });
+
+  it("still prefers the pinned build over one left behind", () => {
+    const storage = "C:\\extension-storage";
+    const root = path.join(storage, "codex-managed");
+    const old = path.join(root, "rust-v0.147.0", "bin", "codex.exe");
+    const pinned = path.join(root, CODEX_MANAGED_TAG, "bin", "codex.exe");
+    expect(locateCodexCli({
+      home: "C:\\Users\\Dev", platform: "win32", managedStorageRoot: storage,
+      fs: fakeFs([old, pinned], { [root]: ["rust-v0.147.0", CODEX_MANAGED_TAG] }),
+      which: () => undefined,
+    })).toBe(pinned);
   });
 });
 

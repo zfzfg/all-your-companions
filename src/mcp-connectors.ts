@@ -933,10 +933,10 @@ export function connectFailureMessage(kind: ConnectFailureKind, detail?: string)
     case "timeout":
       return "Sign-in timed out. Complete the browser prompt within three minutes, then try again.";
     case "port-conflict":
-      // Not a failure to fix — the login port is held by our own running proxy
-      // for this same connector, which means it is already signed in. Say that,
-      // rather than sending the user to close windows for no reason.
-      return "This connector is already signed in and running in another conversation on this computer, so there is nothing to do. If you want to sign in again, close the other conversations using it first.";
+      // All we observed is that this connector's sign-in port is taken, usually
+      // by our own proxy for it in another conversation — which does not prove
+      // it is signed in. Report the observation and end on an action (upstream).
+      return "This connector's sign-in port is already in use on this computer, usually by the same connector running in another conversation or editor window. If it is connected there, nothing needs doing. Otherwise close those windows and press Connect again.";
     case "endpoint-refused":
       return detail
         ? `The app refused the connection: ${detail}`
