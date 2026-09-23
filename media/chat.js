@@ -525,6 +525,9 @@
     /** provider -> the device-login card last sent by the host. Mirrored into
      *  Settings so a connect started there reports where the click happened. */
     deviceLoginByProvider: {},
+    // Which provider the composer's sign-in card is offering, so the moment it
+    // clears (renewed) can be told from the moment it is merely replaced.
+    signInCardFor: "",
     codexInstall: { phase: "idle", receivedBytes: 0, totalBytes: 0, reason: "" },
     availableModels: [],
     currentModeId: "agent",
@@ -12924,6 +12927,71 @@
     el.append(title, body, btn);
   }
 
+  /** "Your sign-in worked", where the person is looking: nothing else says
+   *  it, and the vendor's refusal stays the last line in the transcript. Quiet
+   *  on an empty transcript, where the onboarding panel already says it. */
+  function noteSignInRecovered(provider) {
+    if (state.welcomeVisible) return;
+    addPlanNotice(providerDisplayName(provider) + " is signed in again.", ICON.check);
+  }
+
+  /**
+   * A lapsed account is only actionable if the person is told where to act
+   * (upstream 7166822, 495acc8, 84440b1). "Sign in" normally lives on the
+   * empty-state welcome card, which deliberately does not paint over a live
+   * conversation — exactly where a token expires. So the offer goes directly
+   * above the composer. The composer is NOT frozen: this flag is our
+   * bookkeeping about somebody else's credential.
+   */
+  function renderProviderSignInCard() {
+    const composer = document.querySelector(".composer");
+    let el = document.getElementById("provider-signin-card");
+    const provider = state.providersKnown && providerNeedsLogin(state.activeProvider)
+      ? state.activeProvider : "";
+    // The card going away because the account was RENEWED is the only proof
+    // the sign-in worked this view gets. Re-read the flag so switching away
+    // from a still-expired account is not mistaken for a sign-in.
+    const wasUp = state.signInCardFor;
+    state.signInCardFor = provider;
+    if (wasUp && wasUp !== provider && !providerNeedsLogin(wasUp)) noteSignInRecovered(wasUp);
+    if (!provider || !composer) {
+      if (el) el.remove();
+      return;
+    }
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "provider-signin-card";
+      el.className = "provider-signin-card";
+      composer.insertBefore(el, composer.firstChild);
+    }
+    const name = providerDisplayName(provider);
+    // STATUS ONLY: a device flow is running while it waits or verifies; the
+    // card must not offer "Sign in" again at the moment it is working.
+    const status = (state.deviceLoginByProvider[provider] || {}).status;
+    const signingIn = status === "starting" || status === "waiting" || status === "verifying";
+    el.replaceChildren();
+    const title = document.createElement("p");
+    title.className = "provider-signin-title";
+    title.textContent = name + " needs you to sign in again";
+    const body = document.createElement("p");
+    body.className = "provider-signin-body";
+    body.textContent = "The account is still linked — its sign-in expired, so replies are refused until you renew it.";
+    el.append(title, body);
+    if (signingIn) {
+      const busy = document.createElement("p");
+      busy.className = "provider-signin-busy";
+      busy.textContent = "Signing in…";
+      el.appendChild(busy);
+      return;
+    }
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "provider-signin-btn";
+    btn.textContent = "Sign in";
+    btn.onclick = () => { vscode.postMessage({ type: "runGrokLogin", provider }); };
+    el.appendChild(btn);
+  }
+
   function enterSessionSuperseded(id, cwd) {
     if (!id) return;
     state.sessionSuperseded = { id, cwd: cwd || sessionSupersededCwd(id) };
@@ -13851,12 +13919,12 @@
     scrollToBottom();
   }
 
-  function addPlanNotice(text) {
+  function addPlanNotice(text, icon) {
     clearWelcome();
     hideGrokking();
     const el = document.createElement("div");
     el.className = "plan-notice";
-    el.innerHTML = `${ICON.listTree}<span>${escapeHtml(text)}</span>`;
+    el.innerHTML = `${icon || ICON.listTree}<span>${escapeHtml(text)}</span>`;
     appendTranscriptChild(el);
     scrollToBottom();
   }
@@ -18099,6 +18167,7 @@
         if (!gearPopover.hidden && state.gearView === "main") renderGearMain();
         if (!historyPopover.hidden) renderSessionRows();
         renderRail();
+        renderProviderSignInCard();
         break;
       case "mcpServers":
         state.mcpServers = Array.isArray(msg.servers) ? msg.servers : [];
@@ -18530,6 +18599,7 @@
         if (state.railTransition?.kind === "new") renderRail();
         state.isWorktree = !!msg.worktree; // gates the gear Apply/Remove worktree items
         state.availableModels = msg.models || [];
+        renderProviderSignInCard();
         const m = state.availableModels.find((x) => x.modelId === msg.currentModelId && (!x.provider || x.provider === state.activeProvider));
         if (m?.totalContextTokens) {
           state.contextWindow = m.totalContextTokens;
@@ -19608,6 +19678,9 @@
             // first painted the previous state every time (caught by driving
             // the states in a browser, 2026-08-31).
             syncConnectWizard(msg.provider, msg.device);
+            // The composer card reads the same mirror, and this is the only
+            // frame that moves it while a sign-in is being verified.
+            renderProviderSignInCard();
           }
         break;
       case "error":

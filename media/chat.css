@@ -4345,6 +4345,61 @@ body.dragging { outline: 2px dashed var(--vscode-focusBorder); outline-offset: -
   min-width: 160px;
 }
 .session-superseded-btn:hover { background: var(--vscode-button-hoverBackground); }
+
+/* The lapsed-account offer (upstream 7166822). Same card shape as the
+   superseded one, but it sits ABOVE a composer that still works, so it takes
+   the warning border rather than the focus one. */
+.provider-signin-card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  text-align: left;
+  padding: 14px 16px;
+  border: 1px solid var(--vscode-inputValidation-warningBorder, var(--vscode-editorWidget-border));
+  border-radius: 8px;
+  margin: 0 0 8px;
+  background: var(--vscode-inputValidation-warningBackground, var(--vscode-textBlockQuote-background, rgba(86, 156, 214, 0.08)));
+}
+.provider-signin-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--vscode-foreground);
+}
+.provider-signin-body {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--vscode-descriptionForeground);
+}
+.provider-signin-btn {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  min-height: 34px;
+  padding: 7px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--vscode-button-border, transparent);
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+  cursor: pointer;
+  align-self: flex-start;
+  min-width: 160px;
+}
+.provider-signin-btn:hover { background: var(--vscode-button-hoverBackground); }
+/* Where the button sits while a sign-in is running: same box, so the
+   composer does not jump. */
+.provider-signin-busy {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  min-height: 34px;
+  padding: 7px 0;
+  line-height: 20px;
+  color: var(--vscode-descriptionForeground);
+}
 /* The composer is frozen, so it does not sit under the card pretending
    otherwise. Every control inside it is `disabled` in the renderer as well —
    opacity alone still takes clicks. */

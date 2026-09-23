@@ -4856,7 +4856,21 @@ export class GrokSidebar {
     // A recovered account must be able to re-list at once; the freshness stamp
     // would otherwise hold the empty catalog for its full back-off window.
     if (!needsLogin && isAdapterProvider(provider)) this.adapterHistory(provider)?.at.clear();
+    // And it must be able to RECOVER again. `authRecoveryTried` survives a
+    // restart on purpose (#58) and only a clean turn re-arms it — which a
+    // conversation holding a process built on a dead token never has. A
+    // completed sign-in is the new information it stood in for (upstream 61e0c57).
+    if (!needsLogin) this.rearmAuthRecovery(provider);
     this.postProviderState();
+  }
+
+  /** Every session on this provider may try the token dance once more. */
+  private rearmAuthRecovery(provider: AcpProvider): void {
+    const rearm = (session: Session | undefined) => {
+      if (session?.provider === provider) session.authRecoveryTried = false;
+    };
+    rearm(this.focused);
+    for (const session of this.pool ?? []) rearm(session);
   }
 
   private async warmConnectedCodexModels(): Promise<boolean> {
@@ -5281,6 +5295,10 @@ export class GrokSidebar {
         ? await this.deviceLoginCredentialReady(provider)
         : await this.reprobeProviderCredentials(provider)) {
         this.host.appendLine(`[${provider}] device login: credential verified`);
+        // Lower the needs-login flag too: Claude's check answers without the
+        // probe that clears it, and a flagged account after a sign-in the app
+        // itself verified would bring the card back (upstream 43aa4bc).
+        this.setProviderNeedsLogin(provider, false);
         // Promote on evidence, exactly as the Providers refresh does. The probe
         // just proved the account works; without this the persisted `connected`
         // flag stays false, so Settings keeps offering Connect and never offers
@@ -15487,7 +15505,11 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       this.pool.add(session);
       this.touch(session);
       this.reapPool(); // enforce the LRU cap now that the pool grew
-      this.setProviderNeedsLogin(session.provider, false);
+      // NOT `setProviderNeedsLogin(provider, false)` here: session/create,
+      // load and replay all succeed against a dead token, and this line ran
+      // inside the auth recovery's own restart — so the sign-in card blinked
+      // out right before the refusal. Only an accepted credential clears it
+      // (a served turn, below; upstream a8909af).
       this.emit(session, { type: "setBusy", value: false });
       // A draft this conversation lost to a provider sign-out comes back with
       // it, before the queue flushes — the composer is where it was typed.
@@ -16789,6 +16811,10 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
           await this.startDeviceLogin(provider, cliPath, clientId);
           break;
         }
+        // Connecting an account and RENEWING one are different errands, and
+        // only the second is about the conversation on screen. Read the flag
+        // before any probe below can clear it (upstream 61e0c57).
+        const renewing = !!this.providerNeedsLogin?.[provider];
         // Official CLI owns login. For Claude and Gemini this is `auth login`.
         const loginArgs = (provider === "claude" || provider === "gemini") ? ["auth", "login"] : ["login"];
         const term = this.host.createTerminal({
@@ -16818,7 +16844,10 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         // remote branch above returns before here — TypeScript pointed out the
         // comparison could no longer be false, which is the check that the two
         // paths really are separate rather than merely intended to be.
-        if (session.hasHistory && this.workspaceRoot()) {
+        // A RENEWAL is the exception: the composer's sign-in card sits on a
+        // conversation whose replies are being refused and offers to fix THAT
+        // conversation, so parking it for the login panel is not wanted.
+        if (session.hasHistory && this.workspaceRoot() && !renewing) {
           await this.newFocusedSession(origin);
         }
         // ALWAYS show this provider's login panel, and say the terminal was
@@ -18190,7 +18219,9 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         };
       }
       const entries = result.sessions.map((entry) => adapterListEntry(entry, stableOverrides, provider));
-      this.setProviderNeedsLogin(provider, false);
+      // A listing reads this machine's own files and succeeds with any token,
+      // so a successful one is evidence of nothing (upstream a8909af). A
+      // listing that fails with a credential error still raises the flag.
       history.cache.set(key, entries);
       history.at.set(key, Date.now());
       await this.updateSessionMeta((current) => {
@@ -22234,6 +22265,9 @@ ${directives.block}`;
       // the push that makes the row's position true rather than asserted.
       this.noteSessionActivity(session);
       session.authRecoveryTried = false; // a clean turn re-arms token auto-recovery
+      // A served turn is the only proof the account works; it takes the
+      // sign-in card down, and nothing takes it down before one arrives.
+      this.setProviderNeedsLogin(session.provider, false);
       this.maybeGenerateTitle(session);
       this.postSessionName(session);
     } catch (err) {
@@ -22403,7 +22437,15 @@ ${directives.block}`;
     const credential = session.client?.isCredentialError(err) === true || isCredentialError(err);
     if (!credential && !isAuthErrorText(errorText)) return false;
     const resumeId = beginAuthRecovery(session);
-    if (!resumeId) return false;
+    if (!resumeId) {
+      // One recovery per failure streak, so every send after the first
+      // declines here — the sends a person makes while wondering why nothing
+      // works. Strict classification only: entitlement wording must never
+      // label an account signed-out, because a sign-in cannot fix it
+      // (upstream 7166822).
+      if (credential) this.setProviderNeedsLogin(session.provider, true);
+      return false;
+    }
 
     // Only a CREDENTIAL failure earns a resend. The billing/entitlement family
     // reaches this gate because a wedged token can wear that wording — but the
@@ -22426,8 +22468,17 @@ ${directives.block}`;
     const gen = session.gen;
     if (gen !== session.gen) return true;
 
-    session.userMessageCount += 1;
-    this.emit(session, { type: "userMessage", text: displayText, chips });
+    // The restart above replayed the transcript from the agent's own record,
+    // and Claude persists the user turn BEFORE the call it refuses — so the
+    // bubble may already be back. Re-emitting unconditionally doubled the
+    // prompt. An inexact match re-emits: the failure direction is a duplicate,
+    // never a prompt the person cannot see (upstream f3fce37).
+    const replayRestoredIt = session.inUserMessage
+      && session.replayUserRaw.trim() === displayText.trim();
+    if (!replayRestoredIt) {
+      session.userMessageCount += 1;
+      this.emit(session, { type: "userMessage", text: displayText, chips });
+    }
     this.emit(session, { type: "agentStart" });
     // The resend is a turn in its own right — it gets its own token, and the
     // outer turn's `finally` can no longer end it (the tokens differ).
@@ -22445,6 +22496,7 @@ ${directives.block}`;
       this.noteLiveTurnEnded(session);
       this.setStatus(session, "done");
       session.authRecoveryTried = false; // recovered — re-arm for a future expiry
+      this.setProviderNeedsLogin(session.provider, false); // and the token really is good
       this.maybeGenerateTitle(session);
       this.postSessionName(session);
     } catch (err2) {
@@ -22469,6 +22521,11 @@ ${directives.block}`;
         this.emit(session, { type: "agentError", text: errorDetail(e2), ...this.turnEndFields(session, "failed") });
         this.noteLiveTurnEnded(session);
         this.setStatus(session, "error");
+        // The account flag, not only the overlay: the overlay is the
+        // empty-state card, which deliberately does not paint over a live
+        // conversation — exactly where a mid-turn expiry happens. The flag is
+        // what the composer's sign-in card and every other view read.
+        this.setProviderNeedsLogin(session.provider, true);
         this.post({ type: "onboarding", state: this.onboardingForSession(session) });
       } else {
         // Entitlement/billing wording (or anything else) on a fresh process is
