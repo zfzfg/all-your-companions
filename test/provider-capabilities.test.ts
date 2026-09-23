@@ -9,7 +9,7 @@ import {
 } from "../src/provider-capabilities";
 
 describe("provider-capabilities (AP-01)", () => {
-  it("defines all 20 capabilities explicitly across all 4 ACP providers with no missing cells", () => {
+  it("defines all 20 capabilities explicitly across all 5 ACP providers with no missing cells", () => {
     // 15 since AP-16 added `hostMcp`, `companionSubagentTarget` and
     // `delegationShim` on top of AP-11's `structuredPlan`; 20 since the
     // upstream sync folded PROVIDER_ACTIONS in (`deleteHistory`,
@@ -18,7 +18,7 @@ describe("provider-capabilities (AP-01)", () => {
     // act: every new cell is a claim about a provider that someone has to
     // substantiate.
     expect(PROVIDER_CAPABILITY_NAMES).toHaveLength(20);
-    expect(ACP_PROVIDERS).toHaveLength(4);
+    expect(ACP_PROVIDERS).toHaveLength(5);
 
     for (const provider of ACP_PROVIDERS) {
       const providerMatrix = PROVIDER_CAPABILITIES[provider];

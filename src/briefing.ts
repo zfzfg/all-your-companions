@@ -247,6 +247,7 @@ function providerLabel(provider: string): string {
   if (provider === "codex") return "Codex";
   if (provider === "claude") return "Claude";
   if (provider === "gemini") return "Gemini";
+  if (provider === "muse") return "Muse Code";
   if (provider === "grok") return "Grok";
   return provider;
 }

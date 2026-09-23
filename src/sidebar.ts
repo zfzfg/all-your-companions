@@ -206,6 +206,9 @@ import { readCodexSubscriptionWindows } from "./codex-usage";
 import { providerConfigFiles, type ProviderConfigFile } from "./provider-config";
 import { CLI_NPM_PACKAGE, cliUpdatePlan, selfUpdateArgs } from "./cli-update-plan";
 import { readWorkflowCompletion } from "./workflow-state";
+import { MuseBackend } from "./muse-backend";
+import { locateMuseCli, parseMuseVersionOutput } from "./muse-cli-locator";
+import { supportsClientMcpServers, supportsModeSwitching } from "./acp-backend";
 import { captureGitTurnBaseline, GitRunGate, readGitTurnFileBefore, type GitTurnBaseline } from "./git-run";
 import { probeClaudeAuthStatus, runDeviceLogin } from "./device-login-run";
 import { githubDeviceLoginFailureText, runGithubDeviceLogin } from "./github-device-login";
@@ -1097,6 +1100,9 @@ export class GrokSidebar {
   private geminiSessionCache = new Map<string, SessionListEntry[]>();
   private geminiSessionCacheAt = new Map<string, number>();
   private geminiSessionRefresh = new Map<string, Promise<void>>();
+  private museSessionCache = new Map<string, SessionListEntry[]>();
+  private museSessionCacheAt = new Map<string, number>();
+  private museSessionRefresh = new Map<string, Promise<void>>();
   private codexInstallAbort?: AbortController;
   private providerConnectionState: ProviderConnections = {};
   /**
@@ -1249,6 +1255,7 @@ export class GrokSidebar {
   private codexCliPath?: string;
   private claudeCliPath?: string;
   private geminiCliPath?: string;
+  private museCliPath?: string;
   private readonly providerCliVersions: Partial<Record<AcpProvider, string>> = {};
   /** Accounts that are configured but answered an auth-shaped failure. Not the
    *  same as disconnected: the CLI is installed and the user meant to use it,
@@ -1440,6 +1447,7 @@ export class GrokSidebar {
   private codexVersionProbe?: Promise<string>;
   private claudeVersionProbe?: Promise<string>;
   private geminiVersionProbe?: Promise<string>;
+  private museVersionProbe?: Promise<string>;
   /** History browsing scope. Deliberately independent of the live session cwd. */
   private selectedRepoCwd?: string;
   /**
@@ -4747,6 +4755,14 @@ export class GrokSidebar {
       this.claudeCliPath = located;
       return located;
     }
+    if (provider === "muse") {
+      if (this.museCliPath && fs.existsSync(this.museCliPath)) return this.museCliPath;
+      const located = locateMuseCli({
+        configuredPath: this.host.getConfiguration("grok").get<string>("museCliPath", ""),
+      });
+      this.museCliPath = located;
+      return located;
+    }
     if (this.geminiCliPath && fs.existsSync(this.geminiCliPath)) return this.geminiCliPath;
     const located = locateGeminiCli({
       configuredPath: this.host.getConfiguration("grok").get<string>("geminiCliPath", ""),
@@ -4761,6 +4777,7 @@ export class GrokSidebar {
       codex: !!this.locateProvider("codex"),
       claude: !!this.locateProvider("claude"),
       gemini: !!this.locateProvider("gemini"),
+      muse: !!this.locateProvider("muse"),
     };
   }
 
@@ -4778,6 +4795,9 @@ export class GrokSidebar {
     if (provider === "gemini") {
       return { cache: this.geminiSessionCache, at: this.geminiSessionCacheAt, refresh: this.geminiSessionRefresh };
     }
+    if (provider === "muse") {
+      return { cache: this.museSessionCache, at: this.museSessionCacheAt, refresh: this.museSessionRefresh };
+    }
     return undefined;
   }
 
@@ -4786,10 +4806,11 @@ export class GrokSidebar {
       ...(this.codexSessionCache?.values() ?? []),
       ...(this.claudeSessionCache?.values() ?? []),
       ...(this.geminiSessionCache?.values() ?? []),
+      ...(this.museSessionCache?.values() ?? []),
     ];
   }
 
-  private createProviderBackend(provider: AcpProvider, effort?: string): CodexBackend | ClaudeBackend | GeminiBackend | undefined {
+  private createProviderBackend(provider: AcpProvider, effort?: string): CodexBackend | ClaudeBackend | GeminiBackend | MuseBackend | undefined {
     if (provider === "codex") return new CodexBackend();
     if (provider === "claude") {
       const allowedTools = this.host.getConfiguration("companions").get<string[]>(
@@ -4807,6 +4828,7 @@ export class GrokSidebar {
       });
     }
     if (provider === "gemini") return new GeminiBackend();
+    if (provider === "muse") return new MuseBackend();
     return undefined;
   }
 
@@ -4842,7 +4864,7 @@ export class GrokSidebar {
    * something available the session's own provider is the specific gap to
    * close, so show that.
    */
-  private onboardingForSession(session: Session): "connect-agent" | "auth-required" | "codex-login" | "claude-login" | "gemini-login" {
+  private onboardingForSession(session: Session): "connect-agent" | "auth-required" | "codex-login" | "claude-login" | "gemini-login" | "muse-login" {
     if (session.hasHistory) return providerLoginState(session.provider);
     return this.usableProviders().length ? providerLoginState(session.provider) : "connect-agent";
   }
@@ -5027,6 +5049,9 @@ export class GrokSidebar {
     if (provider === "codex") return this.warmConnectedCodexModels();
     if (provider === "claude") return this.warmConnectedClaudeModels();
     if (provider === "gemini") return this.warmConnectedGeminiModels();
+    // Muse exposes no credential-status operation, and a catalog read cannot
+    // prove a sign-in (upstream). A turn reports any credential failure.
+    if (provider === "muse") return false;
     const cliPath = this.locateProvider("grok");
     if (!cliPath) return false;
     // session/new is what actually proves the account, but grok has no ACP
@@ -5406,6 +5431,9 @@ export class GrokSidebar {
    * that printed something we have not seen.
    */
   private async deviceLoginCredentialReady(provider: AcpProvider): Promise<boolean> {
+    // After `muse login`, file presence confirms a credential landed, not that
+    // it is valid; a later auth failure takes the normal needs-login path.
+    if (provider === "muse") return this.providerCredentialFilePresent(provider);
     if (provider === "claude") {
       const cliPath = this.locateProvider("claude");
       if (!cliPath) return false;
@@ -5424,6 +5452,7 @@ export class GrokSidebar {
   private providerCredentialFilePresent(provider: AcpProvider): boolean {
     try {
       if (provider === "codex") return fs.existsSync(path.join(resolveCodexHome(), "auth.json"));
+      if (provider === "muse") return fs.existsSync(path.join(os.homedir(), ".config", "muse", "auth.json"));
       // GROK_HOME, not a hardcoded ~/.grok: the CLI honours it and so does the
       // rest of this host, so hardcoding made the fallback miss a credential
       // that was plainly there and tell the user to sign in again (review).
@@ -5512,6 +5541,7 @@ export class GrokSidebar {
     const codexConnected = connected.codex === true && located.codex === true;
     const claudeConnected = connected.claude === true && located.claude === true;
     const geminiConnected = connected.gemini === true && located.gemini === true;
+    const museConnected = connected.muse === true && located.muse === true;
     this.lastProviderConnected = { grok: grokConnected, codex: codexConnected, claude: claudeConnected, gemini: geminiConnected };
     return {
       type: "providerState",
@@ -5545,6 +5575,12 @@ export class GrokSidebar {
           connected: geminiConnected,
           ...(geminiConnected && needsLogin.gemini ? { needsLogin: true } : {}),
           ...(geminiConnected && versions.gemini ? { cliVersion: versions.gemini } : {}),
+        },
+        {
+          id: "muse",
+          connected: museConnected,
+          ...(museConnected && needsLogin.muse ? { needsLogin: true } : {}),
+          ...(museConnected && versions.muse ? { cliVersion: versions.muse } : {}),
         },
       ],
       ...(this.providerRefreshInFlight ? { checking: true } : {}),
@@ -5604,6 +5640,7 @@ export class GrokSidebar {
       this.codexCliPath = undefined;
       this.claudeCliPath = undefined;
       this.geminiCliPath = undefined;
+      this.museCliPath = undefined;
       // Read AFTER dropping the paths, so a CLI that appeared since boot counts.
       const located = this.locatedProviders();
       // NEITHER probe nor promotion for an agent that is not connected (#171):
@@ -5804,7 +5841,7 @@ export class GrokSidebar {
   private providerForRequestedModel(modelId: string, fallback: AcpProvider): AcpProvider {
     if (!modelId) return fallback;
     const cache = this.state.get<ProviderModelCache>(PROVIDER_MODEL_CACHE_KEY, {});
-    const matches = (["grok", "codex", "claude", "gemini"] as const).filter((provider) =>
+    const matches = PROVIDER_ORDER.filter((provider) =>
       cache[provider]?.models.some((model) => model.modelId === modelId));
     return matches.length === 1 ? matches[0] : fallback;
   }
@@ -5873,6 +5910,10 @@ export class GrokSidebar {
       }
       if (e.affectsConfiguration("grok.claudeCliPath")) {
         this.claudeCliPath = undefined;
+        this.postProviderState();
+      }
+      if (e.affectsConfiguration("grok.museCliPath")) {
+        this.museCliPath = undefined;
         this.postProviderState();
       }
       if (e.affectsConfiguration("grok.geminiCliPath")) {
@@ -6523,7 +6564,8 @@ Only continue if you trust this code.`,
       // not just future requests: clear routine tool cards already on screen.
       // Plan-review stays — that card is not a routine grant.
       this.autoApprovePendingPermissions(session);
-      if (session.client) {
+      // Muse has no set_mode: auto-accept is the host's own gate there.
+      if (session.client && supportsModeSwitching(session.provider)) {
         try {
           if (session.provider === "codex") {
             await session.client.setMode("default");
@@ -6557,7 +6599,7 @@ Only continue if you trust this code.`,
     session.autoApprove = false;
     // agent
     this.setPlanActive(session, false); // posts displayMode → "agent"
-    if (session.client) {
+    if (session.client && supportsModeSwitching(session.provider)) {
       try {
         if (session.provider === "codex") {
           await session.client.setMode("default");
@@ -6950,7 +6992,7 @@ Only continue if you trust this code.`,
       ...overrides,
       [sid]: { ...(overrides[sid] ?? {}), activeAt },
     });
-    for (const provider of (["codex", "claude", "gemini"] as const)) {
+    for (const provider of (["codex", "claude", "gemini", "muse"] as const)) {
       const history = this.adapterHistory(provider);
       if (!history) continue;
       for (const [key, entries] of history.cache) {
@@ -13050,6 +13092,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         this.scheduleAdapterHistoryRefresh("codex", cwd);
         this.scheduleAdapterHistoryRefresh("claude", cwd);
         this.scheduleAdapterHistoryRefresh("gemini", cwd);
+        this.scheduleAdapterHistoryRefresh("muse", cwd);
       }
       for (const id of adapterIds) {
         const cached = findCachedAdapterSession(
@@ -13830,6 +13873,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     if (provider === "codex") return this.probeCodexVersion();
     if (provider === "claude") return this.probeClaudeVersion();
     if (provider === "gemini") return this.probeGeminiVersion();
+    if (provider === "muse") return this.probeMuseVersion();
     if (this.grokVersionProbe) return this.grokVersionProbe;
     this.grokVersionProbe = (async () => {
       const cliPath = this.locateProvider("grok");
@@ -13956,6 +14000,29 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
   }
 
   /** Read `gemini --version` once per activation. */
+  /** Probe the installed Muse CLI, not the SDK/adapter package version. */
+  private probeMuseVersion(): Promise<string> {
+    if (!this.hasProviderConsent("muse")) return Promise.resolve("");
+    if (this.museVersionProbe) return this.museVersionProbe;
+    this.museVersionProbe = (async () => {
+      const cliPath = this.locateProvider("muse");
+      if (!cliPath) return "";
+      try {
+        const { stdout } = await execGrokCli(cliPath, ["--version"], { timeout: 30_000, windowsHide: true });
+        const version = parseMuseVersionOutput(stdout ?? "");
+        if (!version) throw new Error("unrecognized version output");
+        this.providerCliVersions.muse = version;
+        this.postProviderState();
+        return version;
+      } catch (error) {
+        this.host.appendLine(`muse --version failed: ${(error as Error).message}`);
+        this.postProviderState();
+        return "";
+      }
+    })();
+    return this.museVersionProbe;
+  }
+
   private probeGeminiVersion(): Promise<string> {
     if (this.geminiVersionProbe) return this.geminiVersionProbe;
     this.geminiVersionProbe = (async () => {
@@ -14849,7 +14916,8 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       effort,
       log: (msg) => this.host.appendLine(msg),
       timeouts: this.acpClientTimeouts(),
-      mcpServers: () => this.hostMcpServersFor(session),
+      // The Muse adapter takes no host MCP servers (capability clientMcp).
+      mcpServers: async () => supportsClientMcpServers(session.provider) ? this.hostMcpServersFor(session) : [],
       ...(session.provider === "grok"
         ? { grokVersion: grokHandshakeVersion, grokVersionVerified }
         : { backend: this.createProviderBackend(session.provider, effort) }),
@@ -17049,7 +17117,9 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         // observed directly. Probe immediately as well: browser/desktop login
         // helpers may already have completed, and the explicit Re-check below
         // remains available for interactive terminals still in progress.
-        this.watchProviderLogin(provider);
+        // Muse has no credential-status probe to poll; Re-check reads its
+        // credential file instead (upstream 9a4aa6b).
+        if (provider !== "muse") this.watchProviderLogin(provider);
         // Connecting an agent is about the NEXT conversation, not the one on
         // screen. Showing its sign-in panel over a session with history covered
         // that transcript, and the confirmation afterwards had nowhere sensible
@@ -17160,7 +17230,13 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         // gets the sign-in action, which is what needsLogin is for.
         // Consent was stated by Connect; a re-check only re-reads it (#171).
         if (!this.hasProviderConsent(provider)) break;
-        await this.reprobeProviderCredentials(provider);
+        if (provider === "muse") {
+          // No status RPC: the person acknowledges the CLI sign-in here, and a
+          // landed credential file is the evidence (upstream). A turn still
+          // reports a credential failure through the normal path.
+          this.setProviderNeedsLogin("muse", !this.providerCredentialFilePresent("muse"));
+          void this.probeProviderVersion("muse");
+        } else await this.reprobeProviderCredentials(provider);
         await this.adoptSessionsForConnectedProvider(provider, session);
         break;
       }
@@ -18342,6 +18418,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     if (providers.includes("codex")) adapter.push(...(this.codexSessionCache.get(projectProviderKey(cwd)) ?? []));
     if (providers.includes("claude")) adapter.push(...(this.claudeSessionCache.get(projectProviderKey(cwd)) ?? []));
     if (providers.includes("gemini")) adapter.push(...(this.geminiSessionCache.get(projectProviderKey(cwd)) ?? []));
+    if (providers.includes("muse")) adapter.push(...(this.museSessionCache.get(projectProviderKey(cwd)) ?? []));
     for (const session of this.pool) {
       if (!isAdapterProvider(session.provider) || !session.activeSessionId || !pathsEqual(this.sessionCwd(session), cwd)) continue;
       if (adapter.some((entry) => entry.id === session.activeSessionId)) continue;
@@ -18400,6 +18477,8 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
           ? isClaudeCredentialError(error)
           : provider === "gemini"
           ? isGeminiCredentialError(error)
+          : provider === "muse"
+          ? new MuseBackend().isCredentialError(error)
           : isCodexCredentialError(error);
         if (!credential) return;
         history.at.set(key, Date.now());
@@ -19699,6 +19778,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       codex: pickSttBackend({ ...state, provider: "codex" }) ?? null,
       claude: pickSttBackend({ ...state, provider: "claude" }) ?? null,
       gemini: pickSttBackend({ ...state, provider: "gemini" }) ?? null,
+      muse: pickSttBackend({ ...state, provider: "muse" }) ?? null,
     } };
   }
 

@@ -246,6 +246,7 @@ describe("multi-provider review regressions", () => {
         { id: "codex", connected: false },
         { id: "claude", connected: false },
         { id: "gemini", connected: false },
+        { id: "muse", connected: false },
       ],
     });
 

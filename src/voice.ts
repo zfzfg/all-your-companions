@@ -10,6 +10,8 @@
 // host (ffmpeg child process) and transcription goes straight to xAI's separate
 // Speech-to-Text product (api.x.ai/v1/stt). See research/voice-input.md.
 
+import type { AcpProvider } from "./acp-backend";
+
 export const STT_ENDPOINT = "https://api.x.ai/v1/stt";
 
 export type SttBackend = "xai" | "openai";
@@ -17,7 +19,7 @@ export type SttPreference = "auto" | SttBackend;
 
 /** An explicit choice is strict. Automatic fallback is credential-based only. */
 export function pickSttBackend(opts: {
-  provider: "grok" | "codex" | "claude" | "gemini";
+  provider: AcpProvider;
   hasXai: boolean;
   hasOpenAi: boolean;
   preference?: SttPreference;
@@ -39,12 +41,12 @@ export function resolveOpenAiVoiceKey(opts: {
 }
 
 export interface VoiceBackendState {
-  provider: "grok" | "codex" | "claude" | "gemini";
+  provider: AcpProvider;
   preference: SttPreference;
   backend?: SttBackend;
   hasXai: boolean;
   hasOpenAi: boolean;
-  backends: Record<"grok" | "codex" | "claude" | "gemini", SttBackend | null>;
+  backends: Record<AcpProvider, SttBackend | null>;
 }
 
 /** Hard cap on a single recording (seconds). ffmpeg self-terminates at this, so

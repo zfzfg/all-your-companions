@@ -275,7 +275,7 @@ describe("the frame the page paints from", () => {
     });
     sidebar.postAgentRoles();
     const providers = frame(posted).providers;
-    expect(providers.map((p) => p.id)).toEqual(["grok", "codex", "claude", "gemini"]);
+    expect(providers.map((p) => p.id)).toEqual(["grok", "codex", "claude", "gemini", "muse"]);
     expect(providers.find((p) => p.id === "claude")!.connected).toBe(true);
     expect(providers.find((p) => p.id === "grok")!.connected).toBe(false);
     expect(providers.find((p) => p.id === "claude")!.models).toEqual([{ modelId: "claude-opus-5", name: "Opus 5" }]);

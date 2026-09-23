@@ -4,12 +4,13 @@ import { isAdapterProvider } from "./acp-backend";
 import { normalizeWorkspaceFsPath } from "./host";
 import type { SessionListEntry, SessionMetaOverrides } from "./sessions";
 
-export const PROVIDER_ORDER: readonly AcpProvider[] = ["grok", "codex", "claude", "gemini"];
+export const PROVIDER_ORDER: readonly AcpProvider[] = ["grok", "codex", "claude", "gemini", "muse"];
 
 export function providerDisplayName(provider: AcpProvider): string {
   if (provider === "codex") return "Codex";
   if (provider === "claude") return "Claude";
   if (provider === "gemini") return "Gemini";
+  if (provider === "muse") return "Muse Code";
   return "Grok";
 }
 
@@ -18,6 +19,7 @@ export interface ProviderConnections {
   codex?: boolean;
   claude?: boolean;
   gemini?: boolean;
+  muse?: boolean;
 }
 
 export interface ProviderModelCacheEntry {
@@ -106,17 +108,19 @@ export function usableProviderIds(
   return connectedProviderIds(connections, located).filter((provider) => needsLogin[provider] !== true);
 }
 
-export function providerLoginState(provider: AcpProvider): "auth-required" | "codex-login" | "claude-login" | "gemini-login" {
+export function providerLoginState(provider: AcpProvider): "auth-required" | "codex-login" | "claude-login" | "gemini-login" | "muse-login" {
   if (provider === "codex") return "codex-login";
   if (provider === "claude") return "claude-login";
   if (provider === "gemini") return "gemini-login";
+  if (provider === "muse") return "muse-login";
   return "auth-required";
 }
 
-export function missingProviderState(provider: AcpProvider): "missing-cli" | "missing-codex" | "missing-claude" | "missing-gemini" {
+export function missingProviderState(provider: AcpProvider): "missing-cli" | "missing-codex" | "missing-claude" | "missing-gemini" | "missing-muse" {
   if (provider === "codex") return "missing-codex";
   if (provider === "claude") return "missing-claude";
   if (provider === "gemini") return "missing-gemini";
+  if (provider === "muse") return "missing-muse";
   return "missing-cli";
 }
 
@@ -194,7 +198,7 @@ export function adapterActivityAt(
   activeAt?: number,
 ): number {
   if (typeof activeAt !== "number") return reportedAt;
-  if (provider === "codex" || provider === "claude" || provider === "gemini") return activeAt;
+  if (provider === "codex" || provider === "claude" || provider === "gemini" || provider === "muse") return activeAt;
   return Math.max(reportedAt, activeAt);
 }
 

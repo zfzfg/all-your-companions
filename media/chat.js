@@ -3914,10 +3914,10 @@
     // A signed-out agent has no knowable model list, and the placeholder shown
     // in its place ("Codex default") reads as something you can select — so its
     // rows are replaced by the one action that can actually help.
-    const signInProviders = ["grok", "codex", "claude", "gemini"].filter(providerNeedsLogin);
+    const signInProviders = ["grok", "codex", "claude", "gemini", "muse"].filter(providerNeedsLogin);
     models = models.filter((model) => !signInProviders.includes(model.provider || state.activeProvider));
     if (grouped) {
-      models = ["grok", "codex", "claude", "gemini"].flatMap((provider) => models.filter((model) =>
+      models = ["grok", "codex", "claude", "gemini", "muse"].flatMap((provider) => models.filter((model) =>
         (model.provider || state.activeProvider) === provider));
     }
     let group = "";
@@ -3974,7 +3974,7 @@
       gearPopover.appendChild(el);
     };
     if (grouped) {
-      for (const provider of ["grok", "codex", "claude", "gemini"]) {
+      for (const provider of ["grok", "codex", "claude", "gemini", "muse"]) {
         for (const m of models) {
           if ((m.provider || state.activeProvider) === provider) renderModelRow(m);
         }
@@ -4547,6 +4547,8 @@
     // Four-point sparkle — distinct from the Grok/Codex marks, currentColor.
     claude: "M4.709 15.955l4.72-2.647.08-.23-.08-.128H9.2l-.79-.048-2.698-.073-2.339-.097-2.266-.122-.571-.121L0 11.784l.055-.352.48-.321.686.06 1.52.103 2.278.158 1.652.097 2.449.255h.389l.055-.157-.134-.098-.103-.097-2.358-1.596-2.552-1.688-1.336-.972-.724-.491-.364-.462-.158-1.008.656-.722.881.06.225.061.893.686 1.908 1.476 2.491 1.833.365.304.145-.103.019-.073-.164-.274-1.355-2.446-1.446-2.49-.644-1.032-.17-.619a2.97 2.97 0 01-.104-.729L6.283.134 6.696 0l.996.134.42.364.62 1.414 1.002 2.229 1.555 3.03.456.898.243.832.091.255h.158V9.01l.128-1.706.237-2.095.23-2.695.08-.76.376-.91.747-.492.584.28.48.685-.067.444-.286 1.851-.559 2.903-.364 1.942h.212l.243-.242.985-1.306 1.652-2.064.73-.82.85-.904.547-.431h1.033l.76 1.129-.34 1.166-1.064 1.347-.881 1.142-1.264 1.7-.79 1.36.073.11.188-.02 2.856-.606 1.543-.28 1.841-.315.833.388.091.395-.328.807-1.969.486-2.309.462-3.439.813-.042.03.049.061 1.549.146.662.036h1.622l3.02.225.79.522.474.638-.079.485-1.215.62-1.64-.389-3.829-.91-1.312-.329h-.182v.11l1.093 1.068 2.006 1.81 2.509 2.33.127.578-.322.455-.34-.049-2.205-1.657-.851-.747-1.926-1.62h-.128v.17l.444.649 2.345 3.521.122 1.08-.17.353-.608.213-.668-.122-1.374-1.925-1.415-2.167-1.143-1.943-.14.08-.674 7.254-.316.37-.729.28-.607-.461-.322-.747.322-1.476.389-1.924.315-1.53.286-1.9.17-.632-.012-.042-.14.018-1.434 1.967-2.18 2.945-1.726 1.845-.414.164-.717-.37.067-.662.401-.589 2.388-3.036 1.44-1.882.93-1.086-.006-.158h-.055L4.132 18.56l-1.13.146-.487-.456.061-.746.231-.243 1.908-1.312-.006.006z",
     gemini: "M12 0C12 6.627 6.627 12 0 12c6.627 0 12 5.373 12 12 0-6.627 5.373-12 12-12-6.627 0-12-5.373-12-12z",
+    // Meta's mark (Lobe Icons, MIT) — Muse Code is Meta's agent (upstream dd7841d).
+    muse: "M6.897 4c1.915 0 3.516.932 5.43 3.376l.282-.373c.19-.246.383-.484.58-.71l.313-.35C14.588 4.788 15.792 4 17.225 4c1.273 0 2.469.557 3.491 1.516l.218.213c1.73 1.765 2.917 4.71 3.053 8.026l.011.392.002.25c0 1.501-.28 2.759-.818 3.7l-.14.23-.108.153c-.301.42-.664.758-1.086 1.009l-.265.142-.087.04a3.493 3.493 0 01-.302.118 4.117 4.117 0 01-1.33.208c-.524 0-.996-.067-1.438-.215-.614-.204-1.163-.56-1.726-1.116l-.227-.235c-.753-.812-1.534-1.976-2.493-3.586l-1.43-2.41-.544-.895-1.766 3.13-.343.592C7.597 19.156 6.227 20 4.356 20c-1.21 0-2.205-.42-2.936-1.182l-.168-.184c-.484-.573-.837-1.311-1.043-2.189l-.067-.32a8.69 8.69 0 01-.136-1.288L0 14.468c.002-.745.06-1.49.174-2.23l.1-.573c.298-1.53.828-2.958 1.536-4.157l.209-.34c1.177-1.83 2.789-3.053 4.615-3.16L6.897 4zm-.033 2.615l-.201.01c-.83.083-1.606.673-2.252 1.577l-.138.199-.01.018c-.67 1.017-1.185 2.378-1.456 3.845l-.004.022a12.591 12.591 0 00-.207 2.254l.002.188c.004.18.017.36.04.54l.043.291c.092.503.257.908.486 1.208l.117.137c.303.323.698.492 1.17.492 1.1 0 1.796-.676 3.696-3.641l2.175-3.4.454-.701-.139-.198C9.11 7.3 8.084 6.616 6.864 6.616zm10.196-.552l-.176.007c-.635.048-1.223.359-1.82.933l-.196.198c-.439.462-.887 1.064-1.367 1.807l.266.398c.18.274.362.56.55.858l.293.475 1.396 2.335.695 1.114c.583.926 1.03 1.6 1.408 2.082l.213.262c.282.326.529.54.777.673l.102.05c.227.1.457.138.718.138.176.002.35-.023.518-.073.338-.104.61-.32.813-.637l.095-.163.077-.162c.194-.459.29-1.06.29-1.785l-.006-.449c-.08-2.871-.938-5.372-2.2-6.798l-.176-.189c-.67-.683-1.444-1.074-2.27-1.074z",
   };
 
   /**
@@ -4572,7 +4574,7 @@
     if (state.providerCapabilities && state.providerCapabilities.steer) {
       return state.providerCapabilities.steer.state === "yes";
     }
-    return state.activeProvider !== "claude" && state.activeProvider !== "codex" && state.activeProvider !== "gemini";
+    return state.activeProvider !== "claude" && state.activeProvider !== "codex" && state.activeProvider !== "gemini" && state.activeProvider !== "muse";
   }
 
   function steerCapability() {
@@ -4586,7 +4588,7 @@
     if (cell) {
       return cell;
     }
-    if (state.activeProvider === "claude" || state.activeProvider === "codex" || state.activeProvider === "gemini") {
+    if (state.activeProvider === "claude" || state.activeProvider === "codex" || state.activeProvider === "gemini" || state.activeProvider === "muse") {
       const p = providerDisplayName(state.activeProvider);
       return { state: "no", reason: `Steer is not supported by ${p} — your message will be sent after the turn.` };
     }
@@ -4627,17 +4629,18 @@
     if (provider === "codex") return "Codex";
     if (provider === "claude") return "Claude";
     if (provider === "gemini") return "Gemini";
+    if (provider === "muse") return "Muse Code";
     return "Grok";
   }
 
   function providerLogoId(provider) {
-    if (provider === "codex" || provider === "claude" || provider === "gemini") return provider;
+    if (provider === "codex" || provider === "claude" || provider === "gemini" || provider === "muse") return provider;
     return "grok";
   }
 
   function providerLogoMarkup(provider) {
     const id = providerLogoId(provider);
-    return `<svg class="provider-logo" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="${PROVIDER_LOGO_PATHS[id]}"></path></svg>`;
+    return `<svg class="provider-logo" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="${PROVIDER_LOGO_PATHS[id]}"></path></svg>`;
   }
 
   function makeProviderGlyph(provider, dotValue, sessionId) {
@@ -8417,7 +8420,7 @@
     const host = state.welcomeTips || {};
     const providers = state.providers || [];
     const altConnected = providers.some(
-      (p) => p && (p.id === "codex" || p.id === "claude" || p.id === "gemini") && p.connected,
+      (p) => p && (p.id === "codex" || p.id === "claude" || p.id === "gemini" || p.id === "muse") && p.connected,
     );
     return {
       appPurpose: state.appPurpose === "coding" ? "coding" : "knowledge",
@@ -10048,6 +10051,7 @@
       || (state.onboardingMode === "codex-login" ? "codex"
         : state.onboardingMode === "claude-login" ? "claude"
         : state.onboardingMode === "gemini-login" ? "gemini"
+        : state.onboardingMode === "muse-login" ? "muse"
         : state.onboardingMode === "auth-required" ? "grok" : undefined);
     let anyRan = false;
     for (const btn of onb.querySelectorAll(".onb-action")) {
@@ -10099,7 +10103,7 @@
   function remoteConnectPanel(mode, info, ver) {
     const device = info.device;
     const provider = info.provider
-      || (mode === "codex-login" ? "codex" : mode === "claude-login" ? "claude" : mode === "gemini-login" ? "gemini" : mode === "auth-required" ? "grok" : "");
+      || (mode === "codex-login" ? "codex" : mode === "claude-login" ? "claude" : mode === "gemini-login" ? "gemini" : mode === "muse-login" ? "muse" : mode === "auth-required" ? "grok" : "");
     // The products' own names, everywhere this panel speaks. Not "Grok": that
     // is the model, the extension is Grok Build, and a heading that disagrees
     // with the button beneath it reads as two different things to connect.
@@ -10260,7 +10264,7 @@
     // frame's provider is the specific thing being asked for again.
     const nothingConnected = !((state.providers || []).some((p) => p && p.connected));
     const cloudFresh = !!(state.hostCaps && state.hostCaps.remoteAgentSignOut) && nothingConnected;
-    const offer = provider && !cloudFresh ? [provider] : ["grok", "codex", "claude", "gemini"];
+    const offer = provider && !cloudFresh ? [provider] : ["grok", "codex", "claude", "gemini", "muse"];
     // A cloud machine's three agents are not equal offers: Grok is the native
     // one. Ranking is the cloud-only part; every agent that has a headless
     // flow is offered, including Claude Code's paste-code sign-in.
@@ -10434,6 +10438,7 @@
     "codex-login": true,
     "claude-login": true,
     "gemini-login": true,
+    "muse-login": true,
     "auth-required": true,
   };
 
@@ -10531,7 +10536,7 @@
       const id = info.provider || "grok";
       const done = id === "codex"
         ? "You can start working with OpenAI!"
-        : id === "claude" ? "You can start clauding!" : id === "gemini" ? "You can start working with Gemini!" : "You can start grokking!";
+        : id === "claude" ? "You can start clauding!" : id === "gemini" ? "You can start working with Gemini!" : id === "muse" ? "Muse Code is connected." : "You can start grokking!";
       if (ver) setWelcomeStatus("Connected", false);
       onb.innerHTML =
         `<div class="onb onb-connected">` +
@@ -10558,6 +10563,9 @@
             `</button>` +
             `<button class="onb-agent-tile onb-action" type="button" data-act="connectProvider" data-provider="gemini">` +
               `<span class="onb-agent-mark">${providerLogoMarkup("gemini")}</span><span><strong>Gemini</strong><small>Antigravity CLI</small></span>` +
+            `</button>` +
+            `<button class="onb-agent-tile onb-action" type="button" data-act="connectProvider" data-provider="muse">` +
+              `<span class="onb-agent-mark">${providerLogoMarkup("muse")}</span><span><strong>Muse Code</strong><small>Meta Muse CLI</small></span>` +
             `</button>` +
           `</div>` +
         `</div>`;
@@ -10661,6 +10669,23 @@
           `<p class="onb-desc">Install Google's official Antigravity CLI (<code>agy</code>), then re-check:</p>` +
           `<div class="onb-cmd"><code>${installCmd}</code><button class="onb-copy" type="button" title="Copy" data-cmd="${installCmd}">${ICON.copy}</button></div>` +
           `<button class="onb-action" type="button" data-act="recheckProvider" data-provider="gemini">Re-check</button>` +
+        `</div>`;
+    } else if (mode === "missing-muse") {
+      if (ver) setWelcomeStatus("Muse CLI not found", false);
+      onb.innerHTML =
+        `<div class="onb">` +
+          `<p class="onb-heading">Install Meta's Muse Code CLI</p>` +
+          `<p class="onb-desc">Install the <code>muse</code> CLI on this computer (or set <code>companions.museCliPath</code>), then re-check.</p>` +
+          `<button class="onb-action" type="button" data-act="recheckProvider" data-provider="muse">Re-check</button>` +
+        `</div>`;
+    } else if (mode === "muse-login") {
+      if (ver) setWelcomeStatus("Finish signing in", false);
+      onb.innerHTML =
+        `<div class="onb">` +
+          `<p class="onb-heading">Sign in to Muse Code</p>` +
+          `<p class="onb-desc">Sign in with the Muse CLI in your terminal (it prints a link to open), then connect here.</p>` +
+          `<button class="onb-action onb-secondary" type="button" data-act="connectProvider" data-provider="muse">Open terminal &amp; run <code>muse login</code></button>` +
+          `<button class="onb-action" type="button" data-act="recheckProvider" data-provider="muse">Done - connect Muse Code</button>` +
         `</div>`;
     } else if (mode === "gemini-login") {
       if (ver) setWelcomeStatus("Finish signing in", false);
@@ -11041,7 +11066,7 @@
     if (cap) {
       return state.feedbackAvailable === true && cap.state === "yes";
     }
-    return state.feedbackAvailable === true && state.activeProvider !== "codex" && state.activeProvider !== "claude" && state.activeProvider !== "gemini";
+    return state.feedbackAvailable === true && state.activeProvider !== "codex" && state.activeProvider !== "claude" && state.activeProvider !== "gemini" && state.activeProvider !== "muse";
   }
 
   function stripTurnThumbs(actions) {
@@ -14709,6 +14734,7 @@
     if (state.activeProvider === "codex") return CODEX_ACTIVITY_VERB;
     if (state.activeProvider === "claude") return CLAUDE_ACTIVITY_VERB;
     if (state.activeProvider === "gemini") return "Thinking\u2026";
+    if (state.activeProvider === "muse") return "Working";
     return GROK_ACTIVITY_VERB;
   }
 
@@ -14716,6 +14742,7 @@
     if (state.activeProvider === "codex") return "OpenAI is working";
     if (state.activeProvider === "claude") return "Claude is working";
     if (state.activeProvider === "gemini") return "Gemini is working";
+    if (state.activeProvider === "muse") return "Muse Code is working";
     return "Grok is working";
   }
 
@@ -18386,7 +18413,7 @@
       case "providerState":
         state.providersKnown = true;
         state.providers = Array.isArray(msg.providers) ? msg.providers.filter((provider) =>
-          provider && (provider.id === "grok" || provider.id === "codex" || provider.id === "claude" || provider.id === "gemini")) : [];
+          provider && (provider.id === "grok" || provider.id === "codex" || provider.id === "claude" || provider.id === "gemini" || provider.id === "muse")) : [];
         // A confirmed account retires its device-flow mirror. Without this the
         // "Connected" flow row would resurface in Settings after a later
         // sign-out, describing a connection that no longer exists.
@@ -18878,7 +18905,7 @@
         state.subscriptionWindows = [];
         if (!contextPopover.hidden) renderContextPopover();
         state.currentModelId = msg.currentModelId;
-        state.activeProvider = msg.provider === "codex" || msg.provider === "claude" || msg.provider === "gemini" ? msg.provider : "grok";
+        state.activeProvider = msg.provider === "codex" || msg.provider === "claude" || msg.provider === "gemini" || msg.provider === "muse" ? msg.provider : "grok";
         renderQueuedBlocks();
         syncFeedbackButtons();
         syncProviderVoice();

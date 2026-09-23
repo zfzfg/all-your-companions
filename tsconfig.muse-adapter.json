@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022", "DOM"],
+    "rootDir": "adapters/muse",
+    "outDir": "out/muse-adapter",
+    "strict": true,
+    "noEmitOnError": true,
+    "skipLibCheck": false,
+    "types": ["node"]
+  },
+  "include": ["adapters/muse/**/*.mts"]
+}

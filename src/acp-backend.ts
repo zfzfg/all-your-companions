@@ -1,7 +1,7 @@
 import type { EffortLevel, PromptContentBlock } from "./acp";
 import { providerCapability, type ProviderCapability } from "./provider-capabilities";
 
-export const ACP_PROVIDERS = ["grok", "codex", "claude", "gemini"] as const;
+export const ACP_PROVIDERS = ["grok", "codex", "claude", "gemini", "muse"] as const;
 export type AcpProvider = (typeof ACP_PROVIDERS)[number];
 
 export function isAcpProvider(value: unknown): value is AcpProvider {
@@ -70,6 +70,8 @@ export interface BackendUpdate {
   meta?: any;
   sessionTitle?: string;
   contextWindow?: number;
+  /** Direct occupancy reported by a backend, including an empty context. */
+  contextUsed?: number;
   /**
    * Ordinary `usage_update.used` is billed per model call (includes output).
    * Compact's getContextUsage is the exception — the host only adopts this
@@ -103,8 +105,8 @@ export interface BackendSteeringOptions {
   grokVersionVerified?: boolean;
 }
 
-export interface AcpBackend {
-  readonly provider: AcpProvider;
+export interface AcpBackend<Provider extends string = AcpProvider> {
+  readonly provider: Provider;
   readonly processName: string;
   readonly usesClientPlanGate: boolean;
   spawn(options: BackendSpawnOptions): BackendSpawnSpec;

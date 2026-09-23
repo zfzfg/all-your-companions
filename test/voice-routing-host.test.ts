@@ -45,7 +45,7 @@ describe("backend-aware host readiness", () => {
     s.postVoiceConfigured();
     const message = s.postLocal.mock.calls[0][0];
     expect(message).toMatchObject({ type: "voiceConfigured", value: true, backendState: { provider, backend: "openai", hasXai: false, hasOpenAi: true } });
-    expect(message.backendState.backends).toEqual({ grok: "openai", codex: "openai", claude: "openai", gemini: "openai" });
+    expect(message.backendState.backends).toEqual({ grok: "openai", codex: "openai", claude: "openai", gemini: "openai", muse: "openai" });
     expect(s.sendRemoteClient).toHaveBeenCalledWith("phone", message, "/repo");
     expect(JSON.stringify(message)).not.toContain("openai-key");
   });

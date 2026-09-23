@@ -1250,7 +1250,7 @@ export type HostMsg =
   // itself and a terminal is the better affordance, so nothing changes there.
   | {
       type: "onboarding";
-      state: "connect-agent" | "missing-cli" | "auth-required" | "missing-codex" | "codex-login" | "missing-claude" | "claude-login" | "missing-gemini" | "gemini-login" | "provider-connected" | "no-project";
+      state: "connect-agent" | "missing-cli" | "auth-required" | "missing-codex" | "codex-login" | "missing-claude" | "claude-login" | "missing-gemini" | "gemini-login" | "missing-muse" | "muse-login" | "provider-connected" | "no-project";
       platform?: string;
       reason?: string;
       provider?: AcpProvider;

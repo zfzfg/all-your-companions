@@ -143,7 +143,7 @@ const ALLOWED_ORIGINS = new Set<string>(["local", "remote"]);
 const ALLOWED_DEVICES = new Set<string>(["desktop", "mobile"]);
 const ALLOWED_HOST_KINDS = new Set<string>(["desktop", "vscode"]);
 const ALLOWED_PURPOSES = new Set<string>(["knowledge", "coding"]);
-const ALLOWED_PROVIDERS = new Set<string>(["grok", "codex", "claude", "gemini"]);
+const ALLOWED_PROVIDERS = new Set<string>(["grok", "codex", "claude", "gemini", "muse"]);
 
 const INSTALL_ID_RE = /^[A-Za-z0-9._-]{1,80}$/;
 /** Picker / CLI model ids: `grok-build`, `grok-4.5`, `gpt-5.6-sol`. Empty = CLI default. */

@@ -22,7 +22,8 @@ describe("grok CLI process invocation", () => {
     // remote grok sign-out. A cloud environment has no one to watch the terminal
     // the desk path opens, so that path runs the CLI through the wrapper and
     // waits for it instead.
-    expect(sidebar.match(/execGrokCli\s*\(/g)).toHaveLength(10);
+    // The eleventh is `muse --version` (the Muse provider port).
+    expect(sidebar.match(/execGrokCli\s*\(/g)).toHaveLength(11);
     expect(sidebar).toMatch(/execGrokCli\(cliPath, \["--version"\],[\s\S]*parseCodexVersionOutput/);
     expect(sidebar).toMatch(/execGrokCli\(cliPath, \["--version"\],[\s\S]*parseClaudeVersionOutput/);
     expect(sidebar).toMatch(/execGrokCli\(cliPath, \["--version"\],[\s\S]*parseGeminiVersionOutput/);

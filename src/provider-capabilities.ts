@@ -302,6 +302,33 @@ export const PROVIDER_CAPABILITIES: Record<
     // Sent on session/new; whether it is consumed is the hostMcp probe.
     clientMcp: { state: "yes" },
   },
+  // Meta's Muse Code, through our own ACP adapter (adapters/muse, upstream
+  // 9a4aa6b). Values mirror upstream's PROVIDER_ACTIONS row and the adapter's
+  // actual surface: no set_mode, no MCP servers, no compaction RPC.
+  muse: {
+    steer: { state: "no", reason: "Steer is not supported by Muse — your message will be sent after the turn." },
+    // Client-side file checkpoints + transcript truncate (AP-08).
+    rewind: { state: "yes" },
+    fork: { state: "no", reason: "Forking conversations is not supported by Muse." },
+    worktree: { state: "yes" },
+    planMode: { state: "no", reason: "Muse has no Plan mode over ACP (mode switching is unavailable)." },
+    clientPlanGate: { state: "no", reason: "Muse manages its own approvals (no client-side gate)." },
+    vision: { state: "probe", reason: "Whether Muse accepts image attachments over ACP is unverified." },
+    manualCompact: { state: "no", reason: "Muse does not expose a compaction command over ACP." },
+    questionRpc: { state: "no", reason: "Interactive question cards via x.ai/ask_user_question are not supported by Muse." },
+    feedback: { state: "no", reason: "Thumbs feedback rating (_x.ai/feedback) is not supported by Muse." },
+    subagents: { state: "no", reason: "Subagent delegation is not supported by Muse." },
+    structuredPlan: { state: "no", reason: "Muse does not report a step list over ACP." },
+    hostMcp: { state: "no", reason: "The Muse adapter does not take host MCP servers." },
+    companionSubagentTarget: { state: "yes" },
+    // No host MCP, so delegation needs the fenced-block shim.
+    delegationShim: { state: "yes" },
+    deleteHistory: { state: "no", reason: "Muse does not expose a way to delete its conversations." },
+    adapterHistory: { state: "yes" },
+    modeSwitching: { state: "no", reason: "Muse does not support mode switching over ACP." },
+    perCallContext: { state: "no", reason: "Muse reports context occupancy directly." },
+    clientMcp: { state: "no", reason: "The Muse adapter does not take host MCP servers." },
+  },
 };
 
 /** Runtime facts that can resolve probe-dependent capabilities. */

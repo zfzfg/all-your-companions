@@ -1398,7 +1398,7 @@ export class AcpClient extends EventEmitter {
         if (model) model.totalContextTokens = normalized.contextWindow;
       }
     }
-    if (normalized.update === undefined && normalized.usageUpdateUsed === undefined && normalized.contextWindow === undefined) {
+    if (normalized.update === undefined && normalized.usageUpdateUsed === undefined && normalized.contextWindow === undefined && normalized.contextUsed === undefined) {
       return;
     }
     if (normalized.update !== undefined) {
@@ -1414,7 +1414,8 @@ export class AcpClient extends EventEmitter {
       if (normalized.usageUpdateUsed !== undefined) {
         this.emit("adapterUsageUpdate", normalized.usageUpdateUsed, this.lastContextWindow);
       }
-      const contextUsed = contextUsedFromUpdateEnvelope(meta);
+      // A backend that reports occupancy directly (Muse) wins over the envelope.
+      const contextUsed = normalized.contextUsed ?? contextUsedFromUpdateEnvelope(meta);
       const usedChanged = contextUsed !== null && contextUsed !== this.lastContextUsed;
       if (usedChanged) this.lastContextUsed = contextUsed;
       if (usedChanged || normalized.contextWindow !== undefined) {

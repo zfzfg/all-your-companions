@@ -145,7 +145,7 @@ export interface AgentRoleSet {
 
 export const AGENT_ROLES_DIR = ".companions/agents";
 
-const PROVIDERS: readonly AcpProvider[] = ["grok", "codex", "claude", "gemini"];
+const PROVIDERS: readonly AcpProvider[] = ["grok", "codex", "claude", "gemini", "muse"];
 const EFFORTS: readonly string[] = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultracode"];
 
 /** `[a-z0-9-]`, must start and end alphanumeric. The name is typed after a

@@ -1312,7 +1312,7 @@ describe("provider onboarding", () => {
     dispatch(window, { type: "onboarding", state: "connect-agent" });
 
     const tiles = [...doc.querySelectorAll(".onb-agent-tile")] as HTMLButtonElement[];
-    expect(tiles).toHaveLength(4);
+    expect(tiles).toHaveLength(5);
     expect(tiles[0].textContent).toContain("Grok");
     expect(tiles[0].classList.contains("primary")).toBe(true);
     expect(tiles[1].textContent).toContain("Codex");
