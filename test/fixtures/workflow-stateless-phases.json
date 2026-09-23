@@ -1,0 +1,107 @@
+{
+  "provenance": "State fields transcribed from the supplied CLI 1.0.40 demo-stages state.json. Agent ids are fixture-local because the supplied ids were abbreviated. The second run repeats the two-stage shape with its supplied id/name and 6:06 duration from the reload screenshot.",
+  "runs": [
+    {
+      "run_id": "wf_01a0c8ee00347c91befc4ec0b8a616cd",
+      "name": "demo-stages",
+      "state": {
+        "objective": "Short demo: two readers in parallel, then one summary",
+        "status": "complete",
+        "phases": [
+          {
+            "title": "Read",
+            "detail": "two readers in parallel"
+          },
+          {
+            "title": "Summarize",
+            "detail": "one writer turns the notes into a paragraph"
+          }
+        ],
+        "current_phase": "Summarize",
+        "agent_budget": 4,
+        "agents_used": 3,
+        "agent_usage_incomplete": false,
+        "elapsed_ms_floor": 249082,
+        "result_summary": "{\"note_count\":8,\"path\":\"scratch/demo-summary.md\",\"summary\":\"...\"}",
+        "agents": [
+          {
+            "agent_id": "fixture-read-readme",
+            "label": "read:readme",
+            "phase": "Read",
+            "state": "done",
+            "tokens_used": 20025,
+            "duration_ms": 8841
+          },
+          {
+            "agent_id": "fixture-read-agents",
+            "label": "read:agents",
+            "phase": "Read",
+            "state": "done",
+            "tokens_used": 54873,
+            "duration_ms": 22280
+          },
+          {
+            "agent_id": "fixture-summarize",
+            "label": "summarize",
+            "phase": "Summarize",
+            "state": "done",
+            "tokens_used": 51858,
+            "duration_ms": 223505
+          }
+        ],
+        "script_revision": 0
+      }
+    },
+    {
+      "run_id": "wf_01a0c982d71d75b18dae20f9688e7be0",
+      "name": "demo-stages-2",
+      "state": {
+        "objective": "Short demo: two readers in parallel, then one summary",
+        "status": "complete",
+        "phases": [
+          {
+            "title": "Read",
+            "detail": "two readers in parallel"
+          },
+          {
+            "title": "Summarize",
+            "detail": "one writer turns the notes into a paragraph"
+          }
+        ],
+        "current_phase": "Summarize",
+        "agent_budget": 4,
+        "agents_used": 3,
+        "agent_usage_incomplete": false,
+        "elapsed_ms_floor": 366000,
+        "result_summary": "{\"note_count\":8,\"path\":\"scratch/demo-summary.md\",\"summary\":\"...\"}",
+        "agents": [
+          {
+            "agent_id": "fixture-read-readme",
+            "label": "read:readme",
+            "phase": "Read",
+            "state": "done",
+            "tokens_used": 20025,
+            "duration_ms": 8841
+          },
+          {
+            "agent_id": "fixture-read-agents",
+            "label": "read:agents",
+            "phase": "Read",
+            "state": "done",
+            "tokens_used": 54873,
+            "duration_ms": 22280
+          },
+          {
+            "agent_id": "fixture-summarize",
+            "label": "summarize",
+            "phase": "Summarize",
+            "state": "done",
+            "tokens_used": 51858,
+            "duration_ms": 223505
+          }
+        ],
+        "script_revision": 0
+      }
+    }
+  ]
+}

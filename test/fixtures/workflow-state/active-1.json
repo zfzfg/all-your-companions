@@ -1,0 +1,142 @@
+{
+  "version": 4,
+  "state": {
+    "run_id": "wf_fixture_active_1",
+    "revision": 27,
+    "name": "deep-research",
+    "objective": "What are the tradeoffs between WebSockets and SSE for a chat app? Keep it brief.",
+    "status": "active",
+    "phases": [
+      {
+        "title": "Plan",
+        "detail": "Choose a small set of independent research questions"
+      },
+      {
+        "title": "Research",
+        "detail": "Collect structured claims, evidence, and sources in parallel"
+      },
+      {
+        "title": "Verify",
+        "detail": "Independently cross-check every candidate claim"
+      },
+      {
+        "title": "Report",
+        "detail": "Synthesize verified claims into cited prose with validated citations"
+      }
+    ],
+    "current_phase": "Report",
+    "agent_budget": 128,
+    "agents_used": 8,
+    "agent_usage_incomplete": false,
+    "elapsed_ms_floor": 0,
+    "history": [
+      {
+        "event": "workflow_started",
+        "at": "2026-01-01T00:00:00+00:00"
+      },
+      {
+        "event": "phase_entered",
+        "detail": "Plan",
+        "at": "2026-01-01T00:00:00+00:00"
+      },
+      {
+        "event": "log",
+        "detail": "research plan: 4 question(s), capped at 4",
+        "at": "2026-01-01T00:00:00+00:00"
+      },
+      {
+        "event": "phase_entered",
+        "detail": "Research",
+        "at": "2026-01-01T00:00:00+00:00"
+      },
+      {
+        "event": "log",
+        "detail": "research complete: 24 candidate claim(s) require verification",
+        "at": "2026-01-01T00:00:00+00:00"
+      },
+      {
+        "event": "phase_entered",
+        "detail": "Verify",
+        "at": "2026-01-01T00:00:00+00:00"
+      },
+      {
+        "event": "log",
+        "detail": "verification complete: 20/24 claims retained",
+        "at": "2026-01-01T00:00:00+00:00"
+      },
+      {
+        "event": "phase_entered",
+        "detail": "Report",
+        "at": "2026-01-01T00:00:00+00:00"
+      }
+    ],
+    "journal_path": "workflows/wf_fixture_active_1/journal.jsonl",
+    "agents": [
+      {
+        "agent_id": "fixture-agent-107",
+        "label": "research-planner",
+        "phase": "Plan",
+        "state": "done",
+        "tokens_used": 25967,
+        "duration_ms": 22489
+      },
+      {
+        "agent_id": "fixture-agent-117",
+        "label": "researcher-0",
+        "phase": "Research",
+        "state": "done",
+        "tokens_used": 341795,
+        "duration_ms": 194258
+      },
+      {
+        "agent_id": "fixture-agent-121",
+        "label": "researcher-1",
+        "phase": "Research",
+        "state": "done",
+        "tokens_used": 326944,
+        "duration_ms": 170747
+      },
+      {
+        "agent_id": "fixture-agent-125",
+        "label": "researcher-2",
+        "phase": "Research",
+        "state": "done",
+        "tokens_used": 346226,
+        "duration_ms": 210408
+      },
+      {
+        "agent_id": "fixture-agent-129",
+        "label": "researcher-3",
+        "phase": "Research",
+        "state": "done",
+        "tokens_used": 387507,
+        "duration_ms": 121790
+      },
+      {
+        "agent_id": "fixture-agent-133",
+        "label": "evidence-verifier-0",
+        "phase": "Verify",
+        "state": "done",
+        "tokens_used": 495081,
+        "duration_ms": 368125
+      },
+      {
+        "agent_id": "fixture-agent-137",
+        "label": "evidence-verifier-1",
+        "phase": "Verify",
+        "state": "done",
+        "tokens_used": 752216,
+        "duration_ms": 332017
+      },
+      {
+        "agent_id": "fixture-agent-141",
+        "label": "report-synthesizer",
+        "phase": "Report",
+        "state": "running",
+        "tokens_used": 0,
+        "duration_ms": 0
+      }
+    ]
+  },
+  "script_revision": 0
+}

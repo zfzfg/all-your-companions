@@ -1316,7 +1316,8 @@ export type HostMsg =
   // Deep Research / Workflow / Goal progress (P2-10) — normalized from the
   // live `_x.ai/session_notification` rail (`workflow_updated` / `goal_updated`).
   // Cards update in place by `id`; terminal phases stop the live dots.
-  | { type: "runProgress"; update: RunProgressUpdate }
+  /** `replaceOnly`: a repair of a card already shown; never creates one. */
+  | { type: "runProgress"; update: RunProgressUpdate; replaceOnly?: boolean }
   // A finished shell command's full text + captured output (#41). Live grok
   // snapshots at terminal/release; session/load hydrates the same message from
   // the replayed tool_call (`commandOutputForToolCall`). This host always

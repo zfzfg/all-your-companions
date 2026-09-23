@@ -1,0 +1,144 @@
+{
+  "version": 4,
+  "state": {
+    "run_id": "wf_fixture_complete",
+    "revision": 28,
+    "name": "deep-research",
+    "objective": "Research a query with bounded parallelism, cross-check the evidence, and write a cited report",
+    "status": "complete",
+    "phases": [
+      {
+        "title": "Plan",
+        "detail": "Choose a small set of independent research questions"
+      },
+      {
+        "title": "Research",
+        "detail": "Collect structured claims, evidence, and sources in parallel"
+      },
+      {
+        "title": "Verify",
+        "detail": "Independently cross-check every candidate claim"
+      },
+      {
+        "title": "Report",
+        "detail": "Synthesize verified claims into cited prose with validated citations"
+      }
+    ],
+    "current_phase": "Report",
+    "agent_budget": 24,
+    "agents_used": 7,
+    "agent_usage_incomplete": false,
+    "elapsed_ms_floor": 279830,
+    "history": [
+      {
+        "event": "workflow_started",
+        "at": "2026-01-01T00:00:00+00:00"
+      },
+      {
+        "event": "phase_entered",
+        "detail": "Plan",
+        "at": "2026-01-01T00:00:00+00:00"
+      },
+      {
+        "event": "log",
+        "detail": "research plan: 3 question(s), capped at 3",
+        "at": "2026-01-01T00:00:00+00:00"
+      },
+      {
+        "event": "phase_entered",
+        "detail": "Research",
+        "at": "2026-01-01T00:00:00+00:00"
+      },
+      {
+        "event": "log",
+        "detail": "research complete: 18 candidate claim(s) require verification",
+        "at": "2026-01-01T00:00:00+00:00"
+      },
+      {
+        "event": "phase_entered",
+        "detail": "Verify",
+        "at": "2026-01-01T00:00:00+00:00"
+      },
+      {
+        "event": "log",
+        "detail": "verification complete: 18/18 claims retained",
+        "at": "2026-01-01T00:00:00+00:00"
+      },
+      {
+        "event": "phase_entered",
+        "detail": "Report",
+        "at": "2026-01-01T00:00:00+00:00"
+      },
+      {
+        "event": "log",
+        "detail": "report body synthesized and citation-validated",
+        "at": "2026-01-01T00:00:00+00:00"
+      },
+      {
+        "event": "workflow_completed",
+        "at": "2026-01-01T00:00:00+00:00"
+      }
+    ],
+    "journal_path": "workflows/wf_fixture_complete/journal.jsonl",
+    "result_summary": "Fixture research report completed.\n\n_Full report: scratch/report.md_",
+    "agents": [
+      {
+        "agent_id": "fixture-agent-387",
+        "label": "research-planner",
+        "phase": "Plan",
+        "state": "done",
+        "tokens_used": 26813,
+        "duration_ms": 20648
+      },
+      {
+        "agent_id": "fixture-agent-397",
+        "label": "researcher-0",
+        "phase": "Research",
+        "state": "done",
+        "tokens_used": 57713,
+        "duration_ms": 49136
+      },
+      {
+        "agent_id": "fixture-agent-401",
+        "label": "researcher-1",
+        "phase": "Research",
+        "state": "done",
+        "tokens_used": 343550,
+        "duration_ms": 110591
+      },
+      {
+        "agent_id": "fixture-agent-405",
+        "label": "researcher-2",
+        "phase": "Research",
+        "state": "done",
+        "tokens_used": 89687,
+        "duration_ms": 77356
+      },
+      {
+        "agent_id": "fixture-agent-409",
+        "label": "evidence-verifier-0",
+        "phase": "Verify",
+        "state": "done",
+        "tokens_used": 117599,
+        "duration_ms": 116809
+      },
+      {
+        "agent_id": "fixture-agent-413",
+        "label": "evidence-verifier-1",
+        "phase": "Verify",
+        "state": "done",
+        "tokens_used": 59752,
+        "duration_ms": 79087
+      },
+      {
+        "agent_id": "fixture-agent-417",
+        "label": "report-synthesizer",
+        "phase": "Report",
+        "state": "done",
+        "tokens_used": 13944,
+        "duration_ms": 21630
+      }
+    ]
+  },
+  "script_revision": 0
+}

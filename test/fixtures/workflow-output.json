@@ -1,0 +1,30 @@
+{
+  "provenance": "Synthetic notifications from the owner's three screenshot transcriptions; field placement verified against xai-org/grok-build 4247f661 tracker.rs and notify.rs. Not live captures.",
+  "runs": [
+    {
+      "sessionUpdate": "workflow_updated", "run_id": "markdown", "name": "deep-research", "status": "complete",
+      "objective": "Research the first powered flight", "current_phase": "Report", "elapsed_ms": 1372000,
+      "phases": [{ "title": "Plan" }, { "title": "Research" }, { "title": "Verify" }, { "title": "Report" }],
+      "result_summary": "**Status: Partial** — see the full report for coverage gaps.\n\nOn 17 December 1903, Orville Wright piloted the Wright Flyer. [S5]\n\n### Why earlier attempts do not count\n\nOn 14 December Wilbur Wright made a downhill start.\n\n### The other flights that morning\n\nThe brothers alternated. [S2][S11]\n\n_Full report: scratch/report.md_",
+      "agents_used": 6, "agent_budget": 12,
+      "agents": [{ "agent_id": "a", "label": "Writer", "phase": "Report", "state": "done", "tokens_used": 1200 }]
+    },
+    {
+      "sessionUpdate": "workflow_updated", "run_id": "json", "name": "fast-two-step", "status": "complete",
+      "objective": "Two immediate steps: draft one sentence, then confirm it", "current_phase": "Check", "elapsed_ms": 12000,
+      "phases": [{ "title": "Draft" }, { "title": "Check" }],
+      "result_summary": "{\"sentence\":\"The workflow finished its first step.\",\"status\":\"ok\"}",
+      "agents_used": 2, "agent_budget": 4,
+      "agents": [{ "agent_id": "a", "label": "Checker", "phase": "Check", "state": "done", "tokens_used": 200 }]
+    },
+    {
+      "sessionUpdate": "workflow_updated", "run_id": "diagnostic", "name": "deep-research-2", "status": "cancelled",
+      "objective": "Research a query with bounded parallelism, cross-check the evidence, and write a cited report",
+      "current_phase": "Research", "elapsed_ms": 110000,
+      "phases": [{ "title": "Plan", "state": "done" }, { "title": "Research", "state": "active" }, { "title": "Verify", "state": "pending" }, { "title": "Report", "state": "pending" }],
+      "last_event": "workflow_outcome_ignored", "last_event_detail": "ignored cancelled while status is cancelled",
+      "agents_used": 3, "agent_budget": 12,
+      "agents": [{ "agent_id": "a", "label": "Researcher", "phase": "Research", "state": "cancelled", "tokens_used": 300 }]
+    }
+  ]
+}

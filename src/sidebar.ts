@@ -203,6 +203,7 @@ import { SubscriptionUsageBinding, SubscriptionUsageCache, subscriptionCredentia
 import { readCodexSubscriptionWindows } from "./codex-usage";
 import { providerConfigFiles, type ProviderConfigFile } from "./provider-config";
 import { CLI_NPM_PACKAGE, cliUpdatePlan, selfUpdateArgs } from "./cli-update-plan";
+import { readWorkflowCompletion } from "./workflow-state";
 import { captureGitTurnBaseline, GitRunGate, readGitTurnFileBefore, type GitTurnBaseline } from "./git-run";
 import { probeClaudeAuthStatus, runDeviceLogin } from "./device-login-run";
 import { githubDeviceLoginFailureText, runGithubDeviceLogin } from "./github-device-login";
@@ -736,6 +737,7 @@ import {
 } from "./feedback";
 import {
   parseRunProgressUpdate,
+  type RunProgressUpdate,
   workflowControlCommand,
 } from "./run-progress";
 import {
@@ -1561,6 +1563,7 @@ export class GrokSidebar {
     void this.sweepImageStaging();
     void this.sweepFileStaging();
     this.startRoutineScheduler();
+    this.startWorkflowCompletionPolling();
   }
 
   /* ------------------------------------------------------------ routines */
@@ -13727,6 +13730,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     void this.host.setContext("grok.composerFocus", false);
     if (this.reaper) { clearInterval(this.reaper); this.reaper = undefined; }
     if (this.routineTimer) { clearInterval(this.routineTimer); this.routineTimer = undefined; }
+    if (this.workflowTimer) { clearInterval(this.workflowTimer); this.workflowTimer = undefined; }
     for (const timer of this.loginReprobeTimers.values()) clearTimeout(timer);
     this.cancelAllDeviceLogins();
     this.loginReprobeTimers.clear();
@@ -22997,6 +23001,7 @@ ${directives.block}`;
     if (!wv) return;
     this.touch(session);
     this.markRead(session);
+    this.refreshWorkflowCompletions(session);
     void wv.postMessage({ type: "clearMessages" });
     void wv.postMessage({ type: "historyReplay", active: true });
     for (const m of session.buffer) {
@@ -23764,7 +23769,52 @@ ${directives.block}`;
    * the webview until they're focused. (Pool-of-1 today: session is always the
    * focused one, so this is behaviorally identical to `post`.)
    */
+  private workflowTimer?: ReturnType<typeof setInterval>;
+
+  /**
+   * A Grok workflow's "finished" notification can be missed (the webview was
+   * away, the notification never came). The CLI writes the run's state file
+   * anyway, so read it and repair the card (upstream workflow-state.ts).
+   */
+  private startWorkflowCompletionPolling(): void {
+    this.workflowTimer = setInterval(() => {
+      for (const session of new Set([this.focused, ...this.pool])) this.refreshWorkflowCompletions(session);
+    }, 2000);
+    (this.workflowTimer as unknown as { unref?: () => void }).unref?.();
+  }
+
+  private workflowCompletion(session: Session, update: RunProgressUpdate) {
+    if (session.provider !== "grok" || update.kind !== "workflow" || update.done) return;
+    const sid = session.activeSessionId || session.client?.sessionId;
+    if (!sid) return;
+    const dir = sessionDirFor(resolveGrokHome(process.env), this.sessionCwd(session), sid, { fs: defaultFs });
+    return readWorkflowCompletion(dir, update);
+  }
+
+  private refreshWorkflowCompletions(session: Session): void {
+    if (session?.provider !== "grok" || !session.buffer) return;
+    const runs = new Map<string, Extract<HostMsg, { type: "runProgress" }>[]>();
+    for (const message of session.buffer) {
+      if (message.type !== "runProgress" || message.update.kind !== "workflow") continue;
+      const frames = runs.get(message.update.id);
+      if (frames) frames.push(message);
+      else runs.set(message.update.id, [message]);
+    }
+    for (const frames of runs.values()) {
+      const completed = this.workflowCompletion(session, frames[frames.length - 1].update);
+      if (!completed) continue;
+      // Repair every replay position from the newest observation.
+      for (const message of frames) message.update = structuredClone(completed);
+      if (session.suppressContent) continue;
+      if (session === this.focused) this.postLocal({ type: "runProgress", update: completed, replaceOnly: true });
+    }
+  }
+
   private emit(session: Session, message: HostMsg): void {
+    if (message.type === "runProgress") {
+      const completed = this.workflowCompletion(session, message.update);
+      if (completed) message = { type: "runProgress", update: completed };
+    }
     // A baseline capture still running when tools start may already contain
     // their writes; a wrong "before" is worse than none (upstream 2a8ffb0).
     if (message.type === "toolCall" || message.type === "toolCallUpdate" || message.type === "permissionRequest") {
@@ -23837,6 +23887,7 @@ ${directives.block}`;
       // conversation must be allowed to switch provider. Only a successful
       // replay can prove that; a failed load keeps the lock (upstream ce12449).
       session.hasHistory = session.historyEventCount > 0 || session.userMessageCount > 0;
+      this.refreshWorkflowCompletions(session);
     }, {
       onStart: () => this.emit(session, { type: "historyReplay", active: true }),
       onFinish: () => {
@@ -24046,6 +24097,7 @@ ${directives.block}`;
     this.focused = session;
     this.touch(session);
     this.markRead(session); // opening it clears any unread (green/red) badge
+    this.refreshWorkflowCompletions(session);
     const wv = this.view?.webview;
     // Both surfaces need it, and the desk has the same gap the browser does —
     // re-focusing a live conversation never said which agent it belongs to.

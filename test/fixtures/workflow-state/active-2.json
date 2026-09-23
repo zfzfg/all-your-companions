@@ -1,0 +1,124 @@
+{
+  "version": 4,
+  "state": {
+    "run_id": "wf_fixture_active_2",
+    "revision": 21,
+    "name": "deep-research",
+    "objective": "What are the main tradeoffs between WebSockets and Server-Sent Events for a chat application?",
+    "status": "active",
+    "phases": [
+      {
+        "title": "Plan",
+        "detail": "Choose a small set of independent research questions"
+      },
+      {
+        "title": "Research",
+        "detail": "Collect structured claims, evidence, and sources in parallel"
+      },
+      {
+        "title": "Verify",
+        "detail": "Independently cross-check every candidate claim"
+      },
+      {
+        "title": "Report",
+        "detail": "Synthesize verified claims into cited prose with validated citations"
+      }
+    ],
+    "current_phase": "Verify",
+    "agent_budget": 128,
+    "agents_used": 7,
+    "agent_usage_incomplete": false,
+    "elapsed_ms_floor": 0,
+    "history": [
+      {
+        "event": "workflow_started",
+        "at": "2026-01-01T00:00:00+00:00"
+      },
+      {
+        "event": "phase_entered",
+        "detail": "Plan",
+        "at": "2026-01-01T00:00:00+00:00"
+      },
+      {
+        "event": "log",
+        "detail": "research plan: 4 question(s), capped at 4",
+        "at": "2026-01-01T00:00:00+00:00"
+      },
+      {
+        "event": "phase_entered",
+        "detail": "Research",
+        "at": "2026-01-01T00:00:00+00:00"
+      },
+      {
+        "event": "log",
+        "detail": "research complete: 24 candidate claim(s) require verification",
+        "at": "2026-01-01T00:00:00+00:00"
+      },
+      {
+        "event": "phase_entered",
+        "detail": "Verify",
+        "at": "2026-01-01T00:00:00+00:00"
+      }
+    ],
+    "journal_path": "workflows/wf_fixture_active_2/journal.jsonl",
+    "agents": [
+      {
+        "agent_id": "fixture-agent-101",
+        "label": "research-planner",
+        "phase": "Plan",
+        "state": "done",
+        "tokens_used": 25406,
+        "duration_ms": 26417
+      },
+      {
+        "agent_id": "fixture-agent-111",
+        "label": "researcher-0",
+        "phase": "Research",
+        "state": "done",
+        "tokens_used": 229786,
+        "duration_ms": 123595
+      },
+      {
+        "agent_id": "fixture-agent-115",
+        "label": "researcher-1",
+        "phase": "Research",
+        "state": "done",
+        "tokens_used": 229764,
+        "duration_ms": 126882
+      },
+      {
+        "agent_id": "fixture-agent-119",
+        "label": "researcher-2",
+        "phase": "Research",
+        "state": "done",
+        "tokens_used": 473228,
+        "duration_ms": 159000
+      },
+      {
+        "agent_id": "fixture-agent-123",
+        "label": "researcher-3",
+        "phase": "Research",
+        "state": "done",
+        "tokens_used": 356521,
+        "duration_ms": 134274
+      },
+      {
+        "agent_id": "fixture-agent-127",
+        "label": "evidence-verifier-0",
+        "phase": "Verify",
+        "state": "running",
+        "tokens_used": 0,
+        "duration_ms": 0
+      },
+      {
+        "agent_id": "fixture-agent-131",
+        "label": "evidence-verifier-1",
+        "phase": "Verify",
+        "state": "running",
+        "tokens_used": 0,
+        "duration_ms": 0
+      }
+    ]
+  },
+  "script_revision": 0
+}

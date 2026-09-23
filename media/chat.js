@@ -13933,7 +13933,9 @@
         : update.done
           ? (phase === "completed" || phase === "success" ? "done" : phase)
           : phase;
-    phaseEl.textContent = `· ${statusWord}${pct}`;
+    // Underscores are wire syntax (`budget_exceeded`, `user_paused`); the
+    // machine value stays on update.phase (upstream 52caa7c).
+    phaseEl.textContent = `· ${String(statusWord).replace(/[_-]+/g, " ").trim()}${pct}`;
 
     const sub = el.querySelector(".run-progress-sub");
     if (update.subtitle) {
@@ -13957,7 +13959,10 @@
     el.classList.toggle("run-progress-done", !!update.done);
 
     const dots = el.querySelector(".blink-dots");
-    if (update.done) {
+    // Paused is neither working nor finished: no live dots beside "paused"
+    // (upstream 3d26795). Derived from the machine value, never the label.
+    const paused = /paus/.test(phase);
+    if (update.done || paused) {
       if (dots) dots.remove();
     } else if (!dots) {
       // Restarted (e.g. resume) — put dots back after the title.
@@ -13969,7 +13974,6 @@
     const actions = el.querySelector(".run-progress-actions");
     if (update.kind === "workflow" && update.displayName && !update.done) {
       actions.hidden = false;
-      const paused = /paus/.test(phase);
       actions.innerHTML = "";
       const mk = (label, action) => {
         const b = document.createElement("button");
@@ -19289,6 +19293,9 @@
         applyChildStream(msg);
         break;
       case "runProgress":
+        // A host repair (missed finish, read from the run's state file) only
+        // updates a card this view already has.
+        if (msg.replaceOnly && !document.querySelector(`.run-progress-card[data-run-id="${CSS.escape(String(msg.update?.id || ""))}"]`)) break;
         applyRunProgress(msg.update);
         break;
       case "permissionRequest":
