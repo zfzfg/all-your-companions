@@ -6,6 +6,7 @@ import type { HostMsg, WorkflowRunView } from "./protocol";
 import type { ContextChip } from "./context-chips";
 import { permissionOptionsForPlan } from "./plan-gate";
 import type { AcpProvider } from "./acp-backend";
+import type { SubscriptionUsageBinding } from "./subscription-usage";
 import { allProviderCapabilities } from "./provider-capabilities";
 import type { PlanEntry } from "./plan-entries";
 import type { ReviewDiffBlock } from "./review-center";
@@ -425,6 +426,9 @@ export class Session {
    * Deny and the floor still win first.
    */
   rolePermissionRules?: PermissionRule[];
+
+  /** Latest account capacity (#159), held outside conversation history. */
+  subscriptionUsage?: SubscriptionUsageBinding;
 
   /** Session grants from the card ("allow npm this session"): in memory only,
    *  cleared on every session start (upstream 0a528c5). */
@@ -985,6 +989,7 @@ export function sessionUiSnapshot(
   chips: ContextChip[] = session.chips,
 ): HostMsg[] {
   const messages: HostMsg[] = [];
+  messages.push({ type: "subscriptionUsage", windows: session.subscriptionUsage?.snapshot() ?? [] });
   if (session.client?.currentModelId) {
     messages.push({ type: "modelChanged", modelId: session.client.currentModelId });
   }

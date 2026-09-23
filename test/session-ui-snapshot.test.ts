@@ -14,6 +14,7 @@ describe("sessionUiSnapshot", () => {
     session.queuedSends = [{ text: "queued for B", chips: [] }];
 
     expect(sessionUiSnapshot(session, "plan")).toEqual([
+      { type: "subscriptionUsage", windows: [] },
       { type: "modeChanged", modeId: "plan" },
       // AP-15. Replacing state like the mode badge: a focus switch, a reload or
       // a remote attach must put the Session type control back. The id is empty

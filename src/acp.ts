@@ -3,6 +3,7 @@ import { ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { createInterface, Interface } from "node:readline";
 import { EventEmitter } from "node:events";
 import * as path from "node:path";
+import { claudeSubscriptionWindows, grokSubscriptionWindows, type SubscriptionWindow } from "./subscription-usage";
 import {
   collectToolImages,
   contextUsedFromUpdateEnvelope,
@@ -842,6 +843,28 @@ export class AcpClient extends EventEmitter {
     }
   }
 
+  private billingUnsupported = false;
+
+  /**
+   * Grok answers account capacity on request (`_x.ai/billing`, upstream #159).
+   * Only capacity leaves this method; balances and tier stay here. Latched
+   * off on -32601. Every other provider answers [] (Claude pushes; Codex is
+   * read from its rollout file by the host).
+   */
+  async getSubscriptionUsage(): Promise<SubscriptionWindow[]> {
+    if (this.provider !== "grok" || this.billingUnsupported) return [];
+    try {
+      return grokSubscriptionWindows(await this.request("_x.ai/billing", {}));
+    } catch (error) {
+      if (isMethodNotFoundError(error)) {
+        this.billingUnsupported = true;
+        this.opts.log("[billing] CLI does not support _x.ai/billing");
+        return [];
+      }
+      throw error;
+    }
+  }
+
   /** Host-confirmed: this backend can hear a mid-turn correction right now. */
   supportsInterject(): boolean {
     return this.steering.supported;
@@ -1355,6 +1378,11 @@ export class AcpClient extends EventEmitter {
     const foreign = isForeignSessionUpdate(sessionId, this.sessionId);
     const normalized = this.backend.normalizeUpdate(u, meta);
     if (!foreign) {
+      if (this.provider === "claude") {
+        // Claude only PUSHES its account window, on a rate-limit event.
+        const windows = claudeSubscriptionWindows(normalized.update);
+        if (windows !== undefined) this.emit("subscriptionUsage", windows);
+      }
       if (normalized.sessionTitle) {
         this.currentSessionTitle = normalized.sessionTitle;
         this.emit("sessionTitle", normalized.sessionTitle);

@@ -198,6 +198,8 @@ import {
   deviceLoginUnavailable,
   type DeviceLoginHandle,
 } from "./device-login";
+import { SubscriptionUsageBinding, SubscriptionUsageCache, subscriptionCredentialContext, type SubscriptionWindow } from "./subscription-usage";
+import { readCodexSubscriptionWindows } from "./codex-usage";
 import { captureGitTurnBaseline, GitRunGate, readGitTurnFileBefore, type GitTurnBaseline } from "./git-run";
 import { probeClaudeAuthStatus, runDeviceLogin } from "./device-login-run";
 import { githubDeviceLoginFailureText, runGithubDeviceLogin } from "./github-device-login";
@@ -4838,6 +4840,7 @@ export class GrokSidebar {
 
   private setProviderConnectedInMemory(provider: AcpProvider, connected: boolean): void {
     const current = this.providerConnections();
+    if (!connected || !current[provider]) this.invalidateSubscriptionUsage(provider);
     this.providerConnectionState = { ...current, [provider]: connected };
     if (!connected && isAdapterProvider(provider)) {
       const history = this.adapterHistory(provider);
@@ -4877,6 +4880,7 @@ export class GrokSidebar {
     const current = this.providerNeedsLogin ?? {};
     if (!!current[provider] === needsLogin) return;
     this.providerNeedsLogin = { ...current, [provider]: needsLogin };
+    if (needsLogin) this.invalidateSubscriptionUsage(provider);
     // A recovered account must be able to re-list at once; the freshness stamp
     // would otherwise hold the empty catalog for its full back-off window.
     if (!needsLogin && isAdapterProvider(provider)) this.adapterHistory(provider)?.at.clear();
@@ -5918,7 +5922,16 @@ export class GrokSidebar {
       resolveGrokHome(process.env),
       "auth.json",
     );
-    const refreshVoiceConfigured = () => this.postVoiceConfigured();
+    const refreshVoiceConfigured = () => {
+      this.postVoiceConfigured();
+      // A running CLI may still hold the previous login, so nothing is asked
+      // here: publish cleared usage now; a new process binds the new account.
+      for (const session of new Set([this.focused, ...this.pool])) {
+        if (session.subscriptionUsage && !session.subscriptionUsage.current()) {
+          this.emit(session, { type: "subscriptionUsage", windows: [] });
+        }
+      }
+    };
     authWatcher.onDidCreate(refreshVoiceConfigured);
     authWatcher.onDidChange(refreshVoiceConfigured);
     authWatcher.onDidDelete(refreshVoiceConfigured);
@@ -14524,6 +14537,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     const keepTranscript = session.keepTranscriptOnStart === true;
     session.keepTranscriptOnStart = false;
     if (!keepTranscript) session.buffer = [];
+    session.subscriptionUsage = undefined;
     session.status = "idle";
     // The replacement session has no turn, whatever the old one was doing. This
     // matters most in the case the token exists for: a `prompt()` that never
@@ -15121,6 +15135,11 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         ...(typeof window === "number" && Number.isFinite(window) && window > 0 ? { window } : {}),
       });
     });
+    client.on("subscriptionUsage", (windows: SubscriptionWindow[]) => {
+      if (gen !== session.gen || session.client !== client || session.replaying) return;
+      session.subscriptionUsage?.observe(windows);
+      this.publishSubscriptionUsage(session);
+    });
     client.on("adapterUsageUpdate", (used: number, window?: number) => {
       if (gen !== session.gen) return;
       if (!isAdapterProvider(session.provider) || session.replaying) {
@@ -15549,6 +15568,8 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       // Throw into the classifier instead: the retry budget owns transient
       // startup deaths, and the final failure surfaces like any other.
       if (session.client !== client) throw new Error("the provider exited during startup");
+      this.bindSubscriptionUsage(session, env);
+      void this.refreshSubscriptionUsage(session);
       // Session is live — unlock the composer and flush anything typed during
       // the startup window (#37).
       session.priming = false;
@@ -16037,6 +16058,9 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         break;
       case "workflowControl":
         await this.controlWorkflow(msg.action, msg.displayName, session);
+        break;
+      case "refreshSubscriptionUsage":
+        void this.refreshSubscriptionUsage(session);
         break;
       case "refreshContextDetails":
         if (session.provider === "grok" || session.provider === "gemini") {
@@ -23013,6 +23037,7 @@ ${directives.block}`;
     "restoreComposer", "focusInput", "findInSession", "openModePopover",
     // Replaying a DESTRUCTIVE modal after a reconnect is the bug, not the fix.
     "uiConfirmRequest", "uiConfirmResolved",
+    "subscriptionUsage",
     // Replayed mid-buffer it would stamp the then-current footer, not the live
     // one. `sessionUiSnapshot` restores eligibility after historyReplay ends.
     "turnFeedbackAck",
@@ -25128,6 +25153,66 @@ ${directives.block}`;
     const cwd = this.sessionCwd(session);
     const usage = readContextUsage({ fs: defaultFs, grokHome: resolveGrokHome(process.env), cwd, id });
     if (usage) this.emit(session, { type: "contextUsage", used: usage.used, window: usage.window });
+  }
+
+  private subscriptionUsageCaches?: Map<string, SubscriptionUsageCache>;
+
+  /**
+   * Account capacity (#159, upstream 084dedf, 48942e1). Grok answers on
+   * request, Claude pushes on a rate-limit event, Codex is read from its own
+   * rollout file. Keyed by an opaque digest of the credential context, so a
+   * different login never inherits another's numbers.
+   */
+  private bindSubscriptionUsage(session: Session, env: NodeJS.ProcessEnv): void {
+    const provider = session.provider;
+    if (provider !== "grok" && provider !== "claude" && provider !== "codex") {
+      session.subscriptionUsage = undefined;
+      return;
+    }
+    const cwd = this.sessionCwd(session);
+    const key = subscriptionCredentialContext(provider, env);
+    const caches = this.subscriptionUsageCaches ??= new Map();
+    // Claude can log in through an opaque OS keychain: keep its observations
+    // process-local. Grok and Codex write their login to a file the key hashes.
+    let cache = provider === "claude" ? new SubscriptionUsageCache() : caches.get(key);
+    if (!cache) caches.set(key, cache = new SubscriptionUsageCache());
+    session.subscriptionUsage = new SubscriptionUsageBinding(cache, key, () =>
+      subscriptionCredentialContext(provider, provider === "grok"
+        ? { ...process.env, ...this.readDotEnv(cwd) } : process.env));
+  }
+
+  private invalidateSubscriptionUsage(provider: AcpProvider): void {
+    for (const [key, cache] of this.subscriptionUsageCaches ?? []) {
+      if (key.startsWith(`${provider}:`)) {
+        cache.invalidate();
+        this.subscriptionUsageCaches!.delete(key);
+      }
+    }
+    for (const session of new Set([this.focused, ...(this.pool ?? [])])) {
+      if (session?.provider !== provider || !session.subscriptionUsage) continue;
+      session.subscriptionUsage.invalidate();
+      this.publishSubscriptionUsage(session);
+    }
+  }
+
+  private publishSubscriptionUsage(session: Session): void {
+    this.emit(session, { type: "subscriptionUsage", windows: session.subscriptionUsage?.snapshot() ?? [] });
+  }
+
+  /** On session start and a real popover open, never on a timer: a billing
+   *  read re-arms a prompt's idle timer, so polling would hold a hung prompt. */
+  private async refreshSubscriptionUsage(session: Session): Promise<void> {
+    const binding = session.subscriptionUsage;
+    const client = session.client;
+    this.publishSubscriptionUsage(session);
+    if (!binding) return;
+    if (session.provider === "codex") {
+      await binding.refresh(async () => readCodexSubscriptionWindows({ codexHome: resolveCodexHome(process.env) }));
+    } else if (session.provider === "grok") {
+      if (!client?.sessionId) return;
+      await binding.refresh(() => client.getSubscriptionUsage());
+    } else return;
+    if (session.client === client && session.subscriptionUsage === binding) this.publishSubscriptionUsage(session);
   }
 
   /** Publish a control-plane session/info snapshot without touching accounting. */

@@ -1268,6 +1268,11 @@ a:hover {
 }
 #context-popover .popover-fineprint,
 #context-popover .popover-info { white-space: normal; }
+.subscription-usage { border-top: 1px solid var(--vscode-panel-border); margin-top: 10px; }
+.subscription-window + .subscription-window { margin-top: 10px; }
+.subscription-fullness { height: 5px; border-radius: 3px; overflow: hidden; margin: 5px 10px; background: var(--vscode-editorWidget-border, #6666); }
+.subscription-fullness > i { display: block; height: 100%; background: var(--vscode-textLink-foreground); }
+.subscription-usage .popover-fineprint { margin-top: 4px; }
 /* .history-popover sets display:flex, which would otherwise beat the UA
    [hidden]{display:none} rule (author styles win), so it could never hide. */
 .toolbar-popover[hidden] { display: none; }

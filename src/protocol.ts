@@ -33,6 +33,7 @@ import type { RunProgressUpdate } from "./run-progress";
 import type { McpServerView } from "./mcp";
 import type { ConnectorView } from "./mcp-connectors";
 import type { RoutineDraft, RoutineModelOption, RoutineProjectOption, RoutineView } from "./routines";
+import type { SubscriptionWindow } from "./subscription-usage";
 import type { AcpProvider } from "./acp-backend";
 import type { CapabilitySupport, ProviderCapability } from "./provider-capabilities";
 import type { PlanEntry } from "./plan-entries";
@@ -1363,6 +1364,8 @@ export type HostMsg =
    *  `id` correlates the answer; the host awaits a promise keyed on it. */
   | { type: "uiConfirmRequest"; id: string; title: string; body?: string; confirmLabel: string; danger?: boolean }
   | { type: "uiConfirmResolved"; requestId: string }
+  /** Account capacity windows (#159). Only capacity crosses the wire. */
+  | { type: "subscriptionUsage"; windows: SubscriptionWindow[] }
   // nextOffset = the index offset the next load-more should request — ids CONSUMED
   // from the on-disk index, not entries shown (hidden subagent sessions occupy
   // slots without producing rows).
@@ -2058,6 +2061,8 @@ export type WebviewMsg =
   | { type: "workflowControl"; action: "pause" | "resume" | "stop"; displayName: string }
   /** Read-only Grok context snapshot for the open donut popover. */
   | { type: "refreshContextDetails" }
+  /** The context popover opened: re-read account capacity (60 s minimum). */
+  | { type: "refreshSubscriptionUsage" }
   // Relay account (gear "AFK Pilot" section, local webview only): start the
   // device-link flow / drop the device token / open the relay web portal.
   | { type: "remoteSignIn" }
@@ -2090,7 +2095,7 @@ const HOST_MESSAGE_TYPE_MAP: Record<HostMsg["type"], true> = {
   sessionContext: true, clearMessages: true, onboarding: true, error: true, hostNotice: true,
   xaiNotification: true, subagentUpdate: true, childStream: true, runProgress: true, commandOutput: true, expandCommandOutputs: true, steerByDefault: true,
   soundNotifications: true, processingSound: true, readRepliesAloud: true, summarizeRepliesAloud: true, speechSummary: true, imageFull: true, moveComposerCaret: true, remoteStatus: true,
-  setAllToolDetails: true, focusInput: true, findInSession: true, restoreComposer: true, truncateMessages: true, uiConfirmRequest: true, uiConfirmResolved: true,
+  setAllToolDetails: true, focusInput: true, findInSession: true, restoreComposer: true, truncateMessages: true, uiConfirmRequest: true, uiConfirmResolved: true, subscriptionUsage: true,
   sessions: true, sessionRemoved: true, repoSessions: true, pinnedSessions: true, repos: true, sessionDot: true, queuedSends: true, submitQueuedSend: true,
   steerUnavailable: true, feedbackAvailability: true, turnFeedbackAck: true, usage: true, providerCapabilities: true, planEntries: true, reviewCenter: true, crewRun: true, ruleFiles: true, permissionRules: true, agentRoles: true, workflowGenerator: true,
 };
@@ -2121,6 +2126,7 @@ const WEBVIEW_MESSAGE_TYPE_MAP: Record<WebviewMsg["type"], true> = {
   newWorktreeSession: true, applyWorktree: true, removeWorktree: true,
   rewindSession: true, editLastMessage: true, uiConfirmAnswer: true, workflowControl: true,
   refreshContextDetails: true,
+  refreshSubscriptionUsage: true,
   remoteSignIn: true, remoteSignOut: true, unlinkRemoteDevice: true, openRemotePortal: true,
   openUpdateRelease: true, restartToUpdate: true,
 };

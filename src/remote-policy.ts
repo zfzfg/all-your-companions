@@ -377,6 +377,7 @@ export const INBOUND_DISPOSITION: Record<WebviewMsg["type"], InboundDisposition>
   workflowControl: "propose",
   // Donut popover re-fetch — read-only meter, no turn / no mutation.
   refreshContextDetails: "view",
+  refreshSubscriptionUsage: "view",
   pasteImage: "propose",
   // Host validates the extension/name/bytes before staging under globalStorage.
   uploadFile: "propose",
@@ -669,6 +670,7 @@ export const REMOTE_REQUIRES_BOUND_SESSION: Record<WebviewMsg["type"], boolean> 
   uiConfirmAnswer: true,
   workflowControl: true,
   refreshContextDetails: true,
+  refreshSubscriptionUsage: true,
   pasteImage: true,
   uploadFile: true,
   writeProjectFile: false,
@@ -1144,6 +1146,7 @@ export const OUTBOUND_DISPOSITION: Record<HostMsg["type"], OutboundDisposition> 
   truncateMessages: "mirror",
   uiConfirmRequest: "mirror",
   uiConfirmResolved: "mirror",
+  subscriptionUsage: "mirror",
   sessions: "mirror",
   repoSessions: "mirror",
   pinnedSessions: "mirror",
@@ -1319,6 +1322,7 @@ export const OUTBOUND_PROJECT_AUTH: Record<HostMsg["type"], OutboundProjectAuth>
   truncateMessages: "scope",
   uiConfirmRequest: "scope",
   uiConfirmResolved: "scope",
+  subscriptionUsage: "scope",
   queuedSends: "scope",
   submitQueuedSend: "scope",
   steerUnavailable: "scope",
