@@ -201,6 +201,7 @@ import {
 } from "./device-login";
 import { SubscriptionUsageBinding, SubscriptionUsageCache, subscriptionCredentialContext, type SubscriptionWindow } from "./subscription-usage";
 import { readCodexSubscriptionWindows } from "./codex-usage";
+import { providerConfigFiles, type ProviderConfigFile } from "./provider-config";
 import { captureGitTurnBaseline, GitRunGate, readGitTurnFileBefore, type GitTurnBaseline } from "./git-run";
 import { probeClaudeAuthStatus, runDeviceLogin } from "./device-login-run";
 import { githubDeviceLoginFailureText, runGithubDeviceLogin } from "./github-device-login";
@@ -464,6 +465,7 @@ import {
   ALWAYS_APPROVE_NOTICE_KEY,
   alwaysApproveSource,
   configForcesAlwaysApprove,
+  ensureConfigToml,
   globalConfigPath,
   projectConfigPath,
   shouldShowAlwaysApproveNotice,
@@ -17453,7 +17455,8 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
   }
 
   private async currentRuleFiles(session: Session): Promise<RuleFile[]> {
-    const candidates = ruleFileCandidates(this.sessionCwd(session), this.resolvedUserHome());
+    // Provider config files (upstream 27a01d8) ride along: same Open/Create row.
+    const candidates = [...ruleFileCandidates(this.sessionCwd(session), this.resolvedUserHome()), ...providerConfigFiles()];
     return resolveRuleFileStates(candidates, this.ruleFileFs());
   }
 
@@ -17474,11 +17477,13 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
    * openGlobalConfig/openProjectConfig above.
    */
   private async openRuleFile(session: Session, requestedPath: string): Promise<void> {
-    const candidates = ruleFileCandidates(this.sessionCwd(session), this.resolvedUserHome());
+    const candidates: RuleFile[] = [...ruleFileCandidates(this.sessionCwd(session), this.resolvedUserHome()), ...providerConfigFiles()];
     const target = candidates.find((f) => f.path === requestedPath);
     if (!target) return;
     try {
-      await ensureRuleFile(target, this.ruleFileFs());
+      // A provider config is created with a stub its CLI parses; a rule file empty.
+      if ("config" in target) ensureConfigToml(target.path, (target as ProviderConfigFile).stub);
+      else await ensureRuleFile(target, this.ruleFileFs());
     } catch (err) {
       await this.host.showErrorMessage(`Couldn't create ${target.label}: ${(err as Error)?.message || String(err)}`);
       return;
