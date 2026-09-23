@@ -611,6 +611,11 @@ function makeKeyHost(secrets: Map<string, string>, state: PersistedState): Sideb
   host.post = vi.fn();
   host.settingsEditor = undefined;
   host.reservedMcpIdentityFor = () => ({ names: [], urls: [] });
+  // These tests are about the connector key cache. The AP-05/AP-16 host
+  // servers (ask_user, companions) need a live pipe and a real session, so
+  // they are out of scope here and answer "not offered".
+  host.askUserMcpServer = async () => undefined;
+  host.companionsMcpServer = async () => undefined;
   return host;
 }
 
