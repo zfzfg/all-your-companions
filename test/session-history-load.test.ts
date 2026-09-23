@@ -202,6 +202,21 @@ describe("replayLoadedHistory exclusive join", () => {
     };
   }
 
+  // upstream ce12449: an old but EMPTY conversation must be able to switch
+  // provider; only a successful replay may lift the history lock.
+  it.each(["grok", "codex", "claude", "gemini"])("unlocks a successfully restored empty %s session", async (provider) => {
+    const { sidebar } = makeSidebar();
+    const session = new Session();
+    session.provider = provider as Session["provider"];
+    session.hasHistory = true;
+    await sidebar.replayLoadedHistory(session, async () => {});
+    expect(session.hasHistory).toBe(false);
+    await sidebar.replayLoadedHistory(session, async () => { session.historyEventCount = 1; });
+    expect(session.hasHistory).toBe(true);
+    await expect(sidebar.replayLoadedHistory(session, async () => { throw new Error("load failed"); })).rejects.toThrow();
+    expect(session.hasHistory).toBe(true);
+  });
+
   it("does not run a second load or emit a second replay pair", async () => {
     const { sidebar, emitted, snapshotCount } = makeSidebar();
     const session = new Session();

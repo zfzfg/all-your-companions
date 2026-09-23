@@ -521,6 +521,30 @@ export class AcpClient extends EventEmitter {
       this.availableModels.find((m) => m.modelId === this.currentModelId)?.reasoningEffort ||
       this.opts.effort ||
       undefined;
+    // Adapters take effort as an RPC AFTER session/new (below), so what the
+    // CLI just advertised is its own config default — while `session` is the
+    // frame that publishes the catalog the picker reads. Publish the level this
+    // session is about to be configured with, but only one the model offers;
+    // an off-menu level is refused below and the CLI's value is then the
+    // honest one to show (upstream eb844da).
+    const requestedEffort = this.opts.effort;
+    if (requestedEffort && this.provider !== "grok") {
+      const current = this.availableModels.find((m) => m.modelId === this.currentModelId);
+      if (current?.reasoningEfforts?.includes(requestedEffort)) {
+        this.currentReasoningEffort = requestedEffort;
+        current.reasoningEffort = requestedEffort;
+      }
+    }
+    // Grok's persisted TOML default can override the spawn flag in
+    // session/new's effective state. Apply the preference to the session
+    // itself before its catalog reaches the picker (upstream ce12449, #164).
+    if (requestedEffort && this.provider === "grok" && this.currentModelSupportsEffort()) {
+      try {
+        await this.setReasoningEffort(requestedEffort);
+      } catch (err) {
+        this.opts.log(`[acp] Failed to set reasoning effort to ${requestedEffort}: ${(err as Error).message}.`);
+      }
+    }
     this.emit("session", res);
 
     if (modelId && modelId !== this.currentModelId) {
@@ -1609,6 +1633,8 @@ export class AcpClient extends EventEmitter {
           if (typeof upd.model_id === "string" && upd.model_id) {
             this.currentModelId = resolveModelId(upd.model_id, this.availableModels) ?? upd.model_id;
           }
+          const current = this.availableModels.find((model) => model.modelId === this.currentModelId);
+          if (current) current.reasoningEffort = this.currentReasoningEffort;
         }
         this.emit("xaiNotification", params?.update);
         if (id != null) this.respondOk(id, {});

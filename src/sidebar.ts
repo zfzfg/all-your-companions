@@ -14508,7 +14508,9 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     const configAutoApprove = session.provider === "grok" && this.configForcesAutoApprove(this.sessionCwd(session));
     session.autoApprove = rememberedYolo || configAutoApprove;
     session.planActive = false;
-    session.hasHistory = false;
+    // A resume is assumed to have history (which locks the provider) until a
+    // successful replay proves otherwise — see replaySessionHistory.
+    session.hasHistory = !!resumeId;
     session.suppressContent = false;
     session.captureAgentText = undefined;
     session.lastSessionInfoAt = 0;
@@ -14743,7 +14745,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       this.emit(session, {
         type: "session",
         sessionId: res.sessionId,
-        models: this.modelsForSession(session, client.availableModels, client.currentModelId, !resumeId),
+        models: this.modelsForSession(session, client.availableModels, client.currentModelId, !resumeId || (session.historyEventCount === 0 && session.userMessageCount === 0)),
         currentModelId: client.currentModelId,
         worktree: !!session.worktree,
         provider: session.provider,
@@ -15356,7 +15358,6 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         clock.record("replay(post)", clock.elapsed(replayAt));
         session.activeSessionId = resumeId;
         session.titleGenerated = true; // existing session, name already in storage
-        session.hasHistory = true;
         // AP-15 / ST-3. The session now has an id, so its stored type can be
         // read. A record without one is a pre-AP-15 conversation and reads as a
         // locked Agent session — no migration write, the reader supplies it.
@@ -23549,7 +23550,13 @@ ${directives.block}`;
     // Join an in-flight load rather than superseding it: session/load cannot
     // be aborted, and a second stream would interleave into the same buffer.
     // `replaying` stays a boolean so remotes still see "any replay in progress".
-    await runExclusiveHistoryLoad(session, load, {
+    await runExclusiveHistoryLoad(session, async () => {
+      await load();
+      // A saved id may still be an untouched shell: an old but empty
+      // conversation must be allowed to switch provider. Only a successful
+      // replay can prove that; a failed load keeps the lock (upstream ce12449).
+      session.hasHistory = session.historyEventCount > 0 || session.userMessageCount > 0;
+    }, {
       onStart: () => this.emit(session, { type: "historyReplay", active: true }),
       onFinish: () => {
         this.emit(session, { type: "historyReplay", active: false });
