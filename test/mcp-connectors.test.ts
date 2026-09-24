@@ -446,6 +446,17 @@ describe("dedup prefers the user's config", () => {
     expect(hostMcpServers(store, reserved).map((s) => s.name)).toEqual(["linear"]);
   });
 
+  it("never treats companions_subagents or companions host servers as pre-existing provider servers", () => {
+    const reserved = reservedFromMcpInventory([
+      { name: "companions_subagents" },
+      { name: "companions" },
+      { name: "docs" },
+    ], {});
+    expect(reserved.names).toEqual(["docs"]);
+    expect(reserved.names).not.toContain("companions_subagents");
+    expect(reserved.names).not.toContain("companions");
+  });
+
   // Round-2 regression: the first version of the echo filter matched on the
   // NORMALIZED name, and normalizeMcpName strips `managed_gateway:` — so
   // grok.com's managed Canva looked like our own injection, fell out of the

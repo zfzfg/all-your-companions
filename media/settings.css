@@ -712,6 +712,10 @@ body.settings-page .settings-surface {
   border-radius: 4px;
   font: inherit;
 }
+.settings-select option {
+  background-color: var(--vscode-dropdown-background, var(--vscode-input-background, #252526));
+  color: var(--vscode-dropdown-foreground, var(--vscode-foreground, #cccccc));
+}
 
 .settings-range {
   display: flex;

@@ -14,6 +14,8 @@
  */
 
 import type { AcpProvider } from "./acp-backend";
+import { ASK_USER_SERVER_NAME } from "./ask-user-protocol";
+import { COMPANIONS_SERVER_NAME } from "./companions-protocol";
 
 export const MCP_CONNECTORS_KEY = "grok.mcpConnectors";
 
@@ -672,6 +674,11 @@ export function reservedFromMcpInventory(
   for (const connector of TIER1_CONNECTORS) {
     if (store[connector.id]) ownNames.add(normalizeMcpName(connector.id));
   }
+  // Host-injected servers (companions_subagents, companions) must never be treated
+  // as external provider servers, otherwise echoing them back on _x.ai/mcp/list
+  // self-poisons subsequent sessions with name-collision and withheld tools.
+  ownNames.add(normalizeMcpName(COMPANIONS_SERVER_NAME));
+  ownNames.add(normalizeMcpName(ASK_USER_SERVER_NAME));
   const isOurEcho = (server: { name?: string }) =>
     typeof server.name === "string" && ownNames.has(server.name.trim().toLowerCase());
   const names: string[] = [];

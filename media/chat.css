@@ -6690,7 +6690,31 @@ button.cx-rail-toggle:hover { background: var(--cx-hover); }
 .companion-activity { margin-left: 0; }
 
 /* S-02 / S-03 / S-04 */
-.delegation-switch { max-width: 11em; }
+.delegation-switch {
+  max-width: 13em;
+  background-color: var(--vscode-dropdown-background, var(--vscode-input-background, #252526));
+  color: var(--vscode-dropdown-foreground, var(--vscode-foreground, #cccccc));
+  border: 1px solid var(--vscode-dropdown-border, var(--vscode-editorWidget-border, #3c3c3c));
+  border-radius: 6px;
+  padding: 0 6px;
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  outline: none;
+}
+.delegation-switch:hover {
+  background-color: var(--vscode-toolbar-hoverBackground, #2d2d2d);
+}
+.delegation-switch:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, #007fd4);
+  border-color: var(--vscode-focusBorder, #007fd4);
+}
+.delegation-switch option,
+.cx-select option,
+select option {
+  background-color: var(--vscode-dropdown-background, #252526);
+  color: var(--vscode-dropdown-foreground, var(--vscode-foreground, #cccccc));
+}
 .mention-item.is-disabled { opacity: 0.5; text-decoration: line-through; cursor: not-allowed; }
 .subagent-approval .cx-fields { display: flex; flex-wrap: wrap; gap: 4px; }
 .subagent-approval.resolved { opacity: 0.75; }
