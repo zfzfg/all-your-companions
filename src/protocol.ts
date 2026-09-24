@@ -496,9 +496,61 @@ export interface WorkflowPickerItem {
   source: "builtin" | "global" | "project";
   /** True when this is a `/crew` preset with no stages block, shown as the default graph. */
   defaultGraph?: boolean;
+  /** C-14: the enabled stage titles in order, for the mini diagram. */
+  stages?: string[];
+  /** C-04: the proposed lineup for this workflow in this project. */
+  lineup?: WorkflowLineupView[];
+  /** C-04: whether this workflow has a Fix after an Implement (offers "fix in the implementer's session"). */
+  hasFix?: boolean;
+  /** C-04: default fix rounds when the workflow caps a stage. */
+  maxFixRounds?: number;
 }
 
 /** AP-17. Replacing view of a Crew session's run, rebuilt from `run.json` + packets. */
+/** How a Crew run starts (AP-17 + C-04 lineup). */
+export interface CrewStartOptions {
+  worktree?: boolean;
+  verify?: string;
+  gatePolicy?: "ask" | "workflow";
+  firstTarget?: { provider: AcpProvider; model?: string; effort?: string };
+  /** C-04: per stage — companion/model/effort, gate policy, on/off. */
+  lineup?: Record<string, { provider: AcpProvider; model?: string; effort?: string; gate?: "manual" | "auto"; enabled?: boolean }>;
+  /** C-05 */
+  autonomy?: "step" | "stop-on-problems" | "autopilot";
+  /** C-04: fix rounds for this run (idea-to-done's Fix cap). */
+  maxFixRounds?: number;
+  /** C-08: the fixer continues in the implementer's session. */
+  fixInSession?: boolean;
+  /** Start the first stage right away (the lineup panel's Start). */
+  startNow?: boolean;
+}
+
+/** E-02: queued | running | needs-you | stalled | completed | failed | cancelled | refused. */
+export type ChildStatusView = "queued" | "running" | "needs-you" | "stalled" | "completed" | "failed" | "cancelled" | "refused";
+
+/** C-04: one stage of a proposed / chosen lineup. */
+export interface WorkflowLineupView {
+  stageId: string;
+  title: string;
+  provider: AcpProvider;
+  providerName: string;
+  model?: string;
+  effort?: string;
+  enabled: boolean;
+  optional: boolean;
+  gate: "manual" | "auto";
+}
+
+/** X-01: where a relayed card came from. */
+export interface RelayOriginView {
+  kind: "stage" | "subagent";
+  label: string;
+  route: string;
+  scopeWord: string;
+  /** C-01: the edit reaches outside the stage's scope. */
+  outOfScope?: boolean;
+}
+
 export interface WorkflowRunView {
   runId: string;
   idea: string;
@@ -512,8 +564,46 @@ export interface WorkflowRunView {
     status: string;
     ordinal?: number;
     sessionId?: string;
+    /** X-05: "Codex · gpt-5 · 6m 12s · 84k tokens" of its last run. */
+    meta?: string;
+    /** C-12: "step 2/5" of a running per-plan-step stage. */
+    substep?: string;
+    /** E-02: the one status vocabulary every child shares. */
+    childStatus?: ChildStatusView;
   }>;
+  /** X-05: "4 stages · 11m · 210k tokens". */
+  totals?: string;
+  /** C-17: one row per executed stage. */
+  table?: Array<{
+    ordinal: number;
+    stageId: string;
+    title: string;
+    role: string;
+    target: string;
+    status: string;
+    duration?: string;
+    tokens?: string;
+    files: number;
+    sessionId?: string;
+    /** C-10 */
+    revertible?: boolean;
+  }>;
+  /** C-05 */
+  autonomy?: "step" | "stop-on-problems" | "autopilot";
+  pauseAfterCurrent?: boolean;
+  /** X-04 */
+  stalled?: { stageId: string; text: string };
+  /** C-18 */
+  acknowledged?: boolean;
+  /** C-17 */
+  reportAvailable?: boolean;
+  verify?: string;
+  /** C-04: gate 0 only. */
+  lineup?: WorkflowLineupView[];
+  verifySuggestions?: string[];
   currentStageId?: string;
+  /** X-01: the running stage asked something; its card is in this transcript. */
+  waitingForYou?: boolean;
   gate?: {
     kind: string;
     title: string;
@@ -524,13 +614,34 @@ export interface WorkflowRunView {
     claimedOnly?: string[];
     verify?: { command: string; exitCode: number; outputTail: string };
     verdict?: string;
-    findings?: Array<{ id: string; severity: string; file?: string; line?: number; text: string }>;
+    findings?: Array<{ id: string; severity: string; file?: string; line?: number; text: string; reporters?: string[]; selected?: boolean }>;
+    /** C-13: reviewers in the panel, when the stage fanned out. */
+    panelSize?: number;
+    /** C-03 */
+    headerMeta?: string;
+    compare?: string;
+    compareSame?: boolean;
+    primaryLabel?: string;
+    /** C-11 */
+    anotherRoundLabel?: string;
+    /** C-06: the plan, editable at this gate. */
+    planSteps?: Array<{ id: string; title: string; acceptance?: string; files?: string[] }>;
+    planEdited?: boolean;
+    /** C-15: the clarifier's questions, as a form. */
+    questions?: string[];
+    /** C-16 */
+    limit?: { provider: AcpProvider; providerName: string; alternatives: Array<{ provider: AcpProvider; displayName: string }> };
+    switchedFrom?: string;
     openQuestions?: string[];
     proposedNext: Array<{ id: string; title: string }>;
     nextStageId?: string;
     userNotes?: string;
     forcedManual?: string[];
     staleDetails?: string[];
+    /** C-02: "Stage N result is missing on disk" lines after a resume. */
+    missing?: string[];
+    /** C-01: the next write stage's scope; `note` when it resolved to nothing. */
+    scope?: { globs: string[]; note?: string };
     durationMs?: number;
     targetLabel?: string;
     eligible: Array<{
@@ -769,6 +880,8 @@ export type HostMsg =
       subagentRouting?: SubagentRoutingRow[];
       /** P6 §7.9 — the global half of the crew-stage delegation gate. */
       crewStagesMayUseSubagents?: boolean;
+      /** §9: the crew/subagent/context settings this plan added, by key. */
+      companionSettings?: Record<string, string | number | boolean>;
       /** Effort levels, generated from `EffortLevel` — never typed out (D12). */
       efforts?: string[];
       problems: string[];
@@ -889,6 +1002,20 @@ export type HostMsg =
       effortClamped?: { requested: string; applied: string };
       profileDowngraded?: string;
       errorCode?: string;
+      /** E-02: the one status vocabulary every child shares. */
+      childStatus?: ChildStatusView;
+      /** S-01: the child's own worktree, and whether its changes were applied. */
+      worktree?: "pending" | "applied" | "discarded";
+      /** S-02: the person changed the request on the approval card. */
+      adjustedByUser?: boolean;
+      /** S-04: the child session is still live; a follow-up can go into it. */
+      canFollowUp?: boolean;
+      /** X-05: tokens the child used, when measured; the model that actually ran. */
+      tokens?: number;
+      ranModel?: string;
+      /** S-08: why a spawn was refused, and what the model was offered instead. */
+      refusalMessage?: string;
+      refusalAlternatives?: string[];
       /** The child's own session id, for "Open transcript". */
       sessionId?: string;
       /**
@@ -899,6 +1026,9 @@ export type HostMsg =
       startedBy?: string;
       /** P6 — this child can be promoted to a session of its own (§6.6 point 8). */
       promotable?: boolean;
+      /** X-01: the child asked something; the card is in this transcript. Its
+       *  time limit is paused meanwhile (X-04). */
+      needsYou?: boolean;
       summary?: string;
       filesReported?: string[];
       filesObserved?: string[];
@@ -923,6 +1053,11 @@ export type HostMsg =
         providerName: string;
         model?: string;
         startedAt: number;
+        /** S-08: a finished child of this turn, listed while others still run. */
+        status?: string;
+        promotable?: boolean;
+        /** X-01: this child waits for the person. */
+        needsYou?: boolean;
       }[];
     }
   /**
@@ -936,6 +1071,9 @@ export type HostMsg =
       type: "workflowList";
       workflows: WorkflowPickerItem[];
       defaultWorkflow: string;
+      /** C-04 */
+      verifySuggestions?: string[];
+      defaultAutonomy?: "step" | "stop-on-problems" | "autopilot";
     }
   | { type: "modeChanged"; modeId: string }
   | { type: "openModePopover" }
@@ -1062,18 +1200,20 @@ export type HostMsg =
    * generic allow-everything menu. Older webviews ignore the field and the
    * card stays the two-button prompt it is today.
    */
-  | { type: "permissionRequest"; req: PermissionRequest; ruleSuggestions?: PermissionRuleSuggestion[] }
+  // `origin` (X-01): the card was relayed from a hidden crew stage or subagent.
+  // `req.id` is then an opaque route the host maps back to the child.
+  | { type: "permissionRequest"; req: PermissionRequest; ruleSuggestions?: PermissionRuleSuggestion[]; origin?: RelayOriginView; warning?: string }
   | { type: "permissionOptions"; requestId: number | string; options: PermissionRequest["options"] }
   | { type: "permissionResolved"; requestId: number | string; optionId: string }
   // The host spreads the plan-review snapshot (planPath/planName) into the bare
   // ExitPlanRequest before posting, so the wire shape is wider than acp's type.
-  | { type: "exitPlanRequest"; req: ExitPlanRequest & { planPath?: string; planName?: string } }
+  | { type: "exitPlanRequest"; req: ExitPlanRequest & { planPath?: string; planName?: string }; origin?: RelayOriginView }
   | { type: "planResolved"; requestId: number | string; verdict: "approved" | "abandoned" | "rejected" }
   /** `autoContinueMs` is set only when `companions.askTimeout` armed a timer for
    *  this card. It is what makes the card mirror its in-progress selection back
    *  as `questionDraft`: with no timer there is nothing that could use a draft,
    *  and an older client that ignores the field simply sends none. */
-  | { type: "questionRequest"; req: QuestionRequest; autoContinueMs?: number }
+  | { type: "questionRequest"; req: QuestionRequest; autoContinueMs?: number; origin?: RelayOriginView }
   /**
    * A question card settled without a click on THIS client (AP-05).
    *
@@ -1109,12 +1249,92 @@ export type HostMsg =
       messageTokens?: number;
       freeTokens?: number;
       autoCompactThresholdPercent?: number;
+      /** Compactions so far in this session (K-06), when known. */
+      compactionCount?: number;
     }
+  // K-04: the context is a few points short of the auto-compact threshold.
+  // Live only; the webview shows one block above the composer.
+  | { type: "nearFullPrompt"; used: number; window: number; threshold: number; canCompact: boolean }
+  // X-02: live activity of a hidden crew stage / companion subagent, for the
+  // row or card that stands for it. Live only (never buffered).
+  | {
+      type: "childActivity";
+      owner: { kind: "stage" | "subagent"; id: string };
+      items: Array<
+        | { kind: "prose"; text: string }
+        | { kind: "thought"; text: string }
+        | { kind: "tool"; id: string; title: string; status?: string; toolKind?: string }
+        | { kind: "plan"; done: number; total: number; current?: string }
+      >;
+      lastLine: string;
+    }
+  // X-03: the focused session is a hidden child; null for any other session.
+  | {
+      type: "childContext";
+      context: null | {
+        kind: "stage" | "subagent";
+        label: string;
+        parentSessionId: string;
+        running: boolean;
+        canSteer: boolean;
+      };
+    }
+  // E-01: every running child of this window (crew stages, companion
+  // subagents, Grok's own subagents), grouped by the conversation that owns it.
+  | {
+      type: "runningChildren";
+      groups: Array<{
+        parentSessionId: string;
+        parentName: string;
+        children: Array<{
+          kind: "stage" | "subagent" | "native";
+          id: string;
+          label: string;
+          target: string;
+          status: ChildStatusView;
+          startedAt: number;
+          tokens?: number;
+          sessionId?: string;
+        }>;
+      }>;
+      needYou: number;
+    }
+  // E-01 / E-03: scroll to the first card that waits for the person.
+  | { type: "scrollToWaiting" }
+  // S-03: this session's delegation switch (null outside Agent sessions), and
+  // what `@subagent:` / `@role:` may complete to.
+  | {
+      type: "sessionDelegation";
+      value: "off" | "ask" | "auto" | "read-only-auto" | null;
+      needsRestart?: boolean;
+      targets?: Array<{ provider: AcpProvider; name: string; eligible: boolean; reason?: string; models?: Array<{ id: string; efforts?: string[] }> }>;
+      roles?: Array<{ name: string; whenToUse: string }>;
+    }
+  // S-02: a subagent spawn waits for approval; the request is editable.
+  | {
+      type: "subagentApproval";
+      id: string;
+      label: string;
+      task: string;
+      provider: AcpProvider;
+      model?: string;
+      effort?: string;
+      profile: "read-only" | "scoped-edit" | "inherit";
+      /** Only the proposed profile and narrower ones. */
+      profiles: Array<"read-only" | "scoped-edit" | "inherit">;
+      targets: Array<{ provider: AcpProvider; displayName: string; models?: Array<{ id: string; label?: string; efforts?: string[] }> }>;
+    }
+  | { type: "subagentApprovalResolved"; id: string; approved: boolean }
+  // K-06: an automatic compaction finished; `summary` is what Grok kept.
+  | { type: "compactSummary"; summary: string }
+  // K-05: a turn failed because the context overflowed. Replaces the generic
+  // agentError line; `canCompact` hides "Compact and retry" where there is no /compact.
+  | { type: "contextOverflow"; id: string; text: string; canCompact: boolean; status?: TurnEndStatus; durationMs?: number; children?: string }
   | { type: "agentReset" }
   // status/durationMs are additive turn-footer data: how THIS turn ended and
   // how long it ran ("Worked for 12.4s" / "Cancelled after 4.1s" / "Failed
   // after 8.7s"). Older hosts omit them; the client then shows neither.
-  | { type: "agentError"; text: string; status?: TurnEndStatus; durationMs?: number }
+  | { type: "agentError"; text: string; status?: TurnEndStatus; durationMs?: number; children?: string }
   /**
    * Quota / rate-limit failover card (AP-06). Replaces the generic agentError
    * line for a classified limit: three actions (continue with another
@@ -1136,6 +1356,7 @@ export type HostMsg =
       recommended: LimitOfferRecommended;
       status?: TurnEndStatus;
       durationMs?: number;
+      children?: string;
     }
   /**
    * The limit card settled (AP-06). Collapses a card left on screen after a
@@ -1182,7 +1403,7 @@ export type HostMsg =
       model?: string;
       effort?: string;
       mode?: string;
-      /** "$0.0123 · 4,210 tokens", or "no cost reported". Never blank. */
+      /** "4,210 tokens", or "no token count reported". Never blank, never money (D18). */
       cost: string;
       durationMs?: number;
       outcome: "completed" | "failed" | "cancelled";
@@ -1223,10 +1444,11 @@ export type HostMsg =
       /** Set when the run ended badly — shown instead of a summary. */
       detail?: string;
     }
-  | { type: "agentEnd"; meta?: PromptResultMeta; status?: TurnEndStatus; durationMs?: number }
+  // `children` (X-05): "3 subagents · 2m 14s · 48k tokens" for the turn's delegations.
+  | { type: "agentEnd"; meta?: PromptResultMeta; status?: TurnEndStatus; durationMs?: number; children?: string }
   // status/durationMs are present only when a turn was IN FLIGHT when the
   // process died — a clean exit between turns ends no turn.
-  | { type: "exit"; code: number | null; status?: TurnEndStatus; durationMs?: number }
+  | { type: "exit"; code: number | null; status?: TurnEndStatus; durationMs?: number; children?: string }
   | { type: "setBusy"; value: boolean; locked?: boolean }
   | { type: "summarizing" }
   | { type: "sessionContext" }
@@ -1488,7 +1710,26 @@ export type WebviewMsg =
   | {
       type: "companionSubagentAction";
       subagentId: string;
-      action: "cancel" | "openTranscript" | "approve" | "deny" | "promote";
+      action: "cancel" | "openTranscript" | "approve" | "deny" | "promote" | "followUp" | "applyWorktree" | "discardWorktree";
+      /** S-04: the follow-up text. */
+      message?: string;
+    }
+  /** §9: write one of the whitelisted `companions.*` settings from the settings page. */
+  | { type: "setCompanionsSetting"; key: string; value: string | number | boolean }
+  /** E-01: Open / Stop a running child, or jump to the first open question. */
+  | { type: "childOverviewAction"; action: "open" | "stop" | "jump"; kind?: "stage" | "subagent" | "native"; id?: string; parentSessionId?: string; sessionId?: string }
+  /** S-03: the composer's delegation switch for this session. */
+  | { type: "setSessionDelegation"; value: "off" | "ask" | "auto" | "read-only-auto" }
+  /** S-02: the approval card's answer, with any changes the person made. */
+  | {
+      type: "subagentApprovalAnswer";
+      id: string;
+      approved: boolean;
+      task?: string;
+      provider?: string;
+      model?: string;
+      effort?: string;
+      profile?: string;
     }
   /**
    * AP-17. Start a workflow in this Crew session (or, with `openNew`, in a
@@ -1500,12 +1741,13 @@ export type WebviewMsg =
       idea: string;
       workflowName: string;
       openNew?: boolean;
-      options?: {
-        worktree?: boolean;
-        verify?: string;
-        gatePolicy?: "ask" | "workflow";
-        firstTarget?: { provider: AcpProvider; model?: string; effort?: string };
-      };
+      options?: CrewStartOptions;
+    }
+  /** C-06: the plan as the person edited it at the gate. */
+  | {
+      type: "workflowPlanEdit";
+      runId: string;
+      steps: Array<{ id: string; title: string; acceptance?: string; files?: string[] }>;
     }
   /** AP-17. A click on a stage-gate button. */
   | {
@@ -1524,10 +1766,35 @@ export type WebviewMsg =
         | "anotherRound"
         | "changeWorkflow"
         | "revertAll"
-        | "keepChanges";
+        | "keepChanges"
+        // C-05 / C-09 (pure run state)
+        | "setAutonomy"
+        | "pauseAfterStage"
+        | "selectFindings"
+        // host-only: C-07 revise, C-10 revert one stage, C-16 wait and retry,
+        // X-04 nudge / stop a stalled stage, C-17 open / copy the report
+        | "revise"
+        | "revertStage"
+        | "waitRetry"
+        | "nudge"
+        | "stopStage"
+        | "openReport"
+        | "copyReport";
+      /** C-05 */
+      autonomy?: "step" | "stop-on-problems" | "autopilot";
+      /** C-05 pauseAfterStage */
+      value?: boolean;
+      /** C-09: the finding ids to fix; the rest are accepted as they are. */
+      findings?: string[];
+      /** C-07: the feedback for "Revise". */
+      message?: string;
+      /** C-10: the stage (ordinal) to revert. */
+      ordinal?: number;
       nextStageId?: string;
       target?: { provider: AcpProvider; model?: string; effort?: string };
       notes?: string;
+      /** C-01: "Allow edits anywhere in the workspace for this stage". */
+      allowAnywhere?: boolean;
     }
   /** AP-17 D8. Open a new Crew session, optionally with this idea already in it. */
   | { type: "openCrewWithGoal"; goal: string }
@@ -1946,6 +2213,13 @@ export type WebviewMsg =
    * that may only view a session must not be able to send it.
    */
   | { type: "requestHandoff"; kind: "handoff" | "second-opinion"; role?: string }
+  /** K-04/K-05: open a fresh session on the same companion and model, briefed
+   *  from this one's goal, plan entries and changed files. */
+  | { type: "continueInFreshSession" }
+  /** X-03: text for the running crew stage — into its turn, or a note for the next gate. */
+  | { type: "childMessage"; route: string; text: string; mode: "steer" | "note" }
+  /** K-05: answer to the overflow card. One attempt, never a loop. */
+  | { type: "contextOverflowAnswer"; id: string; action: "compact-retry" | "fresh" | "dismiss" }
   | { type: "resumeSession"; id: string; cwd?: string; claim?: boolean }
   // cwd names the PROJECT the row belongs to, so a client listing several of
   // them (the browser rail) can act on a conversation without first switching
@@ -2094,6 +2368,16 @@ export type WebviewMsg =
 // error). The runtime arrays are just the keys, so they can never drift from the
 // union without failing the build.
 const HOST_MESSAGE_TYPE_MAP: Record<HostMsg["type"], true> = {
+  scrollToWaiting: true,
+  runningChildren: true,
+  sessionDelegation: true,
+  subagentApprovalResolved: true,
+  subagentApproval: true,
+  childContext: true,
+  childActivity: true,
+  contextOverflow: true,
+  compactSummary: true,
+  nearFullPrompt: true,
   initialState: true, moveViewHint: true, welcomeTips: true, projectSetup: true, githubState: true, githubRepos: true, providerState: true, mcpServers: true, mcpConnectors: true, mcpConnectorAuthorization: true, routines: true, codexInstallProgress: true, planModeAvailability: true, showThinking: true, appPurpose: true, fontScale: true, grokUpdateStatus: true, updateAvailable: true, updateReady: true, telemetryEnabled: true, thumbsFeedback: true,
   initialized: true, cliUpdating: true, session: true, sessionName: true, modelChanged: true,
   modeChanged: true, sessionType: true, companionSubagent: true, subagentTray: true, workflowRun: true, workflowList: true, openModePopover: true, voiceState: true, voiceConfigured: true,
@@ -2114,6 +2398,14 @@ const HOST_MESSAGE_TYPE_MAP: Record<HostMsg["type"], true> = {
 };
 
 const WEBVIEW_MESSAGE_TYPE_MAP: Record<WebviewMsg["type"], true> = {
+  setCompanionsSetting: true,
+  childOverviewAction: true,
+  setSessionDelegation: true,
+  subagentApprovalAnswer: true,
+  workflowPlanEdit: true,
+  childMessage: true,
+  contextOverflowAnswer: true,
+  continueInFreshSession: true,
   ready: true, remotePreferences: true, send: true, newSession: true, cancel: true, pickModel: true,
   setMode: true, setSessionType: true, setSubagentsEnabled: true, subagentRosterSave: true, subagentRoutingSave: true, setCrewStageSubagents: true, companionSubagentAction: true, workflowStart: true, workflowGateAction: true, openCrewWithGoal: true, setConfigOption: true, removeChip: true, toggleChip: true, openFile: true, showInFolder: true, openUrl: true,
   openText: true, openDiff: true, revertToolEdit: true, reviewRevertFile: true, reviewRevertAll: true, exportExpr: true, setEffort: true, openGlobalConfig: true,

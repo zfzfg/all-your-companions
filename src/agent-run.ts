@@ -209,20 +209,12 @@ export const USD_TICKS_PER_DOLLAR = 10_000_000_000;
  * and printing the second for the first would be a lie about money.
  */
 export function formatRunCost(costUsdTicks: number | undefined, totalTokens: number | undefined): string {
-  const parts: string[] = [];
-  if (typeof costUsdTicks === "number" && Number.isFinite(costUsdTicks)) {
-    const usd = costUsdTicks / USD_TICKS_PER_DOLLAR;
-    parts.push(usd > 0 && usd < 0.000001
-      ? "<$0.000001"
-      : new Intl.NumberFormat("en-US", {
-        style: "currency",
-        currency: "USD",
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 6,
-      }).format(usd));
-  }
+  // D18 / X-05: no money on a card — only what the run measured in tokens.
+  // `costUsdTicks` stays in the signature (and on disk, in log.jsonl) so
+  // callers do not have to change; it is simply never rendered.
+  void costUsdTicks;
   if (typeof totalTokens === "number" && Number.isFinite(totalTokens) && totalTokens > 0) {
-    parts.push(`${totalTokens.toLocaleString("en-US")} tokens`);
+    return `${totalTokens.toLocaleString("en-US")} tokens`;
   }
-  return parts.length ? parts.join(" · ") : "no cost reported";
+  return "no token count reported";
 }

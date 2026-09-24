@@ -61,7 +61,7 @@
     "promptComplete", "contextUsage", "commandOutput", "expandCommandOutputs", "setAllToolDetails", "focusInput", "findInSession", "restoreComposer", "truncateMessages", "uiConfirmRequest", "uiConfirmResolved", "subscriptionUsage", "agentReset", "agentError", "limitOffer", "limitOfferResolved", "agentResult", "agentEnd", "exit", "setBusy", "summarizing",
     "sessionContext", "clearMessages", "onboarding", "error", "hostNotice", "xaiNotification", "subagentUpdate", "childStream", "runProgress", "sessions", "repoSessions", "pinnedSessions", "repos",
     "sessionDot", "queuedSends", "submitQueuedSend", "steerUnavailable", "feedbackAvailability", "turnFeedbackAck", "usage", "planEntries", "reviewCenter", "crewRun", "steerByDefault", "promptNav", "soundNotifications", "processingSound", "readRepliesAloud", "summarizeRepliesAloud", "speechSummary", "imageFull", "imageOriginal", "moveComposerCaret",
-    "remoteStatus", "ruleFiles", "permissionRules", "agentRoles", "workflowGenerator",
+    "remoteStatus", "ruleFiles", "permissionRules", "agentRoles", "workflowGenerator", "scrollToWaiting", "runningChildren", "sessionDelegation", "subagentApprovalResolved", "subagentApproval", "childContext", "childActivity", "contextOverflow", "nearFullPrompt", "compactSummary",
   ];
   const WEBVIEW_MESSAGE_TYPES = [
     "ready", "remotePreferences", "send", "newSession", "cancel", "pickModel", "setMode", "setSessionType", "setSubagentsEnabled", "subagentRosterSave", "subagentRoutingSave", "setCrewStageSubagents", "companionSubagentAction", "workflowStart", "workflowGateAction", "openCrewWithGoal", "setConfigOption", "removeChip",
@@ -79,7 +79,7 @@
     "setSoundNotifications", "setProcessingSound", "setReadRepliesAloud", "setSummarizeRepliesAloud", "setVoiceSendPhrase", "setVoiceKeyterms", "setTelemetryEnabled", "setThumbsFeedback", "summarizeSpeech", "requestImageFull", "requestImageOriginal", "composerFocus",
     "newWorktreeSession", "applyWorktree", "removeWorktree", "rewindSession", "editLastMessage", "uiConfirmAnswer", "workflowControl", "refreshContextDetails", "refreshSubscriptionUsage",
     "remoteSignIn", "remoteSignOut", "unlinkRemoteDevice", "openRemotePortal",
-    "openUpdateRelease", "restartToUpdate",
+    "openUpdateRelease", "restartToUpdate", "setCompanionsSetting", "childOverviewAction", "setSessionDelegation", "subagentApprovalAnswer", "workflowPlanEdit", "childMessage", "contextOverflowAnswer", "continueInFreshSession",
   ];
   const EXTENSION_HOST_SLASH_COMMANDS = [
     {

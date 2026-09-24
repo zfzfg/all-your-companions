@@ -225,6 +225,19 @@ export class Session {
   /** A live compact notification already supplied this manual compact's count. */
   sawCompactNotification = false;
 
+  /** Compaction threshold this Grok process was spawned with (K-01/K-02), or
+   *  undefined when the env was left alone. Compared once against session/info. */
+  compactThresholdRequested?: number;
+  /** The mismatch check ran for this process. */
+  compactThresholdChecked = false;
+  /** Last threshold / compaction count Grok reported (K-03/K-06). */
+  compactThresholdReported?: number;
+  compactionCount = 0;
+  /** Last context window a contextUsage frame named (used-only frames omit it). */
+  lastContextWindow?: number;
+  /** The near-full prompt may show again (K-04); false once shown this cycle. */
+  nearFullArmed = true;
+
   /**
    * True when an `auto_compact_failed` notification arrived for the CURRENT
    * manual /compact (reset before each). Gates the
@@ -247,6 +260,8 @@ export class Session {
    * Continue / Wait can resend it. Cleared when the card settles. Continue
    * always goes to a *different* provider — never back to this one.
    */
+  /** K-05: the prompt a context overflow ate, for one "Compact and retry". */
+  pendingOverflow?: { id: string; text: string; chips: ContextChip[] };
   pendingLimitOffer?: {
     id: string;
     kind: "rate" | "quota";
@@ -652,6 +667,24 @@ export class Session {
 
   /** Derived status for the dashboard dot (see SessionStatus). */
   status: SessionStatus = "idle";
+  /** X-01: what this session was doing before a hidden child's card made it
+   *  "needs-you"; restored when the last relayed card is answered. */
+  statusBeforeChildAsk?: SessionStatus;
+  /** E-01: Grok's own subagents running inside this process (lifecycle rail). */
+  nativeChildren?: Map<string, { label: string; startedAt: number }>;
+  /** S-03: delegation chosen in the composer for THIS session; the settings
+   *  are the default. Persisted in the session meta. */
+  delegationOverride?: { enabled: boolean; spawnPolicy: "ask" | "auto" | "auto-read-only" };
+  /** C-01: a scoped crew stage's edit globs; an edit outside them is flagged. */
+  stageScope?: string[];
+  /** X-02: activity items waiting for the next throttled frame upstairs. */
+  childActivityQueue?: import("./child-activity").ActivityItem[];
+  childActivityTimer?: ReturnType<typeof setTimeout>;
+  /** X-04: when this hidden child last showed any activity, and whether the
+   *  stall warning is currently up for it. */
+  lastChildActivityAt?: number;
+  childStartedAt?: number;
+  stalled?: boolean;
 
   /**
    * The prompt currently in flight, or undefined when none is. A token rather

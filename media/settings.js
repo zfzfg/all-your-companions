@@ -432,6 +432,33 @@
     return "—";
   }
 
+  /**
+   * A select over one `companions.*` key (§9). The id carries the key so the
+   * shared apply path can update the snapshot without a case per setting.
+   */
+  function companionSelect(key, category, title, description, options, defaultValue, extra) {
+    return {
+      id: "cs:" + key,
+      category,
+      title,
+      description,
+      ...(extra ? { note: extra } : {}),
+      kind: "select",
+      options: options.map(([value, label]) => ({ value: String(value), label })),
+      defaultValue: String(defaultValue),
+      get: (s) => {
+        const v = s && s.companionSettings ? s.companionSettings[key] : undefined;
+        return String(v === undefined || v === null || v === "" ? defaultValue : v);
+      },
+      message: (value) => ({
+        type: "setCompanionsSetting",
+        key,
+        value: typeof defaultValue === "number" ? Number(value) : typeof defaultValue === "boolean" ? value === "true" : value,
+      }),
+      hostLocal: true,
+    };
+  }
+
   /** One sentence, one control. Visibility is decided separately. */
   const ROWS = [
     {
@@ -1100,6 +1127,35 @@
       message: (value) => ({ type: "setCrewStageSubagents", value }),
       hostLocal: true,
     },
+    // §9: the crew / subagent / context settings of the crew-subagent plan.
+    companionSelect("crew.defaultAutonomy", "agents", "Crew autonomy (default)",
+      "How far a new crew run goes on its own. Each run can change it on its gate. Failures, a red verify, an unreadable verdict, unreported edits and usage limits always stop.",
+      [["step", "Step by step"], ["stop-on-problems", "Stop on problems"], ["autopilot", "Autopilot"]], "step"),
+    companionSelect("crew.onLimit", "agents", "When a stage hits a usage limit",
+      "Ask pauses the run with the choices; Switch runs the stage on the next companion and says so on the gate.",
+      [["ask", "Ask"], ["switch", "Switch and say so"]], "ask"),
+    companionSelect("crew.stallWarningSec", "agents", "Warn when a stage is quiet for",
+      "A running stage that shows no activity for this long gets a warning with Open, Nudge and Stop. It is never stopped by itself.",
+      [[60, "1 minute"], [120, "2 minutes"], [300, "5 minutes"], [600, "10 minutes"], [900, "15 minutes"], [1800, "30 minutes"]], 300),
+    companionSelect("subagents.writeIsolation", "agents", "Where writing subagents work",
+      "Shared: in your working tree, files claimed before they start. Worktree: each in its own local worktree — you apply or discard its changes from the card.",
+      [["shared", "Shared working tree"], ["worktree", "Own worktree"]], "shared"),
+    companionSelect("grok.subagents.enabled", "agents", "Grok's built-in subagents",
+      "Grok's own explore / plan / general-purpose subagents. Default leaves Grok's setting alone. New Grok sessions only.",
+      [["default", "Grok's default"], ["on", "On"], ["off", "Off"]], "default",
+      (s) => (s && s.companionSettings && s.companionSettings.bothDelegationsHint) || ""),
+    companionSelect("grok.autoCompactThresholdPercent", "advanced", "Grok compacts its context at",
+      "Compact only when the context is this full (percent of the model's window). Grok's own default is 80%. Above 97 a single large tool result can overflow before compaction runs. New Grok sessions only; the context popover shows the point in tokens.",
+      [[0, "Grok's default (80%)"], [85, "85%"], [90, "90%"], [93, "93%"], [95, "95% (recommended)"], [97, "97%"], [98, "98%"], [99, "99%"]], 95),
+    companionSelect("context.nearFullPrompt", "advanced", "When the context is nearly full",
+      "A few points before auto-compaction, offer Compact now / Continue in a fresh session / Keep going above the composer.",
+      [["ask", "Ask"], ["off", "Don't ask"]], "ask"),
+    companionSelect("notifications.childNeedsYou", "notifications", "Crew stages and subagents that need you",
+      "A VS Code notification when a stage or subagent waits for your approval or answer while the window is not focused.",
+      [["true", "Notify"], ["false", "Don't notify"]], true),
+    companionSelect("grok.subagents.maxConcurrent", "agents", "Grok subagents at once",
+      "How many of Grok's own subagents may run at the same time. New Grok sessions only.",
+      [[0, "Grok's default"], [1, "1"], [2, "2"], [3, "3"], [4, "4"], [6, "6"], [8, "8"]], 0),
     {
       id: "crewFlows",
       category: "agents",
@@ -1616,6 +1672,9 @@
         next.crewStagesMayUseSubagents = !!value;
         break;
       default:
+        if (typeof row.id === "string" && row.id.startsWith("cs:")) {
+          next.companionSettings = { ...(next.companionSettings || {}), [row.id.slice(3)]: value };
+        }
         break;
     }
     return next;
@@ -4898,6 +4957,15 @@
     desc.textContent = rowDescription(row, snapshot, env);
     title.appendChild(name);
     title.appendChild(desc);
+    // §9 / S-07: a live hint under the description (e.g. two delegation
+    // mechanisms active at once). Only when there is something to say.
+    const noteText = typeof row.note === "function" ? row.note(snapshot, env) : "";
+    if (noteText) {
+      const note = document.createElement("div");
+      note.className = "settings-row-desc settings-row-note";
+      note.textContent = noteText;
+      title.appendChild(note);
+    }
     const control = document.createElement("div");
     control.className = "settings-row-control";
     const value = rowValue(row, snapshot);

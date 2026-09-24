@@ -466,24 +466,24 @@ describe("card copy", () => {
 describe("scoped-edit does not leave execute at the user's default trust", () => {
   it("asks before any shell/terminal command, on top of the scope's edit rules", () => {
     expect(subagentPermissionOverlay("scoped-edit", ["docs/**"], [])).toEqual([
-      { kind: "edit", action: "deny", pattern: "**" },
-      { kind: "edit", action: "allow", pattern: "docs/**" },
-      { kind: "execute", action: "ask", pattern: "**" },
+      { kind: "edit", action: "ask" },
+      { kind: "edit", action: "allow", pathGlob: "docs/**" },
+      { kind: "execute", action: "ask" },
     ]);
   });
 
   it("still asks even with no scope globs at all", () => {
     expect(subagentPermissionOverlay("scoped-edit", [], [])).toEqual([
-      { kind: "edit", action: "deny", pattern: "**" },
-      { kind: "execute", action: "ask", pattern: "**" },
+      { kind: "edit", action: "ask" },
+      { kind: "execute", action: "ask" },
     ]);
   });
 
   it("leaves read-only and inherit unchanged", () => {
     expect(subagentPermissionOverlay("read-only", [], ["git log"])).toEqual([
-      { kind: "execute", action: "allow", pattern: "git log" },
-      { kind: "edit", action: "deny", pattern: "**" },
-      { kind: "execute", action: "ask", pattern: "**" },
+      { kind: "edit", action: "deny" },
+      { kind: "execute", action: "ask" },
+      { kind: "execute", action: "allow", commandPrefix: "git log" },
     ]);
     expect(subagentPermissionOverlay("inherit", ["docs/**"], [])).toEqual([]);
   });

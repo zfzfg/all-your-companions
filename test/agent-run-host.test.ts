@@ -272,7 +272,7 @@ describe("a role runs in its own session", () => {
     expect(message.summary).toBe("Done.");
     expect(message.files).toEqual(["src/a.ts"]);
     // A role is a second run and the card says what it cost.
-    expect(message.cost).toBe("$1.23 · 4,210 tokens");
+    expect(message.cost).toBe("4,210 tokens");
     expect(message.runId).toBe(runId);
     expect(message.step).toBe(1);
     expect(message.sessionId).toBe("role-session-1");

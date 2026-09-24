@@ -268,7 +268,7 @@ export function relativizeToRoot(target: string, root: string): string | undefin
   return tn.slice(rn.length + 1);
 }
 
-function pathMatchesGlob(
+export function pathMatchesGlob(
   glob: string,
   path: string,
   workspaceRoot?: string,

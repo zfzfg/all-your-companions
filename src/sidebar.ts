@@ -51,6 +51,7 @@ import {
   decidePermission,
   extractPermissionFacts,
   normalizePermissionKind,
+  pathMatchesGlob,
   globalRulesToMap,
   loadWorkspaceRulesFile,
   parseAdoptionMap,
@@ -159,12 +160,23 @@ import { pickSttBackend, resolveOpenAiVoiceKey, SttBackend, SttPreference, Voice
 import { OPENAI_STT_MODEL } from "./openai-voice";
 import { summarizeForSpeech } from "./speech-summary";
 import type { PromptResultMeta, PromptUsage, SessionInfoContext } from "./acp-dispatch";
+import { DEFAULT_COMPACT_THRESHOLD, GROK_COMPACT_ENV, compactEventKind, compactSummaryPreview, compactThresholdMismatch, compactThresholdMismatchNotice, grokCompactThresholdEnv, normalizeCompactThreshold, shouldOfferNearFull } from "./grok-compaction";
+import { renderFreshSessionPrompt } from "./handoff";
+import { ChildRelayTable, childNeedsYouNotice, childScopedSuggestions, relayOriginLabel, relayScopeWord, type ChildKind, type RelayKind, type RelayOrigin } from "./child-relay";
+import { NUDGE_TEXT, PausableDeadline, normalizeStallWarningSec, stageStallState } from "./child-watch";
+import { subagentTurnSummary } from "./companion-subagents";
+import { bothDelegationsHint, grokSubagentEnv } from "./grok-subagent-env";
+import { stageChildStatus, subagentChildStatus } from "./child-status";
+import type { ChildStatusView } from "./protocol";
+import { ACTIVITY_FLUSH_MS, activityItemFromHostMsg, activityLastLine, coalesceActivity } from "./child-activity";
 import { MediaRef, adapterCompactSignal, adapterContextOccupancy, agentTimestampMsFromMeta, autoCompactStartedNote, childStreamFromRoute, commandOutputForToolCall, commandOutputFromLiveTerminal, contextUsedFromCompactNotification, enforceCompleteSessionCost, errorDetail, gateZeroTokenMeta, isAuthErrorText, isCredentialError, isIncompatibleAgentError, isResumeNotFound, isSubagentLifecycleUpdate, occupancyFromAdapterTurn, parseSessionInfoContext, permissionOutcomeFor, promptErrorText, rateLimitNoticeText, replayedTurnDuration, sessionInfoCacheFresh, sumUsage, summarizeBackgroundCommand, turnStatusFromPromptResult, usageIsRealMeasurement, type TurnEndStatus, type UpdateRoute } from "./acp-dispatch";
 import { createMcpPrepareState, prepareMcpToolCall } from "./mcp-tool";
 import { configWriteTarget, modeToRemember, rememberedEffort, startsInYolo, withRememberedEffort, type EffortPrefs } from "./mode-prefs";
 import { beginAuthRecovery, oauthShadowsXaiApiKey } from "./auth-recovery";
 import {
   classifyLimitError,
+  CONTEXT_OVERFLOW_TEXT,
+  isContextOverflowError,
   limitOfferHint,
   limitOfferTargets,
   freePercentFromWindows,
@@ -209,7 +221,7 @@ import { readWorkflowCompletion } from "./workflow-state";
 import { MuseBackend } from "./muse-backend";
 import { locateMuseCli, parseMuseVersionOutput } from "./muse-cli-locator";
 import { supportsClientMcpServers, supportsModeSwitching } from "./acp-backend";
-import { captureGitTurnBaseline, GitRunGate, readGitTurnFileBefore, type GitTurnBaseline } from "./git-run";
+import { captureGitTurnBaseline, GitRunGate, readGitTurnFileBefore, runGit, type GitTurnBaseline } from "./git-run";
 import { probeClaudeAuthStatus, runDeviceLogin } from "./device-login-run";
 import { githubDeviceLoginFailureText, runGithubDeviceLogin } from "./github-device-login";
 import {
@@ -360,6 +372,10 @@ import {
   findStage,
   IDEA_TO_DONE,
   isReservedTarget,
+  isWriteProfile,
+  stageContinues,
+  stageRunMode,
+  type WorkflowStage,
   workflowSnapshotHash,
   workflowSnapshotPayload,
   workflowToMermaid,
@@ -401,13 +417,24 @@ import {
   toWorkflowView,
   withSnapshotHash,
   WorkflowRunStore,
+  anotherRoundLabel,
+  applyLineupToDefinition,
+  autonomyFromSettings,
+  isTerminalRunStatus,
+  sanitizePlanEdit,
+  type Autonomy,
   type GateAction,
+  type RunLineupEntry,
   type WorkflowRun,
 } from "./workflow-run";
 import {
   briefingFromContract,
   buildHandoffPacket,
+  capHandoffPacket,
+  resolveStageScope,
   type HandoffPacket,
+  type HandoffPlanStep,
+  type StageScope,
 } from "./workflow-handoff";
 import { applyReviewCadence, briefingForCrewStep, fixerTitle, verifyInsertsFixer } from "./crew-run";
 import {
@@ -453,7 +480,7 @@ import {
   type HandoffKind,
   type ThreadContext,
 } from "./handoff";
-import { AgentRunStore, formatRunCost, type AgentRunTrigger } from "./agent-run";
+import { AgentRunStore, formatRunCost, stepSlug, type AgentRunTrigger } from "./agent-run";
 import {
   MENTION_INDEX_LIMIT,
   MENTION_INDEX_TTL_MS,
@@ -494,7 +521,11 @@ import {
 } from "./plan-review";
 import { isPrimerText } from "./grok-primer";
 import { AsyncSerialQueue } from "./async-serial";
-import { HOST_CAPABILITIES, HostMsg, INTERRUPTED_SEND_CODE, SESSION_SUPERSEDED_CODE, WebviewMsg, type GithubState, type ProjectSetupGithub } from "./protocol";
+import { HOST_CAPABILITIES, HostMsg, INTERRUPTED_SEND_CODE, SESSION_SUPERSEDED_CODE, WebviewMsg, type GithubState, type ProjectSetupGithub, type CrewStartOptions, type WorkflowLineupView, type WorkflowPickerItem, type WorkflowRunView } from "./protocol";
+import { formatDurationShort, formatTokenCount, renderRunReport, runTableRows, runTotalsLine, targetText } from "./workflow-report";
+import { compareLabel, preselectGateTarget, proposeLineup, suggestVerifyCommands, type RoleTemplateInfo } from "./workflow-target";
+import { mergeReviewPackets, panelTargets } from "./workflow-panel";
+import { stallWarningText } from "./child-watch";
 import { withoutArchiveFields } from "./project-discovery";
 import { SessionRequestState } from "./session-request-state";
 import {
@@ -655,6 +686,8 @@ import {
   shouldAnnounceCompanionsSkip,
   subagentForbidden,
   subagentPermissionOverlay,
+  SUBAGENT_RUN_MODE,
+  type SubagentRecord,
   subagentReturnFormat,
   uncollectedFollowUpText,
   type CompanionsSkipReason,
@@ -668,6 +701,7 @@ import {
   type EligibilityInput,
   type EligibilityResult,
   type RefusalCode,
+  PERMISSION_PROFILES,
   type RosterEntry,
   type SpawnLimits,
 } from "./target-eligibility";
@@ -1142,6 +1176,8 @@ export class GrokSidebar {
   private readonly deviceLoginPreflightShown = new Set<AcpProvider>();
   private reaper?: ReturnType<typeof setInterval>;
   private oauthShadowWarningShown = false;
+  /** K-02: the threshold-mismatch notice shows once per window. */
+  private compactMismatchNoticeShown = false;
   private get chips(): ContextChip[] { return this.focused.chips; }
   private set chips(value: ContextChip[]) { this.focused.chips = value; }
   /** Attachment-staging ops still in flight — see trackAttach. */
@@ -1316,6 +1352,7 @@ export class GrokSidebar {
     "subagentRoutingSave",
     "setSubagentsEnabled",
     "setCrewStageSubagents",
+    "setCompanionsSetting",
     "listRuleFiles",
     "openRuleFile",
     "listPermissionRules",
@@ -2095,13 +2132,22 @@ export class GrokSidebar {
        * subagent, writes `stage-NN` artefacts, and does not emit an
        * `/agent` result card — the gate card is the one card for the stage.
        */
-      /** AP-17. `allowSubagents` is the workflow's half of the §7.9 gate. */
-      stage?: { stageId: string; allowSubagents?: boolean };
+      /** AP-17. `allowSubagents` is the workflow's half of the §7.9 gate.
+       *  `scope` (C-01): edits outside these globs are flagged on the card. */
+      stage?: { stageId: string; allowSubagents?: boolean; scope?: string[]; subStep?: boolean };
       /**
        * AP-18. The workflow generator: hidden, read-only, no `/agent` card,
        * and it does not take over the caller's `agentRun` slot.
        */
       generator?: { requestId: string };
+      /**
+       * C-07 / C-08 / S-04. Send `continueMessage` as ANOTHER turn into this
+       * existing role session instead of starting a fresh one — the context
+       * stays, which is cheaper than a new brief. Only while the session is
+       * still live in the pool; otherwise a fresh session is started.
+       */
+      continueSession?: Session;
+      continueMessage?: string;
     },
   ): Promise<{
     outcome: "completed" | "failed" | "cancelled";
@@ -2132,9 +2178,15 @@ export class GrokSidebar {
     // is what lets `/agent` (typed task) and AP-11 (derived task) share this
     // one function instead of growing a second, thinner copy of it.
     const briefing: Briefing = makeBriefing({ ...brief, runId, step });
-    const briefMarkdown = renderBriefing(briefing, role);
+    const reuse = coords?.continueSession && coords.continueMessage?.trim()
+      && this.pool.has(coords.continueSession) && coords.continueSession.client
+      ? coords.continueSession
+      : undefined;
+    const briefMarkdown = reuse ? coords!.continueMessage!.trim() : renderBriefing(briefing, role);
 
-    const artifactKind = coords?.stage ? "stage" as const : "step" as const;
+    // A per-plan-step walk or a panel member writes `step-NN` artefacts, so
+    // its runs never overwrite the stage's own `stage-NN` result (C-12, C-13).
+    const artifactKind = coords?.stage && !coords.stage.subStep ? "stage" as const : "step" as const;
     try {
       this.agentRuns.writeBrief(runId, step, briefMarkdown, artifactKind);
     } catch (error) {
@@ -2175,24 +2227,29 @@ export class GrokSidebar {
         + `Connect a second companion for a stronger review.`
       : undefined;
 
-    const roleSession = this.newLocalSession();
-    roleSession.provider = role.provider;
-    roleSession.startOverrides = {
-      ...(role.model ? { model: role.model } : {}),
-      ...(role.effort ? { effort: role.effort } : {}),
-      ...(role.mode ? { mode: role.mode } : {}),
-    };
-    this.setSessionCwd(roleSession, cwd, this.workspaceRoot());
+    const roleSession = reuse ?? this.newLocalSession();
     const overlay = rolePermissionsToRules(role);
+    if (!reuse) {
+      roleSession.provider = role.provider;
+      roleSession.startOverrides = {
+        ...(role.model ? { model: role.model } : {}),
+        ...(role.effort ? { effort: role.effort } : {}),
+        ...(role.mode ? { mode: role.mode } : {}),
+      };
+      this.setSessionCwd(roleSession, cwd, this.workspaceRoot());
+      this.pool.add(roleSession);
+    }
     if (overlay.length) roleSession.rolePermissionRules = overlay;
-    this.pool.add(roleSession);
+    const tokensBefore = reuse?.activeSessionId
+      ? this.persistedUsageLedger(reuse.activeSessionId, reuse.userMessageCount).usage?.totalTokens
+      : undefined;
     const subagentCoords = coords?.subagent;
     const stageCoords = coords?.stage;
     const generatorCoords = coords?.generator;
     // AP-16 §6.6 point 1 / AP-17 D5: stamped BEFORE the first turn, so no
     // history refresh can race the child into the list.
-    if (subagentCoords) this.markHiddenChildSession(roleSession, caller, subagentCoords.subagentId);
-    if (stageCoords) {
+    if (subagentCoords && !reuse) this.markHiddenChildSession(roleSession, caller, subagentCoords.subagentId);
+    if (stageCoords && !reuse) {
       this.markHiddenChildSession(
         roleSession,
         caller,
@@ -2202,6 +2259,7 @@ export class GrokSidebar {
       // §7.9. Half the answer; `companions.crew.stagesMayUseSubagents` is the
       // other half, and `companionsMcpServer` requires both.
       roleSession.stageAllowsSubagents = stageCoords.allowSubagents === true;
+      if (stageCoords.scope) roleSession.stageScope = [...stageCoords.scope];
     }
     if (generatorCoords) {
       this.markHiddenChildSession(roleSession, caller, generatorCoords.requestId, "workflow-generator");
@@ -2261,7 +2319,7 @@ export class GrokSidebar {
     let outcome: "completed" | "failed" | "cancelled" = "completed";
     let detail: string | undefined;
     try {
-      const client = await this.startSession(undefined, roleSession);
+      const client = reuse?.client ?? await this.startSession(undefined, roleSession);
       if (!client) {
         outcome = "failed";
         detail = `${providerDisplayName(role.provider)} could not start a session for this role.`;
@@ -2269,7 +2327,8 @@ export class GrokSidebar {
         outcome = "cancelled";
         detail = "Stopped before the briefing was sent.";
       } else {
-        this.nameAgentRoleSession(roleSession, role, runId, step);
+        if (!reuse) this.nameAgentRoleSession(roleSession, role, runId, step);
+        this.noteChildStarted(caller, roleSession, subagentCoords?.subagentId);
         await this.handleSend(briefMarkdown, false, roleSession, origin);
         if (roleCancelled()) {
           outcome = "cancelled";
@@ -2284,6 +2343,9 @@ export class GrokSidebar {
       detail = (error as Error).message;
     } finally {
       roleSession.agentTextTap = undefined;
+      // A child that ended with a relayed card still open: close it upstairs.
+      this.closeChildRelays(roleSession);
+      this.postRunningChildren();
     }
 
     const result = parseResult(reply);
@@ -2291,8 +2353,9 @@ export class GrokSidebar {
     // actually recorded for that session (AP-09's blocks). A self-report is
     // the weakest link in the format; this is the only evidence available
     // about it, and both halves travel so neither is mistaken for the other.
-    const observed = reviewCenterSnapshot(roleSession.reviewBlocks, String(roleSession.userMessageCount))
-      .map((file) => file.path);
+    const snapshot = reviewCenterSnapshot(roleSession.reviewBlocks, String(roleSession.userMessageCount));
+    // A continued session reports what THIS turn changed; a fresh one has one turn.
+    const observed = (reuse ? filesForScope(snapshot, "turn") : snapshot).map((file) => file.path);
     const reconciliation = reconcileFiles(result.files, observed);
     // Stopped before it said anything: this run produced nothing, so it leaves
     // nothing behind — no result file, no directory holding an unanswered
@@ -2311,9 +2374,13 @@ export class GrokSidebar {
     }
 
     const roleSessionId = roleSession.activeSessionId;
-    const usage = roleSessionId
+    const ledgerUsage = roleSessionId
       ? this.persistedUsageLedger(roleSessionId, roleSession.userMessageCount).usage
       : undefined;
+    // X-05: a continued session's numbers are this turn's, not the session's.
+    const usage = ledgerUsage && reuse && typeof tokensBefore === "number" && typeof ledgerUsage.totalTokens === "number"
+      ? { ...ledgerUsage, totalTokens: Math.max(0, ledgerUsage.totalTokens - tokensBefore) }
+      : ledgerUsage;
     const durationMs = Date.now() - startedAt;
 
     if (subagentHandle) {
@@ -2568,7 +2635,7 @@ export class GrokSidebar {
     const cwd = this.sessionCwd(session);
     const presets = this.crewPresetSet(cwd);
     const wanted = (name ?? this.defaultWorkflowName()).trim() || this.defaultWorkflowName();
-    const preset = findCrewPreset(presets, wanted === "idea-to-done" ? "idea-to-done" : wanted);
+    const preset = findCrewPreset(presets, wanted);
     if (preset.name === "idea-to-done" && !preset.stages && wanted === "idea-to-done") {
       return applyMaxFixerPasses(IDEA_TO_DONE, this.maxFixerPasses());
     }
@@ -2586,14 +2653,34 @@ export class GrokSidebar {
       }
       const presets = this.crewPresetSet(cwd);
       const defaultName = preferred || this.defaultWorkflowName();
-      const workflows = presets.presets.map((preset) => ({
-        name: preset.name,
-        title: preset.title || preset.name,
-        whenToUse: preset.whenToUse || "",
-        source: preset.source,
-        ...(preset.stages === undefined && preset.name !== "idea-to-done" ? { defaultGraph: true } : {}),
-      }));
-      this.emit(session, { type: "workflowList", workflows, defaultWorkflow: defaultName });
+      const workflows = presets.presets.map((preset) => {
+        let extra: Partial<WorkflowPickerItem> = {};
+        try {
+          const def = this.resolveWorkflow(session, preset.name);
+          const capped = def.stages.find((s) => s.maxVisits);
+          extra = {
+            stages: def.stages.filter((s) => s.enabled).map((s) => s.title),
+            lineup: this.lineupForRun(session, undefined, def),
+            ...(findStage(def, "implement") && def.stages.some((s) => s.role === "fixer") ? { hasFix: true } : {}),
+            ...(capped?.maxVisits ? { maxFixRounds: capped.maxVisits } : {}),
+          };
+        } catch { /* a broken workflow still lists; the start path reports it */ }
+        return {
+          name: preset.name,
+          title: preset.title || preset.name,
+          whenToUse: preset.whenToUse || "",
+          source: preset.source,
+          ...(preset.stages === undefined && preset.name !== "idea-to-done" ? { defaultGraph: true } : {}),
+          ...extra,
+        };
+      });
+      this.emit(session, {
+        type: "workflowList",
+        workflows,
+        defaultWorkflow: defaultName,
+        verifySuggestions: this.verifySuggestions(cwd),
+        defaultAutonomy: this.workflowAutonomy({ } as WorkflowRun),
+      });
     } catch (error) {
       this.emit(session, {
         type: "workflowList",
@@ -2609,7 +2696,7 @@ export class GrokSidebar {
     }
   }
 
-  private emitWorkflowRun(session: Session, extra?: { staleDetails?: string[] }): void {
+  private emitWorkflowRun(session: Session, extra?: { staleDetails?: string[]; missing?: string[] }): void {
     const run = session.workflowRun;
     if (!run) {
       session.workflowView = undefined;
@@ -2618,36 +2705,302 @@ export class GrokSidebar {
     }
     const def = this.workflowStore().defs.get(run.runId) ?? this.resolveWorkflow(session, run.workflowName);
     this.workflowStore().defs.set(run.runId, def);
-    const last = [...this.workflowStore().packets.values()]
-      .filter((p) => p.runId === run.runId)
-      .sort((a, b) => b.stageOrdinal - a.stageOrdinal)[0];
-    const listing = listEligibleTargets(this.crewEligibilityInput(session), { includeIneligible: true, expand: undefined });
-    const expanded = listEligibleTargets(this.crewEligibilityInput(session), {
-      includeIneligible: true,
-      expand: listing.targets[0]?.provider,
-    });
-    session.workflowView = toWorkflowView({
+    const packets = this.packetsFor(run.runId);
+    const last = [...packets].sort((a, b) => b.stageOrdinal - a.stageOrdinal)[0];
+    // F-06: every eligible provider carries its models and efforts, so the
+    // gate can offer model and effort for whichever companion is picked (D6).
+    const listing = listEligibleTargets(this.crewEligibilityInput(session), { includeIneligible: true, expand: "all" });
+    const view = toWorkflowView({
       run,
       def,
       lastPacket: last,
       listing: {
-        targets: listing.targets.map((t) => {
-          const full = t.provider === expanded.targets.find((x) => x.provider === t.provider)?.provider
-            ? expanded.targets.find((x) => x.provider === t.provider)
-            : t;
-          return {
-            provider: t.provider,
-            displayName: t.displayName,
-            ...(t.defaultModel ? { defaultModel: t.defaultModel } : {}),
-            ...(t.defaultEffort ? { defaultEffort: t.defaultEffort } : {}),
-            ...(full?.models ? { models: full.models } : {}),
-          };
-        }),
+        targets: listing.targets.map((t) => ({
+          provider: t.provider,
+          displayName: t.displayName,
+          ...(t.defaultModel ? { defaultModel: t.defaultModel } : {}),
+          ...(t.defaultEffort ? { defaultEffort: t.defaultEffort } : {}),
+          ...(t.models ? { models: t.models } : {}),
+        })),
         ineligible: listing.ineligible.map((row) => ({ provider: row.provider, message: row.message })),
       },
       ...(extra?.staleDetails ? { staleDetails: extra.staleDetails } : {}),
+      ...(extra?.missing ? { missing: extra.missing } : {}),
+      waitingForYou: (session.crewLive ?? []).some((live) => this.childWaitsForYou(live.roleSession)),
+      scope: this.nextStageScope(run, def),
     });
+    session.workflowView = this.decorateWorkflowView(session, view, run, def, packets, last);
     this.emit(session, { type: "workflowRun", run: session.workflowView });
+  }
+
+  /**
+   * Everything the run view carries beyond the pure core: honest numbers
+   * (X-05), the run table (C-17), autonomy (C-05), the stall warning (X-04),
+   * and on the gate the preselected target with its comparison (C-03), the
+   * editable plan (C-06), the clarifier's questions (C-15), finding selection
+   * (C-09), the limit choices (C-16) and the lineup at gate 0 (C-04).
+   */
+  private decorateWorkflowView(
+    session: Session,
+    view: WorkflowRunView,
+    run: WorkflowRun,
+    def: WorkflowDefinition,
+    packets: HandoffPacket[],
+    last: HandoffPacket | undefined,
+  ): WorkflowRunView {
+    const rows = runTableRows(run, def, packets);
+    const reverted = new Set(run.reverted ?? []);
+    const table = rows.map((row) => {
+      const stage = findStage(def, row.stageId);
+      return {
+        ordinal: row.ordinal,
+        stageId: row.stageId,
+        title: row.title,
+        role: row.role,
+        target: row.target,
+        status: reverted.has(row.ordinal) ? "reverted" : row.status,
+        ...(row.durationMs ? { duration: formatDurationShort(row.durationMs) } : {}),
+        ...(typeof row.tokens === "number" ? { tokens: formatTokenCount(row.tokens) } : {}),
+        files: row.files,
+        ...(row.sessionId ? { sessionId: row.sessionId } : {}),
+        ...(stage && isWriteProfile(stage.profile) && row.status === "done" && row.sessionId && !reverted.has(row.ordinal)
+          ? { revertible: true }
+          : {}),
+      };
+    });
+    const metaFor = (stageId: string): string | undefined => {
+      const row = [...rows].reverse().find((r) => r.stageId === stageId);
+      if (!row) return undefined;
+      return [row.target, formatDurationShort(row.durationMs), typeof row.tokens === "number" ? `${formatTokenCount(row.tokens)} tokens` : ""]
+        .filter(Boolean).join(" · ") || undefined;
+    };
+    const live = this.runningStageSession(session);
+    const stalled = live?.stalled && run.current && live.lastChildActivityAt
+      ? { stageId: run.current.stageId, text: stallWarningText(Date.now() - live.lastChildActivityAt) }
+      : undefined;
+    const reportPath = this.workflowReportPath(run.runId);
+    const out: WorkflowRunView = {
+      ...view,
+      stages: view.stages.map((s) => {
+        const meta = metaFor(s.id);
+        const runningHere = run.current?.stageId === s.id;
+        const status = runningHere && stalled && s.status !== "needs-you" ? "stalled" : s.status;
+        return {
+          ...s,
+          childStatus: stageChildStatus(status),
+          ...(meta ? { meta } : {}),
+          ...(runningHere && run.current?.sessionId && !s.sessionId ? { sessionId: run.current.sessionId } : {}),
+          ...(runningHere && stalled ? { status: s.status === "needs-you" ? s.status : "stalled" } : {}),
+          ...(runningHere && this.stageStepProgress.get(run.runId) ? { substep: this.stageStepProgress.get(run.runId) } : {}),
+        };
+      }),
+      ...(rows.length ? { totals: runTotalsLine(rows) } : {}),
+      table,
+      autonomy: this.workflowAutonomy(run),
+      ...(run.pauseAfterCurrent ? { pauseAfterCurrent: true } : {}),
+      ...(stalled ? { stalled } : {}),
+      ...(run.acknowledged ? { acknowledged: true } : {}),
+      ...(reportPath && fs.existsSync(reportPath) ? { reportAvailable: true } : {}),
+      ...(run.verify ? { verify: run.verify } : {}),
+    };
+    if (!view.gate || !run.gate) return out;
+    const gate = { ...view.gate };
+    const nextId = run.gate.nextStageId ?? run.gate.proposedNext[0];
+    const nextStage = nextId && !isReservedTarget(nextId) ? findStage(def, nextId) : undefined;
+    if (last && run.gate.kind !== "gate-0") {
+      const meta = [targetText(last.target), formatDurationShort(last.durationMs), typeof last.tokens === "number" ? `${formatTokenCount(last.tokens)} tokens` : ""]
+        .filter(Boolean).join(" · ");
+      if (meta) gate.headerMeta = meta;
+    }
+    if (run.gate.preselectedTarget) {
+      gate.preselected = {
+        provider: run.gate.preselectedTarget.provider,
+        ...(run.gate.preselectedTarget.model ? { model: run.gate.preselectedTarget.model } : {}),
+        ...(run.gate.preselectedTarget.effort ? { effort: run.gate.preselectedTarget.effort } : {}),
+      };
+    }
+    if (run.gate.compare) {
+      gate.compare = compareLabel(run.gate.compare);
+      gate.compareSame = run.gate.compare.same;
+    }
+    if (nextStage) {
+      const who = gate.preselected ? providerDisplayName(gate.preselected.provider) : "";
+      gate.primaryLabel = `Start ${nextStage.title}${who ? ` on ${who}` : ""}`;
+    }
+    if (run.gate.kind === "fixer-limit") gate.anotherRoundLabel = anotherRoundLabel(run, def);
+    if (gate.findings?.length) {
+      const ignored = new Set(run.ignoredFindings ?? []);
+      gate.findings = gate.findings.map((f) => ({ ...f, selected: !ignored.has(f.id) }));
+      gate.panelSize = last?.panel?.length;
+    }
+    // C-06: the plan is editable at the gate right after the stage that made it.
+    if (last?.planSteps?.length && nextStage && last.stageId === run.executed[run.executed.length - 1]?.stageId) {
+      gate.planSteps = last.planSteps.map((s) => ({ ...s, ...(s.files ? { files: [...s.files] } : {}) }));
+      if (last.editedByUser) gate.planEdited = true;
+    }
+    // C-15: the clarifier's questions as a form.
+    if (last?.questions?.length && nextStage) gate.questions = [...last.questions];
+    if (run.gate.kind === "limit" && run.gate.limitProvider) {
+      const exhausted = new Set(run.exhausted);
+      gate.limit = {
+        provider: run.gate.limitProvider,
+        providerName: providerDisplayName(run.gate.limitProvider),
+        alternatives: (view.gate.eligible ?? [])
+          .filter((t) => t.provider !== run.gate!.limitProvider && !exhausted.has(t.provider))
+          .map((t) => ({ provider: t.provider, displayName: t.displayName })),
+      };
+    }
+    if (run.gate.switchedFrom) gate.switchedFrom = providerDisplayName(run.gate.switchedFrom);
+    if (gate.kind === "gate-0") {
+      out.lineup = this.lineupForRun(session, run, def);
+      out.verifySuggestions = this.verifySuggestions(run.cwd);
+    }
+    out.gate = gate;
+    return out;
+  }
+
+  /** C-05: this run's autonomy — its own choice, else the settings default. */
+  private workflowAutonomy(run: WorkflowRun): Autonomy {
+    if (run.autonomy) return run.autonomy;
+    const configured = this.companionsSetting<string>("crew.defaultAutonomy", "step");
+    const legacy = this.autoStartNextStage();
+    return configured === "step" && legacy ? "stop-on-problems" : autonomyFromSettings(configured, legacy);
+  }
+
+  /** X-04 / C-12: "step 2/5" of a running per-plan-step stage, by run id. */
+  private readonly stageStepProgress = new Map<string, string>();
+
+  private workflowReportPath(runId: string): string | undefined {
+    try {
+      return path.join(this.workflowRuns().runDir(runId), "run-report.md");
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** The lineup as the gate-0 / start panel shows it (C-04). */
+  private lineupForRun(session: Session, run: WorkflowRun | undefined, def: WorkflowDefinition): WorkflowLineupView[] {
+    const input = this.crewEligibilityInput(session);
+    const eligible = listEligibleTargets(input, {}).targets.map((t) => t.provider);
+    const roles = this.agentRoleSet(this.sessionCwd(session));
+    const roleInfo: Record<string, RoleTemplateInfo | undefined> = {};
+    for (const [key, ref] of Object.entries(def.roles)) {
+      const named = "ref" in ref ? ref.ref : key;
+      const role = findAgentRole(roles, named);
+      roleInfo[key] = role
+        ? {
+            provider: role.provider,
+            ...(role.model ? { model: role.model } : {}),
+            ...(role.effort ? { effort: role.effort } : {}),
+            builtin: role.source === "builtin",
+            ...(role.preferDifferentProvider ? { preferDifferentProvider: true } : {}),
+          }
+        : undefined;
+    }
+    const remembered = run?.lineup ?? this.rememberedLineup(this.sessionCwd(session), def.name);
+    return proposeLineup({ def, eligible, remembered, roles: roleInfo }).map((entry) => ({
+      ...entry,
+      providerName: providerDisplayName(entry.provider),
+    }));
+  }
+
+  private static readonly LINEUP_KEY = "companions.crew.lineups";
+
+  private rememberedLineup(cwd: string, workflow: string): Record<string, RunLineupEntry> | undefined {
+    const all = this.state.get<Record<string, Record<string, RunLineupEntry>>>(GrokSidebar.LINEUP_KEY, {});
+    return all[`${cwd}::${workflow}`];
+  }
+
+  private async rememberLineup(cwd: string, workflow: string, lineup: Record<string, RunLineupEntry>): Promise<void> {
+    const all = { ...this.state.get<Record<string, Record<string, RunLineupEntry>>>(GrokSidebar.LINEUP_KEY, {}) };
+    all[`${cwd}::${workflow}`] = lineup;
+    await this.state.update(GrokSidebar.LINEUP_KEY, all);
+  }
+
+  /** C-04: verify commands worth proposing — only proposed, never run unasked. */
+  private verifySuggestions(cwd: string): string[] {
+    try {
+      const read = (name: string) => {
+        try { return fs.readFileSync(path.join(cwd, name), "utf8"); } catch { return undefined; }
+      };
+      const pkgText = read("package.json");
+      let packageJson: { scripts?: Record<string, unknown> } | undefined;
+      try { packageJson = pkgText ? JSON.parse(pkgText) : undefined; } catch { packageJson = undefined; }
+      const packageManager = fs.existsSync(path.join(cwd, "pnpm-lock.yaml")) ? "pnpm" as const
+        : fs.existsSync(path.join(cwd, "yarn.lock")) ? "yarn" as const : "npm" as const;
+      return suggestVerifyCommands({
+        packageJson,
+        packageManager,
+        hasCargo: fs.existsSync(path.join(cwd, "Cargo.toml")),
+        hasPyproject: fs.existsSync(path.join(cwd, "pyproject.toml")),
+        hasGoMod: fs.existsSync(path.join(cwd, "go.mod")),
+      });
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * C-03 / F-05: decide the next stage's companion before the gate shows,
+   * and remember it on the gate (so an auto-proceed uses it too).
+   */
+  private withGatePreselection(session: Session, run: WorkflowRun, def: WorkflowDefinition): WorkflowRun {
+    if (!run.gate) return run;
+    const nextId = run.gate.nextStageId ?? run.gate.proposedNext[0];
+    const stage = nextId && !isReservedTarget(nextId) ? findStage(def, nextId) : undefined;
+    if (!stage) return run;
+    const input = this.crewEligibilityInput(session);
+    const eligible = listEligibleTargets(input, {}).targets.map((t) => t.provider);
+    const roleRef = def.roles[stage.role];
+    const named = roleRef && "ref" in roleRef ? roleRef.ref : stage.role;
+    const role = findAgentRole(this.agentRoleSet(this.sessionCwd(session)), named);
+    const packets = this.packetMap(run.runId);
+    const lastPacket = this.packetsFor(run.runId).slice(-1)[0];
+    const lineup = run.lineup?.[stage.id];
+    const pick = preselectGateTarget({
+      stage,
+      def,
+      eligible,
+      packets,
+      ...(lineup ? { lineup: { provider: lineup.provider, ...(lineup.model ? { model: lineup.model } : {}), ...(lineup.effort ? { effort: lineup.effort } : {}) } } : {}),
+      ...(role
+        ? {
+            role: {
+              provider: role.provider,
+              ...(role.model ? { model: role.model } : {}),
+              ...(role.effort ? { effort: role.effort } : {}),
+              builtin: role.source === "builtin",
+              ...(role.preferDifferentProvider ? { preferDifferentProvider: true } : {}),
+            },
+          }
+        : {}),
+      ...(lastPacket ? { lastProvider: lastPacket.target.provider } : {}),
+    });
+    if (!pick.target) return run;
+    return {
+      ...run,
+      gate: {
+        ...run.gate,
+        preselectedTarget: {
+          provider: pick.target.provider,
+          ...(pick.target.model ? { model: pick.target.model } : {}),
+          ...(pick.target.effort && isEffortLevel(pick.target.effort) ? { effort: pick.target.effort } : {}),
+        },
+        ...(pick.compare ? { compare: { stageTitle: pick.compare.stageTitle, same: pick.compare.same } } : {}),
+      },
+    };
+  }
+
+  /** C-01: what the next write stage may edit without asking, for the gate. */
+  private nextStageScope(run: WorkflowRun, def: WorkflowDefinition): { globs: string[]; note?: string } | undefined {
+    if (!run.gate) return undefined;
+    const id = run.gate.nextStageId ?? run.gate.proposedNext[0];
+    const stage = id && !isReservedTarget(id) ? findStage(def, id) : undefined;
+    if (!stage || stage.profile !== "scoped-edit") return undefined;
+    const scope = resolveStageScope(stage, this.packetMap(run.runId), run.attachedFiles);
+    return scope.empty
+      ? { globs: [], note: `The plan names no files — ${stage.title} will ask before editing anything.` }
+      : { globs: scope.globs };
   }
 
   private persistWorkflowRun(session: Session): void {
@@ -2681,7 +3034,13 @@ export class GrokSidebar {
     };
   }
 
-  private restoreWorkflowRun(session: Session, runId: string): void {
+  /**
+   * Bring a Crew run back after a reload (C-02). The run object is set at
+   * once, so a message typed during the async part still finds it; the
+   * packets are read from disk before staleness is judged, because the
+   * observed-file hash is computed over the files those packets name.
+   */
+  private async restoreWorkflowRun(session: Session, runId: string): Promise<void> {
     const run = this.workflowRuns().readRun(runId);
     if (!run) return;
     session.workflowRun = run;
@@ -2703,36 +3062,65 @@ export class GrokSidebar {
     } else {
       this.workflowStore().defs.set(runId, this.resolveWorkflow(session, run.workflowName));
     }
-    const def = this.workflowStore().defs.get(runId)!;
+    const missing = this.loadWorkflowPackets(run);
     const liveHash = workflowSnapshotHash(this.resolveWorkflow(session, run.workflowName));
     let next = run;
-    const stale = resumeStaleness(run.pausedAt, this.currentWorkspaceStamp(run));
+    const stale = resumeStaleness(run.pausedAt, await this.currentWorkspaceStamp(run));
+    if (session.workflowRun !== run) return;
     if (!stale.ok) next = applyStaleness(next, stale);
     if (snapshotDrift(next, liveHash)) next = applySnapshotDrift(next);
     session.workflowRun = next;
-    this.emitWorkflowRun(session, !stale.ok && stale.code === "stale" ? { staleDetails: stale.details } : undefined);
+    this.emitWorkflowRun(session, {
+      ...(!stale.ok && stale.code === "stale" ? { staleDetails: stale.details } : {}),
+      ...(missing.length ? { missing } : {}),
+    });
   }
 
-  private currentWorkspaceStamp(run: WorkflowRun): {
+  /** Read every executed stage's packet back into memory. Returns the
+   *  "Stage N result is missing on disk" lines for the gate. */
+  private loadWorkflowPackets(run: WorkflowRun): string[] {
+    const missing: string[] = [];
+    const def = this.workflowStore().defs.get(run.runId);
+    for (const entry of run.executed) {
+      if (entry.status === "skipped") continue;
+      const key = `${run.runId}:${entry.ordinal}`;
+      if (this.workflowStore().packets.has(key)) continue;
+      // C-06: a plan the person edited at the gate wins over the original.
+      const packet = this.workflowRuns().readUserEdit(run.runId, entry.ordinal)
+        ?? this.workflowRuns().readHandoffAt(entry.packetPath)
+        ?? this.workflowRuns().readHandoff(run.runId, entry.ordinal);
+      if (packet) {
+        this.workflowStore().packets.set(key, packet);
+        continue;
+      }
+      const title = def ? findStage(def, entry.stageId)?.title ?? entry.stageId : entry.stageId;
+      missing.push(`Stage ${entry.ordinal} (${title}) result is missing on disk.`);
+    }
+    return missing;
+  }
+
+  /** HEAD, observed-file hash and worktree existence — async, with a timeout,
+   *  so a slow repository never freezes the extension host (F-20). */
+  private async currentWorkspaceStamp(run: WorkflowRun): Promise<{
     gitHead?: string;
     observedHash?: string;
     worktreeExists?: boolean;
     worktree?: string;
-  } {
+  }> {
     const cwd = run.worktree || run.cwd;
     let gitHead: string | undefined;
     try {
-      const headPath = path.join(cwd, ".git");
-      if (fs.existsSync(headPath)) {
-        gitHead = execFileSync("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf8" }).trim();
+      if (fs.existsSync(path.join(cwd, ".git"))) {
+        const head = await runGit(cwd, ["rev-parse", "HEAD"], { timeoutMs: 5000 });
+        if (head.ok) gitHead = head.stdout.trim() || undefined;
       }
     } catch { /* not a git checkout, or git missing — staleness then relies on file hashes */ }
     const packets = [...this.workflowStore().packets.values()].filter((p) => p.runId === run.runId);
-    const files = packets.flatMap((p) => p.filesObserved);
-    const hashed = files.map((file) => {
+    const files = [...new Set(packets.flatMap((p) => p.filesObserved))];
+    const hashed = await Promise.all(files.map(async (file) => {
       const abs = path.isAbsolute(file) ? file : path.join(cwd, file);
       try {
-        const buf = fs.readFileSync(abs);
+        const buf = await fs.promises.readFile(abs);
         let h = 0x811c9dc5;
         for (let i = 0; i < buf.length; i += 1) {
           h ^= buf[i]!;
@@ -2742,7 +3130,7 @@ export class GrokSidebar {
       } catch {
         return { path: file, hash: "missing" };
       }
-    });
+    }));
     return {
       ...(gitHead ? { gitHead } : {}),
       ...(hashed.length ? { observedHash: observedFilesHash(hashed) } : {}),
@@ -2755,12 +3143,7 @@ export class GrokSidebar {
     origin: MsgOrigin,
     idea: string,
     workflowName: string,
-    options?: {
-      worktree?: boolean;
-      verify?: string;
-      gatePolicy?: "ask" | "workflow";
-      firstTarget?: { provider: AcpProvider; model?: string; effort?: string };
-    },
+    options?: CrewStartOptions,
   ): Promise<void> {
     const trimmed = idea.trim();
     this.lockSessionTypeNow(session);
@@ -2769,7 +3152,12 @@ export class GrokSidebar {
       return;
     }
     await this.waitForSessionStart(session);
-    const def = this.resolveWorkflow(session, workflowName);
+    // C-04: the lineup may switch optional stages on (Clarify first), set a
+    // stage's gate, and cap the fix rounds — on this run's snapshot only.
+    const def = applyLineupToDefinition(
+      options?.maxFixRounds ? applyMaxFixerPasses(this.resolveWorkflow(session, workflowName), options.maxFixRounds) : this.resolveWorkflow(session, workflowName),
+      options?.lineup,
+    );
     const check = validateWorkflowDefinition(def, this.workflowValidateContext());
     if (!check.valid) {
       const first = check.errors[0];
@@ -2808,22 +3196,29 @@ export class GrokSidebar {
     });
     const hash = workflowSnapshotHash(def);
     run = withSnapshotHash(run, hash);
+    if (options?.lineup && Object.keys(options.lineup).length) {
+      run = { ...run, lineup: options.lineup };
+      void this.rememberLineup(cwd, def.name, options.lineup);
+    }
+    if (options?.autonomy) run = { ...run, autonomy: options.autonomy };
+    if (options?.fixInSession && findStage(def, "implement")) run = { ...run, fixInSession: "implement" };
     this.workflowStore().defs.set(runId, def);
     try {
       this.workflowRuns().writeSnapshot(runId, workflowSnapshotPayload(def));
     } catch (error) {
       this.host.appendLine(`[workflow] could not write snapshot: ${(error as Error).message}`);
     }
-    session.workflowRun = run;
+    session.workflowRun = options?.firstTarget ? run : this.withGatePreselection(session, run, def);
     session.firstUserMessageForTitle = trimmed;
     this.emit(session, { type: "userMessage", text: trimmed, chips: [] });
     this.persistWorkflowRun(session);
     this.emitWorkflowRun(session);
-    if (options?.firstTarget) {
+    const first = options?.firstTarget ?? (options?.startNow ? session.workflowRun.gate?.preselectedTarget : undefined);
+    if (first) {
       await this.handleWorkflowGateAction(session, origin, {
         type: "start",
-        nextStageId: run.gate?.nextStageId,
-        target: options.firstTarget as never,
+        nextStageId: session.workflowRun.gate?.nextStageId,
+        target: first as never,
       });
     }
   }
@@ -2841,7 +3236,11 @@ export class GrokSidebar {
       return;
     }
     if (action.type === "keepChanges") {
-      session.workflowRun = applyGateAction(run, def, { type: "cancel", reason: "Cancelled, changes kept." }, Date.now());
+      // C-18: on a finished run this only acknowledges it; before that it
+      // ends the run and keeps whatever the stages changed.
+      session.workflowRun = run.status === "done"
+        ? applyGateAction(run, def, action, Date.now())
+        : applyGateAction(run, def, { type: "cancel", reason: "Cancelled, changes kept." }, Date.now());
       this.persistWorkflowRun(session);
       this.emitWorkflowRun(session);
       return;
@@ -2851,7 +3250,7 @@ export class GrokSidebar {
       return;
     }
     if (action.type === "pause") {
-      const stamp = this.currentWorkspaceStamp(run);
+      const stamp = await this.currentWorkspaceStamp(run);
       session.workflowRun = applyGateAction(run, def, {
         type: "pause",
         at: Date.now(),
@@ -2863,23 +3262,183 @@ export class GrokSidebar {
       this.emitWorkflowRun(session);
       return;
     }
+    if (action.type === "setAutonomy" || action.type === "pauseAfterStage" || action.type === "selectFindings") {
+      // Run state, changeable at any time — also while a stage runs.
+      session.workflowRun = applyGateAction(run, def, action, Date.now());
+      this.persistWorkflowRun(session);
+      this.emitWorkflowRun(session);
+      return;
+    }
     if (action.type === "start" || action.type === "restart" || action.type === "rerun" || action.type === "anotherRound") {
-      const next = applyGateAction(run, def, action, Date.now());
+      // C-03: without an explicit choice, the gate's preselection runs.
+      const target = action.target ?? run.gate?.preselectedTarget;
+      const next = applyGateAction(run, def, target ? { ...action, target } as GateAction : action, Date.now());
       session.workflowRun = next;
       this.persistWorkflowRun(session);
       this.emitWorkflowRun(session);
       if (next.status === "running" && next.current) {
-        await this.executeWorkflowStage(session, origin, def, next, action.target);
+        await this.executeWorkflowStage(session, origin, def, next, target);
+      } else if (next.status === "done") {
+        this.finishWorkflowRun(session, def);
       }
       return;
     }
     session.workflowRun = applyGateAction(run, def, action, Date.now());
-    if (action.type === "skip" && session.workflowRun.status === "at-gate" && session.workflowRun.gate?.autoProceed) {
-      /* skip never auto-proceeds */
-    }
     this.persistWorkflowRun(session);
     this.emitWorkflowRun(session);
-    if (session.workflowRun.status === "done") this.emitReviewCenter(session);
+    if (session.workflowRun.status === "done") this.finishWorkflowRun(session, def);
+  }
+
+  /**
+   * C-06: the plan as edited at the gate becomes a derived packet
+   * (`editedByUser`); the original stays as `stage-NN.handoff.json`, the edit
+   * is `stage-NN.user-edit.json`. Briefings and the next stage's scope read
+   * the edited one.
+   */
+  private applyWorkflowPlanEdit(
+    session: Session,
+    msg: { runId: string; steps: Array<{ id: string; title: string; acceptance?: string; files?: string[] }> },
+  ): void {
+    const run = session.workflowRun;
+    if (!run || run.runId !== msg.runId || run.status === "running") return;
+    const planPacket = [...this.packetsFor(run.runId)].reverse().find((p) => p.planSteps?.length);
+    if (!planPacket) return;
+    const steps = sanitizePlanEdit(msg.steps);
+    const edited: HandoffPacket = { ...planPacket, planSteps: steps, editedByUser: true };
+    try {
+      this.workflowRuns().writeUserEdit(run.runId, planPacket.stageOrdinal, edited);
+    } catch (error) {
+      this.host.appendLine(`[workflow] could not write the plan edit: ${(error as Error).message}`);
+    }
+    this.workflowStore().packets.set(`${run.runId}:${planPacket.stageOrdinal}`, edited);
+    this.emitWorkflowRun(session);
+  }
+
+  /** C-18 / C-17: a finished run opens the Review panel and writes its report. */
+  private finishWorkflowRun(session: Session, def: WorkflowDefinition): void {
+    this.emitReviewCenter(session);
+    this.writeWorkflowReport(session, def);
+    this.emitWorkflowRun(session);
+  }
+
+  private writeWorkflowReport(session: Session, def: WorkflowDefinition): string | undefined {
+    const run = session.workflowRun;
+    const target = run ? this.workflowReportPath(run.runId) : undefined;
+    if (!run || !target) return undefined;
+    try {
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, renderRunReport({ run, def, packets: this.packetsFor(run.runId), ignoredFindings: run.ignoredFindings }), "utf8");
+      return target;
+    } catch (error) {
+      this.host.appendLine(`[workflow] could not write the run report: ${(error as Error).message}`);
+      return undefined;
+    }
+  }
+
+  /**
+   * Host-only gate actions (they need I/O the pure state machine cannot do):
+   * revise (C-07), revert one stage (C-10), wait and retry after a limit
+   * (C-16), nudge / stop a stalled stage (X-04), open / copy the report (C-17).
+   * Returns true when the message was one of these.
+   */
+  private async handleHostGateAction(
+    session: Session,
+    origin: MsgOrigin,
+    msg: Extract<WebviewMsg, { type: "workflowGateAction" }>,
+  ): Promise<boolean> {
+    const run = session.workflowRun;
+    if (!run || msg.runId !== run.runId) return false;
+    const def = this.workflowStore().defs.get(run.runId) ?? this.resolveWorkflow(session, run.workflowName);
+    switch (msg.action) {
+      case "revise": {
+        const message = String(msg.message ?? "").trim();
+        const lastEntry = run.executed[run.executed.length - 1];
+        if (!message || !lastEntry || run.status === "running") return true;
+        await this.reviseWorkflowStage(session, origin, def, lastEntry.stageId, lastEntry.sessionId, message);
+        return true;
+      }
+      case "revertStage": {
+        await this.revertWorkflowStage(session, def, Number(msg.ordinal));
+        return true;
+      }
+      case "waitRetry": {
+        const provider = run.gate?.limitProvider;
+        const stageId = run.gate?.nextStageId ?? run.gate?.proposedNext[0];
+        if (!provider || !stageId) return true;
+        // The person asked to try the exhausted companion again: allow it for
+        // this run once more, and run the same stage on it.
+        session.workflowRun = { ...run, exhausted: run.exhausted.filter((p) => p !== provider) };
+        await this.handleWorkflowGateAction(session, origin, { type: "start", nextStageId: stageId, target: { provider } });
+        return true;
+      }
+      case "nudge": {
+        const child = this.runningStageSession(session);
+        if (!child) return true;
+        this.agentNotice(session, "info", "→ nudged the running stage");
+        child.lastChildActivityAt = Date.now();
+        child.stalled = false;
+        this.emitWorkflowRun(session);
+        await this.steerSend(NUDGE_TEXT, child);
+        return true;
+      }
+      case "stopStage": {
+        for (const live of session.crewLive ?? []) {
+          live.cancelled = true;
+          void live.roleSession.client?.cancel("user stopped the crew stage");
+        }
+        return true;
+      }
+      case "openReport":
+      case "copyReport": {
+        const file = this.writeWorkflowReport(session, def);
+        if (!file) return true;
+        if (msg.action === "openReport") void this.host.openResource(file);
+        else {
+          try {
+            await this.host.writeClipboard?.(fs.readFileSync(file, "utf8"));
+            this.agentNotice(session, "info", "Run report copied as Markdown.");
+          } catch (error) {
+            this.agentNotice(session, "warning", `Could not copy the report: ${(error as Error).message}`);
+          }
+        }
+        this.emitWorkflowRun(session);
+        return true;
+      }
+      default:
+        return false;
+    }
+  }
+
+  /**
+   * C-07: send feedback as a second turn into the stage's own session (its
+   * context stays), then rebuild the packet as a new visit of the same stage
+   * and judge the gate again. The old packet stays on disk.
+   */
+  private async reviseWorkflowStage(
+    session: Session,
+    origin: MsgOrigin,
+    def: WorkflowDefinition,
+    stageId: string,
+    stageSessionId: string | undefined,
+    message: string,
+  ): Promise<void> {
+    const run = session.workflowRun;
+    if (!run) return;
+    const next = startWorkflowStage(run, stageId, Date.now(), {
+      ...(run.gate?.preselectedTarget ? {} : {}),
+    });
+    session.workflowRun = next;
+    this.persistWorkflowRun(session);
+    this.emit(session, { type: "userMessage", text: message, chips: [] });
+    this.emitWorkflowRun(session);
+    await this.executeWorkflowStage(session, origin, def, next, undefined, {
+      continue: stageSessionId ? { sessionId: stageSessionId, message: `Revise your result with this feedback, then give the result block again.\n\n${message}` } : undefined,
+    });
+  }
+
+  private poolSessionById(sessionId: string | undefined): Session | undefined {
+    if (!sessionId) return undefined;
+    return [...this.pool].find((s) => s.activeSessionId === sessionId);
   }
 
   private async executeWorkflowStage(
@@ -2888,130 +3447,84 @@ export class GrokSidebar {
     def: WorkflowDefinition,
     run: WorkflowRun,
     targetHint?: { provider: AcpProvider; model?: string; effort?: string },
+    opts?: { continue?: { sessionId: string; message: string } },
   ): Promise<void> {
     const current = run.current;
     if (!current) return;
     const stage = findStage(def, current.stageId);
     if (!stage) return;
-    const roles = this.agentRoleSet(this.sessionCwd(session));
-    const roleRef = def.roles[stage.role];
-    const named = "ref" in (roleRef ?? {}) ? (roleRef as { ref: string }).ref : stage.role;
-    const template = findAgentRole(roles, named);
-    const input = this.crewEligibilityInput(session);
-    const requested = {
-      provider: targetHint?.provider ?? stage.target?.provider ?? template?.provider ?? session.provider,
-      ...(targetHint?.model || stage.target?.model || template?.model
-        ? { model: targetHint?.model ?? stage.target?.model ?? template?.model }
-        : {}),
-      ...(targetHint?.effort || stage.target?.effort || template?.effort
-        ? { effort: (targetHint?.effort ?? stage.target?.effort ?? template?.effort) as never }
-        : {}),
-      profile: stage.profile,
-      runMode: stage.runMode ?? (stage.profile === "read-only" ? "plan" : "agent"),
-    };
-    const verdict = resolveTarget(requested, input);
-    if (!verdict.ok) {
-      this.emit(session, { type: "hostNotice", level: "warning", text: verdict.message });
-      session.workflowRun = applyStageOutcome(
-        run,
-        def,
-        buildHandoffPacket({
-          runId: run.runId,
-          stageId: stage.id,
-          stageOrdinal: current.ordinal,
-          visit: current.visit,
-          role: stage.role,
-          target: { provider: requested.provider, modelVerified: false },
-          status: "failed",
-          rawReply: verdict.message,
-          durationMs: 0,
-          resultPath: this.agentRuns.resultPath(run.runId, current.ordinal, "stage"),
-        }),
-        this.packetsFor(run.runId),
-        { autoStartNextStage: this.autoStartNextStage() },
-      );
-      this.persistWorkflowRun(session);
-      this.emitWorkflowRun(session);
+    const hint = targetHint ?? current.target;
+    if (!opts?.continue && stage.fanOut && stage.fanOut.count > 1 && stage.profile === "read-only") {
+      await this.executePanelStage(session, origin, def, run, stage, hint);
       return;
     }
-    const role: AgentRole = {
-      ...(template ?? {
-        name: stage.role,
-        whenToUse: stage.title,
-        source: "builtin" as const,
-      }),
-      name: stage.role,
-      provider: verdict.target.provider,
-      ...(verdict.target.model ? { model: verdict.target.model } : {}),
-      ...(verdict.target.effort ? { effort: verdict.target.effort } : {}),
-      mode: stage.runMode ?? (stage.profile === "read-only" ? "plan" : "agent"),
-    };
-    const packets = this.packetMap(run.runId);
-    const brief = briefingFromContract({
-      runId: run.runId,
-      step: current.ordinal,
-      idea: run.idea,
-      stage,
-      def,
-      packets,
-      userNotes: run.gate?.userNotes,
-      attachedFiles: run.attachedFiles,
-      verifyCommand: run.verify,
-    });
+    if (!opts?.continue && stage.strategy === "per-plan-step" && this.planStepsFor(run).length) {
+      await this.executePerPlanStepStage(session, origin, def, run, stage, hint);
+      return;
+    }
+    const prepared = this.prepareStageRun(session, def, run, stage, hint);
+    if ("error" in prepared) {
+      this.emit(session, { type: "hostNotice", level: "warning", text: prepared.error });
+      await this.finishWorkflowStage(session, origin, def, buildHandoffPacket({
+        runId: run.runId,
+        stageId: stage.id,
+        stageOrdinal: current.ordinal,
+        visit: current.visit,
+        role: stage.role,
+        target: { provider: prepared.provider, modelVerified: false },
+        status: "failed",
+        rawReply: prepared.error,
+        durationMs: 0,
+        resultPath: this.agentRuns.resultPath(run.runId, current.ordinal, "stage"),
+      }));
+      return;
+    }
+    // C-08: a stage that continues another stage's session (or the run's
+    // "fix in the implementer's session" choice) sends its brief as a turn.
+    const continuesId = stageContinues(stage) ?? (stage.role === "fixer" && run.fixInSession ? run.fixInSession : undefined);
+    const continueSession = opts?.continue
+      ? this.poolSessionById(opts.continue.sessionId)
+      : continuesId
+        ? this.poolSessionById(run.executed.filter((e) => e.stageId === continuesId).slice(-1)[0]?.sessionId)
+        : undefined;
+    const continueMessage = opts?.continue?.message
+      ?? (continueSession ? renderBriefing(makeBriefing({ ...prepared.brief, runId: run.runId, step: current.ordinal }), prepared.role) : undefined);
+    if ((opts?.continue || continuesId) && !continueSession) {
+      this.host.appendLine(`[workflow] ${stage.id}: the session to continue is gone; starting a fresh one`);
+    }
     this.setStatus(session, "working");
     const started = Date.now();
-    let outcome = await this.runAgentRole(
-      role,
-      brief,
-      "workflow-stage",
-      session,
-      origin,
-      {
-        runId: run.runId,
-        step: current.ordinal,
-        cwd: run.worktree ?? run.cwd,
-        stage: { stageId: stage.id, allowSubagents: stage.allowSubagents === true },
-      },
-    );
-    if (
-      outcome.outcome === "failed"
-      && (classifyLimitError(role.provider, outcome.detail || "") === "quota"
-        || classifyLimitError(role.provider, outcome.detail || "") === "rate")
-    ) {
-      session.workflowRun = markExhausted(session.workflowRun ?? run, role.provider);
-      const next = nextFailoverProvider(
-        session.workflowRun.exhausted,
-        this.usableProviders(),
-      );
+    let role = prepared.role;
+    let switchedFrom: AcpProvider | undefined;
+    let outcome = await this.runStageRole(session, origin, run, stage, current, role, prepared, continueSession, continueMessage);
+    // C-16 / F-08: a usage limit never switches silently.
+    const limitKind = outcome.outcome === "failed" ? classifyLimitError(role.provider, outcome.detail || "") : null;
+    if (limitKind === "quota" || limitKind === "rate") {
+      const exhaustedRun = markExhausted(session.workflowRun ?? run, role.provider);
+      session.workflowRun = { ...exhaustedRun, exhaustedAt: { ...(exhaustedRun.exhaustedAt ?? {}), [role.provider]: Date.now() } };
+      const onLimit = this.companionsSetting<string>("crew.onLimit", "ask") === "switch" ? "switch" : "ask";
+      const next = onLimit === "switch" ? nextFailoverProvider(session.workflowRun.exhausted, this.usableProviders()) : undefined;
       if (next) {
-        outcome = await this.runAgentRole(
-          { ...role, provider: next },
-          brief,
-          "workflow-stage",
-          session,
-          origin,
-          {
-            runId: run.runId,
-            step: current.ordinal,
-            cwd: run.worktree ?? run.cwd,
-            stage: { stageId: stage.id, allowSubagents: stage.allowSubagents === true },
-          },
-        );
+        const text = `${stage.title} ran on ${providerDisplayName(next)} after ${providerDisplayName(role.provider)} hit its usage limit.`;
+        this.emit(session, { type: "hostNotice", level: "warning", text });
+        switchedFrom = role.provider;
+        role = { ...role, provider: next, model: undefined, effort: role.effort };
+        outcome = await this.runStageRole(session, origin, run, stage, current, role, prepared, undefined, undefined);
+      } else {
+        await this.stopAtLimitGate(session, def, run, stage, current, role.provider, outcome);
+        return;
       }
     }
     const live = session.workflowRun ?? run;
-    if (outcome.sessionId) {
-      session.workflowRun = bindStageSession(live, outcome.sessionId);
-    }
+    if (outcome.sessionId) session.workflowRun = bindStageSession(live, outcome.sessionId);
     let verify: { command: string; exitCode: number; output: string } | undefined;
-    if (run.verify && (stage.profile === "scoped-edit" || stage.profile === "inherit") && outcome.outcome === "completed") {
+    if (run.verify && isWriteProfile(stage.profile) && outcome.outcome === "completed") {
       const result = await this.runCrewVerify(run.verify, run.worktree ?? run.cwd);
       verify = { command: run.verify, exitCode: result.code, output: result.output };
     }
-    const status =
-      outcome.outcome === "cancelled" ? "interrupted" as const
-        : outcome.outcome === "failed" ? "failed" as const
-          : "done" as const;
+    const status = outcome.outcome === "cancelled" ? "interrupted" as const
+      : outcome.outcome === "failed" ? "failed" as const
+        : "done" as const;
     const packet = buildHandoffPacket({
       runId: run.runId,
       stageId: stage.id,
@@ -3022,7 +3535,7 @@ export class GrokSidebar {
         provider: role.provider,
         ...(role.model ? { model: role.model } : {}),
         ...(role.effort ? { effort: role.effort } : {}),
-        modelVerified: verdict.ok ? verdict.modelVerified : false,
+        modelVerified: switchedFrom ? false : prepared.modelVerified,
       },
       status,
       rawReply: outcome.rawReply ?? outcome.summary,
@@ -3030,32 +3543,430 @@ export class GrokSidebar {
       filesObserved: outcome.filesObserved,
       reconciliation: outcome.reconciliation,
       ...(verify ? { verify } : {}),
-      userNotes: live.gate?.userNotes,
+      userNotes: current.userNotes,
       tokens: outcome.totalTokens,
       durationMs: outcome.durationMs || (Date.now() - started),
       resultPath: this.agentRuns.resultPath(run.runId, current.ordinal, "stage"),
       contract: def.contracts[stage.contract],
     });
+    await this.finishWorkflowStage(session, origin, def, switchedFrom ? { ...packet, switchedFrom } : packet);
+  }
+
+  /** Resolve who runs a stage and build its brief and overlay (C-01, C-03). */
+  private prepareStageRun(
+    session: Session,
+    def: WorkflowDefinition,
+    run: WorkflowRun,
+    stage: WorkflowStage,
+    hint: { provider: AcpProvider; model?: string; effort?: string } | undefined,
+    overrides?: { scopeGlobs?: string[]; task?: string; title?: string },
+  ): { role: AgentRole; brief: BriefingInput; scope: StageScope; modelVerified: boolean } | { error: string; provider: AcpProvider } {
+    const current = run.current!;
+    const roles = this.agentRoleSet(this.sessionCwd(session));
+    const roleRef = def.roles[stage.role];
+    const named = roleRef && "ref" in roleRef ? roleRef.ref : stage.role;
+    const inline = roleRef && "inline" in roleRef ? roleRef.inline : undefined;
+    const template = findAgentRole(roles, named);
+    const lineup = run.lineup?.[stage.id];
+    const requested = {
+      provider: hint?.provider ?? stage.target?.provider ?? lineup?.provider ?? template?.provider ?? session.provider,
+      ...(hint?.model || stage.target?.model || lineup?.model || template?.model
+        ? { model: hint?.model ?? stage.target?.model ?? lineup?.model ?? template?.model }
+        : {}),
+      ...(hint?.effort || stage.target?.effort || lineup?.effort || template?.effort
+        ? { effort: (hint?.effort ?? stage.target?.effort ?? lineup?.effort ?? template?.effort) as never }
+        : {}),
+      profile: stage.profile,
+      runMode: stageRunMode(stage),
+    };
+    const verdict = resolveTarget(requested, this.crewEligibilityInput(session));
+    if (!verdict.ok) return { error: verdict.message, provider: requested.provider };
+    const role: AgentRole = {
+      ...(template ?? {
+        name: stage.role,
+        whenToUse: inline?.whenToUse ?? stage.title,
+        ...(inline?.systemPreamble ? { systemPreamble: inline.systemPreamble } : {}),
+        source: "builtin" as const,
+      }),
+      name: stage.role,
+      provider: verdict.target.provider,
+      ...(verdict.target.model ? { model: verdict.target.model } : {}),
+      ...(verdict.target.effort ? { effort: verdict.target.effort } : {}),
+      mode: stageRunMode(stage),
+    };
+    const packets = this.packetMap(run.runId);
+    // C-01 / D15: the stage's profile and scope are enforced by an overlay on
+    // the stage session, after the role's own lines (last match wins; deny and
+    // the safety floor still win). Read-only is the deny overlay, not a prompt.
+    const resolved = resolveStageScope(stage, packets, run.attachedFiles);
+    const scope: StageScope = overrides?.scopeGlobs
+      ? { globs: overrides.scopeGlobs, sources: ["plan step"], empty: overrides.scopeGlobs.length === 0 }
+      : resolved;
+    const overlay = stage.profile === "scoped-edit" && current.allowAnywhere
+      ? []
+      : subagentPermissionOverlay(stage.profile, scope.globs, this.companionsSetting<string[]>("subagents.readOnlyCommandAllowList", []));
+    role.permissions = [...(role.permissions ?? []), ...overlay];
+    if (stage.profile === "scoped-edit") {
+      this.host.appendLine(
+        `[workflow] ${stage.id}: scope ${current.allowAnywhere ? "anywhere (allowed at the gate)" : scope.globs.length ? scope.globs.join(", ") : "empty — every edit asks"}`,
+      );
+    }
+    const brief = briefingFromContract({
+      runId: run.runId,
+      step: current.ordinal,
+      idea: run.idea,
+      stage,
+      def,
+      packets,
+      userNotes: current.userNotes,
+      attachedFiles: run.attachedFiles,
+      verifyCommand: run.verify,
+      ignoredFindings: run.ignoredFindings,
+    });
+    const finalBrief: BriefingInput = overrides?.task
+      ? { ...brief, task: `${overrides.task}\n\n${brief.task}`, ...(overrides.scopeGlobs ? { files: [...new Set([...overrides.scopeGlobs, ...(brief.files ?? [])])] } : {}) }
+      : brief;
+    return { role, brief: finalBrief, scope, modelVerified: verdict.modelVerified };
+  }
+
+  /** One runAgentRole for a stage (or a step / panel member of it). */
+  private runStageRole(
+    session: Session,
+    origin: MsgOrigin,
+    run: WorkflowRun,
+    stage: WorkflowStage,
+    current: NonNullable<WorkflowRun["current"]>,
+    role: AgentRole,
+    prepared: { scope: StageScope; brief: BriefingInput },
+    continueSession: Session | undefined,
+    continueMessage: string | undefined,
+    sub?: { step: number; cwd?: string },
+  ): ReturnType<GrokSidebar["runAgentRole"]> {
+    return this.runAgentRole(role, prepared.brief, "workflow-stage", session, origin, {
+      runId: run.runId,
+      step: sub?.step ?? current.ordinal,
+      cwd: sub?.cwd ?? run.worktree ?? run.cwd,
+      stage: {
+        stageId: stage.id,
+        allowSubagents: stage.allowSubagents === true,
+        ...(stage.profile === "scoped-edit" && !current.allowAnywhere ? { scope: prepared.scope.globs } : {}),
+        ...(sub ? { subStep: true } : {}),
+      },
+      ...(continueSession && continueMessage ? { continueSession, continueMessage } : {}),
+    });
+  }
+
+  /**
+   * Record a stage's packet, move the run, and preselect who runs next.
+   * Auto-proceeds only where the run's autonomy allows it (C-05, D6).
+   */
+  private async finishWorkflowStage(session: Session, origin: MsgOrigin, def: WorkflowDefinition, packet: HandoffPacket): Promise<void> {
+    const live = session.workflowRun;
+    if (!live) return;
     try {
-      this.workflowRuns().writeHandoff(run.runId, current.ordinal, packet);
+      this.workflowRuns().writeHandoff(live.runId, packet.stageOrdinal, packet);
     } catch (error) {
       this.host.appendLine(`[workflow] could not write handoff: ${(error as Error).message}`);
     }
-    this.workflowStore().packets.set(`${run.runId}:${current.ordinal}`, packet);
-    const after = applyStageOutcome(
-      session.workflowRun ?? live,
-      def,
-      packet,
-      this.packetsFor(run.runId),
-      { autoStartNextStage: this.autoStartNextStage() },
-    );
-    session.workflowRun = after;
+    this.workflowStore().packets.set(`${live.runId}:${packet.stageOrdinal}`, packet);
+    this.stageStepProgress.delete(live.runId);
+    const after = applyStageOutcome(live, def, packet, this.packetsFor(live.runId), {
+      autoStartNextStage: false,
+      autonomy: this.workflowAutonomy(live),
+    });
+    session.workflowRun = this.withGatePreselection(session, after, def);
     this.persistWorkflowRun(session);
     this.emitWorkflowRun(session);
-    if (after.status === "done") this.emitReviewCenter(session);
-    if (after.gate?.autoProceed && after.status === "at-gate" && after.gate.nextStageId && !isReservedTarget(after.gate.nextStageId)) {
-      await this.handleWorkflowGateAction(session, origin, { type: "start", nextStageId: after.gate.nextStageId });
+    if (session.workflowRun.status === "done") this.finishWorkflowRun(session, def);
+    const gate = session.workflowRun.gate;
+    if (gate?.autoProceed && session.workflowRun.status === "at-gate" && gate.nextStageId && !isReservedTarget(gate.nextStageId)) {
+      await this.handleWorkflowGateAction(session, origin, {
+        type: "start",
+        nextStageId: gate.nextStageId,
+        ...(gate.preselectedTarget ? { target: gate.preselectedTarget } : {}),
+      });
     }
+  }
+
+  /** C-16 (`onLimit: "ask"`): stop the run at a limit gate with the choices. */
+  private async stopAtLimitGate(
+    session: Session,
+    def: WorkflowDefinition,
+    run: WorkflowRun,
+    stage: WorkflowStage,
+    current: NonNullable<WorkflowRun["current"]>,
+    provider: AcpProvider,
+    outcome: Awaited<ReturnType<GrokSidebar["runAgentRole"]>>,
+  ): Promise<void> {
+    const live = session.workflowRun ?? run;
+    const next: WorkflowRun = {
+      ...live,
+      status: "at-gate",
+      gate: {
+        proposedNext: [stage.id, "$pause", "$cancel"],
+        nextStageId: stage.id,
+        reason: `${providerDisplayName(provider)} hit its usage limit during ${stage.title}.`,
+        kind: "limit",
+        forcedManual: ["limit"],
+        limitProvider: provider,
+      },
+    };
+    delete next.current;
+    this.host.appendLine(`[workflow] ${stage.id} stopped at the limit gate (${provider}): ${outcome.detail ?? ""}`);
+    session.workflowRun = this.withGatePreselection(session, next, def);
+    this.persistWorkflowRun(session);
+    this.emitWorkflowRun(session);
+    void current;
+  }
+
+  /** The plan steps a per-plan-step stage walks: the latest plan packet's (edited, if edited). */
+  private planStepsFor(run: WorkflowRun): HandoffPlanStep[] {
+    const withSteps = this.packetsFor(run.runId).filter((p) => p.planSteps?.length);
+    return withSteps.length ? withSteps[withSteps.length - 1]!.planSteps! : [];
+  }
+
+  /**
+   * C-12: the stage runs once per plan step, each with a brief that holds
+   * only that step (the whole plan stays as context) and a scope of that
+   * step's files. Sequential by default; with `parallel: true` independent
+   * steps (disjoint files) share a wave, each in its own worktree, applied
+   * file-by-file afterwards.
+   */
+  private async executePerPlanStepStage(
+    session: Session,
+    origin: MsgOrigin,
+    def: WorkflowDefinition,
+    run: WorkflowRun,
+    stage: WorkflowStage,
+    hint: { provider: AcpProvider; model?: string; effort?: string } | undefined,
+  ): Promise<void> {
+    const current = run.current!;
+    const steps = this.planStepsFor(run);
+    const started = Date.now();
+    let walker = makeCrewRun({
+      runId: run.runId,
+      goal: run.idea,
+      cwd: run.worktree ?? run.cwd,
+      steps: steps.map((s, i) => ({
+        index: i + 1,
+        title: s.title,
+        planEntryHint: s.id,
+        role: stage.role,
+        status: "pending" as const,
+        filesReported: [...(s.files ?? [])],
+        filesObserved: [],
+      })),
+      parallel: stage.parallel === true,
+    });
+    walker = setCrewStatus(walker, "running");
+    const results: Array<{ step: HandoffPlanStep; outcome: Awaited<ReturnType<GrokSidebar["runAgentRole"]>>; verify?: { command: string; exitCode: number; output: string } }> = [];
+    let failed = false;
+    let role: AgentRole | undefined;
+    let modelVerified = false;
+    while (walker.status === "running") {
+      const cap = parallelSlotCap({ maxLive: GrokSidebar.MAX_LIVE_SESSIONS, unreapable: this.crewUnreapableCount() });
+      const wave = nextIndependentSteps(walker, { parallel: stage.parallel === true, cap });
+      if (!wave.length) break;
+      const doneCount = walker.steps.filter((s) => s.status === "done").length;
+      this.stageStepProgress.set(run.runId, `step ${doneCount + 1}/${steps.length}`);
+      this.emitWorkflowRun(session);
+      const runOne = async (crewStep: typeof wave[number]) => {
+        const planStep = steps[crewStep.index - 1]!;
+        const prepared = this.prepareStageRun(session, def, run, stage, hint, {
+          scopeGlobs: planStep.files ?? [],
+          task: `Do ONLY plan step ${planStep.id}: ${planStep.title}.${planStep.acceptance ? ` Done when: ${planStep.acceptance}.` : ""} `
+            + "The whole plan is below for context; the other steps are someone else's.",
+        });
+        if ("error" in prepared) return { crewStep, planStep, error: prepared.error };
+        role = prepared.role;
+        modelVerified = prepared.modelVerified;
+        let stepCwd = run.worktree ?? run.cwd;
+        let wt: { path: string; label: string; sourceGitRoot: string } | undefined;
+        if (stage.parallel && wave.length > 1) {
+          const made = await this.createCrewWorktree(stepCwd, `crew-${run.runId.slice(-8)}-${current.ordinal}-${crewStep.index}`);
+          if (!("error" in made)) {
+            wt = made;
+            stepCwd = made.path;
+          }
+        }
+        const outcome = await this.runStageRole(session, origin, run, stage, current, prepared.role, prepared, undefined, undefined, {
+          step: current.ordinal * 100 + crewStep.index,
+          cwd: stepCwd,
+        });
+        if (wt) await this.applyCrewWorktree(session, wt);
+        let verify: { command: string; exitCode: number; output: string } | undefined;
+        if (run.verify && stage.verifyEach && outcome.outcome === "completed") {
+          const r = await this.runCrewVerify(run.verify, run.worktree ?? run.cwd);
+          verify = { command: run.verify, exitCode: r.code, output: r.output };
+        }
+        return { crewStep, planStep, outcome, verify };
+      };
+      for (const s of wave) walker = startCrewStep(walker, s.index);
+      const settled = await Promise.all(wave.map(runOne));
+      for (const r of settled) {
+        if ("error" in r && r.error) {
+          walker = applyStepOutcome(walker, r.crewStep.index, { status: "failed", detail: r.error });
+          failed = true;
+          continue;
+        }
+        const outcome = (r as { outcome: Awaited<ReturnType<GrokSidebar["runAgentRole"]>> }).outcome;
+        const verify = (r as { verify?: { command: string; exitCode: number; output: string } }).verify;
+        results.push({ step: r.planStep, outcome, ...(verify ? { verify } : {}) });
+        const ok = outcome.outcome === "completed" && (!verify || verify.exitCode === 0);
+        walker = applyStepOutcome(walker, r.crewStep.index, {
+          status: ok ? "done" : outcome.outcome === "cancelled" ? "cancelled" : "failed",
+          filesReported: outcome.filesReported,
+          filesObserved: outcome.filesObserved,
+          durationMs: outcome.durationMs,
+          ...(outcome.sessionId ? { sessionId: outcome.sessionId } : {}),
+        });
+        if (!ok) failed = true;
+      }
+      if (failed) break;
+    }
+    const lastVerify = [...results].reverse().find((r) => r.verify)?.verify;
+    let finalVerify = lastVerify;
+    if (!failed && run.verify && !stage.verifyEach) {
+      const r = await this.runCrewVerify(run.verify, run.worktree ?? run.cwd);
+      finalVerify = { command: run.verify, exitCode: r.code, output: r.output };
+    }
+    const cancelled = results.some((r) => r.outcome.outcome === "cancelled");
+    const union = (pick: (o: Awaited<ReturnType<GrokSidebar["runAgentRole"]>>) => readonly string[]) =>
+      [...new Set(results.flatMap((r) => pick(r.outcome)))];
+    const doneSteps = walker.steps.filter((s) => s.status === "done").length;
+    const summary = [
+      `${doneSteps}/${steps.length} plan steps done${failed ? `; stopped at step ${walker.steps.find((s) => s.status === "failed")?.index ?? "?"}` : ""}.`,
+      ...results.map((r) => `- ${r.step.id} ${r.step.title}: ${r.outcome.summary || r.outcome.outcome}`),
+    ].join("\n");
+    const tokens = results.every((r) => typeof r.outcome.totalTokens === "number")
+      ? results.reduce((sum, r) => sum + (r.outcome.totalTokens ?? 0), 0)
+      : undefined;
+    const reconciliation = {
+      touched: union((o) => o.reconciliation?.touched ?? []),
+      unreported: union((o) => o.reconciliation?.unreported ?? []),
+      claimedOnly: union((o) => o.reconciliation?.claimedOnly ?? []),
+    };
+    const packet = buildHandoffPacket({
+      runId: run.runId,
+      stageId: stage.id,
+      stageOrdinal: current.ordinal,
+      visit: current.visit,
+      role: stage.role,
+      target: {
+        provider: role?.provider ?? hint?.provider ?? session.provider,
+        ...(role?.model ? { model: role.model } : {}),
+        ...(role?.effort ? { effort: role.effort } : {}),
+        modelVerified,
+      },
+      status: cancelled ? "interrupted" : failed ? "failed" : "done",
+      rawReply: [
+        summary,
+        "```companions-result",
+        JSON.stringify({ summary, filesChanged: union((o) => o.filesReported) }),
+        "```",
+      ].join("\n"),
+      filesReported: union((o) => o.filesReported),
+      filesObserved: union((o) => o.filesObserved),
+      reconciliation,
+      ...(finalVerify ? { verify: finalVerify } : {}),
+      userNotes: current.userNotes,
+      ...(typeof tokens === "number" ? { tokens } : {}),
+      durationMs: Date.now() - started,
+      resultPath: this.agentRuns.resultPath(run.runId, current.ordinal, "stage"),
+      contract: def.contracts[stage.contract],
+    });
+    const stepsRecord = walker.steps.map((s) => ({
+      id: steps[s.index - 1]?.id ?? String(s.index),
+      title: s.title,
+      status: (s.status === "done" ? "done" : s.status === "failed" ? "failed" : "skipped") as HandoffPacket["status"],
+      files: [...s.filesObserved],
+    }));
+    try {
+      this.agentRuns.writeResult(run.runId, current.ordinal, `${summary}\n`, "stage");
+    } catch { /* the per-step results are on disk; the summary is a convenience */ }
+    await this.finishWorkflowStage(session, origin, def, { ...packet, steps: stepsRecord });
+  }
+
+  /**
+   * C-13: a review panel — N read-only sessions with the same brief, in
+   * parallel, merged deterministically (strictest verdict, de-duplicated
+   * findings that remember who reported them).
+   */
+  private async executePanelStage(
+    session: Session,
+    origin: MsgOrigin,
+    def: WorkflowDefinition,
+    run: WorkflowRun,
+    stage: WorkflowStage,
+    hint: { provider: AcpProvider; model?: string; effort?: string } | undefined,
+  ): Promise<void> {
+    const current = run.current!;
+    const fan = stage.fanOut!;
+    const first = this.prepareStageRun(session, def, run, stage, hint);
+    if ("error" in first) {
+      this.emit(session, { type: "hostNotice", level: "warning", text: first.error });
+      await this.finishWorkflowStage(session, origin, def, buildHandoffPacket({
+        runId: run.runId, stageId: stage.id, stageOrdinal: current.ordinal, visit: current.visit, role: stage.role,
+        target: { provider: first.provider, modelVerified: false }, status: "failed", rawReply: first.error, durationMs: 0,
+        resultPath: this.agentRuns.resultPath(run.runId, current.ordinal, "stage"),
+      }));
+      return;
+    }
+    const eligible = listEligibleTargets(this.crewEligibilityInput(session), {}).targets.map((t) => ({ provider: t.provider }));
+    const cap = Math.max(1, parallelSlotCap({ maxLive: GrokSidebar.MAX_LIVE_SESSIONS, unreapable: this.crewUnreapableCount() }));
+    const targets = panelTargets({ provider: first.role.provider }, eligible, Math.min(fan.count, cap), fan.distinctProviders);
+    if (targets.length < fan.count) {
+      this.agentNotice(session, "info", `${stage.title}: ${targets.length} of ${fan.count} reviewers can run (companions or free sessions are short).`);
+    }
+    this.setStatus(session, "working");
+    const started = Date.now();
+    const members = await Promise.all(targets.map(async (target, i) => {
+      const prepared = i === 0 ? first : this.prepareStageRun(session, def, run, stage, target);
+      if ("error" in prepared) return undefined;
+      const outcome = await this.runStageRole(session, origin, run, stage, current, prepared.role, prepared, undefined, undefined, {
+        step: current.ordinal * 100 + i + 1,
+      });
+      return { role: prepared.role, outcome, modelVerified: prepared.modelVerified };
+    }));
+    const ran = members.filter((m): m is NonNullable<typeof m> => !!m);
+    const packets = ran.map((m, i) => buildHandoffPacket({
+      runId: run.runId,
+      stageId: stage.id,
+      stageOrdinal: current.ordinal,
+      visit: current.visit,
+      role: stage.role,
+      target: {
+        provider: m.role.provider,
+        ...(m.role.model ? { model: m.role.model } : {}),
+        ...(m.role.effort ? { effort: m.role.effort } : {}),
+        modelVerified: m.modelVerified,
+      },
+      status: m.outcome.outcome === "cancelled" ? "interrupted" : m.outcome.outcome === "failed" ? "failed" : "done",
+      rawReply: m.outcome.rawReply ?? m.outcome.summary,
+      filesReported: m.outcome.filesReported,
+      filesObserved: m.outcome.filesObserved,
+      reconciliation: m.outcome.reconciliation,
+      userNotes: current.userNotes,
+      tokens: m.outcome.totalTokens,
+      durationMs: m.outcome.durationMs,
+      resultPath: this.agentRuns.resultPath(run.runId, current.ordinal * 100 + i + 1, "step"),
+      contract: def.contracts[stage.contract],
+    }));
+    if (!packets.length) {
+      await this.finishWorkflowStage(session, origin, def, buildHandoffPacket({
+        runId: run.runId, stageId: stage.id, stageOrdinal: current.ordinal, visit: current.visit, role: stage.role,
+        target: { provider: first.role.provider, modelVerified: false }, status: "failed", rawReply: "No reviewer could run.",
+        durationMs: Date.now() - started, resultPath: this.agentRuns.resultPath(run.runId, current.ordinal, "stage"),
+      }));
+      return;
+    }
+    const reviewers = ran.map((m) => `${providerDisplayName(m.role.provider)}${m.role.model ? ` ${m.role.model}` : ""}`);
+    const merged = mergeReviewPackets(packets, reviewers);
+    const packet = capHandoffPacket({ ...merged, resultPath: this.agentRuns.resultPath(run.runId, current.ordinal, "stage") });
+    try {
+      this.agentRuns.writeResult(run.runId, current.ordinal, `${packet.summary}\n`, "stage");
+    } catch { /* members' results are on disk */ }
+    await this.finishWorkflowStage(session, origin, def, packet);
   }
 
   private packetMap(runId: string): Map<string, HandoffPacket> {
@@ -3070,20 +3981,158 @@ export class GrokSidebar {
       .sort((a, b) => a.stageOrdinal - b.stageOrdinal);
   }
 
+  /**
+   * "Revert all" for a Crew run: every writing stage, newest first, each from
+   * its own session's checkpoints (the stages wrote in their sessions, not in
+   * the Crew session). Same conflict rule as everywhere: a file changed since
+   * is asked about, never overwritten silently.
+   */
   private async revertWorkflowRun(session: Session): Promise<void> {
     const run = session.workflowRun;
     if (!run) return;
-    try {
-      await this.reviewRevertAll(session, "session");
-    } catch (error) {
-      this.host.appendLine(`[workflow] revert failed: ${(error as Error).message}`);
+    const def = this.workflowStore().defs.get(run.runId) ?? IDEA_TO_DONE;
+    const writing = [...run.executed]
+      .filter((e) => {
+        const stage = findStage(def, e.stageId);
+        return stage && isWriteProfile(stage.profile) && e.sessionId && !(run.reverted ?? []).includes(e.ordinal);
+      })
+      .sort((a, b) => b.ordinal - a.ordinal);
+    const reverted: number[] = [];
+    for (const entry of writing) {
+      const ok = await this.revertStageCheckpoints(session, entry.sessionId!, run.worktree ?? run.cwd,
+        `${findStage(def, entry.stageId)?.title ?? entry.stageId} (stage ${entry.ordinal})`);
+      if (ok === "cancelled") break;
+      if (ok === "reverted") reverted.push(entry.ordinal);
     }
-    session.workflowRun = applyGateAction(run, this.workflowStore().defs.get(run.runId) ?? IDEA_TO_DONE, {
-      type: "cancel",
-      reason: "Cancelled; changes reverted.",
-    }, Date.now());
+    const base = session.workflowRun ?? run;
+    session.workflowRun = applyGateAction(
+      { ...base, reverted: [...new Set([...(base.reverted ?? []), ...reverted])] },
+      def,
+      { type: "cancel", reason: "Cancelled; changes reverted." },
+      Date.now(),
+    );
     this.persistWorkflowRun(session);
     this.emitWorkflowRun(session);
+  }
+
+  /** C-10: roll back one stage; the gate then offers to run it again. */
+  private async revertWorkflowStage(session: Session, def: WorkflowDefinition, ordinal: number): Promise<void> {
+    const run = session.workflowRun;
+    if (!run || run.status === "running") return;
+    const entry = run.executed.find((e) => e.ordinal === ordinal);
+    const stage = entry ? findStage(def, entry.stageId) : undefined;
+    if (!entry || !stage || !entry.sessionId || !isWriteProfile(stage.profile)) {
+      this.agentNotice(session, "warning", "That stage changed no files that can be reverted.");
+      return;
+    }
+    const later = run.executed.filter((e) => e.ordinal > ordinal && e.sessionId && !(run.reverted ?? []).includes(e.ordinal))
+      .filter((e) => { const s = findStage(def, e.stageId); return s && isWriteProfile(s.profile); });
+    if (later.length) {
+      const ok = await this.confirmInChat(session, {
+        title: `Revert ${stage.title}?`,
+        body: `${later.length} later stage(s) also changed files and may build on it. Their files are only restored where they did not change since — anything else is asked about.`,
+        confirmLabel: `Revert ${stage.title}`,
+        danger: true,
+      });
+      if (!ok) return;
+    }
+    const result = await this.revertStageCheckpoints(session, entry.sessionId, run.worktree ?? run.cwd, `${stage.title} (stage ${ordinal})`);
+    if (result !== "reverted") return;
+    const base = session.workflowRun ?? run;
+    session.workflowRun = {
+      ...base,
+      reverted: [...new Set([...(base.reverted ?? []), ordinal])],
+      status: base.status === "done" ? "at-gate" : base.status,
+      gate: {
+        proposedNext: [stage.id, "$done", "$cancel"],
+        nextStageId: stage.id,
+        reason: `${stage.title} was reverted. Rerun it, finish, or cancel.`,
+        kind: "normal",
+      },
+    };
+    session.workflowRun = this.withGatePreselection(session, session.workflowRun, def);
+    this.persistWorkflowRun(session);
+    this.emitWorkflowRun(session);
+  }
+
+  /**
+   * Restore the files one stage session changed, from that session's AP-08
+   * checkpoints. Dialogs appear in `ui` (the Crew session). Works whether or
+   * not the stage session is still live — the checkpoints are keyed by id.
+   */
+  private async revertStageCheckpoints(
+    ui: Session,
+    sessionId: string,
+    cwd: string,
+    label: string,
+  ): Promise<"reverted" | "nothing" | "cancelled" | "failed"> {
+    if (!this.checkpointStore) {
+      this.agentNotice(ui, "warning", `Can't revert ${label} — checkpoints are unavailable.`);
+      return "failed";
+    }
+    const checkpoints = this.checkpointStore.loadFrom(sessionId, 0);
+    if (!checkpoints.length) {
+      this.agentNotice(ui, "warning", `Can't revert ${label} — there is no checkpoint for it.`);
+      return "failed";
+    }
+    const merged = mergeCheckpoints(checkpoints);
+    const current = new Map<string, string | null>();
+    for (const file of merged.files) {
+      try {
+        current.set(file.relPath, fs.readFileSync(path.join(cwd, file.relPath), "utf8"));
+      } catch {
+        current.set(file.relPath, null);
+      }
+    }
+    const restore = planRestoreDetailed(merged, current);
+    const wouldTouch = restore.writes.length + restore.deletes.length + restore.conflicts.length;
+    if (wouldTouch === 0) {
+      this.agentNotice(ui, "info", `Nothing to revert for ${label} — files already match.`);
+      return "nothing";
+    }
+    let overwrite = false;
+    if (restore.conflicts.length) {
+      const ok = await this.confirmInChat(ui, {
+        title: "Files changed since this stage",
+        body: `${label}: these files were modified after the stage wrote them. Overwrite them?\n${restore.conflicts.map((f) => `• ${f}`).join("\n")}`,
+        confirmLabel: "Overwrite",
+        danger: true,
+      });
+      if (!ok) return "cancelled";
+      overwrite = true;
+    }
+    const actions = restoreActions(restore, overwrite, merged);
+    const failed: string[] = [];
+    let restored = 0;
+    for (const w of actions.writes) {
+      try {
+        const abs = path.join(cwd, w.relPath);
+        fs.mkdirSync(path.dirname(abs), { recursive: true });
+        fs.writeFileSync(abs, Buffer.from(w.blob, "utf8"));
+        restored += 1;
+      } catch (e) {
+        failed.push(`${w.relPath}: ${(e as Error).message}`);
+      }
+    }
+    for (const rel of actions.deletes) {
+      try {
+        fs.unlinkSync(path.join(cwd, rel));
+        restored += 1;
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== "ENOENT") failed.push(`${rel}: ${(e as Error).message}`);
+      }
+    }
+    const live = this.poolSessionById(sessionId);
+    if (live && !failed.length) {
+      live.reviewBlocks = [];
+      this.emitReviewCenter(live);
+    }
+    if (failed.length) {
+      this.agentNotice(ui, "warning", `Reverted ${label} partly; ${failed.length} file(s) could not be restored:\n${failed.join("\n")}`);
+      return "failed";
+    }
+    this.agentNotice(ui, "info", `Reverted ${label}: ${restored} file(s) restored.`);
+    return "reverted";
   }
 
   private async handleCrewSessionInput(text: string, session: Session, origin: MsgOrigin): Promise<void> {
@@ -3094,10 +4143,10 @@ export class GrokSidebar {
       return;
     }
     if (run.status === "running") {
-      const live = (session.crewLive ?? [])[0];
-      if (live?.roleSession) {
-        await this.handleSend(text, false, live.roleSession, origin);
-      }
+      // X-03 / F-09: never silently into the hidden stage. The webview asks
+      // "send to the stage, or keep as a note"; a client that did not ask
+      // steers, and says so in the transcript.
+      await this.sendToRunningStage(session, text, "steer");
       return;
     }
     const parsed = parseGateMessage(text);
@@ -3125,6 +4174,10 @@ export class GrokSidebar {
     nextStageId?: string;
     target?: { provider: AcpProvider; model?: string; effort?: string };
     notes?: string;
+    allowAnywhere?: boolean;
+    autonomy?: string;
+    value?: boolean;
+    findings?: string[];
   }): GateAction | undefined {
     if (msg.action === "pause") return { type: "pause", at: Date.now() };
     if (msg.action === "cancel") return { type: "cancel" };
@@ -3138,12 +4191,18 @@ export class GrokSidebar {
     if (msg.action === "changeWorkflow") return { type: "changeWorkflow" };
     if (msg.action === "revertAll") return { type: "revertAll" };
     if (msg.action === "keepChanges") return { type: "keepChanges" };
+    if (msg.action === "setAutonomy" && (msg.autonomy === "step" || msg.autonomy === "stop-on-problems" || msg.autonomy === "autopilot")) {
+      return { type: "setAutonomy", autonomy: msg.autonomy };
+    }
+    if (msg.action === "pauseAfterStage") return { type: "pauseAfterStage", value: msg.value !== false };
+    if (msg.action === "selectFindings") return { type: "selectFindings", keep: Array.isArray(msg.findings) ? msg.findings.map(String) : [] };
     if (msg.action === "start") {
       return {
         type: "start",
         ...(msg.nextStageId ? { nextStageId: msg.nextStageId } : {}),
         ...(msg.target ? { target: msg.target as never } : {}),
         ...(msg.notes ? { notes: msg.notes } : {}),
+        ...(msg.allowAnywhere === true ? { allowAnywhere: true } : {}),
       };
     }
     return undefined;
@@ -3153,12 +4212,7 @@ export class GrokSidebar {
     origin: MsgOrigin,
     idea: string,
     workflowName: string,
-    options?: {
-      worktree?: boolean;
-      verify?: string;
-      gatePolicy?: "ask" | "workflow";
-      firstTarget?: { provider: AcpProvider; model?: string; effort?: string };
-    },
+    options?: CrewStartOptions,
   ): Promise<void> {
     await this.newFocusedSession(origin);
     this.focused.sessionType = "crew";
@@ -3939,6 +4993,35 @@ export class GrokSidebar {
   }
 
   /**
+   * K-04: a nearly full conversation continues in a fresh session on the same
+   * companion and model. The first message is derived like a handoff — goal,
+   * open steps, changed files — never the transcript.
+   */
+  private async continueInFreshSession(session: Session, origin: MsgOrigin): Promise<void> {
+    const derived = deriveBriefing(this.buildThreadContext(session, "handoff"));
+    if (derived.kind === "refused") {
+      this.agentNotice(session, "info", derived.reason);
+      return;
+    }
+    const prompt = renderFreshSessionPrompt(derived.briefing);
+    const provider = session.provider;
+    const model = session.client?.currentModelId;
+    const cwd = this.sessionCwd(session);
+    this.parkFocused();
+    const fresh = this.newLocalSession();
+    this.setSessionCwd(fresh, cwd, this.workspaceRoot());
+    fresh.provider = provider;
+    if (model) fresh.startOverrides = { ...(fresh.startOverrides ?? {}), model };
+    this.focused = fresh;
+    this.pool.add(fresh);
+    this.emit(fresh, { type: "clearMessages" });
+    await this.startSession();
+    this.postSessionsList();
+    this.host.appendLine(`[context] continued in a fresh ${provider} session`);
+    await this.handleSend(prompt, false, fresh, origin);
+  }
+
+  /**
    * `/handoff [role]` and `/second-opinion [role]` — the typed form (AP-11).
    *
    * Returns true when the message was consumed here, so the caller must not
@@ -4108,6 +5191,7 @@ export class GrokSidebar {
       })(),
       subagentsEnabled: this.subagentsEnabledGlobally(),
       crewStagesMayUseSubagents: this.companionsSetting<boolean>("crew.stagesMayUseSubagents", false),
+      companionSettings: this.companionSettingsView(),
       // P6 §6.2. The user's own keyword rules, normalized on the way out so the
       // page never has to reason about a half-written entry.
       subagentRouting: parseRoutingRules(
@@ -4167,6 +5251,47 @@ export class GrokSidebar {
 
   /** Local webview + the settings TAB, like `postRoutines`. Never crosses to a
    *  remote: the frame names `~/.companions` (OUTBOUND_DISPOSITION host-local). */
+  /** The plan's new settings, as the settings page shows them (§9). */
+  private companionSettingsView(): Record<string, string | number | boolean> {
+    const grokSubagents = this.companionsSetting<string>("grok.subagents.enabled", "default");
+    return {
+      "grok.autoCompactThresholdPercent": this.grokCompactThresholdSetting(),
+      "context.nearFullPrompt": this.companionsSetting<string>("context.nearFullPrompt", "ask"),
+      "notifications.childNeedsYou": this.companionsSetting<boolean>("notifications.childNeedsYou", true) !== false,
+      "crew.stallWarningSec": normalizeStallWarningSec(this.companionsSetting<number>("crew.stallWarningSec", 300)),
+      "crew.onLimit": this.companionsSetting<string>("crew.onLimit", "ask"),
+      "crew.defaultAutonomy": this.companionsSetting<string>("crew.defaultAutonomy", "step"),
+      "subagents.writeIsolation": this.companionsSetting<string>("subagents.writeIsolation", "shared"),
+      "grok.subagents.enabled": grokSubagents,
+      "grok.subagents.maxConcurrent": Number(this.companionsSetting<number>("grok.subagents.maxConcurrent", 0)) || 0,
+      bothDelegationsHint: bothDelegationsHint(grokSubagents !== "off", this.subagentsEnabledGlobally()) ?? "",
+    };
+  }
+
+  /** The keys `setCompanionsSetting` may write, with their accepted values. */
+  private static readonly COMPANION_SETTING_KEYS: Record<string, (v: unknown) => boolean> = {
+    "grok.autoCompactThresholdPercent": (v) => typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= 99,
+    "context.nearFullPrompt": (v) => v === "ask" || v === "off",
+    "notifications.childNeedsYou": (v) => typeof v === "boolean",
+    "crew.stallWarningSec": (v) => typeof v === "number" && Number.isInteger(v) && v >= 60,
+    "crew.onLimit": (v) => v === "ask" || v === "switch",
+    "crew.defaultAutonomy": (v) => v === "step" || v === "stop-on-problems" || v === "autopilot",
+    "subagents.writeIsolation": (v) => v === "shared" || v === "worktree",
+    "grok.subagents.enabled": (v) => v === "default" || v === "on" || v === "off",
+    "grok.subagents.maxConcurrent": (v) => typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= 16,
+  };
+
+  private async setCompanionsSetting(key: string, value: unknown): Promise<void> {
+    const check = GrokSidebar.COMPANION_SETTING_KEYS[key];
+    const coerced = typeof value === "string" && /^\d+$/.test(value) ? Number(value) : value;
+    if (!check || !check(coerced)) {
+      this.host.appendLine(`[settings] refused ${key}=${JSON.stringify(value)}`);
+      return;
+    }
+    await this.host.getConfiguration("companions").update(key, coerced, "global");
+    this.postAgentRoles();
+  }
+
   private postAgentRoles(): void {
     const message = this.buildAgentRolesMessage();
     this.postLocal(message);
@@ -5984,6 +7109,9 @@ export class GrokSidebar {
           value: this.host.getConfiguration("grok").get<boolean>("telemetry.enabled", true),
         });
       }
+      if (e.affectsConfiguration("companions.grok.autoCompactThresholdPercent")) {
+        void this.offerGrokRestartForCompactThreshold();
+      }
       if (e.affectsConfiguration("grok.thumbsFeedback")) {
         this.postThumbsFeedback();
         for (const session of [this.focused, ...this.pool]) {
@@ -7085,16 +8213,18 @@ Only continue if you trust this code.`,
       });
       return;
     }
+    // S-01: a subagent writing a file another writer holds always gets a card.
+    const claimWarning = this.childWriteClaimWarning(session, req);
     // AP-07: after the plan gate, before the card. Pure decision; we only apply.
     // Plan-review cards are a verdict, not a tool grant — rules never auto-decide them.
-    if (!isPlanReviewPermission(req.toolCall?.kind) &&
+    if (!claimWarning && !isPlanReviewPermission(req.toolCall?.kind) &&
         this.applyPermissionRules(session, client, req, cwd)) {
       return;
     }
     // Auto accept is not a verdict on a plan-review card. Same rule as
     // autoApprovePendingPermissions, including after a failed mode RPC
     // that already cleared the Plan bit.
-    if (session.autoApprove && !planActive && !isPlanReviewPermission(req.toolCall?.kind)) {
+    if (!claimWarning && session.autoApprove && !planActive && !isPlanReviewPermission(req.toolCall?.kind)) {
       const opt = req.options.find((o) => o.kind === "allow_always") ??
                   req.options.find((o) => o.kind === "allow_once");
       if (opt) {
@@ -7148,6 +8278,7 @@ Only continue if you trust this code.`,
         ...(plan !== undefined ? { plan } : {}),
       },
       ...(ruleSuggestions && ruleSuggestions.length ? { ruleSuggestions } : {}),
+      ...(claimWarning ? { warning: claimWarning } : {}),
     });
     this.setStatus(session, "needs-you");
   }
@@ -7734,9 +8865,20 @@ Only continue if you trust this code.`,
    *  that JUST settled this turn's token call this, so `turnStartedAt` is
    *  always this turn's; a newer turn would have overwritten it only after
    *  beginning, and such a turn is never the one being ended here. */
-  private turnEndFields(session: Session, status: TurnEndStatus): { status: TurnEndStatus; durationMs?: number } {
+  private turnEndFields(session: Session, status: TurnEndStatus): { status: TurnEndStatus; durationMs?: number; children?: string } {
     const durationMs = turnElapsedMs(session);
-    return { status, ...(durationMs !== undefined ? { durationMs } : {}) };
+    const children = this.turnChildrenSummary(session);
+    return { status, ...(durationMs !== undefined ? { durationMs } : {}), ...(children ? { children } : {}) };
+  }
+
+  /** X-05: "3 subagents · 2m 14s · 48k tokens" — this turn's delegations, measured. */
+  private turnChildrenSummary(session: Session): string | undefined {
+    const parentId = session.activeSessionId;
+    if (!parentId || !this.subagentState) return undefined;
+    const turnId = this.currentTurnId(session);
+    return subagentTurnSummary(
+      this.subagents.forParent(parentId).filter((r) => r.spawnedInTurn === turnId && r.status !== "refused"),
+    );
   }
 
   /**
@@ -8507,6 +9649,38 @@ Only continue if you trust this code.`,
    * input box (auto-named worktree instead).
    */
   /** Command Palette / `companions.runCrew` — same as typing `/crew`. */
+  /** E-03: focus the conversation of the running (or last) Crew run. */
+  async showCrewRun(): Promise<void> {
+    const crew = [...this.pool].find((s) => s.workflowRun && s.workflowRun.status === "running")
+      ?? [...this.pool].find((s) => s.workflowRun && !isTerminalRunStatus(s.workflowRun.status))
+      ?? [...this.pool].find((s) => s.workflowRun);
+    if (!crew) {
+      void this.host.showInformationMessage("No Crew run in this window.");
+      return;
+    }
+    if (crew !== this.focused) this.focusSession(crew);
+    await this.host.revealChatView();
+  }
+
+  /** E-03 / C-05: "Pause after this stage" for the running Crew run. */
+  async pauseCrewAfterStage(): Promise<void> {
+    const crew = [...this.pool].find((s) => s.workflowRun?.status === "running");
+    if (!crew?.workflowRun) {
+      void this.host.showInformationMessage("No Crew stage is running.");
+      return;
+    }
+    const def = this.workflowStore().defs.get(crew.workflowRun.runId) ?? this.resolveWorkflow(crew, crew.workflowRun.workflowName);
+    crew.workflowRun = applyGateAction(crew.workflowRun, def, { type: "pauseAfterStage", value: true }, Date.now());
+    this.persistWorkflowRun(crew);
+    this.emitWorkflowRun(crew);
+    void this.host.showInformationMessage("The Crew run will stop at the next gate.");
+  }
+
+  /** E-03: jump to the first card that waits for the person, in any conversation. */
+  async jumpToWaitingApprovalCommand(): Promise<void> {
+    if (!this.jumpToWaitingApproval()) void this.host.showInformationMessage("Nothing is waiting for you.");
+  }
+
   async runCrewCommand(): Promise<void> {
     await this.handleCrewCommand("/crew", this.focused, "local");
   }
@@ -9918,6 +11092,58 @@ Only continue if you trust this code.`,
       sessionType: session.sessionType,
       locked: this.sessionTypeIsLocked(session),
     });
+    this.postSessionDelegation(session);
+  }
+
+  /** S-03: the composer's delegation switch, and the targets `@subagent:` offers. */
+  private postSessionDelegation(session: Session): void {
+    if (session.sessionType !== "agent" || this.hiddenReasonOf(session)) {
+      this.emit(session, { type: "sessionDelegation", value: null });
+      return;
+    }
+    const meta = this.sessionTypeMetaFor(session);
+    const enabled = session.delegationOverride?.enabled ?? meta?.subagentsEnabled ?? this.subagentsEnabledGlobally();
+    const policy = session.delegationOverride?.spawnPolicy ?? meta?.spawnPolicy ?? this.companionsSetting<string>("subagents.spawnPolicy", "auto");
+    const value = !enabled ? "off" : policy === "ask" ? "ask" : policy === "auto-read-only" ? "read-only-auto" : "auto";
+    let targets: Array<{ provider: AcpProvider; name: string; eligible: boolean; reason?: string; models?: Array<{ id: string; efforts?: string[] }> }> = [];
+    let roles: Array<{ name: string; whenToUse: string }> = [];
+    try {
+      const listing = listEligibleTargets(this.eligibilityInput(session, this.currentTurnId(session)), { includeIneligible: true, expand: "all" });
+      targets = [
+        ...listing.targets.map((t) => ({
+          provider: t.provider,
+          name: t.displayName,
+          eligible: true,
+          ...(t.models ? { models: t.models.map((m) => ({ id: m.id, ...(m.efforts ? { efforts: m.efforts } : {}) })) } : {}),
+        })),
+        ...listing.ineligible.map((row) => ({ provider: row.provider, name: providerDisplayName(row.provider), eligible: false, reason: row.message })),
+      ];
+      roles = this.agentRoleSet(this.sessionCwd(session)).roles.map((r) => ({ name: r.name, whenToUse: r.whenToUse }));
+    } catch { /* the switch still works without suggestions */ }
+    this.emit(session, {
+      type: "sessionDelegation",
+      value,
+      ...(enabled && session.client && session.companionsMcpInjected === false ? { needsRestart: true } : {}),
+      targets,
+      roles,
+    });
+  }
+
+  /** S-03: set this session's delegation from the composer. */
+  private setSessionDelegation(session: Session, value: string): void {
+    const enabled = value !== "off";
+    const spawnPolicy = value === "ask" ? "ask" as const : value === "read-only-auto" ? "auto-read-only" as const : "auto" as const;
+    session.delegationOverride = { enabled, spawnPolicy };
+    const id = session.activeSessionId;
+    if (id) {
+      const overrides = this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
+      void this.state.update(SESSION_META_KEY, {
+        ...overrides,
+        [id]: { ...(overrides[id] ?? {}), subagentsEnabled: enabled, spawnPolicy },
+      });
+      this.sessionCache.delete(id);
+    }
+    this.postSessionDelegation(session);
   }
 
   /**
@@ -9972,12 +11198,13 @@ Only continue if you trust this code.`,
     }
     this.postSessionType(session);
     if (session.sessionType === "crew") this.postWorkflowList(session);
+    // S-05: this session's subagent cards come back from their run folders.
+    this.restoreSubagentCards(session);
     if (meta?.crewRunId && !session.workflowRun) {
-      try {
-        this.restoreWorkflowRun(session, meta.crewRunId);
-      } catch (error) {
-        this.host.appendLine?.(`[workflow] could not restore run ${meta.crewRunId}: ${(error as Error).message}`);
-      }
+      const runId = meta.crewRunId;
+      void this.restoreWorkflowRun(session, runId).catch((error) => {
+        this.host.appendLine?.(`[workflow] could not restore run ${runId}: ${(error as Error).message}`);
+      });
     }
   }
 
@@ -10252,6 +11479,7 @@ Only continue if you trust this code.`,
    */
   private subagentsCouldBeUsedIn(session: Session): boolean {
     if (session.sessionType !== "agent") return false;
+    if (session.delegationOverride) return session.delegationOverride.enabled;
     const stored = this.sessionTypeMetaFor(session)?.subagentsEnabled;
     return stored ?? this.subagentsEnabledGlobally();
   }
@@ -10356,6 +11584,471 @@ Only continue if you trust this code.`,
       return this.subagents.get(id)?.label ?? "A subagent";
     }
     return undefined;
+  }
+
+  // ---------- X-01: questions from hidden children ----------
+
+  private childRelayTable?: ChildRelayTable<Session>;
+  private relayTable(): ChildRelayTable<Session> {
+    if (!this.childRelayTable) this.childRelayTable = new ChildRelayTable<Session>();
+    return this.childRelayTable;
+  }
+
+  private hiddenReasonOf(session: Session): HiddenReason | undefined {
+    return session.pendingHiddenChild?.hiddenReason ?? this.sessionTypeMetaFor(session)?.hiddenReason;
+  }
+
+  /** What a relayed card says about where it came from. */
+  private relayOriginFor(child: Session, route: string): RelayOrigin {
+    const reason = this.hiddenReasonOf(child);
+    const id = child.pendingHiddenChild?.subagentId ?? this.sessionTypeMetaFor(child)?.subagentId ?? "";
+    const kind: ChildKind = reason === "crew-stage" ? "stage" : "subagent";
+    let name: string;
+    if (reason === "crew-stage") {
+      const stageId = id.includes(":") ? id.slice(id.indexOf(":") + 1) : id;
+      const runId = id.includes(":") ? id.slice(0, id.indexOf(":")) : "";
+      const def = runId ? this.workflowState?.defs.get(runId) : undefined;
+      name = (def && findStage(def, stageId)?.title) || stageId || "Stage";
+    } else if (reason === "workflow-generator") {
+      name = "Workflow generator";
+    } else {
+      name = this.subagents.get(id)?.label ?? "Subagent";
+    }
+    return {
+      kind,
+      route,
+      scopeWord: relayScopeWord(kind),
+      label: relayOriginLabel({
+        kind,
+        name,
+        providerName: providerDisplayName(child.provider),
+        ...(child.client?.currentModelId ? { model: child.client.currentModelId } : {}),
+      }),
+    };
+  }
+
+  /**
+   * Mirror a hidden child's card into its visible ancestor, and every later
+   * frame about that card (new options, resolution). Wer zuerst antwortet
+   * gewinnt: an answer in either place resolves the child's request once, and
+   * the resolved frame then closes both cards.
+   */
+  private relayFromChild(child: Session, message: HostMsg): void {
+    if (message.type === "hostNotice" && message.level === "warning" && /^Denied by /.test(message.text)) {
+      // A rule or the safety floor refused a child's tool call: the person
+      // should see that where they look, not only in the hidden transcript.
+      if (!this.hiddenReasonOf(child)) return;
+      const ancestor = this.visibleAncestorOf(child);
+      if (ancestor === child) return;
+      const origin = this.relayOriginFor(child, "");
+      this.emit(ancestor, { type: "hostNotice", level: "warning", text: `${origin.label}: ${message.text}` });
+      return;
+    }
+    if (
+      message.type !== "permissionRequest" && message.type !== "questionRequest" && message.type !== "exitPlanRequest"
+      && message.type !== "permissionOptions" && message.type !== "permissionResolved"
+      && message.type !== "planResolved" && message.type !== "questionResolved"
+    ) return;
+    if (!this.hiddenReasonOf(child)) return;
+    const table = this.relayTable();
+    if (message.type === "permissionRequest" || message.type === "questionRequest" || message.type === "exitPlanRequest") {
+      const ancestor = this.visibleAncestorOf(child);
+      if (ancestor === child) return;
+      const kind: RelayKind = message.type;
+      const route = table.open(child, ancestor, message.req.id, kind);
+      const origin = this.relayOriginFor(child, route);
+      if (message.type === "permissionRequest") {
+        const outOfScope = this.outsideStageScope(child, message.req);
+        this.emit(ancestor, {
+          ...message,
+          req: { ...message.req, id: route },
+          origin: outOfScope ? { ...origin, outOfScope: true } : origin,
+          ...(message.ruleSuggestions ? { ruleSuggestions: childScopedSuggestions(message.ruleSuggestions) } : {}),
+        });
+      } else if (message.type === "questionRequest") {
+        this.emit(ancestor, { ...message, req: { ...message.req, id: route }, origin });
+      } else {
+        this.emit(ancestor, { ...message, req: { ...message.req, id: route }, origin });
+      }
+      if (ancestor.status !== "needs-you") {
+        ancestor.statusBeforeChildAsk = ancestor.status;
+        this.setStatus(ancestor, "needs-you");
+      }
+      this.childNeedsYouChanged(child, true);
+      this.notifyChildNeedsYou(ancestor, origin, kind);
+      return;
+    }
+    const route = table.routeFor(child, message.requestId);
+    if (!route) return;
+    const entry = table.resolve(route)!;
+    this.emit(entry.ancestor, { ...message, requestId: route } as HostMsg);
+    if (message.type === "permissionOptions") return;
+    table.close(route);
+    this.afterRelayClosed(entry.ancestor, child);
+  }
+
+  // ---------- X-02 / X-03 / X-04: watching children ----------
+
+  /** Where a child's activity feed is shown: the stage row or the subagent card. */
+  private activityOwnerOf(child: Session): import("./child-activity").ActivityOwner | undefined {
+    const reason = this.hiddenReasonOf(child);
+    const id = child.pendingHiddenChild?.subagentId ?? this.sessionTypeMetaFor(child)?.subagentId ?? "";
+    if (!id) return undefined;
+    if (reason === "crew-stage") return { kind: "stage", id };
+    if (reason === "companion-subagent") return { kind: "subagent", id };
+    return undefined;
+  }
+
+  private tapChildActivity(child: Session, message: HostMsg): void {
+    const item = activityItemFromHostMsg(message);
+    if (!item) return;
+    const owner = this.activityOwnerOf(child);
+    if (!owner) return;
+    child.lastChildActivityAt = Date.now();
+    if (child.stalled) {
+      child.stalled = false;
+      const parent = this.parentSessionOf(child);
+      if (parent?.workflowRun) this.emitWorkflowRun(parent);
+    }
+    (child.childActivityQueue ??= []).push(item);
+    if (child.childActivityTimer) return;
+    const timer = setTimeout(() => this.flushChildActivity(child), ACTIVITY_FLUSH_MS);
+    (timer as { unref?: () => void }).unref?.();
+    child.childActivityTimer = timer;
+  }
+
+  private flushChildActivity(child: Session): void {
+    child.childActivityTimer = undefined;
+    const queued = child.childActivityQueue ?? [];
+    child.childActivityQueue = [];
+    const owner = this.activityOwnerOf(child);
+    if (!owner || !queued.length) return;
+    const ancestor = this.visibleAncestorOf(child);
+    if (ancestor === child) return;
+    const items = coalesceActivity(queued);
+    this.emit(ancestor, { type: "childActivity", owner, items, lastLine: activityLastLine(items) });
+  }
+
+  /**
+   * X-03: the child exists — its session id is known now, not only at the end,
+   * so "Open transcript" and the stage row work while it runs.
+   */
+  private noteChildStarted(caller: Session, child: Session, subagentId?: string): void {
+    this.postRunningChildren();
+    const now = Date.now();
+    child.childStartedAt = now;
+    child.lastChildActivityAt = now;
+    child.stalled = false;
+    const sessionId = child.activeSessionId;
+    if (subagentId && sessionId) {
+      this.subagents.update(subagentId, { childSessionId: sessionId }, now);
+      this.postSubagentCard(caller, subagentId);
+    }
+    if (this.hiddenReasonOf(child) === "crew-stage" && caller.workflowRun?.current && sessionId) {
+      caller.workflowRun = bindStageSession(caller.workflowRun, sessionId);
+      this.persistWorkflowRun(caller);
+      this.emitWorkflowRun(caller);
+      this.ensureStallWatch();
+    }
+  }
+
+  private stallWatch?: ReturnType<typeof setInterval>;
+
+  /** X-04: one light timer while any crew stage runs. */
+  private ensureStallWatch(): void {
+    if (this.stallWatch) return;
+    const t = setInterval(() => this.checkStalls(), 15_000);
+    (t as { unref?: () => void }).unref?.();
+    this.stallWatch = t;
+  }
+
+  private checkStalls(now = Date.now()): void {
+    const warnMs = normalizeStallWarningSec(this.companionsSetting<number>("crew.stallWarningSec", 300)) * 1000;
+    let any = false;
+    for (const parent of this.pool) {
+      for (const live of parent.crewLive ?? []) {
+        any = true;
+        const child = live.roleSession;
+        if (!child.lastChildActivityAt) continue;
+        const state = stageStallState({
+          lastActivityAt: child.lastChildActivityAt,
+          now,
+          warnAfterMs: warnMs,
+          needsYou: this.childWaitsForYou(child),
+        });
+        const stalled = state === "stalled";
+        if (stalled !== !!child.stalled) {
+          child.stalled = stalled;
+          if (parent.workflowRun) this.emitWorkflowRun(parent);
+          this.postRunningChildren();
+        }
+      }
+    }
+    if (!any && this.stallWatch) {
+      clearInterval(this.stallWatch);
+      this.stallWatch = undefined;
+    }
+  }
+
+  // ---------- E-01: every running child of this window, in one place ----------
+
+  /** Grok's own subagents, from the live lifecycle rail. */
+  private noteNativeChild(session: Session, update: unknown): void {
+    const u = update as { sessionUpdate?: string; subagent_id?: string; subagentId?: string; description?: string; task?: string; name?: string };
+    const id = String(u.subagent_id ?? u.subagentId ?? "");
+    if (!id) return;
+    if (!session.nativeChildren) session.nativeChildren = new Map();
+    if (u.sessionUpdate === "subagent_spawned") {
+      session.nativeChildren.set(id, { label: String(u.description ?? u.name ?? u.task ?? "Grok subagent").slice(0, 80), startedAt: Date.now() });
+    } else {
+      session.nativeChildren.delete(id);
+    }
+    this.postRunningChildren();
+  }
+
+  private runningChildrenTimer?: ReturnType<typeof setTimeout>;
+
+  /** Debounced: children change state often; the overview needs one frame. */
+  private postRunningChildren(): void {
+    if (this.runningChildrenTimer) return;
+    const t = setTimeout(() => {
+      this.runningChildrenTimer = undefined;
+      this.post({ type: "runningChildren", ...this.runningChildrenSnapshot() });
+    }, 300);
+    (t as { unref?: () => void }).unref?.();
+    this.runningChildrenTimer = t;
+  }
+
+  private runningChildrenSnapshot(now = Date.now()): Omit<Extract<HostMsg, { type: "runningChildren" }>, "type"> {
+    type Row = { kind: "stage" | "subagent" | "native"; id: string; label: string; target: string; status: ChildStatusView; startedAt: number; tokens?: number; sessionId?: string };
+    const groups: Array<{ parentSessionId: string; parentName: string; children: Row[] }> = [];
+    let needYou = 0;
+    for (const parent of this.pool) {
+      if (this.hiddenReasonOf(parent)) continue;
+      const children: Row[] = [];
+      for (const live of parent.crewLive ?? []) {
+        const child = live.roleSession;
+        const waiting = this.childWaitsForYou(child);
+        if (waiting) needYou += 1;
+        const run = parent.workflowRun;
+        const def = run ? this.workflowStore().defs.get(run.runId) : undefined;
+        const stageId = run?.current?.stageId ?? "";
+        children.push({
+          kind: "stage",
+          id: `${run?.runId ?? live.runId}:${stageId}`,
+          label: (def && findStage(def, stageId)?.title) || live.roleName,
+          target: [providerDisplayName(child.provider), child.client?.currentModelId].filter(Boolean).join(" · "),
+          status: waiting ? "needs-you" : child.stalled ? "stalled" : "running",
+          startedAt: child.childStartedAt ?? now,
+          ...(child.activeSessionId ? { sessionId: child.activeSessionId } : {}),
+        });
+      }
+      for (const handle of parent.subagentLive ?? []) {
+        const record = this.subagents.get(handle.subagentId);
+        if (!record) continue;
+        const waiting = this.childWaitsForYou(handle.roleSession);
+        if (waiting) needYou += 1;
+        children.push({
+          kind: "subagent",
+          id: record.subagentId,
+          label: record.label,
+          target: [providerDisplayName(record.target.provider), record.target.model].filter(Boolean).join(" · "),
+          status: subagentChildStatus(record.status, { needsYou: waiting }),
+          startedAt: record.startedAt,
+          ...(typeof record.tokens === "number" ? { tokens: record.tokens } : {}),
+          ...(record.childSessionId ? { sessionId: record.childSessionId } : {}),
+        });
+      }
+      for (const [id, native] of parent.nativeChildren ?? []) {
+        children.push({ kind: "native", id, label: native.label, target: "Grok · built-in", status: "running", startedAt: native.startedAt });
+      }
+      if (children.length) {
+        groups.push({
+          parentSessionId: parent.activeSessionId ?? "",
+          parentName: this.sessionDisplayName(parent) || "This conversation",
+          children,
+        });
+      }
+    }
+    return { groups, needYou };
+  }
+
+  /** E-01 / E-03: focus the conversation holding the first open question. */
+  private jumpToWaitingApproval(): boolean {
+    const entry = this.relayTable().all()[0];
+    const holder = entry?.ancestor
+      ?? [...this.pool].find((s) => s.status === "needs-you" && !this.hiddenReasonOf(s));
+    if (!holder) return false;
+    if (holder !== this.focused && this.pool.has(holder)) this.focusSession(holder);
+    void this.host.revealChatView();
+    this.post({ type: "scrollToWaiting" });
+    return true;
+  }
+
+  private async childOverviewAction(msg: { action: string; kind?: string; id?: string; parentSessionId?: string; sessionId?: string }): Promise<void> {
+    const parent = this.poolSessionById(msg.parentSessionId);
+    if (msg.action === "jump") {
+      if (!this.jumpToWaitingApproval()) this.host.appendLine("[companions] nothing is waiting for you");
+      return;
+    }
+    if (msg.action === "open") {
+      const live = this.poolSessionById(msg.sessionId);
+      if (live) this.focusSession(live);
+      else if (parent) this.focusSession(parent);
+      return;
+    }
+    if (msg.action === "stop" && parent) {
+      if (msg.kind === "stage") {
+        for (const live of parent.crewLive ?? []) {
+          live.cancelled = true;
+          void live.roleSession.client?.cancel("stopped from the running-children overview");
+        }
+      } else if (msg.kind === "subagent" && msg.id) {
+        this.cancelSubagent(msg.id, "the user stopped it from the running-children overview");
+        this.postSubagentCard(parent, msg.id);
+        this.postSubagentTray(parent);
+      }
+      this.postRunningChildren();
+    }
+  }
+
+  /** The running stage's session of a crew parent, if any. */
+  private runningStageSession(parent: Session): Session | undefined {
+    return (parent.crewLive ?? []).find((live) => !live.cancelled)?.roleSession;
+  }
+
+  /**
+   * X-03: text for a running child. `steer` goes into the running turn
+   * (queued until the turn ends where the companion cannot steer); `note`
+   * waits for the next gate. Either way it is a visible line in the parent.
+   */
+  private async sendToRunningStage(parent: Session, text: string, mode: "steer" | "note"): Promise<void> {
+    const body = text.trim();
+    if (!body) return;
+    const run = parent.workflowRun;
+    const child = this.runningStageSession(parent);
+    const def = run ? this.workflowStore().defs.get(run.runId) : undefined;
+    const title = run?.current && def ? findStage(def, run.current.stageId)?.title ?? run.current.stageId : "the stage";
+    if (mode === "note" || !child) {
+      if (run) {
+        parent.workflowRun = { ...run, pendingNotes: [run.pendingNotes, body].filter(Boolean).join("\n") };
+        this.persistWorkflowRun(parent);
+      }
+      this.emit(parent, { type: "userMessage", text: body, chips: [] });
+      this.agentNotice(parent, "info", `→ noted for the next stage`);
+      return;
+    }
+    this.emit(parent, { type: "userMessage", text: body, chips: [] });
+    this.agentNotice(parent, "info", `→ sent to ${title}`);
+    await this.steerSend(body, child);
+  }
+
+  /** X-03: a focused hidden child says whose it is, with a way back. */
+  private postChildContext(session: Session): void {
+    const reason = this.hiddenReasonOf(session);
+    if (!reason || reason === "workflow-generator") {
+      this.emit(session, { type: "childContext", context: null });
+      return;
+    }
+    const parentId = session.pendingHiddenChild?.parentSessionId ?? this.sessionTypeMetaFor(session)?.parentSessionId ?? "";
+    const origin = this.relayOriginFor(session, "");
+    const running = session.status === "working" || session.status === "needs-you";
+    this.emit(session, {
+      type: "childContext",
+      context: {
+        kind: origin.kind,
+        label: origin.label,
+        parentSessionId: parentId,
+        running,
+        canSteer: providerCapability(session.provider, "steer").state !== "no",
+      },
+    });
+  }
+
+  /** C-01: an edit request from a scoped stage that reaches past its scope. */
+  private outsideStageScope(child: Session, req: PermissionRequest): boolean {
+    const globs = child.stageScope;
+    if (!globs) return false;
+    const facts = extractPermissionFacts(req.toolCall);
+    if (facts.kind !== "edit" || facts.paths.length === 0) return false;
+    const root = this.sessionCwd(child);
+    return !facts.paths.every((p) => globs.some((g) => pathMatchesGlob(g, p, root)));
+  }
+
+  private afterRelayClosed(ancestor: Session, child: Session): void {
+    const table = this.relayTable();
+    if (table.pendingIn(ancestor).length === 0 && ancestor.status === "needs-you") {
+      const before = ancestor.statusBeforeChildAsk;
+      ancestor.statusBeforeChildAsk = undefined;
+      // Only undo what the relay did: the ancestor's own cards keep it waiting.
+      if (ancestor.pendingPermissions.size === 0 && ancestor.pendingQuestions.size === 0) {
+        this.setStatus(ancestor, before && before !== "needs-you" ? before : "working");
+      }
+    }
+    if (table.pendingFor(child) === 0) this.childNeedsYouChanged(child, false);
+  }
+
+  /** A child ended or was torn down with cards still open: close them upstairs. */
+  private closeChildRelays(child: Session): void {
+    for (const entry of this.relayTable().closeChild(child)) {
+      if (entry.kind === "questionRequest") {
+        this.emit(entry.ancestor, { type: "questionResolved", requestId: entry.route, outcome: "closed" });
+      } else if (entry.kind === "exitPlanRequest") {
+        this.emit(entry.ancestor, { type: "planResolved", requestId: entry.route, verdict: "abandoned" });
+      } else {
+        this.emit(entry.ancestor, { type: "permissionResolved", requestId: entry.route, optionId: "" });
+      }
+      this.afterRelayClosed(entry.ancestor, child);
+    }
+  }
+
+  /** The "Needs you" state of a stage row / subagent card, and the fair clock. */
+  private childNeedsYouChanged(child: Session, needsYou: boolean): void {
+    this.postRunningChildren();
+    const reason = this.hiddenReasonOf(child);
+    const id = child.pendingHiddenChild?.subagentId ?? this.sessionTypeMetaFor(child)?.subagentId ?? "";
+    const parent = this.parentSessionOf(child);
+    if (reason === "companion-subagent") {
+      const deadline = this.subagentDeadlines?.get(id);
+      if (deadline) {
+        if (needsYou) deadline.pause(Date.now());
+        else deadline.resume(Date.now());
+        this.rearmSubagentTimer(id);
+      }
+      if (parent) this.postSubagentCard(parent, id);
+    } else if (reason === "crew-stage" && parent?.workflowRun) {
+      this.emitWorkflowRun(parent);
+    }
+  }
+
+  private childWaitsForYou(child: Session | undefined): boolean {
+    return !!child && this.relayTable().pendingFor(child) > 0;
+  }
+
+  /** One OS notification when the window is not focused (setting, default on). */
+  private notifyChildNeedsYou(ancestor: Session, origin: RelayOrigin, kind: RelayKind): void {
+    if (this.host.isWindowFocused?.() !== false) return;
+    if (this.companionsSetting<boolean>("notifications.childNeedsYou", true) === false) return;
+    const name = origin.label.replace(/^(Stage|Subagent) "/, "").replace(/".*$/, "");
+    void this.host.showInformationMessage(childNeedsYouNotice(origin.kind, name, kind), "Show").then((pick) => {
+      if (pick !== "Show") return;
+      if (ancestor !== this.focused && this.pool.has(ancestor)) this.focusSession(ancestor);
+      void this.host.revealChatView();
+    });
+  }
+
+  /**
+   * Route an answer to a relayed card back to its child. The webview only
+   * ever names the opaque route; the table knows the real request id.
+   */
+  private resolveRelayedAnswer(msg: WebviewMsg): { session: Session; msg: WebviewMsg } | undefined {
+    if (
+      msg.type !== "permissionAnswer" && msg.type !== "exitPlanAnswer" && msg.type !== "questionAnswer"
+      && msg.type !== "questionCancel" && msg.type !== "questionDraft"
+    ) return undefined;
+    const entry = this.childRelayTable?.resolve(msg.requestId);
+    if (!entry) return undefined;
+    return { session: entry.child, msg: { ...msg, requestId: entry.requestId } as WebviewMsg };
   }
 
   /**
@@ -10593,6 +12286,8 @@ Only continue if you trust this code.`,
     args: SpawnArguments,
     call: CompanionsCall,
   ): Promise<void> {
+    // `args` and `verdict` are reassigned by S-02 when the person changes
+    // the request on the approval card.
     const turnId = this.currentTurnId(session);
     const parentSessionId = session.activeSessionId ?? "";
     // §6.8: a `must` directive pins the target the agent left open. A directive
@@ -10603,7 +12298,7 @@ Only continue if you trust this code.`,
     const roleTemplate = roleName
       ? findAgentRole(this.agentRoleSet(this.sessionCwd(session)), roleName)
       : undefined;
-    const verdict = resolveTarget(
+    let verdict = resolveTarget(
       {
         // Explicit tool arguments still win; the directive fills what the agent
         // left open, which is the difference between constraining the worker
@@ -10647,7 +12342,11 @@ Only continue if you trust this code.`,
         background: args.wait === "none",
         spawnedInTurn: turnId,
         errorCode: verdict.code,
+        refusalMessage: verdict.message,
+        refusalAlternatives: verdict.alternatives.map((t) =>
+          [providerDisplayName(t.provider), t.model, t.effort ? `effort ${t.effort}` : ""].filter(Boolean).join(" · ")),
       });
+      this.postSubagentCard(session, subagentId);
       call.resolve({
         subagentId,
         ...refusalPayload(verdict.code, verdict.message, verdict.alternatives),
@@ -10659,27 +12358,47 @@ Only continue if you trust this code.`,
     // every spawn, `auto-read-only` only for one that can write. The card shows
     // the FULL task, because approving a delegation you cannot read is not an
     // approval.
-    const policy = this.companionsSetting<string>("subagents.spawnPolicy", "auto");
+    const policy = this.sessionSpawnPolicy(session);
     const needsApproval = policy === "ask"
       || (policy === "auto-read-only" && verdict.profile !== "read-only");
+    let adjustedByUser: Record<string, unknown> | undefined;
     if (needsApproval) {
-      const approved = await this.confirmInChat(session, {
-        title: `Start a subagent on ${providerDisplayName(verdict.target.provider)}?`,
-        body:
-          `${args.label ?? deriveSubagentLabel(args.task)} — ${verdict.profile}`
-          + `${verdict.target.model ? ` · ${verdict.target.model}` : ""}`
-          + `${verdict.target.effort ? ` · effort ${verdict.target.effort}` : ""}`
-          + `
-
-${args.task}`,
-        confirmLabel: "Start",
-      });
-      if (!approved) {
+      // S-02: approve as asked, or with changes — task, companion, model,
+      // effort, and a profile no wider than proposed.
+      const answer = await this.askSubagentApproval(session, args, verdict);
+      if (!answer.approved) {
         call.resolve({
           subagentId: `sa_${this.agentRuns.newRunId()}`,
           ...refusalPayload("denied-by-user", "The user did not approve this subagent.", []),
         });
         return;
+      }
+      if (answer.adjusted) {
+        adjustedByUser = answer.adjusted;
+        args = {
+          ...args,
+          ...(typeof answer.adjusted.task === "string" ? { task: answer.adjusted.task } : {}),
+          ...(isAcpProvider(answer.adjusted.provider) ? { provider: answer.adjusted.provider } : {}),
+          ...(typeof answer.adjusted.model === "string" ? { model: answer.adjusted.model || undefined } : {}),
+          ...(isEffortLevel(answer.adjusted.effort) ? { effort: answer.adjusted.effort } : {}),
+          ...(answer.adjusted.profile === "read-only" || answer.adjusted.profile === "scoped-edit" || answer.adjusted.profile === "inherit"
+            ? { profile: answer.adjusted.profile }
+            : {}),
+        };
+        const again = resolveTarget(
+          {
+            ...(args.provider ? { provider: args.provider } : {}),
+            ...(args.model ? { model: args.model } : {}),
+            ...(args.effort ? { effort: args.effort } : {}),
+            ...(args.profile ? { profile: args.profile } : {}),
+          },
+          this.eligibilityInput(session, turnId),
+        );
+        if (!again.ok) {
+          call.resolve({ subagentId: `sa_${this.agentRuns.newRunId()}`, ...refusalPayload(again.code, again.message, again.alternatives) });
+          return;
+        }
+        verdict = again;
       }
     }
 
@@ -10687,6 +12406,19 @@ ${args.task}`,
     const runId = this.agentRuns.newRunId();
     const subagentId = `sa_${runId}`;
     const startedAt = Date.now();
+    // S-01: a writer claims the files it names BEFORE it starts. A conflict is
+    // a refusal the main agent can act on (sequence the work), not a card
+    // after the edit already happened.
+    if (verdict.profile !== "read-only") {
+      const conflict = this.preClaimSubagentFiles(runId, label, [...(args.files ?? []), ...(args.scope ?? [])]);
+      if (conflict) {
+        call.resolve({
+          subagentId,
+          ...refusalPayload("file-claimed", conflict, []),
+        });
+        return;
+      }
+    }
     this.subagents.add({
       subagentId,
       parentSessionId,
@@ -10705,7 +12437,9 @@ ${args.task}`,
       sameProviderAsParent: verdict.sameProviderAsParent,
       ...(verdict.effortClamped ? { effortClamped: verdict.effortClamped } : {}),
       ...(verdict.profileDowngraded ? { profileDowngraded: verdict.profileDowngraded } : {}),
+      ...(adjustedByUser ? { adjustedByUser } : {}),
     });
+    this.rememberSubagentRun(session, runId);
     this.postSubagentCard(session, subagentId);
 
     // The run itself. Deliberately NOT awaited inline: a foreground spawn waits
@@ -10719,6 +12453,7 @@ ${args.task}`,
         status: "running",
         target: this.targetPayload(verdict),
         profile: verdict.profile,
+        ...(adjustedByUser ? { adjustedByUser } : {}),
       });
       void running;
       return;
@@ -10733,10 +12468,12 @@ ${args.task}`,
         status: "running",
         target: this.targetPayload(verdict),
         profile: verdict.profile,
+        ...(adjustedByUser ? { adjustedByUser } : {}),
       });
       return;
     }
-    call.resolve(this.subagentResultPayload(subagentId, { markCollected: true }));
+    const payload = this.subagentResultPayload(subagentId, { markCollected: true }) as Record<string, unknown>;
+    call.resolve(adjustedByUser ? { ...payload, adjustedByUser } : payload);
   }
 
   private async companionsAwait(
@@ -10759,9 +12496,30 @@ ${args.task}`,
       return;
     }
 
+    if (args.action === "continue") {
+      const id = mine[0];
+      if (!id) {
+        call.resolve({ unknown });
+        return;
+      }
+      const started = await this.continueSubagent(session, id, args.message ?? "");
+      if (!started.ok) {
+        call.resolve({ subagentId: id, ...refusalPayload(started.code, started.message, []) });
+        return;
+      }
+      const cap = Math.max(1, Number(this.companionsSetting("subagents.limits.foregroundWaitSec", 40)));
+      const done = await this.raceSubagent(id, cap * 1000);
+      call.resolve(done
+        ? this.subagentResultPayload(id, { markCollected: true })
+        : { subagentId: id, status: "running" });
+      return;
+    }
+
     if (args.action === "read") {
       const id = mine[0];
-      const text = (id && this.subagentReports.get(id)) ?? "";
+      // S-05: after a reload the in-memory report is gone; the raw reply on
+      // disk still answers.
+      const text = (id && (this.subagentReports.get(id) ?? this.readSubagentReport(id))) ?? "";
       const offset = Math.max(0, args.offset ?? 0);
       const length = Math.max(1, args.length ?? 8000);
       const slice = text.slice(offset, offset + length);
@@ -10818,11 +12576,7 @@ ${args.task}`,
       provider,
       ...(verdict.target.model ? { model: verdict.target.model } : {}),
       ...(verdict.target.effort ? { effort: verdict.target.effort } : {}),
-      // P2 ships the conservative recipe on every provider: the deny overlay is
-      // the floor, and Plan mode is an extra layer only where a probe has shown
-      // it does not stall on plan approval. No provider has that recording yet
-      // — see `research/companion-subagents.md`.
-      mode: verdict.profile === "read-only" ? "agent" : "agent",
+      mode: SUBAGENT_RUN_MODE,
       ...(args.scope?.length ? { scope: args.scope } : roleTemplate?.scope ? { scope: roleTemplate.scope } : {}),
       permissions: subagentPermissionOverlay(
         verdict.profile,
@@ -10836,11 +12590,24 @@ ${args.task}`,
       30,
       args.timeoutSec ?? Number(this.companionsSetting("subagents.limits.timeoutSec", 900)),
     );
-    const timer = setTimeout(() => {
-      this.cancelSubagent(subagentId, "it ran past its time limit", "timeout");
-    }, timeoutSec * 1000);
-    timer.unref?.();
+    // X-04: the clock pauses while the child waits for the person.
+    if (!this.subagentDeadlines) this.subagentDeadlines = new Map();
+    this.subagentDeadlines.set(subagentId, new PausableDeadline(timeoutSec * 1000, Date.now()));
+    this.rearmSubagentTimer(subagentId);
+    const timer = { clear: () => this.clearSubagentDeadline(subagentId) };
 
+    // S-01: `writeIsolation: "worktree"` — a writer works in its own local
+    // worktree; the card offers Apply (file by file) or Discard afterwards.
+    let childCwd: string | undefined;
+    if (verdict.profile !== "read-only" && this.companionsSetting<string>("subagents.writeIsolation", "shared") === "worktree") {
+      const wt = await this.createCrewWorktree(this.sessionCwd(session), `sa-${record.runId.slice(-12)}`);
+      if ("error" in wt) {
+        this.host.appendLine(`[companions] ${subagentId}: no worktree (${wt.error}); running in the shared tree`);
+      } else {
+        childCwd = wt.path;
+        this.subagents.update(subagentId, { worktree: { ...wt, state: "pending" } }, Date.now());
+      }
+    }
     try {
       const outcome = await this.runAgentRole(
         role,
@@ -10864,10 +12631,12 @@ ${args.task}`,
         {
           runId: record.runId,
           step: 1,
+          ...(childCwd ? { cwd: childCwd } : {}),
           subagent: { subagentId, label: record.label, profile: verdict.profile },
         },
       );
-      clearTimeout(timer);
+      timer.clear();
+      if (outcome.rawReply !== undefined) this.writeSubagentRaw(record.runId, 1, outcome.rawReply);
       if (outcome.rawReply !== undefined) this.subagentReports.set(subagentId, outcome.rawReply);
       // §6.7 file claims. Only a child that could write takes them: a read-only
       // inspector holds nothing, and claiming on its behalf would block the
@@ -10884,19 +12653,365 @@ ${args.task}`,
             : outcome.outcome === "cancelled" ? "cancelled" : "failed",
           ...(outcome.sessionId ? { childSessionId: outcome.sessionId } : {}),
           ...(outcome.totalTokens !== undefined ? { tokens: outcome.totalTokens } : {}),
+          ...(this.poolSessionById(outcome.sessionId)?.client?.currentModelId
+            ? { ranModel: this.poolSessionById(outcome.sessionId)!.client!.currentModelId }
+            : {}),
         },
         Date.now(),
       );
       this.subagentOutcomes.set(subagentId, outcome);
     } catch (error) {
-      clearTimeout(timer);
+      timer.clear();
       this.host.appendLine(`[companions] ${subagentId} crashed: ${(error as Error).message}`);
       this.subagents.update(subagentId, { status: "failed", errorCode: "child-crashed" }, Date.now());
     } finally {
+      // S-01: every exit drops the claims this child held.
+      try { this.crewFileClaims().releaseRun(record.runId); } catch { /* claims are a lock, not the run */ }
+      this.persistSubagentRecord(subagentId);
       this.postSubagentCard(session, subagentId);
       this.releaseSubagentWaiters(subagentId);
       this.maybeFinishSubagentTurn(session);
     }
+  }
+
+  // ---------- S-01 / S-02 / S-04 / S-05 ----------
+
+  /** Concrete paths (no glob characters) of a spawn's files and scope. */
+  private preClaimSubagentFiles(runId: string, label: string, entries: readonly string[]): string | undefined {
+    const concrete = [...new Set(entries.map((e) => String(e ?? "").trim().replace(/\\/g, "/")).filter((e) => e && !/[*?[\]{}]/.test(e)))];
+    for (const file of concrete) {
+      let claim;
+      try {
+        claim = this.crewFileClaims().tryClaim({ path: file, runId, step: 1, role: label, at: Date.now() });
+      } catch (error) {
+        this.host.appendLine(`[companions] could not claim ${file}: ${(error as Error).message}`);
+        continue;
+      }
+      if (!claim.ok) {
+        try { this.crewFileClaims().releaseRun(runId); } catch { /* */ }
+        return `${file} is being edited by ${claim.heldBy.role} (run ${claim.heldBy.runId}). Wait for it to finish, or give this subagent other files.`;
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * S-01: an `inherit` / scoped writer without named files claims each file at
+   * its first write. A file another writer holds turns the request into a card
+   * with a warning, never an automatic grant.
+   */
+  private childWriteClaimWarning(session: Session, req: PermissionRequest): string | undefined {
+    if (this.hiddenReasonOf(session) !== "companion-subagent") return undefined;
+    const id = session.pendingHiddenChild?.subagentId ?? this.sessionTypeMetaFor(session)?.subagentId ?? "";
+    const record = this.subagents.get(id);
+    if (!record || record.profile === "read-only") return undefined;
+    const facts = extractPermissionFacts(req.toolCall);
+    if (facts.kind !== "edit" || !facts.paths.length) return undefined;
+    const root = this.sessionCwd(session);
+    for (const p of facts.paths) {
+      const relative = path.relative(root, p);
+      const rel = (relative && !relative.startsWith("..") && !path.isAbsolute(relative) ? relative : p).replace(/\\/g, "/");
+      let claim;
+      try {
+        claim = this.crewFileClaims().tryClaim({ path: rel, runId: record.runId, step: record.step, role: record.label, at: Date.now() });
+      } catch {
+        continue;
+      }
+      if (!claim.ok && claim.heldBy.runId !== record.runId) {
+        return `${rel} is being edited by ${claim.heldBy.role}.`;
+      }
+    }
+    return undefined;
+  }
+
+  private sessionSpawnPolicy(session: Session): string {
+    return session.delegationOverride?.spawnPolicy
+      ?? this.sessionTypeMetaFor(session)?.spawnPolicy
+      ?? this.companionsSetting<string>("subagents.spawnPolicy", "auto");
+  }
+
+  private pendingSubagentApprovals?: Map<string, (answer: { approved: boolean; adjusted?: Record<string, unknown> }) => void>;
+
+  /** S-02: the approval card, with the request editable. */
+  private askSubagentApproval(
+    session: Session,
+    args: SpawnArguments,
+    verdict: Extract<EligibilityResult, { ok: true }>,
+  ): Promise<{ approved: boolean; adjusted?: Record<string, unknown> }> {
+    if (!this.pendingSubagentApprovals) this.pendingSubagentApprovals = new Map();
+    const id = `sa-approval-${randomUUID()}`;
+    const listing = listEligibleTargets(this.eligibilityInput(session, this.currentTurnId(session)), { expand: "all" });
+    const profiles = PERMISSION_PROFILES.slice(0, PERMISSION_PROFILES.indexOf(verdict.profile) + 1);
+    return new Promise((resolve) => {
+      this.pendingSubagentApprovals!.set(id, (answer) => {
+        this.pendingSubagentApprovals!.delete(id);
+        this.emit(session, { type: "subagentApprovalResolved", id, approved: answer.approved });
+        resolve(answer);
+      });
+      this.emit(session, {
+        type: "subagentApproval",
+        id,
+        label: args.label ?? deriveSubagentLabel(args.task),
+        task: args.task,
+        provider: verdict.target.provider,
+        ...(verdict.target.model ? { model: verdict.target.model } : {}),
+        ...(verdict.target.effort ? { effort: verdict.target.effort } : {}),
+        profile: verdict.profile,
+        profiles: [...profiles],
+        targets: listing.targets.map((t) => ({
+          provider: t.provider,
+          displayName: t.displayName,
+          ...(t.models ? { models: t.models.map((m) => ({ id: m.id, ...(m.label ? { label: m.label } : {}), ...(m.efforts ? { efforts: m.efforts } : {}) })) } : {}),
+        })),
+      });
+      this.setStatus(session, "needs-you");
+    });
+  }
+
+  private answerSubagentApproval(
+    session: Session,
+    msg: { id: string; approved: boolean; task?: string; provider?: string; model?: string; effort?: string; profile?: string },
+  ): void {
+    const resolve = this.pendingSubagentApprovals?.get(msg.id);
+    if (!resolve) return;
+    if (session.status === "needs-you") this.setStatus(session, "working");
+    if (!msg.approved) {
+      resolve({ approved: false });
+      return;
+    }
+    const adjusted: Record<string, unknown> = {};
+    for (const key of ["task", "provider", "model", "effort", "profile"] as const) {
+      if (typeof msg[key] === "string") adjusted[key] = msg[key];
+    }
+    resolve({ approved: true, ...(Object.keys(adjusted).length ? { adjusted } : {}) });
+  }
+
+  /**
+   * S-04: a follow-up into a finished child's own session — its context is
+   * kept, which is much cheaper than a new spawn with a new brief. Refused
+   * when the child session is no longer live.
+   */
+  private async continueSubagent(
+    parent: Session,
+    subagentId: string,
+    message: string,
+  ): Promise<{ ok: true } | { ok: false; code: RefusalCode; message: string }> {
+    const record = this.subagents.get(subagentId);
+    if (!record) return { ok: false, code: "session-gone", message: "No such subagent." };
+    if (!isTerminalSubagentStatus(record.status)) {
+      return { ok: false, code: "still-running", message: "This subagent is still running; await it first." };
+    }
+    const child = this.poolSessionById(record.childSessionId);
+    if (!child?.client) {
+      return { ok: false, code: "session-gone", message: "This subagent's session is no longer live. Spawn a new one with a self-contained task." };
+    }
+    const reopened = this.subagents.reopen(subagentId);
+    if (!reopened) return { ok: false, code: "session-gone", message: "This subagent cannot take a follow-up." };
+    this.postSubagentCard(parent, subagentId);
+    this.postSubagentTray(parent);
+    const role: AgentRole = {
+      name: reopened.roleName ?? "subagent",
+      provider: child.provider,
+      whenToUse: "A companion subagent's follow-up.",
+      source: "builtin",
+      mode: SUBAGENT_RUN_MODE,
+    };
+    const run = async () => {
+      try {
+        const outcome = await this.runAgentRole(
+          role,
+          { goal: "", task: message, returnFormat: subagentReturnFormat() },
+          "subagent",
+          parent,
+          "local",
+          {
+            runId: reopened.runId,
+            step: reopened.step,
+            subagent: { subagentId, label: reopened.label, profile: reopened.profile },
+            continueSession: child,
+            continueMessage: message,
+          },
+        );
+        if (outcome.rawReply !== undefined) {
+          this.subagentReports.set(subagentId, outcome.rawReply);
+          this.writeSubagentRaw(reopened.runId, reopened.step, outcome.rawReply);
+        }
+        this.subagents.update(subagentId, {
+          status: outcome.outcome === "completed" ? "completed" : outcome.outcome === "cancelled" ? "cancelled" : "failed",
+          ...(outcome.totalTokens !== undefined ? { tokens: (reopened.tokens ?? 0) + outcome.totalTokens } : {}),
+        }, Date.now());
+        this.subagentOutcomes.set(subagentId, outcome);
+      } catch (error) {
+        this.subagents.update(subagentId, { status: "failed", errorCode: "child-crashed" }, Date.now());
+        this.host.appendLine(`[companions] follow-up for ${subagentId} failed: ${(error as Error).message}`);
+      } finally {
+        this.persistSubagentRecord(subagentId);
+        this.postSubagentCard(parent, subagentId);
+        this.releaseSubagentWaiters(subagentId);
+        this.postSubagentTray(parent);
+        this.maybeFinishSubagentTurn(parent);
+      }
+    };
+    void run();
+    return { ok: true };
+  }
+
+  // S-05: reports and cards survive a reload.
+
+  private writeSubagentRaw(runId: string, step: number, raw: string): void {
+    try {
+      const dir = this.agentRuns.runDir(runId);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, `${stepSlug(step)}.raw.md`), raw, "utf8");
+    } catch (error) {
+      this.host.appendLine(`[companions] could not write the raw report: ${(error as Error).message}`);
+    }
+  }
+
+  private readSubagentReport(subagentId: string): string | undefined {
+    const record = this.subagents.get(subagentId);
+    if (!record?.runId) return undefined;
+    for (const name of [`${stepSlug(record.step)}.raw.md`, `${stepSlug(1)}.raw.md`]) {
+      try {
+        const text = fs.readFileSync(path.join(this.agentRuns.runDir(record.runId), name), "utf8");
+        this.subagentReports.set(subagentId, text);
+        return text;
+      } catch { /* try the next */ }
+    }
+    try {
+      return fs.readFileSync(this.agentRuns.resultPath(record.runId, record.step), "utf8");
+    } catch {
+      return undefined;
+    }
+  }
+
+  private static readonly SUBAGENT_INDEX_KEY = "companions.subagents.index";
+
+  /** Remember which runs belong to a parent, so its cards come back after a reload. */
+  private rememberSubagentRun(parent: Session, runId: string): void {
+    const parentId = parent.activeSessionId;
+    if (!parentId) return;
+    const index = { ...this.state.get<Record<string, string[]>>(GrokSidebar.SUBAGENT_INDEX_KEY, {}) };
+    const runs = [...(index[parentId] ?? []), runId].slice(-50);
+    index[parentId] = runs;
+    const keys = Object.keys(index);
+    if (keys.length > 200) delete index[keys[0]!];
+    void this.state.update(GrokSidebar.SUBAGENT_INDEX_KEY, index);
+  }
+
+  private persistSubagentRecord(subagentId: string): void {
+    const record = this.subagents.get(subagentId);
+    if (!record?.runId) return;
+    const outcome = this.subagentOutcomes.get(subagentId);
+    try {
+      const dir = this.agentRuns.runDir(record.runId);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, "subagent.json"), `${JSON.stringify({
+        record,
+        ...(outcome ? {
+          outcome: {
+            summary: outcome.summary,
+            filesReported: outcome.filesReported,
+            filesObserved: outcome.filesObserved,
+            unreported: outcome.reconciliation?.unreported ?? [],
+            claimedOnly: outcome.reconciliation?.claimedOnly ?? [],
+            durationMs: outcome.durationMs,
+            ...(typeof outcome.totalTokens === "number" ? { totalTokens: outcome.totalTokens } : {}),
+          },
+        } : {}),
+      }, null, 2)}\n`, "utf8");
+    } catch (error) {
+      this.host.appendLine(`[companions] could not persist ${subagentId}: ${(error as Error).message}`);
+    }
+  }
+
+  /** S-05 / D3: rebuild a restored parent's subagent cards from the run folders. */
+  private restoreSubagentCards(parent: Session): void {
+    const parentId = parent.activeSessionId;
+    if (!parentId) return;
+    const runs = this.state.get<Record<string, string[]>>(GrokSidebar.SUBAGENT_INDEX_KEY, {})[parentId] ?? [];
+    for (const runId of runs) {
+      try {
+        const raw = JSON.parse(fs.readFileSync(path.join(this.agentRuns.runDir(runId), "subagent.json"), "utf8")) as {
+          record: SubagentRecord;
+          outcome?: { summary: string; filesReported: string[]; filesObserved: string[]; unreported: string[]; claimedOnly: string[]; durationMs: number; totalTokens?: number };
+        };
+        const record = raw.record;
+        if (!record?.subagentId || this.subagents.get(record.subagentId)) continue;
+        // A child still "running" on disk died with the window.
+        const status = isTerminalSubagentStatus(record.status) ? record.status : "cancelled";
+        this.subagents.add({ ...record, status, ...(record.endedAt ? {} : { endedAt: record.startedAt }) });
+        if (raw.outcome) {
+          this.subagentOutcomes.set(record.subagentId, {
+            outcome: status === "completed" ? "completed" : status === "failed" ? "failed" : "cancelled",
+            filesReported: raw.outcome.filesReported,
+            filesObserved: raw.outcome.filesObserved,
+            durationMs: raw.outcome.durationMs,
+            ...(typeof raw.outcome.totalTokens === "number" ? { totalTokens: raw.outcome.totalTokens } : {}),
+            summary: raw.outcome.summary,
+            planEntries: [],
+            reconciliation: { touched: [], unreported: raw.outcome.unreported, claimedOnly: raw.outcome.claimedOnly },
+          });
+        }
+        this.postSubagentCard(parent, record.subagentId);
+      } catch { /* a run without a record (older build) stays history-only */ }
+    }
+  }
+
+  /** S-01: apply or discard a worktree child's changes. */
+  private async settleSubagentWorktree(session: Session, subagentId: string, apply: boolean): Promise<void> {
+    const record = this.subagents.get(subagentId);
+    const wt = record?.worktree;
+    if (!record || !wt || wt.state !== "pending") return;
+    if (!isTerminalSubagentStatus(record.status)) {
+      this.agentNotice(session, "warning", "This subagent is still running.");
+      return;
+    }
+    if (apply) {
+      await this.applyCrewWorktree(session, wt);
+    } else {
+      try {
+        const removed = await this.worktreeLocal().remove({ worktreePath: wt.path, force: true });
+        if ("error" in removed) this.host.appendLine(`[companions] discard worktree: ${removed.error}`);
+      } catch (error) {
+        this.host.appendLine(`[companions] discard worktree failed: ${(error as Error).message}`);
+      }
+    }
+    this.subagents.update(subagentId, { worktree: { ...wt, state: apply ? "applied" : "discarded" } }, Date.now());
+    this.persistSubagentRecord(subagentId);
+    this.postSubagentCard(session, subagentId);
+  }
+
+  private subagentDeadlines?: Map<string, PausableDeadline>;
+  private subagentTimers?: Map<string, ReturnType<typeof setTimeout>>;
+
+  /** (Re)schedule the one timer for a subagent's remaining time; none while paused. */
+  private rearmSubagentTimer(subagentId: string): void {
+    const deadline = this.subagentDeadlines?.get(subagentId);
+    if (!this.subagentTimers) this.subagentTimers = new Map();
+    const old = this.subagentTimers.get(subagentId);
+    if (old) clearTimeout(old);
+    this.subagentTimers.delete(subagentId);
+    if (!deadline || deadline.paused) return;
+    const t = setTimeout(() => {
+      this.subagentTimers?.delete(subagentId);
+      const d = this.subagentDeadlines?.get(subagentId);
+      if (!d || d.paused) return;
+      if (!d.expired(Date.now())) {
+        this.rearmSubagentTimer(subagentId);
+        return;
+      }
+      this.cancelSubagent(subagentId, "it ran past its time limit", "timeout");
+    }, Math.max(10, deadline.remainingMs(Date.now())));
+    (t as { unref?: () => void }).unref?.();
+    this.subagentTimers.set(subagentId, t);
+  }
+
+  private clearSubagentDeadline(subagentId: string): void {
+    const t = this.subagentTimers?.get(subagentId);
+    if (t) clearTimeout(t);
+    this.subagentTimers?.delete(subagentId);
+    this.subagentDeadlines?.delete(subagentId);
   }
 
   /**
@@ -10974,18 +13089,33 @@ ${args.task}`,
    * moment the last one is terminal.
    */
   private postSubagentTray(session: Session): void {
-    const running = this.subagents.running(session.activeSessionId ?? "");
-    // Same reasoning as the card: the tray belongs where somebody is looking.
-    this.emit(this.visibleAncestorOf(session), {
-      type: "subagentTray",
-      subagents: running.map((record) => ({
+    const parentId = session.activeSessionId ?? "";
+    const running = this.subagents.running(parentId);
+    const turnId = this.currentTurnId(session);
+    // S-08: while others still run, this turn's finished children stay in the
+    // tray so one can be kept as a session from there too.
+    const finished = running.length
+      ? this.subagents.forParent(parentId).filter((record) =>
+          record.spawnedInTurn === turnId && isTerminalSubagentStatus(record.status)
+          && record.status !== "refused" && !!record.childSessionId && !record.promoted)
+      : [];
+    const row = (record: SubagentRecord) => {
+      const live = (session.subagentLive ?? []).find((h) => h.subagentId === record.subagentId)?.roleSession;
+      return {
         subagentId: record.subagentId,
         label: record.label,
         provider: record.target.provider,
         providerName: providerDisplayName(record.target.provider),
         ...(record.target.model ? { model: record.target.model } : {}),
         startedAt: record.startedAt,
-      })),
+        ...(isTerminalSubagentStatus(record.status) ? { status: record.status, promotable: true } : {}),
+        ...(this.childWaitsForYou(live) ? { needsYou: true } : {}),
+      };
+    };
+    // Same reasoning as the card: the tray belongs where somebody is looking.
+    this.emit(this.visibleAncestorOf(session), {
+      type: "subagentTray",
+      subagents: [...running, ...finished].map(row),
     });
   }
 
@@ -11271,9 +13401,12 @@ ${args.task}`,
     // it would look like the user's own session started it (§7.9).
     const visible = this.visibleAncestorOf(session);
     const startedBy = visible === session ? undefined : this.chainLabelFor(session);
+    const liveChild = (session.subagentLive ?? []).find((h) => h.subagentId === subagentId)?.roleSession;
     this.emit(visible, {
       type: "companionSubagent",
       ...(startedBy ? { startedBy } : {}),
+      ...(this.childWaitsForYou(liveChild) ? { needsYou: true } : {}),
+      childStatus: subagentChildStatus(record.status, { needsYou: this.childWaitsForYou(liveChild) }),
       subagentId,
       label: record.label,
       provider: record.target.provider,
@@ -11290,6 +13423,15 @@ ${args.task}`,
       ...(record.effortClamped ? { effortClamped: record.effortClamped } : {}),
       ...(record.profileDowngraded ? { profileDowngraded: record.profileDowngraded } : {}),
       ...(record.errorCode ? { errorCode: record.errorCode } : {}),
+      ...(record.refusalMessage ? { refusalMessage: record.refusalMessage } : {}),
+      ...(typeof record.tokens === "number" ? { tokens: record.tokens } : {}),
+      ...(record.worktree ? { worktree: record.worktree.state } : {}),
+      ...(record.adjustedByUser ? { adjustedByUser: true } : {}),
+      ...(isTerminalSubagentStatus(record.status) && record.status !== "refused" && this.poolSessionById(record.childSessionId)?.client
+        ? { canFollowUp: true }
+        : {}),
+      ...(record.ranModel && record.ranModel !== record.target.model ? { ranModel: record.ranModel } : {}),
+      ...(record.refusalAlternatives?.length ? { refusalAlternatives: record.refusalAlternatives } : {}),
       ...(record.childSessionId ? { sessionId: record.childSessionId } : {}),
       // §6.6 point 8: offered only once the child is finished and actually has
       // a session to keep. Promoting mid-flight would put a conversation in the
@@ -14893,6 +17035,8 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     if (this.mcpConnectorKeysReady) await this.mcpConnectorKeysReady;
     if (gen !== session.gen) return undefined;
     const env = session.provider === "grok" ? this.buildEnv(cwd) : { ...process.env };
+    session.compactThresholdRequested = session.provider === "grok" ? normalizeCompactThreshold(env[GROK_COMPACT_ENV]) : undefined;
+    session.compactThresholdChecked = false;
     // A role's effort (AP-10) wins over the remembered default, and it is
     // applied HERE — on the spawn, ahead of `session/new` — because that is the
     // only place grok takes `--reasoning-effort` at all and the only point an
@@ -15364,10 +17508,23 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
           text: typeof err === "string" && err.trim() ? `Compaction failed: ${err.trim()}` : "Compaction failed.",
         });
       }
+      const compactKind = compactEventKind(u);
+      if (compactKind === "cancelled") {
+        this.emit(session, { type: "autoCompactNotice", text: "Compaction cancelled." });
+      }
+      if (compactKind === "completed") {
+        session.nearFullArmed = true;
+        session.compactionCount += 1;
+        const summary = compactSummaryPreview(u);
+        if (summary) this.emit(session, { type: "compactSummary", summary });
+      }
       // Subagent lifecycle rides this LIVE rail (not the persist/replay
       // subagentLifecycle channel). Re-route to the same `subagentUpdate` the
       // webview cards already consume — subagent_finished fills duration/output.
-      if (isSubagentLifecycleUpdate(u)) this.emit(session, { type: "subagentUpdate", update: u });
+      if (isSubagentLifecycleUpdate(u)) {
+        this.emit(session, { type: "subagentUpdate", update: u });
+        this.noteNativeChild(session, u);
+      }
       // Deep Research / Workflow / Goal progress (P2-10) — same live rail.
       // Normalized once so the webview only sees a stable card shape.
       const runProg = parseRunProgressUpdate(u);
@@ -15912,7 +18069,13 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       this.refuseUnboundRemoteSession(clientId);
       return;
     }
-    const session = remoteBound ?? this.focused;
+    let session = remoteBound ?? this.focused;
+    // X-01: an answer to a card relayed from a hidden child goes to the child.
+    const relayed = this.resolveRelayedAnswer(msg);
+    if (relayed) {
+      session = relayed.session;
+      msg = relayed.msg;
+    }
     const requester = origin === "remote" && clientId
       ? this.captureRemoteRequester(clientId)
       : undefined;
@@ -16344,6 +18507,19 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         await this.startHandoff(msg.kind, msg.role, session, origin, true);
         break;
       }
+      case "childMessage": {
+        // The route names the Crew run; the host picks the running stage.
+        if (String(msg.route ?? "").startsWith("stage:") && session.workflowRun) {
+          await this.sendToRunningStage(session, String(msg.text ?? ""), msg.mode === "note" ? "note" : "steer");
+        }
+        break;
+      }
+      case "contextOverflowAnswer":
+        await this.answerContextOverflow(session, msg);
+        break;
+      case "continueInFreshSession":
+        await this.continueInFreshSession(session, origin);
+        break;
       case "stopCrew": {
         this.cancelAgentRun(session);
         break;
@@ -16784,11 +18960,33 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         } else if (msg.action === "openTranscript" && record.childSessionId) {
           // The child is hidden from history but its transcript is readable —
           // that is the whole reason §6.6 keeps it rather than asking the CLI
-          // not to persist.
-          await this.openSession(record.childSessionId, this.sessionCwd(session));
+          // not to persist. A live child is focused as it is (X-03).
+          const live = this.poolSessionById(record.childSessionId);
+          if (live) this.focusSession(live);
+          else await this.openSession(record.childSessionId, this.sessionCwd(session));
         } else if (msg.action === "promote") {
           await this.promoteSubagentSession(session, msg.subagentId);
+        } else if (msg.action === "followUp") {
+          const text = String(msg.message ?? "").trim();
+          if (!text) break;
+          const started = await this.continueSubagent(session, msg.subagentId, text);
+          if (!started.ok) this.agentNotice(session, "warning", started.message);
+        } else if (msg.action === "applyWorktree" || msg.action === "discardWorktree") {
+          await this.settleSubagentWorktree(session, msg.subagentId, msg.action === "applyWorktree");
         }
+        break;
+      }
+      case "childOverviewAction":
+        await this.childOverviewAction(msg);
+        break;
+      case "setCompanionsSetting":
+        await this.setCompanionsSetting(String(msg.key ?? ""), msg.value);
+        break;
+      case "setSessionDelegation":
+        this.setSessionDelegation(session, String(msg.value ?? "auto"));
+        break;
+      case "subagentApprovalAnswer": {
+        this.answerSubagentApproval(session, msg);
         break;
       }
       case "workflowStart": {
@@ -16800,7 +18998,11 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         await this.startWorkflowRun(target, origin, msg.idea, msg.workflowName, msg.options);
         break;
       }
+      case "workflowPlanEdit":
+        this.applyWorkflowPlanEdit(session, msg);
+        break;
       case "workflowGateAction": {
+        if (await this.handleHostGateAction(session, origin, msg)) break;
         const action = this.gateActionFromMsg(msg);
         if (action) await this.handleWorkflowGateAction(session, origin, action);
         break;
@@ -22694,6 +24896,7 @@ ${directives.block}`;
       // is posted first so a limit never also rebuilds the session against
       // the same ceiling.
       if (this.surfaceLimitError(session, e, text, sentChips)) return;
+      if (this.surfaceContextOverflow(session, e, text, sentChips)) return;
       // An expired-token error wedges only THIS long-lived process (the CLI shares
       // ~/.grok/auth.json across the pool + sibling `grok login`); transparently
       // reload the process and resend before surfacing the error (see method doc).
@@ -22764,6 +24967,44 @@ ${directives.block}`;
     this.noteLiveTurnEnded(session);
     this.setStatus(session, "error");
     return true;
+  }
+
+  /** K-05: a context overflow gets its own card instead of a raw error. */
+  private surfaceContextOverflow(session: Session, err: unknown, displayText: string, chips: ContextChip[]): boolean {
+    if (!isContextOverflowError(errorDetail(err))) return false;
+    const id = randomUUID();
+    session.pendingOverflow = { id, text: displayText, chips: chips.slice() };
+    this.host.appendLine(`[context] overflow: ${errorDetail(err)}`);
+    this.emit(session, {
+      type: "contextOverflow",
+      id,
+      text: CONTEXT_OVERFLOW_TEXT,
+      canCompact: providerCapability(session.provider, "manualCompact").state !== "no",
+      ...this.turnEndFields(session, "failed"),
+    });
+    this.noteLiveTurnEnded(session);
+    this.setStatus(session, "error");
+    return true;
+  }
+
+  private async answerContextOverflow(
+    session: Session,
+    msg: { id: string; action: "compact-retry" | "fresh" | "dismiss" },
+  ): Promise<void> {
+    const pending = session.pendingOverflow;
+    if (!pending || pending.id !== msg.id) return;
+    session.pendingOverflow = undefined;
+    if (msg.action === "fresh") {
+      await this.continueInFreshSession(session, "local");
+      return;
+    }
+    if (msg.action !== "compact-retry") return;
+    // One attempt: compact, then the lost message once more. A second
+    // overflow shows the card again; nothing loops on its own.
+    await this.handleSend("/compact", true, session);
+    if (session.status === "error") return;
+    session.chips = [...pending.chips, ...session.chips];
+    await this.handleSend(pending.text, false, session);
   }
 
   /**
@@ -23331,6 +25572,15 @@ ${directives.block}`;
     "workflowRun",
     "workflowList",
     "workflowGenerator",
+    // K-04: an offer about the context right now; stale after a compaction.
+    "nearFullPrompt",
+    // X-02: a child's live feed. The child's own transcript is the record.
+    "childActivity",
+    // X-03: which parent a focused hidden child belongs to; re-sent on focus.
+    "childContext",
+    // E-01: a window-wide overview, re-sent whenever it changes.
+    "runningChildren",
+    "scrollToWaiting",
   ]);
   /**
    * Host→rail catalog surface. Everything else stays chat-only so a user who
@@ -24005,6 +26255,10 @@ ${directives.block}`;
   }
 
   private emit(session: Session, message: HostMsg): void {
+    if (!session.replaying) {
+      this.relayFromChild(session, message);
+      this.tapChildActivity(session, message);
+    }
     if (message.type === "runProgress") {
       const completed = this.workflowCompletion(session, message.update);
       if (completed) message = { type: "runProgress", update: completed };
@@ -24025,6 +26279,12 @@ ${directives.block}`;
     if (message.type === "userMessage" && !message.steer) {
       session.liveFeedbackEligible = false;
       session.turnRating = 0;
+    }
+    if (message.type === "contextUsage" && !session.replaying) {
+      if (typeof message.window === "number" && message.window > 0) session.lastContextWindow = message.window;
+      if (typeof message.used === "number") {
+        this.maybeOfferNearFull(session, message.used, session.lastContextWindow, message.autoCompactThresholdPercent);
+      }
     }
     if (session === this.focused) {
       this.postTap?.("local", message);
@@ -24344,6 +26604,7 @@ ${directives.block}`;
     // the small frame the client actually needs, instead of rebuilding a list
     // that has not changed.
     this.postSessionName(session);
+    this.postChildContext(session);
     // Same as the remote path, and for the same reason: restorePersistedDraft
     // broadcasts, so it is not called here.
   }
@@ -25565,6 +27826,45 @@ ${directives.block}`;
       messageTokens: info.messageTokens,
       freeTokens: info.freeTokens,
       autoCompactThresholdPercent: info.autoCompactThresholdPercent,
+      compactionCount: info.compactionCount,
+    });
+    if (info.autoCompactThresholdPercent !== undefined) session.compactThresholdReported = info.autoCompactThresholdPercent;
+    if (info.compactionCount !== undefined) session.compactionCount = info.compactionCount;
+    this.checkCompactThreshold(session, info.autoCompactThresholdPercent);
+  }
+
+  /** K-02: the first snapshot of a Grok process tells whether the env was honoured. Never silent. */
+  private checkCompactThreshold(session: Session, reported: number | undefined): void {
+    if (session.provider !== "grok" || session.compactThresholdChecked || reported === undefined) return;
+    session.compactThresholdChecked = true;
+    const desired = session.compactThresholdRequested;
+    if (!compactThresholdMismatch(desired, reported)) return;
+    const text = compactThresholdMismatchNotice(desired!, reported);
+    this.host.appendLine(`[context] ${text}`);
+    if (this.compactMismatchNoticeShown) return;
+    this.compactMismatchNoticeShown = true;
+    this.emit(session, { type: "hostNotice", level: "warning", text });
+  }
+
+  /** K-04: a few points before the threshold, let the user decide instead of the CLI. */
+  private maybeOfferNearFull(session: Session, used: number | undefined, window: number | undefined, threshold: number | undefined): void {
+    if (used === undefined || window === undefined) return;
+    const effective = threshold ?? session.compactThresholdReported;
+    if (session.provider === "muse") return;
+    let mode: "ask" | "off" = "ask";
+    try {
+      mode = this.host.getConfiguration("companions").get<string>("context.nearFullPrompt", "ask") === "off" ? "off" : "ask";
+    } catch { /* default */ }
+    if (!shouldOfferNearFull({ used, window, thresholdPercent: effective, armed: session.nearFullArmed, mode })) return;
+    // Live only: a session in the background keeps its prompt armed for later.
+    if (session !== this.focused) return;
+    session.nearFullArmed = false;
+    this.emit(session, {
+      type: "nearFullPrompt",
+      used,
+      window,
+      threshold: effective!,
+      canCompact: providerCapability(session.provider, "manualCompact").state !== "no",
     });
   }
 
@@ -26556,6 +28856,37 @@ ${directives.block}`;
     );
   }
 
+  /** `companions.grok.autoCompactThresholdPercent`; 0 = keep Grok's own default. */
+  private grokCompactThresholdSetting(): number {
+    try {
+      const n = this.host.getConfiguration("companions").get<number>("grok.autoCompactThresholdPercent", DEFAULT_COMPACT_THRESHOLD);
+      return typeof n === "number" ? n : DEFAULT_COMPACT_THRESHOLD;
+    } catch {
+      return DEFAULT_COMPACT_THRESHOLD;
+    }
+  }
+
+  /** K-01: the env reaches new processes only. Offer to restart the idle
+   *  Grok ones — never a working or needs-you session (pool reap rules). */
+  private async offerGrokRestartForCompactThreshold(): Promise<void> {
+    const idle = () => [...new Set([this.focused, ...this.pool])].filter(
+      (s) => s?.provider === "grok" && s.client && s.status === "idle",
+    );
+    if (idle().length === 0) return;
+    const pick = await this.host.showInformationMessage(
+      "The compaction threshold applies to new Grok sessions. Restart idle Grok sessions now?",
+      "Restart idle sessions",
+    );
+    if (pick !== "Restart idle sessions") return;
+    let n = 0;
+    for (const s of idle()) {
+      // Detached, the conversation resumes on the next send (ensureClient).
+      void this.detachClient(s)?.dispose();
+      n++;
+    }
+    this.host.appendLine(`[context] restarted ${n} idle Grok session(s) for the new compaction threshold`);
+  }
+
   private buildEnv(cwd: string): NodeJS.ProcessEnv {
     const dotEnv = this.readDotEnv(cwd);
     const env: NodeJS.ProcessEnv = { ...process.env, ...dotEnv };
@@ -26577,6 +28908,17 @@ ${directives.block}`;
       const grokShell = grokShellEnvValue(resolvedTerminalShell(), process.platform);
       if (grokShell) env["GROK_SHELL"] = grokShell;
     }
+
+    // Compact only when the context is really full (K-01). The catalog pins
+    // 80%; the env outranks it. A user-set variable (shell or .env) wins.
+    const compactThreshold = grokCompactThresholdEnv(this.grokCompactThresholdSetting(), env);
+    if (compactThreshold !== undefined) env[GROK_COMPACT_ENV] = compactThreshold;
+    // S-07: Grok's own subagents — on/off and parallelism, by env, like K-01.
+    const grokSub = this.companionsSetting<string>("grok.subagents.enabled", "default");
+    Object.assign(env, grokSubagentEnv({
+      ...(grokSub === "on" ? { enabled: true } : grokSub === "off" ? { enabled: false } : {}),
+      maxConcurrent: Number(this.companionsSetting<number>("grok.subagents.maxConcurrent", 0)) || 0,
+    }, env));
 
     if (Object.keys(dotEnv).length > 0) {
       this.host.appendLine(`[env] loaded ${Object.keys(dotEnv).length} var(s) from .env`);
@@ -27365,6 +29707,7 @@ ${directives.block}`;
             subagentsEnabled: msg.subagentsEnabled !== false,
             subagentRouting: Array.isArray(msg.subagentRouting) ? msg.subagentRouting : [],
             crewStagesMayUseSubagents: msg.crewStagesMayUseSubagents === true,
+            companionSettings: msg.companionSettings || {},
             efforts: Array.isArray(msg.efforts) ? msg.efforts : []
           });
         }

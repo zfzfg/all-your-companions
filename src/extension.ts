@@ -245,6 +245,10 @@ export function activate(context: vscode.ExtensionContext): GrokExtensionApi {
   });
   registerPair("companions.newSession", "grok.newSession", () => sidebar.newSession());
   registerPair("companions.runCrew", "grok.runCrew", () => sidebar.runCrewCommand());
+  // E-03: the crew and its questions from the Command Palette.
+  context.subscriptions.push(vscode.commands.registerCommand("companions.showCrewRun", () => sidebar.showCrewRun()));
+  context.subscriptions.push(vscode.commands.registerCommand("companions.pauseCrewAfterStage", () => sidebar.pauseCrewAfterStage()));
+  context.subscriptions.push(vscode.commands.registerCommand("companions.jumpToWaitingApproval", () => sidebar.jumpToWaitingApprovalCommand()));
   registerPair("companions.newWorktreeSession", "grok.newWorktreeSession", () => sidebar.newWorktreeSession());
   registerPair("companions.applyWorktree", "grok.applyWorktree", () => sidebar.applyFocusedWorktree());
   registerPair("companions.removeWorktree", "grok.removeWorktree", () => sidebar.removeFocusedWorktree());

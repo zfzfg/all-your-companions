@@ -16,6 +16,7 @@ import {
   firstEnabledStart,
   isReservedTarget,
   isWriteProfile,
+  stageContinues,
   workflowFromStagesJson,
   workflowNameOk,
   type WorkflowDefinition,
@@ -180,7 +181,12 @@ export function validateWorkflowDefinition(
     }
   }
 
-  // 8. write profiles
+  // 8. write profiles. A scope source is a packet path resolved at stage start
+  // by `resolveStageScope`: `<stage>.files` is that stage's `filesReported`
+  // PLUS the files of all its `planSteps` (so `plan.files` works with the plan
+  // contract, which reports files per step); `<stage>.filesReported`,
+  // `<stage>.filesObserved` and `<stage>.findings.files` read one field each.
+  // A source that resolves to nothing is not "anywhere": the stage asks.
   for (const [i, stage] of def.stages.entries()) {
     if (!isWriteProfile(stage.profile)) continue;
     const hasScope = !!(stage.scope?.length || stage.scopeFrom);
@@ -217,6 +223,23 @@ export function validateWorkflowDefinition(
       if (!parseRolePermissionLine(line)) {
         err(`/roles/${key}/inline/permissions/${j}`, `\`${line}\` is not a permission rule.`);
       }
+    }
+  }
+
+  // 10b. C-08 / C-12 / C-13 stage options
+  for (const [i, stage] of def.stages.entries()) {
+    const continues = stageContinues(stage);
+    if (continues && !findStage(def, continues)) {
+      err(`/stages/${i}/session`, `\`continue:${continues}\` names no stage.`);
+    }
+    if (continues && stage.fanOut) {
+      err(`/stages/${i}/fanOut`, "A fan-out stage runs fresh sessions; it cannot continue another stage's session.");
+    }
+    if (stage.fanOut && isWriteProfile(stage.profile)) {
+      err(`/stages/${i}/fanOut`, "Only read-only stages may fan out: parallel writers would edit the same files.");
+    }
+    if ((stage.verifyEach || stage.parallel) && stage.strategy !== "per-plan-step") {
+      warn(`/stages/${i}/strategy`, "verifyEach / parallel only apply with strategy per-plan-step.");
     }
   }
 

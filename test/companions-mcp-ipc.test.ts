@@ -154,7 +154,7 @@ describe("companions MCP server over a real pipe", () => {
     expect(names).not.toContain("companions_read_subagent_result");
     expect(names).not.toContain("companions_subagent_status");
     const awaitTool = tools.result.tools.find((t: any) => t.name === COMPANIONS_AWAIT_TOOL);
-    expect(awaitTool.inputSchema.properties.action.enum).toEqual(["wait", "cancel", "read"]);
+    expect(awaitTool.inputSchema.properties.action.enum).toEqual(["wait", "cancel", "read", "continue"]);
   });
 
   it("advertises generator tools (not spawn/await) when the token is a generator session", async () => {

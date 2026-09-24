@@ -52,7 +52,7 @@ describe("parseCrewPreset", () => {
 describe("loadCrewPresets", () => {
   it("falls back to the built-in when the directory is empty", () => {
     const set = loadCrewPresets([]);
-    expect(set.presets.map((p) => p.name).sort()).toEqual(["default", "idea-to-done"]);
+    expect(set.presets.map((p) => p.name).sort()).toEqual(["bugfix", "default", "idea-to-done", "refactor-safe", "research", "review-only", "test-first"]);
     expect(set.presets.find((p) => p.name === "default")).toEqual({ ...BUILTIN_PRESET });
     expect(set.presets.find((p) => p.name === "idea-to-done")?.source).toBe("builtin");
     expect(set.problems).toEqual([]);

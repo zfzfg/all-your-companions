@@ -6,6 +6,10 @@
 
 ### Added
 
+- **Crew stages and subagents ask where you are looking.** Their permission, question and plan cards appear in the Crew / Agent session with where they came from; "Allow for this stage" grants only that child. Stages and subagent cards show a live feed, "Needs you", time and tokens; a quiet stage gets a stall warning (Open / Nudge / Stop); a running-children overview sits above the history list.
+- **The crew gate, rebuilt.** Companion, model and effort preselected (a review prefers a different companion and says so), an autonomy switch (Step by step / Stop on problems / Autopilot, plus "Pause after this stage"), an editable plan, finding selection, Revise, per-stage revert, a limit gate instead of a silent switch, a run table and `run-report.md`. The start panel proposes the whole lineup and a verify command. New workflows: bugfix, review-only, research, test-first, refactor-safe; per-plan-step runs and review panels work.
+- **Subagents:** files claimed before a writer starts, an optional own worktree per writer, an approval card you can edit, a Delegation switch and `@subagent:` completion in the composer, follow-ups into a finished subagent, reports that survive a reload.
+- **Grok compacts later.** `companions.grok.autoCompactThresholdPercent` (default 95; Grok's own is 80), shown on the context ring and popover, with a "context nearly full" offer (Compact now / Continue in a fresh session / Keep going) and a card when the context overflows.
 - **Muse Code (Meta) is the fifth companion.** Connect it in Settings → Providers. It runs through its own ACP adapter. It has no Plan mode, no mode switching and no host MCP servers. Delegation to it uses the fenced-block shim.
 - **Codex can be steered mid-turn.** Whether Steer is offered is now decided by what the backend reports when it starts, not by a fixed list.
 - **Previous prompt.** A button above the message box jumps back to the prompt before the one you are reading and highlights it. You can turn it off with `companions.promptNav`.
@@ -21,6 +25,7 @@
 
 ### Changed
 
+- Crew stages are read-only / scoped by the permission overlay rather than by Plan mode, handoff packets are read back on resume, and result cards show tokens, never money.
 - **Privacy (#171): an agent you have not connected is never started.** This covers refreshes, settings pages and credential probes. Saved connections start over once. No credentials are touched, and reconnecting takes one press.
 - **Permission rules check each part of a chained command.** An allow rule for `npm` no longer covers `npm test && rm -rf build`.
 - The Claude ACP adapter is updated to 0.76, the Codex ACP adapter to 1.11, and managed Codex to 0.153.4.

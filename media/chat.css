@@ -6588,3 +6588,122 @@ button.cx-rail-toggle:hover { background: var(--cx-hover); }
 .image-preview-copy:disabled { opacity: 0.5; cursor: default; }
 .image-preview-copy svg { width: 16px; height: 16px; }
 .image-preview-status { font-size: 12px; text-align: center; }
+
+/* X-01: a card relayed from a hidden crew stage or subagent. */
+.card--relayed { border-left: 3px solid var(--vscode-editorWarning-foreground, #d7ba7d); }
+.card-origin { display: flex; gap: 6px; align-items: center; font-size: 0.9em; margin-bottom: 4px; color: var(--vscode-descriptionForeground); }
+.card-origin-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cx-status--needs-you { background: var(--vscode-editorWarning-foreground, #d7ba7d); }
+.cx-status--stalled { background: var(--vscode-editorWarning-foreground, #d7ba7d); opacity: 0.6; }
+
+/* K-04: near-full context prompt above the composer. */
+.near-full-prompt {
+  border: 1px solid var(--vscode-editorWarning-foreground, #d7ba7d);
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin: 4px 0;
+  background: var(--vscode-editorWidget-background, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.near-full-head { font-size: 0.92em; }
+.near-full-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.near-full-actions button {
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 4px;
+  padding: 2px 8px;
+  cursor: pointer;
+  background: var(--vscode-button-secondaryBackground, #3a3d41);
+  color: var(--vscode-button-secondaryForeground, inherit);
+}
+.near-full-actions button.primary {
+  background: var(--vscode-button-background, #0e639c);
+  color: var(--vscode-button-foreground, #fff);
+}
+.near-full-focus {
+  flex: 1 1 120px;
+  min-width: 80px;
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  border: 1px solid var(--vscode-input-border, transparent);
+  border-radius: 3px;
+  padding: 2px 4px;
+}
+/* K-03: threshold line in the context popover. */
+.context-compact-threshold a { margin-left: 8px; color: var(--vscode-textLink-foreground); }
+/* K-06: what a compaction kept. */
+.compact-summary summary { cursor: pointer; }
+.compact-summary-body { white-space: pre-wrap; margin-top: 4px; opacity: 0.85; font-size: 0.92em; }
+.plan-notice.compact-summary { display: block; }
+
+/* C-03..C-18: crew gate, lineup, rail extras, run table. */
+.gate-header-meta { font-size: 0.85em; color: var(--vscode-descriptionForeground); white-space: nowrap; }
+.gate-summary-wrap > summary { cursor: pointer; list-style: none; }
+.gate-summary-lead { color: var(--vscode-foreground); }
+.gate-next-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.gate-target { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.gate-compare { font-size: 0.85em; }
+.gate-compare.is-different { color: var(--vscode-testing-iconPassed, #73c991); }
+.gate-compare.is-same { color: var(--vscode-editorWarning-foreground, #d7ba7d); }
+.gate-why { font-size: 0.9em; color: var(--vscode-descriptionForeground); }
+.gate-more { position: relative; display: inline-block; }
+.gate-more > summary { list-style: none; cursor: pointer; }
+.gate-more-list { position: absolute; right: 0; bottom: 100%; z-index: 5; display: flex; flex-direction: column; gap: 2px; padding: 4px;
+  background: var(--vscode-menu-background, var(--vscode-editorWidget-background)); border: 1px solid var(--vscode-menu-border, var(--vscode-editorWidget-border)); border-radius: 4px; }
+.gate-autonomy-row, .crew-run-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; }
+.cx-segmented { display: inline-flex; border: 1px solid var(--vscode-editorWidget-border, #444); border-radius: 4px; overflow: hidden; }
+.cx-seg { background: transparent; color: inherit; border: 0; padding: 2px 8px; cursor: pointer; font-size: 0.85em; }
+.cx-seg + .cx-seg { border-left: 1px solid var(--vscode-editorWidget-border, #444); }
+.cx-seg.is-on { background: var(--vscode-button-background, #0e639c); color: var(--vscode-button-foreground, #fff); }
+.gate-plan-steps { padding-left: 18px; margin: 4px 0; }
+.gate-plan-step { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin: 2px 0; }
+.gate-plan-step.is-dropped .gate-plan-title { text-decoration: line-through; opacity: 0.6; }
+.gate-plan-title { flex: 1 1 200px; }
+.gate-plan-actions, .gate-revise { display: flex; gap: 6px; margin-top: 4px; flex-wrap: wrap; }
+.gate-revise textarea { flex: 1 1 100%; }
+.gate-questions { display: flex; flex-direction: column; gap: 4px; }
+.gate-consensus { font-size: 0.8em; }
+.crew-lineup { margin: 4px 0 8px 24px; display: flex; flex-direction: column; gap: 6px; }
+.crew-diagram { display: flex; flex-wrap: wrap; gap: 4px; font-size: 0.85em; color: var(--vscode-descriptionForeground); }
+.crew-lineup-summary { font-size: 0.9em; }
+.crew-lineup-table { border-collapse: collapse; font-size: 0.85em; }
+.crew-lineup-table th, .crew-lineup-table td { padding: 2px 4px; text-align: left; }
+.crew-lineup-options { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.lineup-verify { min-width: 160px; }
+.lineup-rounds { width: 3.5em; }
+.crew-step-meta { font-size: 0.8em; color: var(--vscode-descriptionForeground); }
+.crew-step-substep { font-size: 0.85em; color: var(--vscode-descriptionForeground); }
+.crew-stall { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin: 2px 0 4px 24px; }
+.crew-run-totals { font-size: 0.85em; color: var(--vscode-descriptionForeground); }
+.crew-run-extras { padding: 4px 8px 6px; }
+.crew-run-table { border-collapse: collapse; font-size: 0.8em; width: 100%; }
+.crew-run-table th, .crew-run-table td { padding: 2px 4px; text-align: left; border-bottom: 1px solid var(--vscode-editorWidget-border, #333); }
+.crew-input-choice, .child-context-bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px 8px; margin: 4px 0;
+  border: 1px solid var(--vscode-editorWidget-border, #444); border-radius: 6px; background: var(--vscode-editorWidget-background, transparent); }
+.child-context-hint { font-size: 0.85em; color: var(--vscode-descriptionForeground); flex: 1 1 100%; }
+/* X-02: a child's live feed. */
+.child-activity { margin: 2px 0 4px 24px; font-size: 0.85em; }
+.child-activity > summary { cursor: pointer; color: var(--vscode-descriptionForeground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.child-activity-lines { max-height: 160px; overflow: auto; white-space: pre-wrap; padding: 2px 4px; border-left: 2px solid var(--vscode-editorWidget-border, #444); }
+.child-activity-line.is-thought { opacity: 0.7; font-style: italic; }
+.companion-activity { margin-left: 0; }
+
+/* S-02 / S-03 / S-04 */
+.delegation-switch { max-width: 11em; }
+.mention-item.is-disabled { opacity: 0.5; text-decoration: line-through; cursor: not-allowed; }
+.subagent-approval .cx-fields { display: flex; flex-wrap: wrap; gap: 4px; }
+.subagent-approval.resolved { opacity: 0.75; }
+.companion-follow-up-box { display: flex; gap: 4px; margin: 4px 0; }
+.companion-follow-up-text { flex: 1 1 auto; }
+.card-warning { display: inline-block; margin-bottom: 4px; }
+.subagent-tokens, .subagent-ran-model { margin-left: 6px; font-size: 0.85em; color: var(--vscode-descriptionForeground); }
+.msg-children { margin-left: 8px; color: var(--vscode-descriptionForeground); }
+
+/* E-01: running children above the history list. */
+.running-children { padding: 6px 8px; border-bottom: 1px solid var(--vscode-editorWidget-border, #444); display: flex; flex-direction: column; gap: 3px; }
+.running-children-head { display: flex; justify-content: space-between; align-items: center; font-weight: 600; }
+.running-children-parent { font-size: 0.85em; color: var(--vscode-descriptionForeground); margin-top: 2px; }
+.running-children-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 0.9em; }
+.running-children-label { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.running-children-target, .running-children-time, .running-children-tokens { color: var(--vscode-descriptionForeground); font-size: 0.85em; }

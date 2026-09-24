@@ -270,7 +270,11 @@ rl.on("line", async (line) => {
           toolDefinitionsTokens: 812,
           messageTokens: 12166,
           freeTokens: 495983,
-          autoCompactThresholdPercent: 92,
+          // K-01: the real CLI honours this env over its catalog value.
+          autoCompactThresholdPercent: (() => {
+            const n = Number(process.env.GROK_AUTO_COMPACT_THRESHOLD_PERCENT);
+            return Number.isInteger(n) && n > 0 && n <= 100 ? n : 92;
+          })(),
           usageCategories: [{ label: "Skills", tokens: 1200 }],
         },
       });

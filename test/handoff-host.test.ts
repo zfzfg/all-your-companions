@@ -293,7 +293,8 @@ describe("the run itself is AP-10's, unchanged", () => {
     const c = card(h.posted);
     expect(c.role).toBe("reviewer");
     expect(c.origin).toBe("second-opinion");
-    expect(c.cost).toContain("$");
+    expect(c.cost).toContain("tokens");
+    expect(c.cost).not.toContain("$");
   });
 
   it("marks a handoff card as a handoff", async () => {

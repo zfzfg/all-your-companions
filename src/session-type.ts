@@ -49,6 +49,8 @@ export interface SessionTypeMeta {
   hiddenReason?: HiddenReason;
   /** Agent sessions: snapshot of the global switch at creation and at lock. */
   subagentsEnabled?: boolean;
+  /** S-03: the composer's delegation choice for this session. */
+  spawnPolicy?: "ask" | "auto" | "auto-read-only";
   /** Session-gear override, per provider or `*` for all. */
   subagentEffortOverride?: Partial<Record<AcpProvider | "*", EffortLevel | "inherit">>;
   /** Crew sessions: the selected workflow. */

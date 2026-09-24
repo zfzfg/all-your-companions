@@ -184,3 +184,21 @@ is still a non-goal. On native-Windows the legacy correlation key is the backgro
 poll output under the spawn card by `task_id`. Today's card is a flat labeled
 marker; the live suite's `subagent` test guards the two invariants we rely on
 (real delegation detected, poller not carded).
+
+## Configuring Grok's own subagents from the extension (S-07)
+
+The 1.0.41 binary names `GROK_SUBAGENTS`, `GROK_MAX_CONCURRENT_SUBAGENTS`,
+`GROK_SUBAGENT_SAMPLING_LIMIT` and `GROK_SUBAGENT_LIMIT_BEHAVIOR`.
+`companions.grok.subagents.enabled` (`default` | `on` | `off`) and
+`companions.grok.subagents.maxConcurrent` (0 = Grok's default) set the first two
+on every Grok spawn (`grokSubagentEnv`), never over a user-set variable.
+**Unconfirmed:** the value `GROK_SUBAGENTS` expects (`0`/`1` is assumed). Probe:
+start `grok agent stdio` with `GROK_SUBAGENTS=0`, ask for a task that would
+delegate, and check that no `subagent_spawned` arrives; record the result here.
+Per-type models (`subagents.models.<name>`) exist only in `config.toml`; the
+`GROK_CONFIG` overlay passes `models`, `features`, parts of `toolset` and
+`shell_environment_policy` only, so they are not offered.
+
+Grok's own subagents appear in the subagent tray and the running-children
+overview next to companion subagents, with the same status words (E-02); they
+cannot be cancelled one by one — the CLI owns them.

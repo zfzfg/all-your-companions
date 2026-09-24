@@ -180,7 +180,12 @@ export type RefusalCode =
   | "denied-by-user"
   | "no-eligible-target"
   | "timeout"
-  | "child-crashed";
+  | "child-crashed"
+  // S-01: a file the child would edit is held by another writer.
+  | "file-claimed"
+  // S-04: a follow-up for a child whose session is no longer live.
+  | "session-gone"
+  | "still-running";
 
 export interface SpawnRequest {
   provider?: AcpProvider;
@@ -705,7 +710,7 @@ export interface TargetListing {
  */
 export function listEligibleTargets(
   input: EligibilityInput,
-  options: { includeIneligible?: boolean; expand?: AcpProvider } = {},
+  options: { includeIneligible?: boolean; expand?: AcpProvider | "all" } = {},
 ): TargetListing {
   const targets: TargetListingEntry[] = [];
   const ineligible: TargetListing["ineligible"] = [];
@@ -739,7 +744,7 @@ export function listEligibleTargets(
       modelCount: cache.models.length,
       modelListVerified: cache.checked,
     };
-    if (options.expand === provider) {
+    if (options.expand === provider || options.expand === "all") {
       entry.models = cache.models.map((model) => ({
         id: model.id,
         ...(model.label ? { label: model.label } : {}),

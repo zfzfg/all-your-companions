@@ -353,6 +353,33 @@ async function testTerminalShell() {
   }
 }
 
+// K-01: the compaction threshold follows GROK_AUTO_COMPACT_THRESHOLD_PERCENT
+// over xAI's catalog value. Free — no prompt, only session/info.
+async function testCompactThreshold() {
+  const read = async (value) => {
+    const saved = process.env.GROK_AUTO_COMPACT_THRESHOLD_PERCENT;
+    if (value === undefined) delete process.env.GROK_AUTO_COMPACT_THRESHOLD_PERCENT;
+    else process.env.GROK_AUTO_COMPACT_THRESHOLD_PERCENT = value;
+    const cwd = mkTmp("compact");
+    const acp = new Acp(cwd);
+    try {
+      const init = await withTimeout(acp.send("initialize", INIT), 30000, "initialize");
+      assert(!init.error, "initialize errored: " + JSON.stringify(init.error));
+      const s = await withTimeout(acp.send("session/new", { cwd, mcpServers: [] }), 60000, "session/new");
+      const info = await withTimeout(acp.send("_x.ai/session/info", { sessionId: s.result.sessionId }), 30000, "session/info");
+      return info.result && info.result.context && info.result.context.autoCompactThresholdPercent;
+    } finally {
+      acp.kill();
+      if (saved === undefined) delete process.env.GROK_AUTO_COMPACT_THRESHOLD_PERCENT;
+      else process.env.GROK_AUTO_COMPACT_THRESHOLD_PERCENT = saved;
+    }
+  };
+  const base = await read(undefined);
+  const set = await read("95");
+  assert(set === 95, `DRIFT: GROK_AUTO_COMPACT_THRESHOLD_PERCENT=95 reported ${set} (baseline 95). companions.grok.autoCompactThresholdPercent no longer applies — see research/compact.md Plan B.`);
+  return `default=${base}, env95=${set}`;
+}
+
 async function testHandshake() {
   const cwd = mkTmp("hs");
   const acp = new Acp(cwd);
@@ -1470,6 +1497,7 @@ const TESTS = [
   // v1.6.1 notification-rail features (drift canaries):
   { name: "compact-notification", fn: testCompactNotification, slow: false },
   { name: "effort-live", fn: testEffortLive, slow: false, smoke: true },
+  { name: "compact-threshold", fn: testCompactThreshold, slow: false, smoke: true },
   // The native reject-then-approve plan loop is intentionally slow, so it's
   // slow enough to skip under --quick; the full release gate still runs it.
   { name: "plan-mode", fn: testPlanMode, slow: true },

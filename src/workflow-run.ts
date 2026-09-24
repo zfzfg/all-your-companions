@@ -29,6 +29,7 @@ import {
   firstEnabledStart,
   isAutoGate,
   isReservedTarget,
+  stageGatePolicy,
   type ReservedTarget,
   type WorkflowDefinition,
   type WorkflowStage,
@@ -54,7 +55,8 @@ export type GateKind =
   | "failed"
   | "stale"
   | "snapshot-drift"
-  | "unresumable";
+  | "unresumable"
+  | "limit";
 
 export interface ExecutedStage {
   stageId: string;
@@ -75,6 +77,12 @@ export interface WorkflowGate {
   preselectedTarget?: Target;
   userNotes?: string;
   nextStageId?: string;
+  /** C-16: the companion that hit its usage limit on this gate's stage. */
+  limitProvider?: AcpProvider;
+  /** C-16 (`onLimit: "switch"`): the stage ran on this one instead. */
+  switchedFrom?: AcpProvider;
+  /** C-03: the preselected companion against the stage it should differ from. */
+  compare?: { stageTitle: string; same: boolean };
 }
 
 export interface PauseSnapshot {
@@ -97,16 +105,59 @@ export interface WorkflowRun {
   status: WorkflowRunStatus;
   checkpointTurnId?: string;
   executed: ExecutedStage[];
-  current?: { stageId: string; ordinal: number; visit: number; sessionId?: string; startedAt: number; target?: Target };
+  current?: {
+    stageId: string;
+    ordinal: number;
+    visit: number;
+    sessionId?: string;
+    startedAt: number;
+    target?: Target;
+    /** C-01: the person ticked "Allow edits anywhere" for this stage. */
+    allowAnywhere?: boolean;
+    /** The gate's notes, carried into the stage (the gate itself is gone). */
+    userNotes?: string;
+  };
   gate?: WorkflowGate;
   pausedAt?: PauseSnapshot;
   exhausted: AcpProvider[];
   attachedFiles?: string[];
   stoppedReason?: string;
+  /** C-04: who runs each stage, chosen before the first token. */
+  lineup?: Record<string, RunLineupEntry>;
+  /** C-05: how far the run goes on its own. Absent = "step". */
+  autonomy?: Autonomy;
+  /** C-05: stop at the next gate even on autopilot. */
+  pauseAfterCurrent?: boolean;
+  /** C-11: extra visits the person granted per stage ("Another round"). */
+  extraVisits?: Record<string, number>;
+  /** C-09: findings the person chose not to fix, by id. */
+  ignoredFindings?: string[];
+  /** C-16: when each exhausted provider hit its limit (ms). */
+  exhaustedAt?: Record<string, number>;
+  /** C-18: the finished run was acknowledged (Keep changes). */
+  acknowledged?: boolean;
+  /** C-10: ordinals whose changes were reverted. */
+  reverted?: number[];
+  /** C-08: the fixer continues in this stage's session instead of a fresh one. */
+  fixInSession?: string;
+  /** C-09: ids of the findings the last review returned (for selection). */
+  lastFindingIds?: string[];
+  /** X-03: notes typed while a stage ran, for the next gate. */
+  pendingNotes?: string;
+}
+
+export type Autonomy = "step" | "stop-on-problems" | "autopilot";
+
+export interface RunLineupEntry {
+  provider: AcpProvider;
+  model?: string;
+  effort?: string;
+  gate?: "manual" | "auto";
+  enabled?: boolean;
 }
 
 export type GateAction =
-  | { type: "start"; nextStageId?: string; target?: Target; notes?: string }
+  | { type: "start"; nextStageId?: string; target?: Target; notes?: string; allowAnywhere?: boolean }
   | { type: "pause"; at: number; gitHead?: string; observedHash?: string; worktree?: string }
   | { type: "cancel"; reason?: string }
   | { type: "skip"; notes?: string }
@@ -118,7 +169,10 @@ export type GateAction =
   | { type: "anotherRound"; target?: Target }
   | { type: "changeWorkflow" }
   | { type: "revertAll" }
-  | { type: "keepChanges" };
+  | { type: "keepChanges" }
+  | { type: "setAutonomy"; autonomy: Autonomy }
+  | { type: "pauseAfterStage"; value: boolean }
+  | { type: "selectFindings"; keep: string[] };
 
 export interface GateProposal {
   proposedNext: string[];
@@ -140,12 +194,19 @@ export function copyRun(run: WorkflowRun): WorkflowRun {
             proposedNext: [...run.gate.proposedNext],
             ...(run.gate.forcedManual ? { forcedManual: [...run.gate.forcedManual] } : {}),
             ...(run.gate.preselectedTarget ? { preselectedTarget: { ...run.gate.preselectedTarget } } : {}),
+            ...(run.gate.compare ? { compare: { ...run.gate.compare } } : {}),
           },
         }
       : {}),
     ...(run.pausedAt ? { pausedAt: { ...run.pausedAt } } : {}),
     exhausted: [...run.exhausted],
     ...(run.attachedFiles ? { attachedFiles: [...run.attachedFiles] } : {}),
+    ...(run.lineup ? { lineup: Object.fromEntries(Object.entries(run.lineup).map(([k, v]) => [k, { ...v }])) } : {}),
+    ...(run.extraVisits ? { extraVisits: { ...run.extraVisits } } : {}),
+    ...(run.ignoredFindings ? { ignoredFindings: [...run.ignoredFindings] } : {}),
+    ...(run.exhaustedAt ? { exhaustedAt: { ...run.exhaustedAt } } : {}),
+    ...(run.reverted ? { reverted: [...run.reverted] } : {}),
+    ...(run.lastFindingIds ? { lastFindingIds: [...run.lastFindingIds] } : {}),
   };
 }
 
@@ -230,7 +291,48 @@ export function forcedManualReasons(
   const contract = stage ? def.contracts[stage.contract] : undefined;
   if (verdictUnreadable(packet, contract)) reasons.push("unreadable-verdict");
   if (packet.unreported.length) reasons.push("unreported-edits");
+  // F-08 / C-16: a stage that ran on another companion after a limit always
+  // stops, so the switch is seen before anything builds on it.
+  if (packet.switchedFrom) reasons.push("provider-switched");
   return reasons;
+}
+
+/** How many times `stageId` may run: its cap plus the extra rounds granted (C-11). */
+export function visitCap(run: WorkflowRun, stage: WorkflowStage): number | undefined {
+  if (!stage.maxVisits) return undefined;
+  return stage.maxVisits + (run.extraVisits?.[stage.id] ?? 0);
+}
+
+/**
+ * C-05: may the host start the next stage without showing the gate?
+ *
+ * - `step`: never — every gate waits.
+ * - `stop-on-problems`: only gates the workflow marks `auto`.
+ * - `autopilot`: manual gates too.
+ *
+ * Every forced reason (failed stage, red verify, unreadable verdict,
+ * unreported edits, limit, provider switch, fixer limit) stops all three —
+ * D6 holds whatever the setting. "Pause after this stage" stops once.
+ */
+export function shouldAutoProceed(input: {
+  autonomy: Autonomy;
+  stage: WorkflowStage | undefined;
+  def: WorkflowDefinition;
+  forced: readonly string[];
+  pauseAfterCurrent?: boolean;
+}): boolean {
+  if (!input.stage || input.forced.length || input.pauseAfterCurrent) return false;
+  if (input.autonomy === "autopilot") return true;
+  if (input.autonomy === "stop-on-problems") return stageGatePolicy(input.stage, input.def) === "auto";
+  return false;
+}
+
+/** The legacy boolean setting as an autonomy default. */
+export function autonomyFromSettings(defaultAutonomy: unknown, autoStartNextStage: unknown): Autonomy {
+  if (defaultAutonomy === "step" || defaultAutonomy === "stop-on-problems" || defaultAutonomy === "autopilot") {
+    return defaultAutonomy;
+  }
+  return autoStartNextStage === true ? "stop-on-problems" : "step";
 }
 
 function severityRank(value: string | undefined): number {
@@ -321,11 +423,12 @@ export function nextFromTransitions(
     const dest = isReservedTarget(transition.to) ? undefined : findStage(def, transition.to);
     // Bound the loop on the DESTINATION: the third review that still wants
     // Fix is what produces "after N fix rounds", not the Fix stage ending.
-    if (dest?.maxVisits && run.executed.filter((entry) => entry.stageId === dest.id).length >= dest.maxVisits) {
+    const cap = dest ? visitCap(run, dest) : undefined;
+    if (dest && cap !== undefined && run.executed.filter((entry) => entry.stageId === dest.id).length >= cap) {
       const to = dest.onMaxVisits || "$pause";
       return {
         proposedNext: [to, "$done", "$cancel"],
-        reason: `Review still requests changes after ${dest.maxVisits} fix rounds.`,
+        reason: `Review still requests changes after ${cap} fix rounds.`,
         kind: "fixer-limit",
         forcedManual: ["max-visits"],
       };
@@ -372,7 +475,7 @@ export function startStage(
   run: WorkflowRun,
   stageId: string,
   now: number,
-  opts?: { sessionId?: string; target?: Target },
+  opts?: { sessionId?: string; target?: Target; allowAnywhere?: boolean },
 ): WorkflowRun {
   const next = copyRun(run);
   const visit = visitCount(run, stageId) + (run.current?.stageId === stageId ? 0 : 1);
@@ -385,6 +488,8 @@ export function startStage(
     startedAt: now,
     ...(opts?.sessionId ? { sessionId: opts.sessionId } : {}),
     ...(opts?.target ? { target: opts.target } : {}),
+    ...(opts?.allowAnywhere ? { allowAnywhere: true } : {}),
+    ...(run.gate?.userNotes?.trim() ? { userNotes: run.gate.userNotes.trim() } : {}),
   };
   delete next.gate;
   delete next.pausedAt;
@@ -404,10 +509,12 @@ export function applyStageOutcome(
   def: WorkflowDefinition,
   packet: HandoffPacket,
   packets: Iterable<HandoffPacket>,
-  opts: { autoStartNextStage: boolean },
+  opts: { autoStartNextStage: boolean; autonomy?: Autonomy },
 ): WorkflowRun {
   const next = copyRun(run);
   const current = next.current;
+  const pauseAfter = !!next.pauseAfterCurrent;
+  delete next.pauseAfterCurrent;
   next.executed.push({
     stageId: packet.stageId,
     ordinal: packet.stageOrdinal,
@@ -417,11 +524,16 @@ export function applyStageOutcome(
     ...(current?.sessionId ? { sessionId: current.sessionId } : {}),
   });
   delete next.current;
+  if (packet.findings?.length) next.lastFindingIds = packet.findings.map((f) => f.id);
+  const pendingNotes = next.pendingNotes?.trim();
+  delete next.pendingNotes;
   const proposal = nextFromTransitions(def, next, packet, packets);
   const finished = findStage(def, packet.stageId);
-  const auto = finished
-    ? isAutoGate(finished, def, opts.autoStartNextStage) && proposal.forcedManual.length === 0
-    : false;
+  const auto = opts.autonomy
+    ? shouldAutoProceed({ autonomy: opts.autonomy, stage: finished, def, forced: proposal.forcedManual, pauseAfterCurrent: pauseAfter })
+    : finished
+      ? isAutoGate(finished, def, opts.autoStartNextStage) && proposal.forcedManual.length === 0 && !pauseAfter
+      : false;
   const first = proposal.proposedNext[0];
   if (auto && first === "$done") {
     next.status = "done";
@@ -442,18 +554,19 @@ export function applyStageOutcome(
       reason: proposal.reason,
       kind: proposal.kind,
       autoProceed: true,
+      ...(pendingNotes ? { userNotes: pendingNotes } : {}),
     };
     return next;
   }
-  next.status = first === "$done" && proposal.kind === "normal" && proposal.forcedManual.length === 0
-    ? "at-gate"
-    : "at-gate";
+  next.status = "at-gate";
   next.gate = {
     proposedNext: proposal.proposedNext,
     nextStageId: first,
     reason: proposal.reason,
     kind: proposal.kind,
     ...(proposal.forcedManual.length ? { forcedManual: proposal.forcedManual } : {}),
+    ...(packet.switchedFrom ? { switchedFrom: packet.switchedFrom } : {}),
+    ...(pendingNotes ? { userNotes: pendingNotes } : {}),
   };
   if (proposal.kind === "fixer-limit") {
     next.status = "paused";
@@ -494,9 +607,41 @@ export function applyGateAction(
   }
   if (action.type === "finish" || action.type === "acceptAsIs") {
     const next = copyRun(run);
+    if (action.type === "acceptAsIs") {
+      // C-09: whatever the last review still lists is accepted as is, and
+      // the report says so.
+      const open = openFindingIds(next, lastReviewFindingIds(run));
+      if (open.length) next.ignoredFindings = [...new Set([...(next.ignoredFindings ?? []), ...open])];
+    }
     next.status = "done";
     delete next.gate;
     delete next.current;
+    return next;
+  }
+  if (action.type === "setAutonomy") {
+    const next = copyRun(run);
+    next.autonomy = action.autonomy;
+    return next;
+  }
+  if (action.type === "pauseAfterStage") {
+    const next = copyRun(run);
+    if (action.value) next.pauseAfterCurrent = true;
+    else delete next.pauseAfterCurrent;
+    return next;
+  }
+  if (action.type === "selectFindings") {
+    const next = copyRun(run);
+    const all = lastReviewFindingIds(run);
+    const keep = new Set(action.keep);
+    const ignored = all.filter((id) => !keep.has(id));
+    const others = (next.ignoredFindings ?? []).filter((id) => !all.includes(id));
+    next.ignoredFindings = [...others, ...ignored];
+    if (!next.ignoredFindings.length) delete next.ignoredFindings;
+    return next;
+  }
+  if (action.type === "keepChanges" && run.status === "done") {
+    const next = copyRun(run);
+    next.acknowledged = true;
     return next;
   }
   if (action.type === "continueAnyway") {
@@ -520,17 +665,14 @@ export function applyGateAction(
     return startStage(run, stageId, now, { target: action.target });
   }
   if (action.type === "anotherRound") {
-    const stageId = run.gate?.proposedNext.find((id) => id === "fix") ?? "fix";
+    // C-11: one more round is a granted visit, recorded on the run — not a
+    // raised `maxVisits` on the snapshot, which would rewrite a paused run's
+    // meaning. The next Review → Fix then runs normally, and the limit gate
+    // returns only once the extra round is used up too.
+    const stageId = anotherRoundStage(run, def);
+    if (!stageId) return run;
     const next = copyRun(run);
-    const stage = findStage(def, stageId);
-    if (stage?.maxVisits) {
-      next.executed = next.executed.map((entry) =>
-        entry.stageId === stageId ? entry : entry,
-      );
-      // An explicit extra round: lift the cap by treating this as a fresh
-      // visit the user asked for, rather than silently raising maxVisits on
-      // the snapshot (which would rewrite a paused run's meaning).
-    }
+    next.extraVisits = { ...(next.extraVisits ?? {}), [stageId]: (next.extraVisits?.[stageId] ?? 0) + 1 };
     return startStage(next, stageId, now, { target: action.target });
   }
   if (action.type === "start") {
@@ -554,9 +696,80 @@ export function applyGateAction(
     const next = action.notes?.trim()
       ? withGateNotes(run, action.notes.trim())
       : run;
-    return startStage(next, requested, now, { target: action.target });
+    return startStage(next, requested, now, { target: action.target, allowAnywhere: action.allowAnywhere });
   }
   return run;
+}
+
+/**
+ * C-04: apply the lineup's per-stage choices to this run's snapshot — an
+ * optional stage switched on or off, a stage's gate policy. Targets are not
+ * written into the definition: they live on the run (`run.lineup`).
+ */
+export function applyLineupToDefinition(
+  def: WorkflowDefinition,
+  lineup: Record<string, { enabled?: boolean; gate?: "manual" | "auto" }> | undefined,
+): WorkflowDefinition {
+  if (!lineup) return def;
+  return {
+    ...def,
+    stages: def.stages.map((stage) => {
+      const choice = lineup[stage.id];
+      if (!choice) return stage;
+      return {
+        ...stage,
+        ...(typeof choice.enabled === "boolean" ? { enabled: choice.enabled } : {}),
+        ...(choice.gate === "manual" || choice.gate === "auto" ? { gate: choice.gate } : {}),
+      };
+    }),
+  };
+}
+
+/** C-06: a plan edit from the webview, cleaned; ids renumbered when missing. */
+export function sanitizePlanEdit(
+  steps: ReadonlyArray<{ id?: unknown; title?: unknown; acceptance?: unknown; files?: unknown }>,
+): Array<{ id: string; title: string; acceptance?: string; files?: string[] }> {
+  const out: Array<{ id: string; title: string; acceptance?: string; files?: string[] }> = [];
+  for (const raw of Array.isArray(steps) ? steps : []) {
+    const title = typeof raw?.title === "string" ? raw.title.trim() : "";
+    if (!title) continue;
+    const id = typeof raw.id === "string" && raw.id.trim() ? raw.id.trim() : `S${out.length + 1}`;
+    const acceptance = typeof raw.acceptance === "string" && raw.acceptance.trim() ? raw.acceptance.trim() : undefined;
+    const files: string[] = Array.isArray(raw.files)
+      ? [...new Set((raw.files as unknown[]).map((f) => String(f ?? "").trim()).filter(Boolean))]
+      : [];
+    out.push({ id, title, ...(acceptance ? { acceptance } : {}), ...(files.length ? { files } : {}) });
+  }
+  return out;
+}
+
+/** The capped stage the fixer-limit gate is about (the Fix stage in idea-to-done). */
+export function anotherRoundStage(run: WorkflowRun, def: WorkflowDefinition): string | undefined {
+  const capped = def.stages.filter((s) => s.maxVisits);
+  const named = run.gate?.proposedNext.find((id) => capped.some((s) => s.id === id));
+  if (named) return named;
+  const lastCapped = [...run.executed].reverse().find((e) => capped.some((s) => s.id === e.stageId));
+  return lastCapped?.stageId ?? capped[0]?.id;
+}
+
+/** "Another round (3 of 3)" — the visit the button would start, of the new cap. */
+export function anotherRoundLabel(run: WorkflowRun, def: WorkflowDefinition): string {
+  const id = anotherRoundStage(run, def);
+  const stage = id ? findStage(def, id) : undefined;
+  if (!stage?.maxVisits) return "Another round";
+  const done = run.executed.filter((e) => e.stageId === stage.id).length;
+  const cap = (visitCap(run, stage) ?? stage.maxVisits) + 1;
+  return `Another round (${done + 1} of ${cap})`;
+}
+
+/** Finding ids from the most recent packet that carried findings (set by the host). */
+function lastReviewFindingIds(run: WorkflowRun): string[] {
+  return run.lastFindingIds ? [...run.lastFindingIds] : [];
+}
+
+function openFindingIds(run: WorkflowRun, ids: readonly string[]): string[] {
+  const ignored = new Set(run.ignoredFindings ?? []);
+  return ids.filter((id) => !ignored.has(id));
 }
 
 function withGateNotes(run: WorkflowRun, notes: string): WorkflowRun {
@@ -693,7 +906,7 @@ export function applySnapshotDrift(run: WorkflowRun): WorkflowRun {
 }
 
 /** Copy-deck history subtitle. */
-export function historySubtitle(run: WorkflowRun, def: WorkflowDefinition): string {
+export function historySubtitle(run: WorkflowRun, def: WorkflowDefinition, opts?: { needsYou?: boolean }): string {
   const total = estimatedStageCount(def);
   const done = run.executed.filter((e) => e.status === "done" || e.status === "skipped").length;
   if (run.status === "done") return `Done · ${run.executed.length} stages`;
@@ -702,6 +915,7 @@ export function historySubtitle(run: WorkflowRun, def: WorkflowDefinition): stri
   const nextId = run.current?.stageId ?? run.gate?.nextStageId ?? run.gate?.proposedNext[0];
   const stage = nextId && !isReservedTarget(nextId) ? findStage(def, nextId) : undefined;
   const name = stage?.title ?? nextId ?? "next stage";
+  if (run.status === "running" && opts?.needsYou) return `Crew · ${name} needs you (${done}/${total})`;
   if (run.status === "running") return `Running ${name} (${done}/${total})`;
   return `Crew · paused before ${name} (${done}/${total})`;
 }
@@ -859,6 +1073,44 @@ export class WorkflowRunStore {
     }
   }
 
+  userEditPath(runId: string, ordinal: number): string {
+    return this.handoffPath(runId, ordinal).replace(/\.handoff\.json$/, ".user-edit.json");
+  }
+
+  /** C-06: the person's edit of a stage's packet, next to the original. */
+  writeUserEdit(runId: string, ordinal: number, packet: HandoffPacket): string {
+    const dir = this.runDir(runId);
+    this.options.fs.mkdirSync(dir, { recursive: true });
+    const target = this.userEditPath(runId, ordinal);
+    writeAtomic(this.options.fs, target, `${JSON.stringify(packet, null, 2)}\n`);
+    return target;
+  }
+
+  readUserEdit(runId: string, ordinal: number): HandoffPacket | undefined {
+    return this.readHandoffAt(this.userEditPath(runId, ordinal));
+  }
+
+  /**
+   * A stage's handoff packet from disk (C-02), or undefined when it is missing
+   * or unreadable. Tolerant: a resumed run with a lost packet still opens, and
+   * the gate names what is missing.
+   */
+  readHandoff(runId: string, ordinal: number): HandoffPacket | undefined {
+    return this.readHandoffAt(this.handoffPath(runId, ordinal));
+  }
+
+  readHandoffAt(file: string): HandoffPacket | undefined {
+    const read = this.options.fs.readFileSync;
+    if (!read || !file || !this.options.fs.existsSync(file)) return undefined;
+    try {
+      const raw = JSON.parse(read(file, "utf8")) as HandoffPacket;
+      if (!raw || raw.version !== 1 || typeof raw.stageId !== "string") return undefined;
+      return raw;
+    } catch {
+      return undefined;
+    }
+  }
+
   readSnapshot(runId: string): string | undefined {
     const read = this.options.fs.readFileSync;
     if (!read || !this.options.fs.existsSync(this.snapshotPath(runId))) return undefined;
@@ -887,13 +1139,19 @@ export function toWorkflowView(opts: {
     ineligible: Array<{ provider: AcpProvider; message: string }>;
   };
   staleDetails?: string[];
+  /** C-02: stage results that could not be read back from disk. */
+  missing?: string[];
+  /** X-01: the running stage waits for an answer from the person. */
+  waitingForYou?: boolean;
+  /** C-01: the next write stage's scope. */
+  scope?: { globs: string[]; note?: string };
 }): WorkflowRunView {
-  const { run, def, lastPacket, listing, staleDetails } = opts;
+  const { run, def, lastPacket, listing, staleDetails, missing, waitingForYou, scope } = opts;
   const nextId = run.current?.stageId ?? run.gate?.nextStageId ?? run.gate?.proposedNext[0];
   const stages = def.stages.filter((s) => s.enabled).map((stage) => {
     const last = [...run.executed].reverse().find((e) => e.stageId === stage.id);
     const status = run.current?.stageId === stage.id
-      ? "running"
+      ? (waitingForYou ? "needs-you" : "running")
       : last?.status ?? "pending";
     return {
       id: stage.id,
@@ -926,6 +1184,8 @@ export function toWorkflowView(opts: {
         ...(run.gate.userNotes ? { userNotes: run.gate.userNotes } : {}),
         ...(run.gate.forcedManual ? { forcedManual: run.gate.forcedManual } : {}),
         ...(staleDetails?.length ? { staleDetails } : {}),
+        ...(missing?.length ? { missing } : {}),
+        ...(scope ? { scope } : {}),
         ...(lastPacket?.durationMs ? { durationMs: lastPacket.durationMs } : {}),
         ...(lastPacket
           ? {
@@ -962,9 +1222,10 @@ export function toWorkflowView(opts: {
     workflowName: run.workflowName,
     workflowTitle: def.title,
     status: run.status,
-    subtitle: historySubtitle(run, def),
+    subtitle: historySubtitle(run, def, { needsYou: waitingForYou }),
     stages,
     ...(nextId && !isReservedTarget(nextId) ? { currentStageId: nextId } : {}),
     ...(gate ? { gate } : {}),
+    ...(waitingForYou && run.status === "running" ? { waitingForYou: true } : {}),
   };
 }

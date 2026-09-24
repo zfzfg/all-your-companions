@@ -286,3 +286,30 @@ export function defaultRoleFor(kind: HandoffKind): string {
 export function handoffLabel(kind: HandoffKind): string {
   return kind === "second-opinion" ? "Second opinion" : "Handoff";
 }
+
+/**
+ * The first message of a fresh session that continues a nearly full one
+ * (K-04 "Continue in a fresh session"). Same derivation as a handoff, but it
+ * goes to the SAME companion as an ordinary user turn, so it reads as a
+ * hand-written brief rather than a role briefing. Deterministic.
+ */
+export function renderFreshSessionPrompt(briefing: DerivedBriefing): string {
+  const lines: string[] = [
+    "This continues an earlier conversation whose context window was nearly full. "
+      + "You cannot see it; everything that matters is below.",
+    "",
+    `Goal: ${briefing.goal}`,
+    "",
+    briefing.task,
+  ];
+  if (briefing.decisions.length) {
+    lines.push("", "Already settled:");
+    for (const d of briefing.decisions) lines.push(`- ${d}`);
+  }
+  if (briefing.files.length) {
+    lines.push("", "Files touched so far:");
+    for (const f of briefing.files) lines.push(`- ${f}`);
+  }
+  lines.push("", `When you are done: ${briefing.acceptance}`);
+  return lines.join("\n");
+}

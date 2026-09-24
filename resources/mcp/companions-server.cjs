@@ -96,12 +96,13 @@ const FALLBACK_TOOLS = [
   {
     name: COMPANIONS_AWAIT_TOOL,
     description:
-      "Collect, cancel or read companion subagents you started. `action` is wait (the default), cancel, or read; `maxWaitSec: 0` is a status poll. A wait that returns before a child is done is normal — call again.",
+      "Collect, cancel, read or continue companion subagents you started. `action` is wait (the default), cancel, read, or continue (send `message` to a finished one); `maxWaitSec: 0` is a status poll. A wait that returns before a child is done is normal — call again.",
     inputSchema: {
       type: "object",
       properties: {
         ids: { type: "array", items: { type: "string" }, minItems: 1 },
-        action: { type: "string", enum: ["wait", "cancel", "read"] },
+        action: { type: "string", enum: ["wait", "cancel", "read", "continue"] },
+        message: { type: "string" },
         mode: { type: "string", enum: ["all", "any"] },
         maxWaitSec: { type: "integer", minimum: 0 },
         offset: { type: "integer", minimum: 0 },

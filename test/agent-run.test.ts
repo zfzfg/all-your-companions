@@ -92,22 +92,18 @@ describe("AgentRunStore", () => {
 });
 
 describe("formatRunCost", () => {
-  it("converts grok's 10^10 ticks per USD", () => {
-    expect(formatRunCost(12_300_000_000, 4210)).toBe("$1.23 · 4,210 tokens");
+  it("renders tokens only — never money (D18)", () => {
+    expect(formatRunCost(12_300_000_000, 4210)).toBe("4,210 tokens");
+    expect(formatRunCost(1, undefined)).toBe("no token count reported");
   });
 
-  it("does not round a real charge away to zero", () => {
-    expect(formatRunCost(1, undefined)).toBe("<$0.000001");
+  it("says 'no token count reported' rather than a reassuring zero", () => {
+    // A provider that reported nothing is not a provider that used nothing.
+    expect(formatRunCost(undefined, undefined)).toBe("no token count reported");
+    expect(formatRunCost(0, 0)).toBe("no token count reported");
   });
 
-  it("says 'no cost reported' rather than a reassuring $0.00", () => {
-    // The distinction is the point: a provider that reported nothing is not a
-    // provider that charged nothing, and printing the second would be a lie.
-    expect(formatRunCost(undefined, undefined)).toBe("no cost reported");
-    expect(formatRunCost(0, 0)).toBe("$0.00");
-  });
-
-  it("still reports tokens when only tokens are known", () => {
+  it("reports tokens when only tokens are known", () => {
     expect(formatRunCost(undefined, 1200)).toBe("1,200 tokens");
   });
 });

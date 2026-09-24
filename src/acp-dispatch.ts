@@ -796,6 +796,8 @@ export interface SessionInfoContext {
   messageTokens?: number;
   freeTokens?: number;
   autoCompactThresholdPercent?: number;
+  /** How often this session compacted so far, when Grok reports it. */
+  compactionCount?: number;
 }
 
 /** Keep a popover re-open from issuing another control-plane RPC immediately. */
@@ -856,6 +858,8 @@ export function parseSessionInfoRpcResult(raw: unknown): SessionInfoContext | nu
   if (typeof threshold === "number" && Number.isFinite(threshold) && threshold > 0) {
     parsed.autoCompactThresholdPercent = threshold;
   }
+  const compactions = finiteNonNegative(values.compactionCount ?? values.compaction_count);
+  if (compactions !== undefined) parsed.compactionCount = Math.floor(compactions);
   return parsed;
 }
 

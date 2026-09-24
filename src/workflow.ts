@@ -121,6 +121,21 @@ export interface WorkflowStage {
   next: WorkflowTransition[];
   /** P6. Ignored in P4/P5. */
   allowSubagents?: boolean;
+  /**
+   * C-08: `fresh` (default) starts a new session with only the briefing;
+   * `continue:<stageId>` sends the briefing as another turn into the session
+   * that stage ran in, so its context is kept.
+   */
+  session?: string;
+  /** C-12: with `per-plan-step`, run the verify command after every step. */
+  verifyEach?: boolean;
+  /** C-12: with `per-plan-step`, independent steps may run at once, each in its own worktree. */
+  parallel?: boolean;
+  /**
+   * C-13: run N read-only sessions with the same briefing and merge their
+   * packets (strictest verdict, de-duplicated findings). Opt-in per workflow.
+   */
+  fanOut?: { count: number; distinctProviders: boolean };
 }
 
 export interface WorkflowCompiler {
@@ -425,7 +440,32 @@ function parseStage(raw: unknown, contracts: Record<string, PromptContract>): Wo
     contract: contractRef,
     next,
     ...(obj.allowSubagents === true ? { allowSubagents: true } : {}),
+    ...(parseStageSession(obj.session) ? { session: parseStageSession(obj.session) } : {}),
+    ...(obj.verifyEach === true ? { verifyEach: true } : {}),
+    ...(obj.parallel === true ? { parallel: true } : {}),
+    ...(parseFanOut(obj.fanOut) ? { fanOut: parseFanOut(obj.fanOut) } : {}),
   };
+}
+
+function parseStageSession(raw: unknown): string | undefined {
+  const value = clean(raw);
+  if (value === "fresh") return "fresh";
+  const m = /^continue:([a-z0-9][a-z0-9-]*)$/i.exec(value);
+  return m ? `continue:${m[1]}` : undefined;
+}
+
+function parseFanOut(raw: unknown): { count: number; distinctProviders: boolean } | undefined {
+  const obj = asObject(raw);
+  if (!obj) return undefined;
+  const count = typeof obj.count === "number" && Number.isFinite(obj.count) ? Math.floor(obj.count) : 0;
+  if (count < 2) return undefined;
+  return { count: Math.min(count, 4), distinctProviders: obj.distinctProviders !== false };
+}
+
+/** C-08: the stage whose session this one continues, if any. */
+export function stageContinues(stage: Pick<WorkflowStage, "session">): string | undefined {
+  const value = stage.session ?? "";
+  return value.startsWith("continue:") ? value.slice("continue:".length) : undefined;
 }
 
 function resolveContractName(raw: unknown, contracts: Record<string, PromptContract>): string | undefined {
@@ -555,6 +595,16 @@ export function workflowToMermaid(def: WorkflowDefinition): string {
     }
   }
   return lines.join("\n");
+}
+
+/**
+ * How a stage's session runs (C-01). Read-only is enforced by the deny
+ * overlay, never by Plan mode alone, so a stage runs in `agent` unless the
+ * workflow asks for `plan` explicitly — Plan mode is then an extra layer,
+ * and its approval card is relayed to the Crew session (X-01) like any other.
+ */
+export function stageRunMode(stage: Pick<WorkflowStage, "runMode">): "agent" | "plan" {
+  return stage.runMode ?? "agent";
 }
 
 export function stageTargetHint(stage: WorkflowStage): Target | undefined {

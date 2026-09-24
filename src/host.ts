@@ -523,6 +523,10 @@ export interface HostFileSystem {
 export interface Host {
   // ── Notifications ──────────────────────────────────────────────────────
   showInformationMessage(message: string, ...items: string[]): Thenable<string | undefined>;
+  /** Whether the editor window has OS focus. Optional: undefined = unknown. */
+  isWindowFocused?(): boolean;
+  /** Put text on the system clipboard (C-17 "Copy as Markdown"). Optional. */
+  writeClipboard?(text: string): Thenable<void>;
   showWarningMessage(
     message: string,
     ...items: Array<string | HostMessageOptions>

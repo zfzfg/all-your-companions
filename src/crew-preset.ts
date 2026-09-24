@@ -8,6 +8,7 @@
  * Pure against file *contents* the host already read.
  */
 
+import { MORE_BUILTIN_WORKFLOWS, stagesJsonFor } from "./workflow-builtins";
 import {
   parseFrontmatter,
   isValidRoleName,
@@ -69,6 +70,18 @@ export interface CrewPresetSet {
   presets: CrewPreset[];
   problems: CrewPresetProblem[];
 }
+
+/** C-14: the other shipped workflows, as presets carrying their stage graph. */
+export const MORE_BUILTIN_PRESETS: readonly CrewPreset[] = MORE_BUILTIN_WORKFLOWS.map((def) => ({
+  name: def.name,
+  title: def.title,
+  whenToUse: def.whenToUse,
+  roles: Object.entries(def.roles).filter(([, ref]) => "ref" in ref).map(([key]) => key),
+  defaultGate: def.defaults.gate,
+  stages: stagesJsonFor(def),
+  body: def.description ?? "",
+  source: "builtin" as const,
+}));
 
 /** Shipped when `.companions/crews/` is missing or empty. The `/crew` default. */
 export const BUILTIN_PRESET: CrewPreset = {
@@ -207,6 +220,9 @@ export function loadCrewPresets(files: readonly CrewPresetFile[]): CrewPresetSet
   const hadFiles = byName.size > 0;
   if (!byName.has(BUILTIN_IDEA_TO_DONE_PRESET.name)) {
     byName.set(BUILTIN_IDEA_TO_DONE_PRESET.name, { ...BUILTIN_IDEA_TO_DONE_PRESET });
+  }
+  for (const builtin of MORE_BUILTIN_PRESETS) {
+    if (!byName.has(builtin.name)) byName.set(builtin.name, { ...builtin });
   }
   // The empty-directory fallback is still `default` for `/crew`. A project
   // that already defined flows must not gain a silent extra `default` — that

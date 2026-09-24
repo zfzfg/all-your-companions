@@ -61,6 +61,15 @@ export interface SubagentRecord {
   collected?: boolean;
   tokens?: number;
   errorCode?: RefusalCode;
+  /** S-01: the child works in its own worktree (`writeIsolation: "worktree"`). */
+  worktree?: { path: string; label: string; sourceGitRoot: string; state: "pending" | "applied" | "discarded" };
+  /** S-02: what the person changed on the approval card. */
+  adjustedByUser?: Record<string, unknown>;
+  /** X-05: the model that actually ran, when it differs from the one asked for. */
+  ranModel?: string;
+  /** S-08: the refusal's own words and the targets the model was offered. */
+  refusalMessage?: string;
+  refusalAlternatives?: string[];
   /** Set when the roster ceiling lowered the effort — always reported (§6.3.5). */
   effortClamped?: { requested: string; applied: string };
   /** False when the provider's model cache was cold at spawn time. */
@@ -122,6 +131,19 @@ export class SubagentRegistry {
     if (patch.status && isTerminalSubagentStatus(patch.status) && next.endedAt === undefined) {
       next.endedAt = now;
     }
+    this.records.set(subagentId, next);
+    return next;
+  }
+
+  /**
+   * S-04: a finished child takes a follow-up. The record runs again (same
+   * card, same id); it is terminal again when the follow-up ends.
+   */
+  reopen(subagentId: string): SubagentRecord | undefined {
+    const record = this.records.get(subagentId);
+    if (!record || !isTerminalSubagentStatus(record.status) || record.status === "refused") return undefined;
+    const next: SubagentRecord = { ...record, status: "running", collected: false, step: record.step + 1 };
+    delete next.endedAt;
     this.records.set(subagentId, next);
     return next;
   }
@@ -330,40 +352,55 @@ export function subagentForbidden(profile: PermissionProfile): string[] {
 }
 
 /**
- * The AP-07 overlay a profile compiles to (§6.7).
+ * Every companion subagent runs in `agent` mode, whatever its profile.
  *
- * Deny still wins over everything here, and the safety floor cannot be
- * overridden — this only ever narrows. `read-only` denies edits outright and
- * allows the read commands the user listed; `scoped-edit` allows edits inside
- * the given globs and asks before any shell/terminal execution, so a scoped
- * child cannot use a command to write outside its scope with the trust of
- * whatever the user's own default execute rule happens to be; `inherit` adds
- * nothing, because the parent's own rules already apply and a child is never
- * granted more than its parent.
+ * The conservative recipe on every provider: the deny overlay is the floor
+ * that makes read-only true, and Plan mode would only be an extra layer where
+ * a probe has shown it does not stall on plan approval. No provider has that
+ * recording yet — see `research/companion-subagents.md`.
+ */
+export const SUBAGENT_RUN_MODE = "agent" as const;
+
+/**
+ * The AP-07 overlay a profile compiles to (§6.7), as role permission lines
+ * (`rolePermissionsToRules` turns them into rules on the child's session).
+ *
+ * The rule engine decides deny-first, then last-match-wins, and the overlay
+ * sits AFTER the user's own rules — so it can only narrow:
+ *
+ * - `read-only`: every edit is denied (deny always wins). Every command asks,
+ *   except the read commands the user listed, which come LAST so they are the
+ *   last match.
+ * - `scoped-edit`: an edit asks by default and is allowed inside the scope
+ *   globs; outside the scope the person sees the card (relayed to where they
+ *   look, X-01) instead of a silent grant — a user rule that allows all edits
+ *   does not reach past the scope. Every command asks, so a scoped child cannot
+ *   write around its scope with a shell command.
+ * - `inherit` adds nothing: the parent's own rules already apply.
+ *
+ * The safety floor is evaluated before any of this and cannot be overridden.
  */
 export function subagentPermissionOverlay(
   profile: PermissionProfile,
   scope: readonly string[],
   readOnlyCommands: readonly string[],
-): { kind: "edit" | "execute"; action: "allow" | "deny" | "ask"; pattern: string }[] {
+): { kind: "edit" | "execute"; action: "allow" | "deny" | "ask"; pathGlob?: string; commandPrefix?: string }[] {
   if (profile === "read-only") {
     return [
-      // The allow-list comes FIRST so the deny below is what a later rule has
-      // to beat, matching how the overlay parser resolves ties.
+      { kind: "edit" as const, action: "deny" as const },
+      { kind: "execute" as const, action: "ask" as const },
       ...readOnlyCommands
         .map((command) => String(command ?? "").trim())
         .filter(Boolean)
-        .map((command) => ({ kind: "execute" as const, action: "allow" as const, pattern: command })),
-      { kind: "edit" as const, action: "deny" as const, pattern: "**" },
-      { kind: "execute" as const, action: "ask" as const, pattern: "**" },
+        .map((command) => ({ kind: "execute" as const, action: "allow" as const, commandPrefix: command })),
     ];
   }
   if (profile === "scoped-edit") {
     const globs = scope.map((glob) => String(glob ?? "").trim()).filter(Boolean);
     return [
-      { kind: "edit" as const, action: "deny" as const, pattern: "**" },
-      ...globs.map((glob) => ({ kind: "edit" as const, action: "allow" as const, pattern: glob })),
-      { kind: "execute" as const, action: "ask" as const, pattern: "**" },
+      { kind: "edit" as const, action: "ask" as const },
+      ...globs.map((glob) => ({ kind: "edit" as const, action: "allow" as const, pathGlob: glob })),
+      { kind: "execute" as const, action: "ask" as const },
     ];
   }
   return [];
@@ -588,4 +625,21 @@ export function carveChildLimits(parent: SpawnLimits): SpawnLimits {
     // than divided.
     poolHeadroom: parent.poolHeadroom,
   };
+}
+
+/**
+ * X-05: one line for a turn's delegations — count, wall-clock span, tokens.
+ * Only what was measured: no tokens part when no child reported any.
+ */
+export function subagentTurnSummary(records: readonly SubagentRecord[], now = Date.now()): string | undefined {
+  if (!records.length) return undefined;
+  const start = Math.min(...records.map((r) => r.startedAt));
+  const end = Math.max(...records.map((r) => r.endedAt ?? now));
+  const withTokens = records.filter((r) => typeof r.tokens === "number");
+  const tokens = withTokens.reduce((sum, r) => sum + (r.tokens ?? 0), 0);
+  const secs = Math.max(0, Math.round((end - start) / 1000));
+  const span = secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${String(secs % 60).padStart(2, "0")}s`;
+  const parts = [`${records.length} ${records.length === 1 ? "subagent" : "subagents"}`, span];
+  if (withTokens.length) parts.push(`${tokens >= 1000 ? `${Math.round(tokens / 1000)}k` : tokens} tokens`);
+  return parts.join(" · ");
 }

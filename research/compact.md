@@ -100,3 +100,74 @@ boundaries (the probe saw one during the seed turn and one as the after turn
 started), so command-list churn is NOT a compact tell. The only reliable
 dispatch signals are the compact turn itself being empty (zero updates, empty
 reply, `totalTokens: 0`) and the async history rewrite.
+
+## Threshold: when Grok compacts (K-01, grok 1.0.41)
+
+xAI's model catalog (`~/.grok/models_cache.json`) pins
+`auto_compact_threshold_percent: 80` per model, and that beats the documented
+`[session]` default of 85. Probe `research/compact-threshold-probe.cjs`
+(free — no prompt) against grok 1.0.41 on native Windows:
+
+| Start condition | `session/info` threshold |
+|---|---|
+| nothing set | 80 |
+| `GROK_AUTO_COMPACT_THRESHOLD_PERCENT=95` | 95 |
+| `…=99` / `…=100` | 99 / 100 |
+| `…=150` (invalid) | 80 (ignored) |
+| `GROK_CONFIG='{"session":{"auto_compact_threshold_percent":95}}'` | 80 (overlay does not pass `session`) |
+
+The extension sets the env on every Grok spawn from
+`companions.grok.autoCompactThresholdPercent` (default 95, 0 = leave Grok's
+default, max 99), never over a user-set variable (shell or workspace `.env`).
+Every Grok process — main sessions, crew stages, companion subagents, and
+Grok's own subagents inside that process — inherits it. The first
+`session/info` of each process is compared with the requested value; a
+mismatch is logged and shown once per window.
+
+Why not 100: compaction is itself a model call over the whole history; the
+threshold is checked before a sampling step, so one large tool result between
+two checks can overflow; the memory flush and two-pass compaction also run
+before it.
+
+### Plan B (not built)
+
+Only if a future CLI stops honouring the env: opt-in, confirmed, backed-up
+writes of `[model."<id>"] auto_compact_threshold_percent = N` into
+`~/.grok/config.toml` for the ids in `models_cache.json`. Table keys with a
+dot MUST be quoted — `[model.grok-4.7]` parses as nested tables `grok-4` → `7`.
+
+## Context overflow (K-05)
+
+`isContextOverflowError` (`src/limit-errors.ts`) matches only documented API
+wordings (`context_length_exceeded`, "maximum context length is N",
+"maximum prompt length is N", Anthropic's "prompt is too long: N tokens > M").
+Grok's own wire form for an overflow is **not captured yet**:
+`research/context-overflow-probe.cjs` provokes one (costs credits, run once,
+manually) and records the prompt error and every `auto_compact_*` row. Add
+what it prints here and to the pattern list.
+
+## Lifecycle notifications
+
+`auto_compact_started` (auto path only), `auto_compact_completed`
+(`tokens_after`; `summary_preview` per the 1.0.41 binary — shown as a
+collapsed "what was kept" row when present), `auto_compact_failed`, and
+`auto_compact_cancelled` (binary string; shown as "Compaction cancelled.").
+
+## Other providers (K-07) — not built, probe first
+
+Same idea for Claude, Codex and Gemini CLI, but only a lever the probe
+`research/compact-threshold-other-providers-probe.cjs` confirms may land in
+code (a `probe` cell is missing knowledge, not a soft yes):
+
+| Provider | Candidate | Status |
+|---|---|---|
+| Claude (claude-agent-acp) | env `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` | unconfirmed; possibly lower-only |
+| Codex (codex-acp) | `model_auto_compact_token_limit` in a `CODEX_HOME` config copy | unconfirmed |
+| Gemini CLI | project `.gemini/settings.json` `chatCompression.contextPercentageThreshold` | unconfirmed |
+| Antigravity | none (compacts in the background) | — |
+| Muse | none known | — |
+
+Once confirmed, the setting becomes `companions.context.autoCompactThresholdPercent`
+with per-provider overrides; `companions.grok.autoCompactThresholdPercent` stays
+as the Grok alias. The near-full prompt (K-04) and the overflow card (K-05)
+already work for every provider that reports its context.

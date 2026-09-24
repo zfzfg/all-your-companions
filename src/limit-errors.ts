@@ -232,3 +232,31 @@ export const DISMISS_BUTTON_LABEL = "Dismiss";
 export function switchTranscriptLine(source: AcpProvider, target: AcpProvider): string {
   return `Switched from ${providerDisplayName(source)} to ${providerDisplayName(target)} after a usage limit.`;
 }
+
+/**
+ * A turn that failed because the context window overflowed (K-05).
+ *
+ * Only public, documented API wordings — no guessing on free text. The
+ * Grok-specific wire form is not captured yet (research/compact.md §
+ * "Context overflow"); until research/context-overflow-probe.cjs has run once,
+ * a Grok overflow that uses other words falls through to the generic error.
+ */
+const CONTEXT_OVERFLOW_PATTERNS: readonly RegExp[] = [
+  // OpenAI-compatible error code (xAI's API follows the OpenAI shape).
+  /\bcontext_length_exceeded\b/i,
+  // OpenAI / xAI message: "This model's maximum context length is N tokens".
+  /maximum context length is \d+/i,
+  // xAI: "This model's maximum prompt length is N but the request contains M tokens".
+  /maximum prompt length is \d+/i,
+  // Anthropic: "prompt is too long: N tokens > M maximum".
+  /prompt is too long: \d+ tokens > \d+/i,
+];
+
+export function isContextOverflowError(message: string): boolean {
+  const text = typeof message === "string" ? message : "";
+  if (!text) return false;
+  return CONTEXT_OVERFLOW_PATTERNS.some((re) => re.test(text));
+}
+
+export const CONTEXT_OVERFLOW_TEXT =
+  "The context window overflowed before the companion could compact.";

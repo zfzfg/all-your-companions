@@ -108,6 +108,18 @@
         "title": "All your Companions: New Session"
       },
       {
+        "command": "companions.showCrewRun",
+        "title": "All your Companions: Show Crew Run"
+      },
+      {
+        "command": "companions.pauseCrewAfterStage",
+        "title": "All your Companions: Pause Crew After This Stage"
+      },
+      {
+        "command": "companions.jumpToWaitingApproval",
+        "title": "All your Companions: Jump to Waiting Approval"
+      },
+      {
         "command": "companions.runCrew",
         "title": "All your Companions: Run Crew"
       },
@@ -686,6 +698,91 @@
           "type": "boolean",
           "default": false,
           "description": "Let /crew still walk a step list inside an Agent session. Off: /crew in an Agent session offers to open a Crew session instead."
+        },
+        "companions.crew.stallWarningSec": {
+          "type": "integer",
+          "minimum": 60,
+          "default": 300,
+          "description": "Warn when a running crew stage has shown no activity for this many seconds. The stage is never stopped automatically."
+        },
+        "companions.crew.onLimit": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "switch"
+          ],
+          "enumDescriptions": [
+            "Pause the run and ask which companion should take over.",
+            "Switch to the next eligible companion and say so on the gate."
+          ],
+          "default": "ask",
+          "description": "What a crew run does when a stage's companion hits its usage limit."
+        },
+        "companions.crew.defaultAutonomy": {
+          "type": "string",
+          "enum": [
+            "step",
+            "stop-on-problems",
+            "autopilot"
+          ],
+          "enumDescriptions": [
+            "Every gate waits for you.",
+            "Gates the workflow marks auto proceed; failures, red verify, unreadable verdicts, unreported edits and limits still pause.",
+            "Like Stop on problems, and manual gates in the workflow proceed too. The same problems still pause."
+          ],
+          "default": "step",
+          "description": "How far a new crew run goes on its own. You can change it per run on the gate. When unset, Auto start next stage = on means Stop on problems."
+        },
+        "companions.grok.autoCompactThresholdPercent": {
+          "type": "integer",
+          "default": 95,
+          "minimum": 0,
+          "maximum": 99,
+          "markdownDescription": "Compact Grok's context automatically only when it is this full (percent of the model's context window). 0 keeps Grok's own default (currently 80% from xAI's model list). Higher values keep more of the conversation verbatim; above 97 a single large tool result can overflow the window before compaction runs. Applies to Grok sessions started after the change."
+        },
+        "companions.context.nearFullPrompt": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "off"
+          ],
+          "default": "ask",
+          "description": "Shortly before a conversation's context reaches its auto-compaction point, offer Compact now / Continue in a fresh session / Keep going."
+        },
+        "companions.grok.subagents.enabled": {
+          "type": "string",
+          "enum": [
+            "default",
+            "on",
+            "off"
+          ],
+          "default": "default",
+          "description": "Grok's own built-in subagents (explore, plan, general-purpose). Default leaves Grok's setting alone. Applies to Grok sessions started after the change."
+        },
+        "companions.grok.subagents.maxConcurrent": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16,
+          "default": 0,
+          "description": "How many of Grok's own subagents may run at once. 0 leaves Grok's default. Applies to Grok sessions started after the change."
+        },
+        "companions.notifications.childNeedsYou": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a VS Code notification when a crew stage or subagent waits for your approval or answer while the window is not focused."
+        },
+        "companions.subagents.writeIsolation": {
+          "type": "string",
+          "enum": [
+            "shared",
+            "worktree"
+          ],
+          "enumDescriptions": [
+            "Writing subagents edit the same working tree as you. Files are claimed before they start.",
+            "Each writing subagent works in its own local git worktree; you apply or discard its changes from the card."
+          ],
+          "default": "shared",
+          "description": "Where subagents that may edit files do their work."
         },
         "companions.workflows.generator.target": {
           "type": "object",

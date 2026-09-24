@@ -625,6 +625,10 @@
     // Structured session/info addends, bound to the `used` they arrived with.
     // Occupancy-only frames keep this; an open popover re-fetches session/info.
     contextBreakdown: null,
+    // K-03/K-06: the last threshold / compaction count the host named for this
+    // session. A used-only frame never clears them (same rule as the breakdown).
+    compactThresholdPct: null,
+    compactionCount: null,
     activeAgentEl: null,
     activeAgentRaw: "",
     activeUserEl: null,
@@ -2351,6 +2355,35 @@
     }
     contextPopover.appendChild(act);
 
+    // Where compaction happens and how often it did (K-03, K-06).
+    if (state.compactThresholdPct) {
+      const t = state.compactThresholdPct;
+      const approx = state.contextWindow > 0 ? ` (≈ ${toK(Math.round(state.contextWindow * t / 100))} tokens)` : "";
+      const line = document.createElement("div");
+      line.className = "popover-info context-compact-threshold";
+      const label = document.createElement("span");
+      label.textContent = `Auto-compacts at ${t}%${approx}`;
+      line.appendChild(label);
+      if (state.activeProvider === "grok") {
+        const link = document.createElement("a");
+        link.href = "#";
+        link.className = "context-threshold-setting";
+        link.textContent = "Change";
+        link.title = "companions.grok.autoCompactThresholdPercent";
+        link.onclick = (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          vscode.postMessage({ type: "openSettings", section: "companions.grok.autoCompactThresholdPercent" });
+          closePopovers();
+        };
+        line.appendChild(link);
+      }
+      contextPopover.appendChild(line);
+    }
+    if (state.compactionCount) {
+      info("Compacted", `${state.compactionCount}× in this session`);
+    }
+
     // Account capacity (#159, upstream 084dedf): how much of the subscription
     // window is left, per provider that can say. A list of labelled windows,
     // because Grok, Claude and Codex each answer differently.
@@ -3251,6 +3284,7 @@
       subagentRouting: state.subagentRouting,
       subagentsEnabled: state.subagentsEnabled !== false,
       crewStagesMayUseSubagents: !!state.crewStagesMayUseSubagents,
+      companionSettings: state.companionSettings || {},
       efforts: state.efforts,
       permissionRules: state.permissionRules,
       permissionRulesOrderCopy: state.permissionRulesOrderCopy,
@@ -3344,6 +3378,9 @@
         state.crewStagesMayUseSubagents = !!value;
         break;
       default:
+        if (typeof id === "string" && id.startsWith("cs:")) {
+          state.companionSettings = { ...(state.companionSettings || {}), [id.slice(3)]: value };
+        }
         break;
     }
     if (message) vscode.postMessage(message);
@@ -4916,8 +4953,54 @@
     }
   }
 
+  /** E-01: running children of every conversation, above the history list. */
+  function renderRunningChildren() {
+    let box = historyPopover.querySelector(".running-children");
+    const data = state.runningChildren;
+    const groups = data && Array.isArray(data.groups) ? data.groups : [];
+    if (!groups.length) {
+      if (box) box.remove();
+      return;
+    }
+    const fresh = h("section", { class: "running-children", "aria-label": "Running children" });
+    const head = h("div", { class: "running-children-head" }, h("span", { class: "running-children-title" }, "Running children"));
+    if (data.needYou) {
+      const jump = h("button", { class: "cx-btn cx-btn--sm cx-btn--primary running-children-jump", type: "button" },
+        data.needYou + (data.needYou === 1 ? " needs you" : " need you"));
+      jump.onclick = (e) => { e.stopPropagation(); closePopovers(); vscode.postMessage({ type: "childOverviewAction", action: "jump" }); };
+      head.appendChild(jump);
+    }
+    fresh.appendChild(head);
+    for (const g of groups) {
+      fresh.appendChild(h("div", { class: "running-children-parent" }, g.parentName || "Conversation"));
+      for (const c of g.children || []) {
+        const view = CHILD_STATUS[c.status] || CHILD_STATUS.running;
+        const row = h("div", { class: "running-children-row", dataset: { kind: c.kind, id: c.id } },
+          h("span", { class: "cx-pill cx-pill--" + view[1] }, view[0]),
+          h("span", { class: "running-children-label" }, c.label),
+          h("span", { class: "running-children-target" }, c.target),
+          h("span", { class: "running-children-time" }, c.startedAt ? formatElapsed(Date.now() - c.startedAt) : ""),
+          typeof c.tokens === "number" ? h("span", { class: "running-children-tokens" }, (c.tokens >= 1000 ? Math.round(c.tokens / 1000) + "k" : c.tokens) + " tokens") : null);
+        if (c.sessionId || c.kind !== "native") {
+          const open = h("button", { class: "cx-btn cx-btn--ghost cx-btn--sm", type: "button" }, "Open");
+          open.onclick = (e) => { e.stopPropagation(); closePopovers(); vscode.postMessage({ type: "childOverviewAction", action: "open", kind: c.kind, id: c.id, parentSessionId: g.parentSessionId, sessionId: c.sessionId }); };
+          row.appendChild(open);
+        }
+        if (c.kind !== "native") {
+          const stop = h("button", { class: "cx-btn cx-btn--ghost cx-btn--sm cx-btn--danger", type: "button" }, "Stop");
+          armedButton(stop, "Stop?", () => vscode.postMessage({ type: "childOverviewAction", action: "stop", kind: c.kind, id: c.id, parentSessionId: g.parentSessionId }));
+          row.appendChild(stop);
+        }
+        fresh.appendChild(row);
+      }
+    }
+    if (box) box.replaceWith(fresh);
+    else historyPopover.insertBefore(fresh, historyPopover.firstChild);
+  }
+
   function renderHistoryList() {
     historyPopover.innerHTML = "";
+    renderRunningChildren();
 
     const searchWrap = document.createElement("div");
     searchWrap.className = "history-search-wrap";
@@ -9225,7 +9308,7 @@
    *  so "running" and "done" look the same wherever they appear. The ring and
    *  spinner are CSS; only terminal states carry a glyph. */
   function statusMark(status, label) {
-    const known = ["pending", "running", "done", "failed", "skipped", "cancelled"];
+    const known = ["pending", "running", "done", "failed", "skipped", "cancelled", "needs-you", "stalled"];
     const s = known.includes(status) ? status : "pending";
     const glyph = s === "done" ? ICON.check : s === "failed" ? ICON.x : "";
     const mark = h("span", { class: "cx-status cx-status--" + s, "aria-hidden": "true", html: glyph || undefined });
@@ -9438,12 +9521,16 @@
   const RUN_STATUS_WORDS = {
     planning: "Planning", assigning: "Assigning roles", running: "Running", paused: "Paused",
     review: "In review", done: "Done", failed: "Failed", cancelled: "Cancelled", "at-gate": "Waiting for you",
+    "needs-you": "Waiting for you",
   };
   const RUN_STATUS_TONE = {
     planning: "info", assigning: "info", running: "info", paused: "warn", review: "info",
-    done: "ok", failed: "danger", cancelled: "muted", "at-gate": "warn",
+    done: "ok", failed: "danger", cancelled: "muted", "at-gate": "warn", "needs-you": "warn",
   };
-  const STEP_STATUS = { pending: "pending", running: "running", done: "done", failed: "failed", skipped: "skipped", cancelled: "cancelled" };
+  const STEP_STATUS = {
+    pending: "pending", running: "running", done: "done", failed: "failed", skipped: "skipped", cancelled: "cancelled",
+    "needs-you": "needs-you", stalled: "stalled",
+  };
 
   function runPill(status) {
     return h("span", { class: "cx-pill cx-pill--" + (RUN_STATUS_TONE[status] || "muted") },
@@ -9514,11 +9601,14 @@
 
   function startCrewWorkflow() {
     const idea = (input && input.value ? input.value : "").trim();
+    const workflowName = state.selectedWorkflow || state.defaultWorkflow || "idea-to-done";
+    const options = crewStartOptions(workflowName);
     vscode.postMessage({
       type: "workflowStart",
       sessionId: state.sessionTypeId || "",
       idea,
-      workflowName: state.selectedWorkflow || state.defaultWorkflow || "idea-to-done",
+      workflowName,
+      ...(options ? { options } : {}),
     });
     if (input) {
       input.value = "";
@@ -9527,6 +9617,139 @@
   }
 
   const WORKFLOW_SOURCE_LABEL = { builtin: "built-in", global: "all projects", project: "this project" };
+
+  // ---------- C-04: the Crew start panel with its lineup ----------
+
+  const AUTONOMY_WORDS = { step: "Step by step", "stop-on-problems": "Stop on problems", autopilot: "Autopilot" };
+  const AUTONOMY_HELP = {
+    step: "Every gate waits for you.",
+    "stop-on-problems": "Gates the workflow marks auto run on; failures, red verify, unreadable verdicts, unreported edits and limits stop.",
+    autopilot: "Manual gates run on too. The same problems still stop.",
+  };
+
+  function autonomyControl(current, onPick, idPrefix) {
+    const wrap = h("div", { class: "cx-segmented crew-autonomy", role: "radiogroup", "aria-label": "Autonomy" });
+    for (const key of ["step", "stop-on-problems", "autopilot"]) {
+      const on = key === (current || "step");
+      const btn = h("button", {
+        class: "cx-seg" + (on ? " is-on" : ""), type: "button", role: "radio",
+        "aria-checked": on ? "true" : "false", title: AUTONOMY_HELP[key],
+        dataset: { autonomy: key }, id: idPrefix ? idPrefix + "-" + key : undefined,
+      }, AUTONOMY_WORDS[key]);
+      btn.onclick = (e) => { e.stopPropagation(); onPick(key); };
+      wrap.appendChild(btn);
+    }
+    return wrap;
+  }
+
+  function lineupDraftFor(wf) {
+    const drafts = state.lineupDrafts || (state.lineupDrafts = {});
+    if (!drafts[wf.name]) {
+      drafts[wf.name] = {
+        stages: (wf.lineup || []).map((e) => ({ ...e })),
+        worktree: false,
+        verify: (state.verifySuggestions || [])[0] || "",
+        verifyChosen: false,
+        maxFixRounds: wf.maxFixRounds || 0,
+        fixInSession: false,
+        autonomy: state.defaultAutonomy || "step",
+        open: false,
+      };
+    }
+    return drafts[wf.name];
+  }
+
+  function lineupSummaryText(stages) {
+    return (stages || []).filter((e) => e.enabled).map((e) => {
+      const detail = [e.model, e.effort].filter(Boolean).join("/");
+      return (e.title || e.stageId) + ": " + (e.providerName || e.provider) + (detail ? " " + detail : "");
+    }).join(" → ");
+  }
+
+  function eligibleForLineup() {
+    // The providers any lineup entry already names are known to be eligible;
+    // the run view's gate list is the full one when a run exists.
+    const seen = new Map();
+    for (const wf of state.workflows || []) {
+      for (const e of wf.lineup || []) if (!seen.has(e.provider)) seen.set(e.provider, e.providerName || e.provider);
+    }
+    for (const p of state.availableProviders || []) if (p && p.id && !seen.has(p.id)) seen.set(p.id, p.name || p.id);
+    return [...seen.entries()].map(([provider, name]) => ({ provider, name }));
+  }
+
+  function renderLineupPanel(container, wf) {
+    const draft = lineupDraftFor(wf);
+    const panel = h("div", { class: "crew-lineup", dataset: { workflow: wf.name } });
+    if (Array.isArray(wf.stages) && wf.stages.length) {
+      panel.appendChild(h("div", { class: "crew-diagram", "aria-label": "Stages" },
+        wf.stages.map((t, i) => h("span", { class: "crew-diagram-stage" }, (i ? "→ " : "") + t))));
+    }
+    const summary = h("div", { class: "crew-lineup-summary cx-text" }, lineupSummaryText(draft.stages) || "No companion is eligible for this workflow.");
+    panel.appendChild(summary);
+    const toggle = h("button", { class: "cx-link crew-lineup-customize", type: "button", "aria-expanded": draft.open ? "true" : "false" },
+      draft.open ? "Customize ▴" : "Customize ▾");
+    toggle.onclick = () => { draft.open = !draft.open; renderCrewEmpty(); };
+    panel.appendChild(toggle);
+    if (draft.open) {
+      const providers = eligibleForLineup();
+      const table = h("table", { class: "crew-lineup-table" },
+        h("thead", {}, h("tr", {}, ["Stage", "Companion", "Model", "Effort", "Gate", "On"].map((t) => h("th", {}, t)))));
+      const body = h("tbody");
+      draft.stages.forEach((entry) => {
+        const provSel = h("select", { class: "cx-select lineup-provider", "aria-label": entry.title + " companion" },
+          providers.map((p) => h("option", { value: p.provider, selected: p.provider === entry.provider || undefined }, p.name)));
+        provSel.onchange = () => {
+          entry.provider = provSel.value;
+          entry.providerName = (providers.find((p) => p.provider === provSel.value) || {}).name || provSel.value;
+          entry.model = undefined;
+          summary.textContent = lineupSummaryText(draft.stages);
+        };
+        const model = h("input", { class: "cx-input lineup-model", type: "text", value: entry.model || "", placeholder: "default", "aria-label": entry.title + " model" });
+        model.oninput = () => { entry.model = model.value.trim() || undefined; summary.textContent = lineupSummaryText(draft.stages); };
+        const effort = h("select", { class: "cx-select lineup-effort", "aria-label": entry.title + " effort" },
+          ["", "low", "medium", "high", "xhigh", "max"].map((v) => h("option", { value: v, selected: (entry.effort || "") === v || undefined }, v || "default")));
+        effort.onchange = () => { entry.effort = effort.value || undefined; summary.textContent = lineupSummaryText(draft.stages); };
+        const gateSel = h("select", { class: "cx-select lineup-gate", "aria-label": entry.title + " gate" },
+          ["manual", "auto"].map((v) => h("option", { value: v, selected: entry.gate === v || undefined }, v)));
+        gateSel.onchange = () => { entry.gate = gateSel.value; };
+        const on = h("input", { type: "checkbox", class: "lineup-enabled", checked: entry.enabled || undefined, disabled: entry.optional ? undefined : true, "aria-label": entry.title + " enabled" });
+        on.onchange = () => { entry.enabled = on.checked; summary.textContent = lineupSummaryText(draft.stages); };
+        body.appendChild(h("tr", { dataset: { stage: entry.stageId } },
+          h("td", {}, entry.title + (entry.optional ? " (optional)" : "")),
+          h("td", {}, provSel), h("td", {}, model), h("td", {}, effort), h("td", {}, gateSel), h("td", {}, on)));
+      });
+      table.appendChild(body);
+      panel.appendChild(table);
+      if (wf.hasFix) {
+        const fis = h("input", { type: "checkbox", class: "lineup-fix-in-session", checked: draft.fixInSession || undefined });
+        fis.onchange = () => { draft.fixInSession = fis.checked; };
+        panel.appendChild(h("label", { class: "cx-check" }, fis, " Fix in the implementer's session (keeps its context, cheaper)"));
+      }
+    }
+    const opts = h("div", { class: "crew-lineup-options" });
+    const wt = h("input", { type: "checkbox", class: "lineup-worktree", checked: draft.worktree || undefined });
+    wt.onchange = () => { draft.worktree = wt.checked; };
+    opts.appendChild(h("label", { class: "cx-check" }, wt, " Worktree"));
+    const suggestions = state.verifySuggestions || [];
+    const verifyInput = h("input", {
+      class: "cx-input lineup-verify", type: "text", list: "crew-verify-suggestions",
+      value: draft.verifyChosen ? draft.verify : "", placeholder: suggestions[0] ? "Verify: " + suggestions[0] + " (pick to use)" : "Verify command (optional)",
+      "aria-label": "Verify command",
+    });
+    verifyInput.oninput = () => { draft.verify = verifyInput.value.trim(); draft.verifyChosen = !!draft.verify; };
+    opts.appendChild(verifyInput);
+    if (suggestions.length) {
+      opts.appendChild(h("datalist", { id: "crew-verify-suggestions" }, suggestions.map((v) => h("option", { value: v }))));
+    }
+    if (wf.maxFixRounds) {
+      const rounds = h("input", { class: "cx-input lineup-rounds", type: "number", min: "1", max: "9", value: String(draft.maxFixRounds || wf.maxFixRounds), "aria-label": "Max fix rounds" });
+      rounds.oninput = () => { draft.maxFixRounds = Math.max(1, Math.min(9, Number(rounds.value) || wf.maxFixRounds)); };
+      opts.appendChild(h("label", { class: "cx-field-inline" }, "Max fix rounds ", rounds));
+    }
+    panel.appendChild(opts);
+    panel.appendChild(autonomyControl(draft.autonomy, (key) => { draft.autonomy = key; renderCrewEmpty(); }, "crew-start-autonomy"));
+    container.appendChild(panel);
+  }
 
   function renderCrewEmpty() {
     if (!crewEmpty) return;
@@ -9557,7 +9780,10 @@
         h("span", { class: "cx-choice-title" }, wf.title || wf.name,
           wf.defaultGraph ? h("span", { class: "cx-pill" }, "default graph") : null,
           wf.source && wf.source !== "builtin" ? h("span", { class: "cx-pill cx-pill--outline" }, WORKFLOW_SOURCE_LABEL[wf.source] || wf.source) : null),
-        wf.whenToUse ? h("span", { class: "cx-choice-desc" }, wf.whenToUse) : null));
+        wf.whenToUse ? h("span", { class: "cx-choice-desc" }, wf.whenToUse) : null,
+        Array.isArray(wf.stages) && wf.stages.length && !selected
+          ? h("span", { class: "cx-choice-desc crew-diagram-inline" }, wf.stages.join(" → "))
+          : null));
       opt.onclick = () => {
         state.selectedWorkflow = wf.name;
         renderCrewEmpty();
@@ -9565,12 +9791,14 @@
         if (again) again.focus();
       };
       crewWorkflowList.appendChild(opt);
+      if (selected) renderLineupPanel(crewWorkflowList, wf);
     }
   }
 
   if (crewWorkflowList) {
     crewWorkflowList.addEventListener("keydown", (e) => {
       if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+      if (!e.target || !e.target.classList || !e.target.classList.contains("cx-choice")) return;
       const options = [...crewWorkflowList.querySelectorAll(".cx-choice")];
       const i = options.indexOf(document.activeElement);
       if (i < 0) return;
@@ -9580,11 +9808,43 @@
     });
   }
 
-  const GATE_TONE = { stale: "warn", "fixer-limit": "warn", unresumable: "danger", interrupted: "warn" };
-  const SEVERITY_TONE = { critical: "danger", high: "danger", medium: "warn", low: "muted", info: "muted" };
+  /** The lineup options the Start button sends (C-04). */
+  function crewStartOptions(wfName) {
+    const wf = (state.workflows || []).find((w) => w.name === wfName);
+    if (!wf || !state.lineupDrafts || !state.lineupDrafts[wfName]) return undefined;
+    const draft = state.lineupDrafts[wfName];
+    const lineup = {};
+    for (const e of draft.stages || []) {
+      lineup[e.stageId] = {
+        provider: e.provider,
+        ...(e.model ? { model: e.model } : {}),
+        ...(e.effort ? { effort: e.effort } : {}),
+        gate: e.gate,
+        enabled: !!e.enabled,
+      };
+    }
+    return {
+      lineup,
+      ...(draft.worktree ? { worktree: true } : {}),
+      ...(draft.verifyChosen && draft.verify ? { verify: draft.verify } : {}),
+      ...(wf.maxFixRounds && draft.maxFixRounds && draft.maxFixRounds !== wf.maxFixRounds ? { maxFixRounds: draft.maxFixRounds } : {}),
+      ...(draft.fixInSession ? { fixInSession: true } : {}),
+      autonomy: draft.autonomy || "step",
+      startNow: true,
+    };
+  }
+
+  const GATE_TONE = { stale: "warn", "fixer-limit": "warn", unresumable: "danger", interrupted: "warn", limit: "warn" };
+  // The contract words (blocker/major/minor/nit; pass/changes_requested/blocked)
+  // first; the older words stay as aliases so a run on disk still reads.
+  const SEVERITY_TONE = {
+    blocker: "danger", major: "warn", minor: "muted", nit: "outline",
+    critical: "danger", high: "danger", medium: "warn", low: "muted", info: "muted",
+  };
   const VERDICT = {
+    pass: ["ok", "Pass"], changes_requested: ["warn", "Changes requested"], blocked: ["danger", "Blocked"],
     approved: ["ok", "Approved"], "changes-requested": ["warn", "Changes requested"],
-    rejected: ["danger", "Rejected"], blocked: ["danger", "Blocked"],
+    rejected: ["danger", "Rejected"],
   };
 
   function gateSection(label, tone, ...children) {
@@ -9601,40 +9861,165 @@
     }));
   }
 
+  /** C-03: provider / model / effort for the next stage, preselected by the host. */
+  function gateTargetFields(gate) {
+    const eligible = Array.isArray(gate.eligible) ? gate.eligible : [];
+    const pre = gate.preselected || {};
+    const wrap = h("div", { class: "gate-target" });
+    const provSel = h("select", { class: "cx-select gate-provider", "aria-label": "Companion" },
+      eligible.map((t) => h("option", { value: t.provider, selected: t.provider === pre.provider || undefined },
+        t.displayName || t.provider)));
+    const modelSel = h("select", { class: "cx-select gate-model", "aria-label": "Model" });
+    const effortSel = h("select", { class: "cx-select gate-effort", "aria-label": "Effort" });
+    const fill = () => {
+      const t = eligible.find((x) => x.provider === provSel.value) || eligible[0] || {};
+      const models = Array.isArray(t.models) ? t.models : [];
+      modelSel.textContent = "";
+      modelSel.appendChild(h("option", { value: "" }, t.defaultModel ? "default (" + t.defaultModel + ")" : "default model"));
+      for (const m of models) {
+        modelSel.appendChild(h("option", {
+          value: m.id,
+          selected: (provSel.value === pre.provider && m.id === pre.model) || undefined,
+        }, m.label || m.id));
+      }
+      const chosen = models.find((m) => m.id === modelSel.value);
+      const efforts = chosen && Array.isArray(chosen.efforts) && chosen.efforts.length
+        ? chosen.efforts
+        : ["low", "medium", "high", "xhigh", "max"];
+      effortSel.textContent = "";
+      effortSel.appendChild(h("option", { value: "" }, t.defaultEffort ? "effort " + t.defaultEffort : "default effort"));
+      for (const e of efforts) {
+        effortSel.appendChild(h("option", { value: e }, "effort " + e));
+      }
+      if (provSel.value === pre.provider) {
+        if (pre.model && models.some((m) => m.id === pre.model)) modelSel.value = pre.model;
+        if (pre.effort && efforts.includes(pre.effort)) effortSel.value = pre.effort;
+      }
+    };
+    fill();
+    provSel.onchange = () => { fill(); refreshPrimary(); };
+    modelSel.onchange = () => {
+      const keepEffort = effortSel.value;
+      const t = eligible.find((x) => x.provider === provSel.value) || {};
+      const chosen = (t.models || []).find((m) => m.id === modelSel.value);
+      if (chosen && Array.isArray(chosen.efforts) && chosen.efforts.length) {
+        effortSel.textContent = "";
+        effortSel.appendChild(h("option", { value: "" }, "default effort"));
+        for (const e of chosen.efforts) effortSel.appendChild(h("option", { value: e, selected: e === keepEffort || undefined }, "effort " + e));
+      }
+    };
+    const refreshPrimary = () => {
+      const card = wrap.closest ? wrap.closest(".workflow-gate-card") : null;
+      const primary = card && card.querySelector(".gate-primary");
+      const t = eligible.find((x) => x.provider === provSel.value);
+      if (primary && primary.dataset.stageTitle) {
+        primary.textContent = "Start " + primary.dataset.stageTitle + (t ? " on " + (t.displayName || t.provider) : "");
+      }
+    };
+    wrap.append(provSel, modelSel, effortSel);
+    if (gate.compare) {
+      wrap.appendChild(h("span", { class: "gate-compare " + (gate.compareSame ? "is-same" : "is-different") }, gate.compare));
+    }
+    return wrap;
+  }
+
+  /** C-06: the plan as a checklist the person can trim, edit and reorder. */
+  function gatePlanEditor(run, gate) {
+    const steps = (gate.planSteps || []).map((s) => ({ ...s, files: Array.isArray(s.files) ? s.files.slice() : [], keep: true }));
+    const list = h("ol", { class: "gate-plan-steps" });
+    const paint = () => {
+      list.textContent = "";
+      steps.forEach((step, i) => {
+        const keep = h("input", { type: "checkbox", class: "gate-plan-keep", checked: step.keep || undefined, "aria-label": "Keep step " + step.id });
+        keep.onchange = () => { step.keep = keep.checked; };
+        const title = h("input", { class: "cx-input gate-plan-title", type: "text", value: step.title, "aria-label": "Step " + step.id });
+        title.oninput = () => { step.title = title.value; };
+        const up = h("button", { class: "cx-btn cx-btn--ghost cx-btn--sm gate-plan-up", type: "button", "aria-label": "Move up", disabled: i === 0 || undefined }, "↑");
+        up.onclick = () => { steps.splice(i - 1, 0, steps.splice(i, 1)[0]); paint(); };
+        const down = h("button", { class: "cx-btn cx-btn--ghost cx-btn--sm gate-plan-down", type: "button", "aria-label": "Move down", disabled: i === steps.length - 1 || undefined }, "↓");
+        down.onclick = () => { steps.splice(i + 1, 0, steps.splice(i, 1)[0]); paint(); };
+        const li = h("li", { class: "gate-plan-step" + (step.keep ? "" : " is-dropped"), dataset: { stepId: step.id } },
+          keep, title, up, down,
+          step.acceptance ? h("div", { class: "cx-row-sub" }, "Done when: " + step.acceptance) : null,
+          step.files && step.files.length ? h("div", { class: "cx-row-sub" }, step.files.join(", ")) : null);
+        li.addEventListener("keydown", (e) => {
+          if (!e.altKey || (e.key !== "ArrowUp" && e.key !== "ArrowDown")) return;
+          e.preventDefault();
+          const j = e.key === "ArrowUp" ? i - 1 : i + 1;
+          if (j < 0 || j >= steps.length) return;
+          steps.splice(j, 0, steps.splice(i, 1)[0]);
+          paint();
+        });
+        list.appendChild(li);
+      });
+    };
+    paint();
+    const add = h("button", { class: "cx-btn cx-btn--ghost cx-btn--sm gate-plan-add", type: "button" }, "Add step");
+    add.onclick = () => { steps.push({ id: "S" + (steps.length + 1), title: "", files: [], keep: true }); paint(); };
+    const save = h("button", { class: "cx-btn cx-btn--sm gate-plan-save", type: "button" }, "Save plan");
+    save.onclick = () => {
+      vscode.postMessage({
+        type: "workflowPlanEdit",
+        runId: run.runId,
+        steps: steps.filter((s) => s.keep && String(s.title || "").trim()).map((s) => ({
+          id: s.id, title: String(s.title).trim(), ...(s.acceptance ? { acceptance: s.acceptance } : {}), ...(s.files && s.files.length ? { files: s.files } : {}),
+        })),
+      });
+    };
+    const sec = gateSection("Plan" + (gate.planEdited ? " (edited)" : ""), "", list,
+      h("div", { class: "gate-plan-actions" }, add, save));
+    sec.classList.add("gate-plan");
+    return sec;
+  }
+
   /**
-   * The human gate between two workflow stages (AP-17).
+   * The human gate between two workflow stages (AP-17, C-03).
    *
-   * One card per run, and it always sits at the END of the transcript: a gate
-   * is a question that is open now, and a question scrolled out of view above
-   * the stage it interrupts is one nobody answers. Every repaint moves it back
-   * to the bottom rather than rewriting it wherever it was first drawn.
+   * One card per run, always at the END of the transcript: a gate is a
+   * question that is open now. It reads top-down in three seconds — what
+   * just happened (with honest numbers), what the problems are (first), and
+   * one primary action that names who runs next. Everything rarer sits in the
+   * "⋯" menu.
    */
   function renderWorkflowGate(run) {
     let el = document.querySelector(".workflow-gate-card");
-    if (!run || !run.gate) {
+    if (!run || (!run.gate && !(run.status === "done" && !run.acknowledged))) {
       if (el) el.remove();
       return;
     }
-    const gate = run.gate;
     if (el) el.remove();
     clearWelcome();
+    if (!run.gate) {
+      renderWorkflowDone(run);
+      return;
+    }
+    const gate = run.gate;
     const tone = GATE_TONE[gate.kind] || "info";
     el = h("section", {
       class: "cx-card cx-card--" + tone + " workflow-gate-card",
-      "aria-live": "polite", "aria-label": gate.title || "Workflow gate",
+      "aria-live": "polite", "aria-label": gate.title || "Workflow gate", tabindex: "-1",
       dataset: { kind: gate.kind || "" },
     });
     const done = (run.stages || []).filter((s) => s.status === "done" || s.status === "skipped").length;
     el.appendChild(h("div", { class: "cx-card-head" },
-      h("span", { class: "cx-card-icon", "aria-hidden": "true", html: gate.kind === "stale" || gate.kind === "fixer-limit" ? ICON.diagnostics : ICON.flag }),
+      h("span", { class: "cx-card-icon", "aria-hidden": "true", html: gate.kind === "stale" || gate.kind === "fixer-limit" || gate.kind === "limit" ? ICON.diagnostics : ICON.flag }),
       h("div", { class: "cx-card-heading" },
         h("div", { class: "cx-card-title gate-header" }, gate.title || ""),
         h("div", { class: "cx-card-sub" }, [run.workflowTitle || run.workflowName, (run.stages || []).length ? done + "/" + run.stages.length + " stages" : ""].filter(Boolean).join(" · "))),
-      runPill(run.status)));
+      gate.headerMeta ? h("span", { class: "cx-card-meta gate-header-meta" }, gate.headerMeta) : runPill(run.status)));
 
     const body = h("div", { class: "cx-card-body" });
-    if (gate.reason) body.appendChild(h("p", { class: "cx-text gate-reason" }, gate.reason));
-    if (gate.summary) body.appendChild(h("blockquote", { class: "cx-quote gate-summary" }, gate.summary));
+    if (gate.summary) {
+      const summary = h("details", { class: "gate-summary-wrap" },
+        h("summary", {}, h("span", { class: "gate-summary-lead" }, gate.summary.split("\n").slice(0, 2).join(" "))),
+        h("blockquote", { class: "cx-quote gate-summary" }, gate.summary));
+      body.appendChild(summary);
+    }
+    if (gate.switchedFrom) {
+      body.appendChild(h("div", { class: "cx-notice cx-notice--warning gate-switched" },
+        h("span", { class: "cx-notice-icon", html: ICON.diagnostics }),
+        h("div", { class: "cx-notice-body" }, "Ran on " + (gate.targetLabel || "another companion") + " after " + gate.switchedFrom + " hit its usage limit.")));
+    }
     if (Array.isArray(gate.staleDetails) && gate.staleDetails.length) {
       body.appendChild(h("div", { class: "cx-notice cx-notice--warning gate-stale" },
         h("span", { class: "cx-notice-icon", html: ICON.diagnostics }),
@@ -9642,78 +10027,114 @@
           h("div", {}, "The workspace changed since this run paused."),
           h("ul", { class: "cx-list" }, gate.staleDetails.map((d) => h("li", {}, d))))));
     }
+    if (Array.isArray(gate.missing) && gate.missing.length) {
+      body.appendChild(h("div", { class: "cx-notice cx-notice--warning gate-missing" },
+        h("span", { class: "cx-notice-icon", html: ICON.diagnostics }),
+        h("div", { class: "cx-notice-body" }, h("ul", { class: "cx-list" }, gate.missing.map((d) => h("li", {}, d))))));
+    }
     const observed = Array.isArray(gate.filesObserved) ? gate.filesObserved : [];
     const unreported = Array.isArray(gate.unreported) ? gate.unreported : [];
     const claimed = Array.isArray(gate.claimedOnly) ? gate.claimedOnly : [];
     // The discrepancies first, as on every other card: the files nobody
     // mentioned are the ones the next stage must be told about.
-    if (unreported.length) body.appendChild(gateSection("Changed but not reported", "warn", gateFileList(unreported, "warn")));
+    if (unreported.length) body.appendChild(gateSection("⚠ Changed but not reported", "warn", gateFileList(unreported, "warn")));
     if (claimed.length) body.appendChild(gateSection("Reported but not observed", "", gateFileList(claimed)));
     const plain = observed.filter((p) => !unreported.includes(p));
-    if (plain.length) body.appendChild(gateSection("Files changed (" + observed.length + ")", "", gateFileList(plain)));
-
-    if (gate.verify && gate.verify.command) {
-      const ok = gate.verify.exitCode === 0;
-      const verify = gateSection("Verify", "",
-        h("div", { class: "cx-verify" },
-          h("code", { class: "cx-code" }, gate.verify.command),
-          h("span", { class: "cx-pill cx-pill--" + (ok ? "ok" : "danger") }, ok ? "passed" : "exit " + gate.verify.exitCode)));
-      if (gate.verify.outputTail) {
-        verify.appendChild(h("details", { class: "cx-details", open: ok ? undefined : true },
-          h("summary", {}, "Output"),
-          h("pre", { class: "cx-pre" }, gate.verify.outputTail)));
+    const verifyRow = gate.verify && gate.verify.command
+      ? h("span", { class: "gate-verify-inline" }, "Verify: ", h("code", { class: "cx-code" }, gate.verify.command), " ",
+        h("span", { class: "cx-pill cx-pill--" + (gate.verify.exitCode === 0 ? "ok" : "danger") }, gate.verify.exitCode === 0 ? "✔ passed" : "exit " + gate.verify.exitCode))
+      : null;
+    if (plain.length || verifyRow) {
+      const openReview = h("button", { class: "cx-link gate-open-review", type: "button" }, "Open review");
+      openReview.onclick = () => { if (reviewCenter && reviewCenter.scrollIntoView) reviewCenter.scrollIntoView({ block: "nearest" }); };
+      body.appendChild(gateSection(plain.length ? "Files changed (" + observed.length + ")" : "", "",
+        plain.length ? h("details", { class: "gate-files" }, h("summary", {}, plain.length + " file" + (plain.length === 1 ? "" : "s"), " ", openReview), gateFileList(plain)) : null,
+        verifyRow));
+      if (gate.verify && gate.verify.outputTail && gate.verify.exitCode !== 0) {
+        body.appendChild(h("details", { class: "cx-details", open: true }, h("summary", {}, "Verify output"), h("pre", { class: "cx-pre" }, gate.verify.outputTail)));
       }
-      body.appendChild(verify);
     }
     if (gate.verdict) {
       const [vt, vw] = VERDICT[gate.verdict] || ["muted", gate.verdict];
       body.appendChild(gateSection("Verdict", "", h("div", {}, h("span", { class: "cx-pill cx-pill--" + vt + " gate-verdict" }, vw))));
     }
-    if (Array.isArray(gate.findings) && gate.findings.length) {
-      body.appendChild(gateSection("Findings (" + gate.findings.length + ")", "",
-        h("ul", { class: "cx-findings gate-findings" }, gate.findings.map((f) => {
-          const where = f.file ? f.file + (f.line ? ":" + f.line : "") : "";
-          let loc = null;
-          if (where) {
-            loc = h("button", { class: "cx-link cx-finding-loc", type: "button" }, where);
-            loc.onclick = () => vscode.postMessage({ type: "openFile", path: where });
-          }
-          return h("li", { class: "cx-finding" },
-            h("span", { class: "cx-pill cx-pill--" + (SEVERITY_TONE[f.severity] || "muted") }, f.severity || "note"),
-            h("span", { class: "cx-finding-text" }, f.text || "", loc ? h("span", { class: "cx-finding-where" }, " — ", loc) : null));
-        }))));
+    const findings = Array.isArray(gate.findings) ? gate.findings : [];
+    if (findings.length) {
+      // C-09: pick which findings the fixer gets; the rest are accepted as is.
+      const list = h("ul", { class: "cx-findings gate-findings" }, findings.map((f) => {
+        const where = f.file ? f.file + (f.line ? ":" + f.line : "") : "";
+        let loc = null;
+        if (where) {
+          loc = h("button", { class: "cx-link cx-finding-loc", type: "button" }, where);
+          loc.onclick = () => vscode.postMessage({ type: "openFile", path: where });
+        }
+        const pick = h("input", {
+          type: "checkbox", class: "gate-finding-pick", dataset: { findingId: f.id },
+          checked: (f.selected !== false && f.severity !== "nit") || (f.selected === true) || undefined,
+          "aria-label": "Fix " + f.id,
+        });
+        pick.onchange = () => postFindingSelection(run);
+        return h("li", { class: "cx-finding" },
+          pick,
+          h("span", { class: "cx-pill cx-pill--" + (SEVERITY_TONE[f.severity] || "muted") }, f.severity || "note"),
+          h("span", { class: "cx-finding-text" }, f.text || "", loc ? h("span", { class: "cx-finding-where" }, " — ", loc) : null),
+          gate.panelSize && f.reporters ? h("span", { class: "cx-pill cx-pill--outline gate-consensus" }, f.reporters.length + "/" + gate.panelSize + " reviewers") : null);
+      }));
+      body.appendChild(gateSection("Findings (" + findings.length + ")", "", list));
     }
     if (Array.isArray(gate.openQuestions) && gate.openQuestions.length) {
       body.appendChild(gateSection("Open questions", "", h("ul", { class: "cx-list" }, gate.openQuestions.map((q) => h("li", {}, q)))));
     }
+    if (Array.isArray(gate.questions) && gate.questions.length) {
+      // C-15: one field per clarifying question; answers go to the next stage.
+      body.appendChild(gateSection("Questions before planning", "", h("div", { class: "gate-questions" },
+        gate.questions.map((q, i) => h("label", { class: "cx-field gate-question" },
+          h("span", { class: "cx-field-label" }, q),
+          h("input", { class: "cx-input gate-answer", type: "text", dataset: { q: String(i) }, "aria-label": q }))))));
+    }
+    if (Array.isArray(gate.planSteps) && gate.planSteps.length) body.appendChild(gatePlanEditor(run, gate));
+    if (gate.scope && (gate.scope.note || (gate.scope.globs || []).length)) {
+      const scopeSec = gateSection("Next stage may edit", gate.scope.note ? "warn" : "");
+      if (gate.scope.note) scopeSec.appendChild(h("p", { class: "cx-text gate-scope-note" }, gate.scope.note));
+      else scopeSec.appendChild(h("p", { class: "cx-text gate-scope-globs" }, gate.scope.globs.join(", ")));
+      scopeSec.appendChild(h("label", { class: "cx-check gate-allow-anywhere" },
+        h("input", { type: "checkbox", class: "gate-allow-anywhere-input" }),
+        " Allow edits anywhere in the workspace for this stage"));
+      body.appendChild(scopeSec);
+    }
 
+    // Next: stage + who runs it.
     const proposed = (gate.proposedNext || []).filter((n) => n && n.id && n.id.charAt(0) !== "$");
     const eligible = Array.isArray(gate.eligible) ? gate.eligible : [];
     const ineligible = Array.isArray(gate.ineligible) ? gate.ineligible : [];
     const choosing = gate.kind !== "fixer-limit" && gate.kind !== "unresumable";
-    if (choosing && (proposed.length || eligible.length)) {
-      const fields = h("div", { class: "cx-fields" });
-      if (proposed.length) {
-        const sel = h("select", { class: "cx-select gate-next", id: "gate-next-" + run.runId },
+    const next = (gate.proposedNext || [])[0];
+    const nextTitle = next && next.id && next.id.charAt(0) !== "$" ? (next.title || next.id) : "";
+    if (choosing && (proposed.length || eligible.length) && gate.kind !== "limit") {
+      const fields = h("div", { class: "cx-fields gate-next-row" });
+      if (proposed.length > 1) {
+        const sel = h("select", { class: "cx-select gate-next", id: "gate-next-" + run.runId, "aria-label": "Next stage" },
           proposed.map((n) => h("option", { value: n.id, selected: n.id === gate.nextStageId || undefined }, n.title || n.id)));
-        fields.appendChild(h("label", { class: "cx-field" }, h("span", { class: "cx-field-label" }, "Next stage"), sel));
+        fields.appendChild(h("label", { class: "cx-field" }, h("span", { class: "cx-field-label" }, "Next"), sel));
+      } else if (proposed.length === 1) {
+        fields.appendChild(h("span", { class: "gate-next-label" }, "Next: ", h("strong", {}, nextTitle), " on"));
       }
-      if (eligible.length) {
-        const pre = gate.preselected && (gate.preselected.provider || gate.preselected);
-        const sel = h("select", { class: "cx-select gate-provider" },
-          eligible.map((t) => h("option", { value: t.provider, selected: t.provider === pre || undefined },
-            (t.displayName || t.provider) + (t.defaultModel ? " · " + t.defaultModel : ""))));
-        fields.appendChild(h("label", { class: "cx-field" }, h("span", { class: "cx-field-label" }, "Run on"), sel));
-      }
+      if (eligible.length) fields.appendChild(gateTargetFields(gate));
       body.appendChild(fields);
       if (ineligible.length) {
         body.appendChild(h("ul", { class: "cx-unavailable" }, ineligible.map((t) =>
           h("li", {}, h("span", { class: "cx-unavailable-name" }, t.provider), " — ", t.message || "not available"))));
       }
     }
+    if (gate.reason) body.appendChild(h("p", { class: "cx-text gate-reason gate-why", title: "Why this next stage?" }, gate.reason));
+    const draft = gateNotesDraft(run.runId);
+    const notesArea = h("textarea", { class: "cx-textarea gate-notes", rows: "2", placeholder: "Anything the next role should know" },
+      draft != null ? draft : (gate.userNotes || ""));
+    // F-21: an unsent note survives every repaint (webview state, per run).
+    notesArea.addEventListener("input", () => setGateNotesDraft(run.runId, notesArea.value));
     body.appendChild(h("label", { class: "cx-field" },
-      h("span", { class: "cx-field-label" }, "Notes for the next stage (optional)"),
-      h("textarea", { class: "cx-textarea gate-notes", rows: "2", placeholder: "Anything the next role should know" }, gate.userNotes || "")));
+      h("span", { class: "cx-field-label" }, nextTitle ? "Notes for " + nextTitle + " (optional)" : "Notes for the next stage (optional)"),
+      notesArea));
     el.appendChild(body);
 
     const actions = h("div", { class: "cx-card-actions gate-actions" });
@@ -9724,63 +10145,259 @@
       return btn;
     };
     const spacer = () => actions.appendChild(h("span", { class: "cx-spacer" }));
-    const next = (gate.proposedNext || [])[0];
-    const startLabel = gate.kind === "gate-0"
-      ? "Start stage"
-      : (next && next.id && next.id.charAt(0) !== "$" ? "Start " + (next.title || next.id) : "Start");
-    if (gate.kind === "stale") addBtn("continueAnyway", "Continue anyway", "primary");
+    let primary = null;
+    if (gate.kind === "stale") primary = addBtn("continueAnyway", "Continue anyway", "primary");
     if (gate.kind === "fixer-limit") {
-      addBtn("anotherRound", "Another round", "primary");
+      primary = addBtn("anotherRound", gate.anotherRoundLabel || "Another round", "primary");
       addBtn("acceptAsIs", "Accept as is");
       spacer();
       addBtn("cancel", "Cancel run", "danger");
-    } else if (gate.kind === "gate-0") {
-      addBtn("start", startLabel, "primary");
-      addBtn("changeWorkflow", "Change workflow");
+    } else if (gate.kind === "limit" && gate.limit) {
+      // C-16: never a silent switch.
+      for (const alt of gate.limit.alternatives || []) {
+        const btn = addBtn("start", "Run " + (nextTitle || "stage") + " on " + (alt.displayName || alt.provider), primary ? "" : "primary",
+          { target: { provider: alt.provider }, nextStageId: gate.nextStageId });
+        if (!primary) primary = btn;
+      }
+      addBtn("waitRetry", "Wait and retry on " + gate.limit.providerName, primary ? "" : "primary");
       spacer();
-      addBtn("pause", "Stop & resume later", "ghost");
+      addBtn("pause", "Pause run", "ghost");
     } else if (gate.kind === "unresumable") {
       addBtn("cancel", "Cancel run", "danger");
-    } else {
-      addBtn("start", startLabel, gate.kind === "stale" ? "" : "primary");
-      addBtn("skip", "Skip this stage");
-      if (run.status === "done" || (next && next.id === "$done")) addBtn("finish", "Finish");
-      spacer();
-      addBtn("pause", "Stop & resume later", "ghost");
-      addBtn("cancel", "Cancel run", "danger");
+    } else if (gate.kind !== "stale") {
+      const label = gate.primaryLabel || (gate.kind === "gate-0" ? "Start stage" : nextTitle ? "Start " + nextTitle : "Start");
+      primary = addBtn("start", next && next.id === "$done" ? "Finish" : label, "primary");
+      primary.classList.add("gate-primary");
+      if (nextTitle) primary.dataset.stageTitle = nextTitle;
+      if (gate.kind !== "gate-0") {
+        addBtn("skip", "Skip this stage");
+        const last = (run.table || [])[(run.table || []).length - 1];
+        if (last) {
+          const rv = h("button", { class: "cx-btn gate-revise-open", type: "button", dataset: { action: "revise" } }, "Revise " + last.title + "…");
+          rv.addEventListener("click", () => openReviseBox(el, run, last.title));
+          actions.appendChild(rv);
+        }
+        if (findings.length) addBtn("acceptAsIs", "Accept remaining as is");
+      } else {
+        addBtn("changeWorkflow", "Change workflow");
+      }
     }
     if (gate.kind === "interrupted") addBtn("restart", "Restart stage");
+    actions.appendChild(gateMoreMenu(run, gate));
+    el.appendChild(actions);
+    el.appendChild(h("div", { class: "gate-autonomy-row" },
+      h("span", { class: "cx-field-label" }, "Autonomy"),
+      autonomyControl(run.autonomy, (key) => postGateAction("setAutonomy", { autonomy: key }), "gate-autonomy")));
+    // Enter = the primary action; Esc = back to the composer.
+    el.addEventListener("keydown", (e) => {
+      const tag = (e.target && e.target.tagName) || "";
+      if (e.key === "Escape") { e.preventDefault(); try { input.focus(); } catch { /* */ } return; }
+      if (e.key !== "Enter" || e.shiftKey || tag === "TEXTAREA" || tag === "SELECT" || tag === "BUTTON" || (tag === "INPUT" && e.target.type !== "checkbox")) return;
+      if (primary) { e.preventDefault(); primary.click(); }
+    });
+    appendTranscriptChild(el);
+    scrollToBottom();
+  }
+
+  /** "⋯": Pause · Cancel · Revert this stage · Change workflow · Report. */
+  function gateMoreMenu(run, gate) {
+    const menu = h("details", { class: "gate-more" });
+    menu.appendChild(h("summary", { class: "cx-btn cx-btn--ghost", "aria-label": "More actions", title: "More actions" }, "⋯"));
+    const list = h("div", { class: "gate-more-list", role: "menu" });
+    const item = (action, label, kind, extra) => {
+      const b = h("button", { class: "cx-btn cx-btn--ghost cx-btn--sm" + (kind ? " cx-btn--" + kind : ""), type: "button", role: "menuitem", dataset: { action } }, label);
+      b.onclick = () => { menu.open = false; postGateAction(action, extra); };
+      list.appendChild(b);
+    };
+    if (gate.kind !== "unresumable") item("pause", "Stop & resume later");
+    const last = (run.table || []).slice().reverse().find((r) => r.revertible);
+    if (last) item("revertStage", "Revert " + last.title, "danger", { ordinal: last.ordinal });
+    if (gate.kind !== "gate-0") item("changeWorkflow", "Change workflow");
+    item("openReport", "Open report");
+    item("cancel", "Cancel run", "danger");
+    menu.appendChild(list);
+    return menu;
+  }
+
+  /** C-07: feedback goes into the same stage session as a second turn. */
+  function openReviseBox(card, run, title) {
+    if (card.querySelector(".gate-revise")) return;
+    const text = h("textarea", { class: "cx-textarea gate-revise-text", rows: "3", placeholder: "What should " + title + " change?" });
+    const send = h("button", { class: "cx-btn cx-btn--primary cx-btn--sm", type: "button" }, "Send to " + title);
+    send.onclick = () => {
+      const message = text.value.trim();
+      if (!message) return;
+      postGateAction("revise", { message });
+    };
+    const box = h("div", { class: "gate-revise" }, text, send);
+    card.insertBefore(box, card.querySelector(".gate-actions"));
+    text.focus();
+  }
+
+  function postFindingSelection(run) {
+    const card = document.querySelector(".workflow-gate-card");
+    if (!card) return;
+    const keep = [...card.querySelectorAll(".gate-finding-pick")].filter((c) => c.checked).map((c) => c.dataset.findingId);
+    vscode.postMessage({ type: "workflowGateAction", runId: run.runId, action: "selectFindings", findings: keep });
+  }
+
+  /** C-18: the finished run's card — keep, revert, report. */
+  function renderWorkflowDone(run) {
+    const el = h("section", {
+      class: "cx-card cx-card--ok workflow-gate-card workflow-done-card", "aria-live": "polite", "aria-label": "Crew run finished",
+      dataset: { kind: "done" },
+    });
+    el.appendChild(h("div", { class: "cx-card-head" },
+      h("span", { class: "cx-card-icon", "aria-hidden": "true", html: ICON.check || ICON.flag }),
+      h("div", { class: "cx-card-heading" },
+        h("div", { class: "cx-card-title gate-header" }, "Crew run finished"),
+        h("div", { class: "cx-card-sub" }, [run.workflowTitle || run.workflowName, run.totals].filter(Boolean).join(" · "))),
+      runPill("done")));
+    const actions = h("div", { class: "cx-card-actions gate-actions" });
+    const add = (action, label, kind) => {
+      const b = h("button", { class: "cx-btn" + (kind ? " cx-btn--" + kind : ""), type: "button", dataset: { action } }, label);
+      b.addEventListener("click", () => postGateAction(action));
+      actions.appendChild(b);
+      return b;
+    };
+    add("keepChanges", "Keep changes", "primary");
+    add("revertAll", "Revert all", "danger");
+    add("openReport", "Open report");
+    add("copyReport", "Copy as Markdown", "ghost");
     el.appendChild(actions);
     appendTranscriptChild(el);
     scrollToBottom();
   }
 
+  function gateNotesDraft(runId) {
+    const drafts = uiState().gateDrafts || {};
+    return typeof drafts[runId] === "string" ? drafts[runId] : null;
+  }
+
+  function setGateNotesDraft(runId, text) {
+    const drafts = { ...(uiState().gateDrafts || {}) };
+    if (text == null) delete drafts[runId];
+    else drafts[runId] = text;
+    setUiState({ gateDrafts: drafts });
+  }
+
+  const RUN_STATE_ACTIONS = new Set(["setAutonomy", "pauseAfterStage", "selectFindings", "nudge", "stopStage", "openReport", "copyReport"]);
+
   function postGateAction(action, extra) {
     const run = state.workflowRun;
     if (!run) return;
+    if (RUN_STATE_ACTIONS.has(action)) {
+      vscode.postMessage({ type: "workflowGateAction", runId: run.runId, action, ...(extra || {}) });
+      return;
+    }
+    setGateNotesDraft(run.runId, null);
     const card = document.querySelector(".workflow-gate-card");
     const nextSel = card && card.querySelector(".gate-next");
     const providerSel = card && card.querySelector(".gate-provider");
+    const modelSel = card && card.querySelector(".gate-model");
+    const effortSel = card && card.querySelector(".gate-effort");
     const notes = card && card.querySelector(".gate-notes");
+    const anywhere = card && card.querySelector(".gate-allow-anywhere-input");
+    // C-15: answers to the clarifier's questions ride along as notes.
+    const answers = card ? [...card.querySelectorAll(".gate-answer")]
+      .map((i) => ({ q: (run.gate && run.gate.questions || [])[Number(i.dataset.q)], a: i.value.trim() }))
+      .filter((x) => x.q && x.a) : [];
+    const noteText = [notes && notes.value.trim(), answers.length ? "Answers to the clarifying questions:\n" + answers.map((x) => "- " + x.q + "\n  " + x.a).join("\n") : ""]
+      .filter(Boolean).join("\n\n");
+    const target = providerSel && providerSel.value
+      ? {
+          provider: providerSel.value,
+          ...(modelSel && modelSel.value ? { model: modelSel.value } : {}),
+          ...(effortSel && effortSel.value ? { effort: effortSel.value } : {}),
+        }
+      : undefined;
     const payload = {
       type: "workflowGateAction",
       runId: run.runId,
       action,
       ...(nextSel && nextSel.value ? { nextStageId: nextSel.value } : {}),
-      ...(providerSel && providerSel.value ? { target: { provider: providerSel.value } } : {}),
-      ...(notes && notes.value.trim() ? { notes: notes.value.trim() } : {}),
+      ...(target ? { target } : {}),
+      ...(noteText ? { notes: noteText } : {}),
+      ...(anywhere && anywhere.checked && action === "start" ? { allowAnywhere: true } : {}),
       ...(extra || {}),
     };
     vscode.postMessage(payload);
   }
 
-  const STAGE_STATUS = { "at-gate": "pending", paused: "pending", interrupted: "failed" };
+  const STAGE_STATUS = { "at-gate": "pending", paused: "pending", interrupted: "failed", reverted: "cancelled" };
+
+  /** X-02: the live feed of a child, by owner id. */
+  function activityFor(ownerId) {
+    return (state.childActivity || {})[ownerId];
+  }
+
+  function recordChildActivity(msg) {
+    const owner = msg.owner || {};
+    if (!owner.id) return;
+    const store = state.childActivity || (state.childActivity = {});
+    const prev = store[owner.id] || { lines: [], lastLine: "" };
+    const lines = prev.lines.slice();
+    for (const item of msg.items || []) {
+      if (item.kind === "tool") {
+        const i = lines.findIndex((l) => l.toolId === item.id);
+        const title = item.title || (i >= 0 ? lines[i].title : "") || item.toolKind || "tool";
+        const text = (item.status === "failed" ? "✗ " : item.status === "completed" ? "✓ " : "… ") + title;
+        if (i >= 0) lines[i] = { toolId: item.id, title, text };
+        else lines.push({ toolId: item.id, title, text });
+      } else if (item.kind === "prose" || item.kind === "thought") {
+        const last = lines[lines.length - 1];
+        if (last && last.kind === item.kind) last.text = (last.text + item.text).slice(-600);
+        else lines.push({ kind: item.kind, text: item.text });
+      } else if (item.kind === "plan") {
+        lines.push({ text: item.done + "/" + item.total + " steps" + (item.current ? " · " + item.current : "") });
+      }
+    }
+    store[owner.id] = { lines: lines.slice(-40), lastLine: msg.lastLine || prev.lastLine };
+    if (owner.kind === "subagent") paintCompanionActivity(owner.id);
+    else renderCrewChrome();
+  }
+
+  function activityBlock(ownerId, className) {
+    const act = activityFor(ownerId);
+    if (!act || !act.lines.length) return null;
+    const open = !!(state.activityOpen || {})[ownerId];
+    const d = h("details", { class: "child-activity " + (className || ""), open: open || undefined, dataset: { owner: ownerId } },
+      h("summary", {}, h("span", { class: "child-activity-last" }, act.lastLine || act.lines[act.lines.length - 1].text.split("\n").pop())),
+      h("div", { class: "child-activity-lines" }, act.lines.map((l) => h("div", { class: "child-activity-line" + (l.kind === "thought" ? " is-thought" : "") }, l.text))));
+    d.addEventListener("toggle", () => {
+      state.activityOpen = { ...(state.activityOpen || {}), [ownerId]: d.open };
+    });
+    return d;
+  }
+
+  function paintCompanionActivity(subagentId) {
+    const card = state.companionSubagentCards && state.companionSubagentCards.get(subagentId);
+    if (!card || !card.isConnected) return;
+    const old = card.querySelector(".child-activity");
+    if (old) old.remove();
+    const block = activityBlock(subagentId, "companion-activity");
+    if (!block) return;
+    const anchor = card.querySelector(".companion-notes") || card.lastChild;
+    card.insertBefore(block, anchor ? anchor.nextSibling : null);
+  }
+
+  function crewRailExtras() {
+    if (!crewRunEl) return null;
+    let extras = crewRunEl.querySelector(".crew-run-extras");
+    if (!extras) {
+      extras = h("div", { class: "crew-run-extras" });
+      crewRunEl.appendChild(extras);
+    }
+    return extras;
+  }
 
   function renderCrewChrome() {
     renderCrewEmpty();
     renderWorkflowGate(state.workflowRun);
     if (!crewRunEl) return;
     if (!state.workflowRun) {
+      const extras = crewRunEl.querySelector(".crew-run-extras");
+      if (extras) extras.remove();
       renderCrewRun();
       return;
     }
@@ -9788,20 +10405,105 @@
     const run = state.workflowRun;
     const stages = Array.isArray(run.stages) ? run.stages : [];
     const done = stages.filter((s) => s.status === "done" || s.status === "skipped").length;
-    paintCrewRail(run.workflowTitle || "Crew", run.status, stages.length, done, stages.some((s) => s.status === "failed"));
+    paintCrewRail(run.workflowTitle || "Crew", run.waitingForYou ? "needs-you" : run.status, stages.length, done, stages.some((s) => s.status === "failed"));
     crewRunEl.title = run.subtitle || "";
+    if (crewRunCount && run.totals) {
+      crewRunCount.appendChild(h("span", { class: "crew-run-totals" }, " · " + run.totals));
+    }
     if (!crewRunList) return;
     crewRunList.textContent = "";
     stages.forEach((stage, i) => {
       const status = STEP_STATUS[stage.status] || STAGE_STATUS[stage.status] || "pending";
       const current = stage.id === run.currentStageId;
-      const li = h("li", { class: "cx-step crew-step crew-step-" + status + (current ? " is-current" : "") },
-        h("span", { class: "cx-row" },
-          statusMark(status, stage.ordinal || i + 1),
-          h("span", { class: "cx-row-main" }, h("span", { class: "cx-row-title" }, stage.title || stage.id)),
-          current && run.gate ? h("span", { class: "cx-row-end" }, "next") : null));
+      const li = h("li", { class: "cx-step crew-step crew-step-" + status + (current ? " is-current" : "") });
+      const row = h(stage.sessionId ? "button" : "span", {
+        class: "cx-row" + (stage.sessionId ? " cx-row--button crew-step-open" : ""),
+        ...(stage.sessionId ? { type: "button", title: "Open this stage's session" } : {}),
+      },
+      statusMark(status, stage.ordinal || i + 1),
+      h("span", { class: "cx-row-main" },
+        h("span", { class: "cx-row-title" }, stage.title || stage.id, stage.substep ? h("span", { class: "crew-step-substep" }, " · " + stage.substep) : null),
+        stage.meta ? h("span", { class: "cx-row-sub crew-step-meta" }, stage.meta) : null),
+      current && run.gate ? h("span", { class: "cx-row-end" }, "next")
+        : stage.status === "needs-you" ? h("span", { class: "cx-row-end" }, h("span", { class: "cx-pill cx-pill--warn" }, "Needs you"))
+          : null);
+      if (stage.sessionId) {
+        row.onclick = () => vscode.postMessage({ type: "openCrewSession", sessionId: stage.sessionId });
+      }
+      li.appendChild(row);
+      if (current && run.status === "running" && run.runId) {
+        const block = activityBlock(run.runId + ":" + stage.id, "crew-activity");
+        if (block) li.appendChild(block);
+      }
+      if (run.stalled && run.stalled.stageId === stage.id) {
+        const warn = h("div", { class: "crew-stall" },
+          h("span", { class: "cx-pill cx-pill--warn" }, run.stalled.text));
+        if (stage.sessionId) {
+          const openB = h("button", { class: "cx-btn cx-btn--ghost cx-btn--sm", type: "button" }, "Open stage");
+          openB.onclick = () => vscode.postMessage({ type: "openCrewSession", sessionId: stage.sessionId });
+          warn.appendChild(openB);
+        }
+        const nudge = h("button", { class: "cx-btn cx-btn--ghost cx-btn--sm crew-nudge", type: "button" }, "Nudge");
+        nudge.onclick = () => postGateAction("nudge");
+        const stop = h("button", { class: "cx-btn cx-btn--ghost cx-btn--sm cx-btn--danger crew-stop-stage", type: "button" }, "Stop stage");
+        armedButton(stop, "Stop the stage?", () => postGateAction("stopStage"));
+        warn.append(nudge, stop);
+        li.appendChild(warn);
+      }
       crewRunList.appendChild(li);
     });
+    const extras = crewRailExtras();
+    if (!extras) return;
+    extras.textContent = "";
+    const head = h("div", { class: "crew-run-controls" },
+      autonomyControl(run.autonomy, (key) => postGateAction("setAutonomy", { autonomy: key }), "rail-autonomy"));
+    if (run.status === "running") {
+      const pause = h("input", { type: "checkbox", class: "crew-pause-after", checked: run.pauseAfterCurrent || undefined });
+      pause.onchange = () => postGateAction("pauseAfterStage", { value: pause.checked });
+      head.appendChild(h("label", { class: "cx-check" }, pause, " Pause after this stage"));
+    }
+    extras.appendChild(head);
+    // C-17: the run table, collapsed by default.
+    if (Array.isArray(run.table) && run.table.length) {
+      const open = !!uiState().crewTableOpen;
+      const details = h("details", { class: "crew-run-table-wrap", open: open || undefined });
+      details.addEventListener("toggle", () => setUiState({ crewTableOpen: details.open }));
+      details.appendChild(h("summary", {}, "Run table"));
+      const table = h("table", { class: "crew-run-table" },
+        h("thead", {}, h("tr", {}, ["#", "Stage", "Role", "Companion", "Status", "Time", "Tokens", "Files", ""].map((t) => h("th", {}, t)))));
+      const tbody = h("tbody");
+      for (const row of run.table) {
+        const brief = h("button", { class: "cx-link", type: "button" }, "Brief");
+        brief.onclick = () => vscode.postMessage({ type: "openAgentArtifact", runId: run.runId, step: row.ordinal, which: "brief" });
+        const result = h("button", { class: "cx-link", type: "button" }, "Result");
+        result.onclick = () => vscode.postMessage({ type: "openAgentArtifact", runId: run.runId, step: row.ordinal, which: "result" });
+        const cells = [brief, " ", result];
+        if (row.sessionId) {
+          const openS = h("button", { class: "cx-link", type: "button" }, "Open session");
+          openS.onclick = () => vscode.postMessage({ type: "openCrewSession", sessionId: row.sessionId });
+          cells.push(" ", openS);
+        }
+        if (row.revertible && run.status !== "running") {
+          const rv = h("button", { class: "cx-link cx-link--danger crew-revert-stage", type: "button" }, "Revert");
+          armedButton(rv, "Revert?", () => postGateAction("revertStage", { ordinal: row.ordinal }));
+          cells.push(" ", rv);
+        }
+        tbody.appendChild(h("tr", { dataset: { ordinal: String(row.ordinal) } },
+          h("td", {}, String(row.ordinal)), h("td", {}, row.title), h("td", {}, row.role), h("td", {}, row.target || ""),
+          h("td", {}, row.status), h("td", {}, row.duration || ""), h("td", {}, row.tokens || ""), h("td", {}, String(row.files)),
+          h("td", {}, ...cells)));
+      }
+      table.appendChild(tbody);
+      details.appendChild(table);
+      if (run.reportAvailable || run.status === "done") {
+        const rep = h("button", { class: "cx-link", type: "button" }, "Open report");
+        rep.onclick = () => postGateAction("openReport");
+        const copy = h("button", { class: "cx-link", type: "button" }, "Copy as Markdown");
+        copy.onclick = () => postGateAction("copyReport");
+        details.appendChild(h("div", { class: "crew-run-report" }, rep, " · ", copy));
+      }
+      extras.appendChild(details);
+    }
   }
 
   if (crewRunToggle) {
@@ -9903,6 +10605,9 @@
     renderReviewCenter();
     state.crewRun = null;
     renderCrewRun();
+    state.childActivity = {};
+    hideCrewInputChoice();
+    if (state.childContext) renderChildContext(null);
     state.pendingDiffByToolCallId.clear();
     state.revertedEdits.clear();
     state.toolItemsByToolCallId.clear();
@@ -9949,6 +10654,9 @@
     state.sessionUsage = null;
     state.subscriptionWindows = [];
     state.contextBreakdown = null;
+    state.compactThresholdPct = null;
+    state.compactionCount = null;
+    hideNearFullPrompt();
     if (!contextPopover.hidden) renderContextPopover();
     state.suppressReplayTurn = false;
     state.skipUserBubble = false;
@@ -11059,6 +11767,16 @@
     const ts = actions.querySelector(".msg-timestamp");
     if (ts) actions.insertBefore(span, ts);
     else actions.appendChild(span);
+    // X-05: this turn's delegations, measured.
+    const oldKids = actions.querySelector(".msg-children");
+    if (oldKids) oldKids.remove();
+    if (end && typeof end.children === "string" && end.children) {
+      const kids = document.createElement("span");
+      kids.className = "msg-children";
+      kids.textContent = end.children;
+      if (ts) actions.insertBefore(kids, ts);
+      else actions.appendChild(kids);
+    }
   }
 
   function feedbackOffered() {
@@ -12991,6 +13709,48 @@
     scrollToBottom();
   }
 
+  // K-05: the context overflowed before compaction. One card, one retry.
+  function addContextOverflowCard(msg) {
+    clearWelcome();
+    hideGrokking();
+    hideThinkingIndicator();
+    stopProcessingCue();
+    revealTurnFooter(undefined, (msg.status || msg.durationMs != null)
+      ? { status: msg.status || "failed", durationMs: msg.durationMs }
+      : undefined);
+    if (state.busy) markLiveTurnFeedback();
+    state.busy = false;
+    state.busyLocked = false;
+    updateSendButton();
+    hideNearFullPrompt();
+    const el = h("section", { class: "cx-card cx-card--orange context-overflow", dataset: { overflowId: String(msg.id) } });
+    el.appendChild(cardHead(ICON.gauge, "Context window full", "",
+      h("span", { class: "cx-pill cx-pill--warn" }, "overflow")));
+    el.appendChild(h("div", { class: "cx-card-body" }, h("div", { class: "cx-text card-subtitle" }, msg.text || "")));
+    const actions = h("div", { class: "cx-card-actions" });
+    const settle = (action) => {
+      if (el.classList.contains("resolved")) return;
+      vscode.postMessage({ type: "contextOverflowAnswer", id: msg.id, action });
+      el.classList.add("resolved");
+      for (const b of actions.querySelectorAll("button")) b.disabled = true;
+    };
+    if (msg.canCompact) {
+      const retry = h("button", { class: "cx-btn cx-btn--sm cx-btn--primary primary", type: "button" }, "Compact and retry");
+      retry.onclick = () => settle("compact-retry");
+      actions.appendChild(retry);
+    }
+    const fresh = h("button", { class: "cx-btn cx-btn--sm" + (msg.canCompact ? "" : " cx-btn--primary primary"), type: "button" }, "Continue in a fresh session");
+    fresh.onclick = () => settle("fresh");
+    actions.appendChild(fresh);
+    actions.appendChild(h("span", { class: "cx-spacer" }));
+    const dismiss = h("button", { class: "cx-btn cx-btn--sm cx-btn--ghost", type: "button" }, "Dismiss");
+    dismiss.onclick = () => settle("dismiss");
+    actions.appendChild(dismiss);
+    el.appendChild(actions);
+    appendTranscriptChild(el);
+    scrollToBottom();
+  }
+
   function sessionSupersededCwd(id) {
     const row = (state.sessions || []).find((s) => s && s.id === id)
       || (state.pinnedSessions || []).find((s) => s && s.id === id)
@@ -13378,6 +14138,16 @@
     el.classList.add("subagent-done");
     if (failed) el.classList.add("subagent-failed");
     else if (cancelled) el.classList.add("subagent-cancelled");
+    if (el.dataset.childKind === "native") {
+      const status = failed ? "failed" : cancelled ? "cancelled" : "completed";
+      el.dataset.childStatus = status;
+      const pill = el.querySelector(".subagent-child-status");
+      if (pill) {
+        pill.className = "cx-pill cx-pill--" + CHILD_STATUS[status][1] + " subagent-child-status";
+        pill.textContent = CHILD_STATUS[status][0];
+      }
+      if (!state.replaying) repaintSubagentTray();
+    }
     const dots = el.querySelector(".blink-dots");
     if (dots) dots.remove();
     const timeEl = el.querySelector(".subagent-time");
@@ -13570,18 +14340,20 @@
   // every change, so this never has to merge two partial updates and a card
   // that arrives after a reload is complete on its own.
 
+  // E-02: every child (crew stage, companion subagent, Grok's own) speaks
+  // this one vocabulary; the words and colours live here and nowhere else.
+  const CHILD_STATUS = {
+    queued: ["Queued", "muted"], running: ["Running", "info"], "needs-you": ["Needs you", "warn"],
+    stalled: ["Stalled", "warn"], completed: ["Done", "ok"], failed: ["Failed", "danger"],
+    cancelled: ["Cancelled", "muted"], refused: ["Refused", "danger"],
+  };
+  const COMPANION_TO_CHILD = { "pending-approval": "needs-you", running: "running", completed: "completed", failed: "failed", cancelled: "cancelled", refused: "refused" };
   const COMPANION_STATUS_WORDS = {
+    ...Object.fromEntries(Object.entries(COMPANION_TO_CHILD).map(([k, v]) => [k, CHILD_STATUS[v][0].toLowerCase()])),
+    // The copy deck's own words for a card that has not started yet.
     "pending-approval": "waiting for approval",
-    running: "running",
-    completed: "done",
-    failed: "failed",
-    cancelled: "cancelled",
-    refused: "refused",
   };
-  const COMPANION_STATUS_TONE = {
-    "pending-approval": "warn", running: "info", completed: "ok",
-    failed: "danger", cancelled: "muted", refused: "danger",
-  };
+  const COMPANION_STATUS_TONE = Object.fromEntries(Object.entries(COMPANION_TO_CHILD).map(([k, v]) => [k, CHILD_STATUS[v][1]]));
 
   function companionCardFor(subagentId) {
     let el = state.companionSubagentCards.get(subagentId);
@@ -13618,19 +14390,58 @@
    * one thing that changes while nothing else does, so it ticks on its own.
    */
   let subagentTrayTimer = 0;
+  /** S-06: the tray lists Grok's own running subagents next to the companions. */
+  function nativeTrayEntries() {
+    const out = [];
+    for (const el of state.subagentCards ? state.subagentCards.values() : []) {
+      if (!el.isConnected || el.dataset.childKind !== "native" || el.classList.contains("subagent-done") || el.dataset.subagentReplayed) continue;
+      const title = el.querySelector(".subagent-title");
+      out.push({ native: true, label: (title && title.textContent) || "Grok subagent", providerName: "Grok", startedAt: Number(el.dataset.startedAt) || 0 });
+    }
+    return out;
+  }
+
+  function repaintSubagentTray() {
+    renderSubagentTray(state.lastSubagentTray || { subagents: [] });
+  }
+
   function renderSubagentTray(msg) {
     const tray = $("subagent-tray");
     const list = $("subagent-tray-list");
     const title = $("subagent-tray-title");
     if (!tray || !list) return;
-    const running = Array.isArray(msg.subagents) ? msg.subagents : [];
+    state.lastSubagentTray = msg;
+    const entries = [...(Array.isArray(msg.subagents) ? msg.subagents : []), ...nativeTrayEntries()];
+    const running = entries.filter((e) => !e.status);
     tray.hidden = running.length === 0;
     clearInterval(subagentTrayTimer);
     if (!running.length) { list.textContent = ""; return; }
-    if (title) title.textContent = running.length === 1 ? "1 running" : running.length + " running";
+    const waiting = running.filter((e) => e.needsYou).length;
+    if (title) {
+      title.textContent = (running.length === 1 ? "1 running" : running.length + " running")
+        + (waiting ? " · " + waiting + " need" + (waiting === 1 ? "s" : "") + " you" : "");
+    }
     list.textContent = "";
+    for (const entry of entries.filter((e) => e.status && e.promotable)) {
+      const keep = h("button", { class: "cx-btn cx-btn--ghost cx-btn--sm subagent-tray-keep", type: "button" }, "Keep as a session");
+      keep.onclick = () => vscode.postMessage({ type: "companionSubagentAction", subagentId: entry.subagentId, action: "promote" });
+      list.appendChild(h("li", { class: "cx-row subagent-tray-row is-done", dataset: { subagentId: entry.subagentId } },
+        statusMark(entry.status === "completed" ? "done" : entry.status === "failed" ? "failed" : "cancelled"),
+        h("span", { class: "cx-row-main" }, h("span", { class: "cx-row-title subagent-tray-name" }, entry.label || "")),
+        keep));
+    }
     for (const entry of running) {
       const time = h("span", { class: "cx-row-end subagent-tray-time", dataset: { startedAt: String(entry.startedAt || "") } });
+      if (entry.native) {
+        // Grok's own subagents cannot be cancelled one by one (the CLI owns them).
+        list.appendChild(h("li", { class: "cx-row subagent-tray-row is-native" },
+          statusMark("running"),
+          h("span", { class: "cx-row-main" },
+            h("span", { class: "cx-row-title subagent-tray-name" }, entry.label),
+            h("span", { class: "cx-row-sub subagent-tray-target" }, "Grok · built-in")),
+          time));
+        continue;
+      }
       const cancel = h("button", {
         class: "cx-btn cx-btn--ghost cx-btn--sm subagent-tray-cancel", type: "button",
         title: "Stop this subagent", "aria-label": "Stop " + (entry.label || "subagent"),
@@ -13643,7 +14454,7 @@
         });
       });
       list.appendChild(h("li", { class: "cx-row subagent-tray-row", dataset: { subagentId: entry.subagentId } },
-        statusMark("running"),
+        statusMark(entry.needsYou ? "needs-you" : "running"),
         h("span", { class: "cx-row-main" },
           h("span", { class: "cx-row-title subagent-tray-name" }, entry.label || ""),
           h("span", { class: "cx-row-sub subagent-tray-target" },
@@ -13698,7 +14509,14 @@
     if (msg.profileDowngraded) {
       notes.push(`Permissions reduced to read-only: ${msg.profileDowngraded}.`);
     }
-    if (msg.errorCode) notes.push(`Refused: ${msg.errorCode}.`);
+    if (msg.adjustedByUser) notes.push("You changed this request before it started.");
+    if (msg.worktree) notes.push("Works in its own worktree; nothing reaches your files until you apply it.");
+    if (msg.errorCode) {
+      notes.push(msg.refusalMessage ? `Refused: ${msg.refusalMessage}` : `Refused: ${msg.errorCode}.`);
+      if (Array.isArray(msg.refusalAlternatives) && msg.refusalAlternatives.length) {
+        notes.push(`Offered instead: ${msg.refusalAlternatives.join(", ")}.`);
+      }
+    }
     const notesEl = el.querySelector(".companion-notes");
     if (notesEl) {
       notesEl.textContent = "";
@@ -13727,15 +14545,31 @@
       const word = COMPANION_STATUS_WORDS[msg.status] || msg.status || "";
       const ms = terminal && msg.endedAt ? msg.endedAt - msg.startedAt : null;
       statusEl.textContent = "";
-      if (msg.status === "running") statusEl.appendChild(statusMark("running"));
-      statusEl.appendChild(h("span", { class: "cx-pill cx-pill--" + (COMPANION_STATUS_TONE[msg.status] || "muted") }, word));
+      if (msg.status === "running" && msg.needsYou) {
+        statusEl.appendChild(statusMark("needs-you"));
+        statusEl.appendChild(h("span", { class: "cx-pill cx-pill--warn companion-needs-you" }, "Waiting for you — timer paused"));
+      } else {
+        if (msg.status === "running") statusEl.appendChild(statusMark("running"));
+        statusEl.appendChild(h("span", { class: "cx-pill cx-pill--" + (COMPANION_STATUS_TONE[msg.status] || "muted") }, word));
+      }
       if (ms != null) statusEl.appendChild(h("span", { class: "subagent-time" }, formatElapsed(Math.max(1000, ms))));
+      // X-05: honest numbers — tokens measured, and the model that really ran.
+      if (typeof msg.tokens === "number" && msg.tokens > 0) {
+        statusEl.appendChild(h("span", { class: "subagent-tokens" },
+          (msg.tokens >= 1000 ? Math.round(msg.tokens / 1000) + "k" : String(msg.tokens)) + " tokens"));
+      }
+      if (msg.ranModel) statusEl.appendChild(h("span", { class: "subagent-ran-model", title: "The model that actually ran" }, "ran " + msg.ranModel));
     }
     if (terminal) {
       el.classList.add("subagent-done");
       renderCompanionResult(el, msg);
     }
     renderCompanionActions(el, msg);
+    if (!terminal) paintCompanionActivity(msg.subagentId);
+    else {
+      const act = el.querySelector(".child-activity");
+      if (act) act.remove();
+    }
     scrollToBottom();
   }
 
@@ -13752,6 +14586,11 @@
     // §6.6 point 8. Offered by the host only once the child is finished and has
     // a session worth keeping.
     if (msg.promotable) actions.push({ action: "promote", label: "Keep as a session" });
+    // S-01: a worktree child's changes wait for Apply / Discard.
+    if (msg.worktree === "pending" && msg.status !== "running") {
+      actions.push({ action: "applyWorktree", label: "Apply changes" });
+      actions.push({ action: "discardWorktree", label: "Discard" });
+    }
     bar.textContent = "";
     bar.hidden = actions.length === 0;
     for (const entry of actions) {
@@ -13764,6 +14603,33 @@
         });
       });
       bar.appendChild(button);
+    }
+    // S-04: a follow-up into the finished child's own session.
+    if (msg.canFollowUp) {
+      bar.hidden = false;
+      const ask = h("button", { class: "cx-btn cx-btn--sm companion-action companion-follow-up", type: "button" }, "Ask a follow-up");
+      ask.addEventListener("click", () => {
+        if (el.querySelector(".companion-follow-up-box")) return;
+        const text = h("input", { class: "cx-input companion-follow-up-text", type: "text", placeholder: "Follow-up for " + (msg.label || "this subagent") });
+        const send = h("button", { class: "cx-btn cx-btn--primary cx-btn--sm", type: "button" }, "Send");
+        const go = () => {
+          const message = text.value.trim();
+          if (!message) return;
+          vscode.postMessage({ type: "companionSubagentAction", subagentId: msg.subagentId, action: "followUp", message });
+          box.remove();
+        };
+        send.onclick = go;
+        text.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); go(); } });
+        const box = h("div", { class: "companion-follow-up-box" }, text, send);
+        bar.after(box);
+        text.focus();
+      });
+      bar.appendChild(ask);
+    }
+    const worktreeNote = el.querySelector(".companion-worktree-state");
+    if (worktreeNote) worktreeNote.remove();
+    if (msg.worktree === "applied" || msg.worktree === "discarded") {
+      bar.after(h("div", { class: "cx-row-sub companion-worktree-state" }, msg.worktree === "applied" ? "Changes applied." : "Changes discarded."));
     }
   }
 
@@ -13821,6 +14687,16 @@
       `<div class="subagent-stream" hidden></div>` +
       `<div class="subagent-result" hidden></div>`;
     setSubagentTitle(el, call);
+    // S-06: the same head as a companion card — who runs it and its status in
+    // the one vocabulary (E-02). Grok's own subagents run inside this process.
+    el.dataset.childKind = "native";
+    el.dataset.childStatus = "running";
+    if (!state.replaying) el.dataset.startedAt = String(Date.now());
+    const kind = el.querySelector(".subagent-label");
+    if (kind) kind.title = "Grok's built-in subagent";
+    const pill = h("span", { class: "cx-pill cx-pill--info subagent-child-status" }, CHILD_STATUS.running[0]);
+    const row = el.querySelector(".subagent-row");
+    if (row) row.appendChild(pill);
     // Cards rebuilt by a cold restore never receive their own subagent_spawned
     // (session/load strips the lifecycle rail), so they'd sit permanently
     // untagged — a magnet for a LATER live spawn's FIFO tag, corrupting the old
@@ -13830,6 +14706,7 @@
     appendTranscriptChild(el);
     if (call && call.toolCallId) state.subagentCards.set(call.toolCallId, el);
     applySubagentUpdate(call, el); // a replayed call may already be completed
+    if (!state.replaying) repaintSubagentTray();
     scrollToBottom();
   }
 
@@ -14120,6 +14997,231 @@
   // may be live). Finalize that bubble first so the notice sits BETWEEN prior
   // content and what follows — otherwise later answer tokens reuse the pre-notice
   // bubble and render ABOVE the notice. Text arrives as markdown (italic).
+  // S-03: "Delegation: Off / Ask / Auto / Read-only auto" next to the mode button.
+  const DELEGATION_WORDS = { off: "Off", ask: "Ask", auto: "Auto", "read-only-auto": "Read-only auto" };
+  function renderDelegationSwitch() {
+    let sel = document.getElementById("delegation-switch");
+    const d = state.delegation;
+    if (!d || state.sessionType !== "agent") {
+      if (sel) sel.remove();
+      return;
+    }
+    if (!sel) {
+      sel = h("select", { id: "delegation-switch", class: "toolbar-btn delegation-switch", "aria-label": "Delegation for this conversation",
+        title: "Companion subagents for this conversation" },
+        Object.entries(DELEGATION_WORDS).map(([v, label]) => h("option", { value: v }, "Delegation: " + label)));
+      sel.onchange = () => vscode.postMessage({ type: "setSessionDelegation", value: sel.value });
+      const anchor = document.getElementById("mode-btn");
+      if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(sel, anchor);
+      else return;
+    }
+    sel.value = d.value;
+    sel.title = d.needsRestart
+      ? "Turned on after this conversation started: subagents are offered from its next start."
+      : "Companion subagents for this conversation";
+  }
+
+  // S-02: approve a subagent as asked, or with changes.
+  function resolveSubagentApprovalCard(card, approved) {
+    card.classList.add("resolved");
+    for (const el of card.querySelectorAll("button, input, select, textarea")) el.disabled = true;
+    const status = card.querySelector(".subagent-approval-status");
+    if (status) status.textContent = approved ? "Started" : "Declined";
+  }
+
+  function addSubagentApprovalCard(msg) {
+    clearWelcome();
+    hideGrokking();
+    const targets = Array.isArray(msg.targets) ? msg.targets : [];
+    const el = h("section", { class: "cx-card cx-card--purple subagent-approval", dataset: { approvalId: msg.id } });
+    el.appendChild(cardHead(ICON.bot, "Start a subagent?", msg.label || "", h("span", { class: "subagent-approval-status cx-pill cx-pill--warn" }, "Needs you")));
+    const task = h("textarea", { class: "cx-textarea subagent-approval-task", rows: "4", "aria-label": "Task" }, msg.task || "");
+    const prov = h("select", { class: "cx-select subagent-approval-provider", "aria-label": "Companion" },
+      targets.map((t) => h("option", { value: t.provider, selected: t.provider === msg.provider || undefined }, t.displayName || t.provider)));
+    const model = h("select", { class: "cx-select subagent-approval-model", "aria-label": "Model" });
+    const effort = h("select", { class: "cx-select subagent-approval-effort", "aria-label": "Effort" },
+      ["", "low", "medium", "high", "xhigh", "max"].map((v) => h("option", { value: v, selected: (msg.effort || "") === v || undefined }, v ? "effort " + v : "default effort")));
+    const fillModels = () => {
+      const t = targets.find((x) => x.provider === prov.value) || {};
+      model.textContent = "";
+      model.appendChild(h("option", { value: "" }, "default model"));
+      for (const m of t.models || []) model.appendChild(h("option", { value: m.id, selected: (prov.value === msg.provider && m.id === msg.model) || undefined }, m.label || m.id));
+    };
+    fillModels();
+    prov.onchange = fillModels;
+    const profile = h("select", { class: "cx-select subagent-approval-profile", "aria-label": "Permissions" },
+      (msg.profiles || [msg.profile]).map((p) => h("option", { value: p, selected: p === msg.profile || undefined }, p)));
+    el.appendChild(h("div", { class: "cx-card-body" },
+      h("label", { class: "cx-field" }, h("span", { class: "cx-field-label" }, "Task"), task),
+      h("div", { class: "cx-fields" }, prov, model, effort, profile)));
+    const actions = h("div", { class: "cx-card-actions" });
+    const start = h("button", { class: "cx-btn cx-btn--primary", type: "button" }, "Start");
+    start.onclick = () => {
+      if (el.classList.contains("resolved")) return;
+      const changed = {};
+      if (task.value.trim() && task.value.trim() !== String(msg.task || "").trim()) changed.task = task.value.trim();
+      if (prov.value && prov.value !== msg.provider) changed.provider = prov.value;
+      if ((model.value || "") !== (prov.value === msg.provider ? (msg.model || "") : "")) changed.model = model.value;
+      if ((effort.value || "") !== (msg.effort || "")) changed.effort = effort.value;
+      if (profile.value !== msg.profile) changed.profile = profile.value;
+      vscode.postMessage({ type: "subagentApprovalAnswer", id: msg.id, approved: true, ...changed });
+      resolveSubagentApprovalCard(el, true);
+    };
+    const deny = h("button", { class: "cx-btn cx-btn--ghost", type: "button" }, "Deny");
+    deny.onclick = () => {
+      if (el.classList.contains("resolved")) return;
+      vscode.postMessage({ type: "subagentApprovalAnswer", id: msg.id, approved: false });
+      resolveSubagentApprovalCard(el, false);
+    };
+    actions.append(start, deny);
+    el.appendChild(actions);
+    appendTranscriptChild(el);
+    scrollToBottom();
+  }
+
+  // X-03: text typed in a Crew session while a stage runs.
+  function hideCrewInputChoice() {
+    const el = document.getElementById("crew-input-choice");
+    if (el) el.remove();
+  }
+
+  function showCrewInputChoice(text) {
+    hideCrewInputChoice();
+    const run = state.workflowRun;
+    if (!run || !text) return;
+    const stage = (run.stages || []).find((s) => s.id === run.currentStageId);
+    const title = stage ? stage.title : "the running stage";
+    const box = h("section", { id: "crew-input-choice", class: "crew-input-choice", role: "group", "aria-label": "Where should this go?" });
+    const send = (mode) => {
+      vscode.postMessage({ type: "childMessage", route: "stage:" + run.runId, text, mode });
+      input.value = "";
+      renderInputHighlight();
+      hideCrewInputChoice();
+    };
+    const steer = h("button", { class: "cx-btn cx-btn--primary cx-btn--sm", type: "button" }, "Send to the running stage (" + title + ")");
+    steer.onclick = () => send("steer");
+    const note = h("button", { class: "cx-btn cx-btn--sm", type: "button" }, "Add as a note for the next stage");
+    note.onclick = () => send("note");
+    const cancel = h("button", { class: "cx-btn cx-btn--ghost cx-btn--sm", type: "button" }, "Cancel");
+    cancel.onclick = () => hideCrewInputChoice();
+    box.append(steer, note, cancel);
+    box.addEventListener("keydown", (e) => { if (e.key === "Escape") { hideCrewInputChoice(); input.focus(); } });
+    const dock = document.getElementById("cx-dock");
+    if (dock) dock.appendChild(box);
+    else document.body.appendChild(box);
+    steer.focus();
+  }
+
+  // X-03: a hidden child opened on its own says whose it is.
+  function renderChildContext(context) {
+    state.childContext = context || null;
+    let bar = document.getElementById("child-context-bar");
+    if (!context) {
+      if (bar) bar.remove();
+      syncProviderVoice();
+      return;
+    }
+    if (bar) bar.remove();
+    bar = h("div", { id: "child-context-bar", class: "child-context-bar", role: "note" });
+    bar.appendChild(h("span", { class: "child-context-label" }, "Part of " + (context.kind === "stage" ? "a Crew run" : "a delegation") + " · " + context.label));
+    if (context.parentSessionId) {
+      const back = h("button", { class: "cx-btn cx-btn--ghost cx-btn--sm child-context-back", type: "button" },
+        context.kind === "stage" ? "Back to crew" : "Back to the conversation");
+      back.onclick = () => vscode.postMessage({ type: "openCrewSession", sessionId: context.parentSessionId });
+      bar.appendChild(back);
+    }
+    if (context.running) {
+      bar.appendChild(h("span", { class: "child-context-hint" }, context.canSteer
+        ? "Messages here steer the running turn. Stop stops only this " + (context.kind === "stage" ? "stage" : "subagent") + "."
+        : "Messages here wait until the running turn ends. Stop stops only this " + (context.kind === "stage" ? "stage" : "subagent") + "."));
+    }
+    const dock = document.getElementById("cx-dock");
+    if (dock) dock.insertBefore(bar, dock.firstChild);
+    else document.body.appendChild(bar);
+    if (context.running) input.placeholder = context.canSteer ? "Steer this " + context.kind + "…" : "Queue a message for this " + context.kind + "…";
+  }
+
+  // K-06: what Grok kept after an automatic compaction, collapsed by default.
+  function addCompactSummary(summary) {
+    if (typeof summary !== "string" || !summary.trim()) return;
+    flushAgent();
+    state.activeAgentEl = null;
+    state.activeAgentRaw = "";
+    const el = document.createElement("details");
+    el.className = "plan-notice compact-summary";
+    const head = document.createElement("summary");
+    head.textContent = "Context compacted — show what was kept";
+    const body = document.createElement("div");
+    body.className = "compact-summary-body";
+    body.textContent = summary;
+    el.appendChild(head);
+    el.appendChild(body);
+    appendTranscriptChild(el);
+    scrollToBottom();
+  }
+
+  // K-04: a few points before auto-compaction, the user decides.
+  function hideNearFullPrompt() {
+    const el = document.getElementById("near-full-prompt");
+    if (el) el.remove();
+  }
+
+  function showNearFullPrompt(msg) {
+    hideNearFullPrompt();
+    const used = Number(msg.used) || 0;
+    const win = Number(msg.window) || 0;
+    const threshold = Number(msg.threshold) || 0;
+    if (!win || !threshold) return;
+    const pct = Math.min(100, Math.round((used / win) * 100));
+    const box = document.createElement("section");
+    box.id = "near-full-prompt";
+    box.className = "near-full-prompt";
+    box.setAttribute("role", "status");
+    box.setAttribute("aria-live", "polite");
+    const head = document.createElement("div");
+    head.className = "near-full-head";
+    head.textContent = msg.canCompact
+      ? `Context ${pct}% full · compacts automatically at ${threshold}%`
+      : `Context ${pct}% full`;
+    box.appendChild(head);
+    const row = document.createElement("div");
+    row.className = "near-full-actions";
+    const button = (label, cls, onClick) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = cls;
+      b.textContent = label;
+      b.onclick = (e) => { e.stopPropagation(); onClick(); };
+      row.appendChild(b);
+      return b;
+    };
+    if (msg.canCompact) {
+      const focusInput = document.createElement("input");
+      focusInput.type = "text";
+      focusInput.className = "near-full-focus";
+      focusInput.placeholder = "Keep (optional)…";
+      focusInput.setAttribute("aria-label", "What the compaction should keep");
+      button("Compact now", "primary", () => {
+        const keep = focusInput.value.trim();
+        vscode.postMessage({ type: "send", text: keep ? `/compact ${keep}` : "/compact", bare: true });
+        hideNearFullPrompt();
+      });
+      row.appendChild(focusInput);
+    }
+    button("Continue in a fresh session", "secondary", () => {
+      vscode.postMessage({ type: "continueInFreshSession" });
+      hideNearFullPrompt();
+    });
+    button("Keep going", "secondary", () => hideNearFullPrompt());
+    box.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") { hideNearFullPrompt(); try { input.focus(); } catch { /* */ } }
+    });
+    box.appendChild(row);
+    const dock = document.getElementById("cx-dock");
+    if (dock) dock.insertBefore(box, dock.firstChild);
+    else document.body.appendChild(box);
+  }
+
   function addAutoCompactNotice(text) {
     flushAgent();
     state.activeAgentEl = null;
@@ -15143,6 +16245,25 @@
 
   const RULE_SCOPE_WORDS = { session: "this session", workspace: "this project", global: "all projects" };
 
+  // X-01: a card relayed from a hidden crew stage or subagent says where it
+  // came from, above everything else on it.
+  function markRelayedCard(selector, dataKey, id, origin) {
+    if (!origin || id == null) return;
+    const card = liveTranscriptQueryAll(selector).find((c) => c.dataset[dataKey] === String(id));
+    if (!card || card.querySelector(".card-origin")) return;
+    card.classList.add("card--relayed");
+    card.dataset.relayKind = origin.kind || "";
+    // E-03: a new question from a child is announced, without taking focus
+    // from the composer (shouldFocusPermissionCard still decides focus).
+    card.setAttribute("aria-live", "polite");
+    card.setAttribute("aria-label", (origin.label || "A child session") + " needs you");
+    const line = h("div", { class: "card-origin", title: origin.label || "" },
+      h("span", { class: "cx-pill cx-pill--warn" }, "Needs you"),
+      h("span", { class: "card-origin-label" }, origin.label || ""),
+      origin.outOfScope ? h("span", { class: "cx-pill cx-pill--danger card-origin-scope" }, "outside the stage's scope") : null);
+    card.insertBefore(line, card.firstChild);
+  }
+
   function renderPermissionRuleSuggestions(el, requestId, cardTitle, suggestions) {
     const old = el.querySelector(".perm-rule-suggestions");
     if (old) old.remove();
@@ -15155,7 +16276,8 @@
       // shared through git, an all-projects rule follows the user everywhere.
       const btn = h("button", { class: "perm-rule-suggestion", type: "button" },
         h("span", { class: "perm-rule-suggestion-label" }, sug.label || "this request"),
-        sug.scope ? h("span", { class: "cx-pill cx-pill--outline" }, RULE_SCOPE_WORDS[sug.scope] || sug.scope) : null);
+        sug.scope ? h("span", { class: "cx-pill cx-pill--outline" },
+          (sug.scope === "session" && state.relayScopeWord) || RULE_SCOPE_WORDS[sug.scope] || sug.scope) : null);
       btn.onclick = () => {
         if (state.sessionSuperseded) return;
         const opt = preferredAllowOnce(el._permOptions);
@@ -16392,6 +17514,30 @@
     return 200000;
   }
 
+  // A thin tick on the ring where auto-compaction happens (K-03).
+  function paintDonutThresholdMark(threshold) {
+    const svg = donutArc && donutArc.parentNode;
+    if (!svg || !svg.appendChild) return;
+    let mark = svg.querySelector ? svg.querySelector(".donut-threshold-mark") : null;
+    if (!threshold) {
+      if (mark) mark.remove();
+      return;
+    }
+    if (!mark) {
+      mark = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      mark.setAttribute("class", "donut-threshold-mark");
+      mark.setAttribute("x1", "8");
+      mark.setAttribute("y1", "0.5");
+      mark.setAttribute("x2", "8");
+      mark.setAttribute("y2", "3.5");
+      mark.setAttribute("stroke", "var(--vscode-foreground, #ccc)");
+      mark.setAttribute("stroke-width", "1");
+      svg.appendChild(mark);
+    }
+    mark.setAttribute("transform", `rotate(${Math.round((threshold / 100) * 360)} 8 8)`);
+    mark.setAttribute("data-threshold", String(threshold));
+  }
+
   function updateDonut(used) {
     // Remember the last usage so a later redraw (e.g. the context window changing
     // when the model switches) keeps the same "used" and just rescales the max.
@@ -16403,9 +17549,16 @@
     const arc = (pct / 100) * circumference;
     donutArc.setAttribute("stroke-dasharray", `${arc} ${circumference}`);
     let color = "var(--vscode-charts-green, #4ec9b0)";
-    if (pct > 90) color = "var(--vscode-charts-red, #f48771)";
+    const threshold = state.compactThresholdPct;
+    if (threshold) {
+      // Relative to where compaction actually happens (K-03): warn from
+      // threshold − 5 points, danger from the threshold itself.
+      if (pct >= threshold) color = "var(--vscode-charts-red, #f48771)";
+      else if (pct >= threshold - 5) color = "var(--vscode-charts-yellow, #d7ba7d)";
+    } else if (pct > 90) color = "var(--vscode-charts-red, #f48771)";
     else if (pct > 70) color = "var(--vscode-charts-yellow, #d7ba7d)";
     donutArc.setAttribute("stroke", color);
+    paintDonutThresholdMark(threshold);
     donutLabel.textContent = `${toK(used)}/${toK(max)}`;
     const isGeminiAutoCompacted = state.activeProvider === "gemini" && used >= max;
     const usageDetail = isGeminiAutoCompacted
@@ -16495,11 +17648,54 @@
     return state.mentionSources.length + state.mentionFiles.length;
   }
 
+  /** S-03: `@subagent:<provider>/<model>` and `@role:<name>` from the roster. */
+  function delegationSuggestions(q) {
+    const d = state.delegation;
+    if (!d) return [];
+    const lower = q.toLowerCase();
+    const out = [];
+    if (lower.startsWith("role")) {
+      const want = lower.slice(5);
+      for (const r of d.roles || []) {
+        if (want && !r.name.toLowerCase().startsWith(want)) continue;
+        out.push({ source: "delegation", token: "role:" + r.name, label: "@role:" + r.name, detail: r.whenToUse || "" });
+      }
+      return out.slice(0, 20);
+    }
+    const rest = lower.startsWith("subagent:") ? lower.slice(9) : "";
+    const [provPart, modelPart] = rest.split("/");
+    for (const t of d.targets || []) {
+      if (provPart && !t.provider.startsWith(provPart) && !(modelPart !== undefined && t.provider === provPart)) continue;
+      if (modelPart === undefined) {
+        out.push({ source: "delegation", token: "subagent:" + t.provider, label: "@subagent:" + t.provider,
+          detail: t.eligible ? t.name : (t.reason || "not available"), disabled: !t.eligible });
+      }
+      if (t.eligible && (modelPart !== undefined || provPart === t.provider)) {
+        for (const m of t.models || []) {
+          if (modelPart && !m.id.toLowerCase().startsWith(modelPart)) continue;
+          out.push({ source: "delegation", token: "subagent:" + t.provider + "/" + m.id, label: "@subagent:" + t.provider + "/" + m.id,
+            detail: (m.efforts && m.efforts.length ? "effort " + m.efforts.join("/") : t.name) });
+        }
+      }
+    }
+    if (!provPart || "none".startsWith(provPart)) out.push({ source: "delegation", token: "subagent:none", label: "@subagent:none", detail: "no subagents for this message" });
+    return out.slice(0, 30);
+  }
+
   function updateMention() {
     if (!mentionPopover) return;
     const q = getMentionQuery(input.value, input.selectionStart || 0);
     if (q === null) { hideMention(); return; }
     state.mentionQuery = q;
+    if (/^(subagent|role)(:|$)/i.test(q) && state.delegation && state.delegation.value && state.delegation.value !== "off") {
+      state.mentionFiles = [];
+      state.mentionSources = delegationSuggestions(q);
+      if (!state.mentionSources.length) { mentionPopover.hidden = true; return; }
+      state.mentionActive = 0;
+      renderMention();
+      mentionPopover.hidden = false;
+      return;
+    }
     // No debounce: the host answers from an in-memory index (concurrent
     // keystrokes during a cold build share one findFiles pass), so a reply per
     // keystroke is cheap and keeps the popover snappy.
@@ -16512,7 +17708,7 @@
     const sourceCount = state.mentionSources.length;
     state.mentionSources.forEach((entry, i) => {
       const el = document.createElement("div");
-      el.className = `mention-item mention-source${i === state.mentionActive ? " active" : ""}`;
+      el.className = `mention-item mention-source${i === state.mentionActive ? " active" : ""}${entry.disabled ? " is-disabled" : ""}`;
       if (i === state.mentionActive) activeEl = el;
       const name = document.createElement("span");
       name.className = "mention-name";
@@ -16563,7 +17759,16 @@
    *  host is asked for the chip. The host may still refuse (nothing to attach),
    *  which is why nothing here pretends a chip exists. */
   function pickMentionSource(entry) {
+    if (entry.disabled) return;
     const r = applyMentionPick(input.value, input.selectionStart || 0, entry.token);
+    if (entry.source === "delegation") {
+      input.value = r.text;
+      if (input.setSelectionRange) input.setSelectionRange(r.caret, r.caret);
+      hideMention();
+      input.focus();
+      renderInputHighlight();
+      return;
+    }
     input.value = r.text;
     if (input.setSelectionRange) input.setSelectionRange(r.caret, r.caret);
     hideMention();
@@ -16762,6 +17967,12 @@
     if (!text && state.chips.every((c) => c.hidden)) return;
     if (state.sessionType === "crew" && !state.workflowRun) {
       startCrewWorkflow();
+      return;
+    }
+    // X-03 / F-09: while a stage runs, typed text never vanishes into the
+    // hidden stage — the person chooses where it goes.
+    if (state.sessionType === "crew" && state.workflowRun && state.workflowRun.status === "running") {
+      showCrewInputChoice(text);
       return;
     }
     let sendText = text;
@@ -18503,6 +19714,7 @@
         state.subagentRouting = Array.isArray(msg.subagentRouting) ? msg.subagentRouting : [];
         state.subagentsEnabled = msg.subagentsEnabled !== false;
         state.crewStagesMayUseSubagents = msg.crewStagesMayUseSubagents === true;
+        state.companionSettings = msg.companionSettings && typeof msg.companionSettings === "object" ? msg.companionSettings : {};
         state.efforts = Array.isArray(msg.efforts) ? msg.efforts : [];
         refreshSettingsOverlay();
         break;
@@ -19446,9 +20658,42 @@
         state.workflowRun = msg.run || null;
         renderCrewChrome();
         break;
+      case "childActivity":
+        recordChildActivity(msg);
+        break;
+      case "runningChildren":
+        state.runningChildren = msg;
+        if (!historyPopover.hidden) renderRunningChildren();
+        break;
+      case "scrollToWaiting": {
+        const card = liveTranscriptQueryAll(".card.permission, .card.question, .card.plan, .subagent-approval, .workflow-gate-card")
+          .find((c) => !c.classList.contains("resolved") && !c.classList.contains("perm-resolved"));
+        if (card && card.scrollIntoView) card.scrollIntoView({ block: "center" });
+        const button = card && card.querySelector("button:not([disabled])");
+        if (button) button.focus();
+        break;
+      }
+      case "sessionDelegation":
+        state.delegation = msg.value ? msg : null;
+        renderDelegationSwitch();
+        break;
+      case "subagentApproval":
+        addSubagentApprovalCard(msg);
+        break;
+      case "subagentApprovalResolved": {
+        const card = liveTranscriptQueryAll(".subagent-approval").find((c) => c.dataset.approvalId === msg.id);
+        if (card && !card.classList.contains("resolved")) resolveSubagentApprovalCard(card, msg.approved);
+        break;
+      }
+      case "childContext":
+        renderChildContext(msg.context);
+        break;
       case "workflowList":
         state.workflows = Array.isArray(msg.workflows) ? msg.workflows : [];
         state.defaultWorkflow = msg.defaultWorkflow || "idea-to-done";
+        state.verifySuggestions = Array.isArray(msg.verifySuggestions) ? msg.verifySuggestions : [];
+        state.defaultAutonomy = msg.defaultAutonomy || "step";
+        state.lineupDrafts = {};
         if (!state.selectedWorkflow) state.selectedWorkflow = state.defaultWorkflow;
         renderCrewChrome();
         break;
@@ -19535,7 +20780,16 @@
         applyRunProgress(msg.update);
         break;
       case "permissionRequest":
+        state.relayScopeWord = msg.origin && msg.origin.scopeWord ? msg.origin.scopeWord : null;
         addPermissionCard(msg.req, msg.ruleSuggestions);
+        state.relayScopeWord = null;
+        if (msg.warning) {
+          const card = liveTranscriptQueryAll(".card.permission").find((c) => c.dataset.permReqId === String(msg.req && msg.req.id));
+          if (card && !card.querySelector(".card-warning")) {
+            card.insertBefore(h("div", { class: "card-warning cx-pill cx-pill--warn" }, msg.warning), card.firstChild);
+          }
+        }
+        markRelayedCard(".card.permission", "permReqId", msg.req && msg.req.id, msg.origin);
         if (!state.replaying) {
           // Tool titles can expose commands or file operations. The accessibility
           // cue says what the user must do without reading tool details aloud.
@@ -19566,6 +20820,7 @@
         break;
       case "exitPlanRequest":
         addPlanCard(msg.req);
+        markRelayedCard(".card.plan", "planReqId", msg.req && msg.req.id, msg.origin);
         break;
       case "planResolved": {
         // Replayed (on re-focus) right after the buffered exitPlanRequest, or
@@ -19598,6 +20853,7 @@
       }
       case "questionRequest":
         addQuestionCard(msg.req, msg.autoContinueMs);
+        markRelayedCard(".card.question", "questionReqId", msg.req && msg.req.id, msg.origin);
         if (!state.replaying) {
           const questions = (msg.req?.questions || [])
             .map((question) => questionText(question))
@@ -19614,6 +20870,13 @@
         break;
       case "autoCompactNotice":
         addAutoCompactNotice(msg.text);
+        break;
+      case "nearFullPrompt":
+        showNearFullPrompt(msg);
+        break;
+      case "compactSummary":
+        hideNearFullPrompt();
+        addCompactSummary(msg.summary);
         break;
       case "planBlocked":
         addPlanNotice(
@@ -19655,6 +20918,12 @@
         // Structured addends are one snapshot (`nextContextBreakdown`). A
         // used-only frame keeps them; currency is `contextBreakdownIsCurrent`.
         state.contextBreakdown = nextContextBreakdown(state.contextBreakdown, msg);
+        if (typeof msg.autoCompactThresholdPercent === "number" && msg.autoCompactThresholdPercent > 0) {
+          state.compactThresholdPct = msg.autoCompactThresholdPercent;
+        }
+        if (typeof msg.compactionCount === "number" && msg.compactionCount >= 0) {
+          state.compactionCount = msg.compactionCount;
+        }
         if (msg.window) state.contextWindow = msg.window;
         if (msg.used != null) updateDonut(msg.used);
         else updateDonut();
@@ -19762,6 +21031,10 @@
         if (!state.replaying) maybeNotifySound("error"); // #59 — live turns only, and only when away
         state.ttsTurnText = "";
         break;
+      case "contextOverflow":
+        addContextOverflowCard(msg);
+        state.ttsTurnText = "";
+        break;
       case "limitOffer":
         addLimitOfferCard(msg);
         state.ttsTurnText = "";
@@ -19789,7 +21062,7 @@
         // The host derives "cancelled" from the prompt's stopReason; anything
         // else that reached here ended cleanly.
         revealTurnFooter(undefined, (msg.status || msg.durationMs != null)
-          ? { status: msg.status || "completed", durationMs: msg.durationMs }
+          ? { status: msg.status || "completed", durationMs: msg.durationMs, children: msg.children }
           : undefined);
         markLiveTurnFeedback();
         state.busy = false;

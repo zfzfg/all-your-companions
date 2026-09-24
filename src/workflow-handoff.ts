@@ -38,6 +38,8 @@ export interface HandoffFinding {
   file?: string;
   line?: number;
   text: string;
+  /** C-13: which reviewers of a panel reported it. */
+  reporters?: string[];
 }
 
 export interface HandoffPlanStep {
@@ -77,6 +79,16 @@ export interface HandoffPacket {
   durationMs: number;
   resultPath: string;
   provenance?: string[];
+  /** C-16: this stage ran here after this companion hit its usage limit. */
+  switchedFrom?: AcpProvider;
+  /** C-06: the person edited this plan at the gate. */
+  editedByUser?: boolean;
+  /** C-15: the clarifier's questions, for the gate's form. */
+  questions?: string[];
+  /** C-13: one row per reviewer of a panel stage. */
+  panel?: Array<{ reviewer: string; target: HandoffPacket["target"]; verdict?: string; findings: number }>;
+  /** C-12: how the per-plan-step walk went. */
+  steps?: Array<{ id: string; title: string; status: HandoffStatus; files: string[] }>;
 }
 
 export interface CompanionsResultBlock {
@@ -309,6 +321,7 @@ export function buildHandoffPacket(input: {
     ...(verdict ? { verdict } : {}),
     ...(findings.length ? { findings: findings.slice(0, FINDINGS_CAP) } : {}),
     ...(openQuestions.length ? { openQuestions } : {}),
+    ...(asStringList(block?.questions).length ? { questions: asStringList(block?.questions).slice(0, 5) } : {}),
     filesReported,
     filesObserved,
     unreported: [...recon.unreported],
@@ -396,6 +409,8 @@ export function resolveInputPath(
     userNotes?: string;
     attachedFiles?: readonly string[];
     packets: ReadonlyMap<string, HandoffPacket>;
+    /** C-09: findings the person chose not to fix never reach the next brief. */
+    ignoredFindings?: readonly string[];
   },
 ): { text?: string; paths?: string[]; note?: string } {
   if (from === "idea") return { text: ctx.idea };
@@ -410,8 +425,15 @@ export function resolveInputPath(
   if (dot <= 0) return { note: `unknown input '${from}'` };
   const stageId = from.slice(0, dot);
   const field = from.slice(dot + 1);
-  const packet = ctx.packets.get(stageId);
-  if (!packet) return { note: `stage '${stageId}' has not run` };
+  const found = ctx.packets.get(stageId);
+  if (!found) return { note: `stage '${stageId}' has not run` };
+  const ignored = new Set(ctx.ignoredFindings ?? []);
+  const packet = ignored.size && found.findings?.length
+    ? { ...found, findings: found.findings.filter((f) => !ignored.has(f.id)) }
+    : found;
+  if (field === "findings" && found.findings?.length && !packet.findings?.length) {
+    return { note: "the user chose not to fix any of the findings" };
+  }
   return fieldFromPacket(packet, field);
 }
 
@@ -444,8 +466,15 @@ function fieldFromPacket(packet: HandoffPacket, field: string): { text?: string;
     const files = [...new Set((packet.findings ?? []).map((f) => f.file).filter((p): p is string => !!p))];
     return files.length ? { paths: files } : { note: "no finding named a file" };
   }
-  if (field === "files" || field === "filesReported") {
+  if (field === "filesReported") {
     return packet.filesReported.length ? { paths: [...packet.filesReported] } : { note: `${packet.role} named no files` };
+  }
+  if (field === "files") {
+    // `plan.files` (C-01): what the stage named in its result block AND every
+    // file its plan steps name. The plan contract returns `planSteps` with
+    // files per step, so `filesReported` alone would usually be empty.
+    const paths = packetFiles(packet);
+    return paths.length ? { paths } : { note: `${packet.role} named no files` };
   }
   if (field === "filesObserved") {
     return packet.filesObserved.length ? { paths: [...packet.filesObserved] } : { note: "the host observed no edits" };
@@ -465,6 +494,57 @@ function fieldFromPacket(packet: HandoffPacket, field: string): { text?: string;
   return { note: `packet has no field '${field}'` };
 }
 
+/** filesReported ∪ the files of every plan step, first-seen order. */
+export function packetFiles(packet: HandoffPacket): string[] {
+  const out: string[] = [];
+  for (const file of [...packet.filesReported, ...(packet.planSteps ?? []).flatMap((s) => s.files ?? [])]) {
+    const f = String(file ?? "").trim();
+    if (f && !out.includes(f)) out.push(f);
+  }
+  return out;
+}
+
+export interface StageScope {
+  /** Globs an edit may touch without a card. */
+  globs: string[];
+  /** The `scopeFrom` paths / `scope` entries that contributed. */
+  sources: string[];
+  /** The stage declares a scope, and it resolved to nothing. */
+  empty: boolean;
+}
+
+/**
+ * Resolve a write stage's scope (C-01): explicit `scope` globs plus every
+ * `scopeFrom` path read from the packets so far. A scope that names nothing
+ * is `empty` — never "allow everything": the stage then asks before each edit.
+ */
+export function resolveStageScope(
+  stage: Pick<WorkflowStage, "scope" | "scopeFrom">,
+  packets: ReadonlyMap<string, HandoffPacket>,
+  attachedFiles?: readonly string[],
+): StageScope {
+  const globs: string[] = [];
+  const sources: string[] = [];
+  const add = (glob: string) => {
+    const g = String(glob ?? "").trim().replace(/\\/g, "/");
+    if (g && !globs.includes(g)) globs.push(g);
+  };
+  for (const glob of stage.scope ?? []) {
+    add(glob);
+    if (!sources.includes("scope")) sources.push("scope");
+  }
+  const from = stage.scopeFrom === undefined ? [] : Array.isArray(stage.scopeFrom) ? stage.scopeFrom : [stage.scopeFrom];
+  for (const path of from) {
+    const resolved = resolveInputPath(path, { idea: "", attachedFiles, packets });
+    if (resolved.paths?.length) {
+      for (const p of resolved.paths) add(p);
+      sources.push(path);
+    }
+  }
+  const declared = (stage.scope?.length ?? 0) > 0 || from.length > 0;
+  return { globs, sources, empty: declared && globs.length === 0 };
+}
+
 /**
  * Build the next stage's briefing from the contract's `inputs[]` only.
  *
@@ -482,6 +562,7 @@ export function briefingFromContract(opts: {
   userNotes?: string;
   attachedFiles?: readonly string[];
   verifyCommand?: string;
+  ignoredFindings?: readonly string[];
 }): BriefingInput {
   const contract = opts.def.contracts[opts.stage.contract];
   const files: string[] = [];
@@ -502,6 +583,7 @@ export function briefingFromContract(opts: {
       userNotes: opts.userNotes,
       attachedFiles: opts.attachedFiles,
       packets: opts.packets,
+      ignoredFindings: opts.ignoredFindings,
     });
     if (resolved.paths?.length) {
       for (const path of resolved.paths) if (!files.includes(path)) files.push(path);
@@ -513,6 +595,9 @@ export function briefingFromContract(opts: {
     } else {
       provenance.push(`${input.as}: ${resolved.note ?? `nothing at ${input.from}`}.`);
     }
+  }
+  if (opts.ignoredFindings?.length && (contract?.inputs ?? []).some((i) => i.from.endsWith(".findings"))) {
+    decisions.push(`The user accepted these findings as they are; do not work on them: ${opts.ignoredFindings.join(", ")}.`);
   }
   if (opts.verifyCommand && isWriteLike(opts.stage)) {
     decisions.push(`Verify command to run after you finish: \`${opts.verifyCommand}\`.`);
