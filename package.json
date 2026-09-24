@@ -2,7 +2,7 @@
   "name": "all-your-companions",
   "displayName": "All your Companions - in one Place!",
   "description": "Unified GUI for AI Coding Companions: Google Antigravity, Grok Build, OpenAI Codex, and Claude Code. Multi-session chat, voice control, rich media, and universal diff review. Fork of Grok Build for VS Code (v4.1.8) by Paweł Huryn.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "zfzfg",
   "author": {
     "name": "Collin Lerche (zfzfg) | STERRA",

@@ -1,8 +1,8 @@
 # Changelog
 
-## Unreleased
+## [0.2.0] - 2026-09-24
 
-**Caught up with Grok Build 4.3–4.11.** The improvements from upstream that apply to a VS Code-only, multi-companion extension are ported. Remote, phone and desktop-app changes are left out, because this fork doesn't have those parts.
+**Caught up with Grok Build 4.3–4.11 and major Companion Subagents & Crew updates.** The improvements from upstream that apply to a VS Code-only, multi-companion extension are ported. Remote, phone and desktop-app changes are left out, because this fork doesn't have those parts.
 
 ### Added
 
@@ -32,6 +32,8 @@
 
 ### Fixed
 
+- **Delegation switch styling:** styled `.delegation-switch` and select options using VS Code dropdown theme tokens so options are dark and legible in dark mode.
+- **Subagent host MCP collision:** excluded host-injected servers (`companions_subagents`, `companions`) from reserved identity in `reservedFromMcpInventory`, preventing false name-collision errors from blocking subagents on new sessions.
 - A diff no longer closes the file you had single-clicked open (#167).
 - Confirmation dialogs always appear on top.
 - A question card closes when the agent stops waiting for an answer. What you had typed can be moved to the composer.
