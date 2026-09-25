@@ -9,7 +9,6 @@
  */
 import { describe, expect, it } from "vitest";
 import { ACP_PROVIDERS, type AcpProvider } from "../src/acp-backend";
-import type { EffortLevel } from "../src/acp";
 import {
   EFFORT_ORDER,
   clampEffort,

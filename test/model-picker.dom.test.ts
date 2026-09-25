@@ -114,30 +114,6 @@ describe("New session in the top bar", () => {
     expect(labels.some((t) => t === "Delete")).toBe(true);
   });
 
-  it("injects New session beside Session history on a remote header and leaves it out of ⋯", () => {
-    const h = bootWebview({
-      remote: true,
-      beforeScripts: (window) => {
-        const head = window.document.getElementById("session-head")!;
-        const history = window.document.createElement("button");
-        history.id = "session-history";
-        head.appendChild(history);
-      },
-    });
-    dispatch(h.window, { type: "sessionName", sessionId: "s1", name: "Live", cwd: "/w" });
-    const history = $(h.doc, "session-history");
-    const sessionNew = $(h.doc, "session-new");
-    expect(sessionNew).toBeTruthy();
-    expect(sessionNew.hidden).toBe(false);
-    expect(sessionNew.previousElementSibling).toBe(history);
-    expect(sessionNew.getAttribute("aria-label")).toBe("New session");
-
-    const labels = overflowLabels(h.window, h.doc, "session-head-actions");
-    expect(labels.some((t) => /New session/.test(t))).toBe(false);
-    expect(labels.some((t) => /Continue in a new chat/.test(t))).toBe(true);
-    expect(labels.some((t) => t === "Delete")).toBe(true);
-  });
-
   it("keeps VS Code New on the top bar; overflow stays Continue and Export", () => {
     const h = bootWebview({ vscode: true });
     dispatch(h.window, { type: "sessionName", sessionId: "s1", name: "Live", cwd: "/w" });

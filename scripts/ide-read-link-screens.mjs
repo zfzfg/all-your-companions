@@ -13,7 +13,6 @@ import { _electron as electron } from "playwright";
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import { themeCss } from "./ui-harness/themes.mjs";
-import * as os from "node:os";
 import * as path from "node:path";
 import { createRequire } from "node:module";
 

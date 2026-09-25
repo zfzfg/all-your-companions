@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 vi.mock("node:fs", () => ({ readFileSync: () => Buffer.alloc(4096) }));
 import { transcribeAudio } from "../src/voice-recorder";
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.unstubAllGlobals(); });
 describe("explicit batch preference", () => {
   it.each(["xai", "openai"] as const)("transcribes with the pinned %s credential and endpoint", async backend => {
     const fetch = vi.fn(async () => ({ ok: true, text: async () => JSON.stringify({ text: "  final words  " }) }));

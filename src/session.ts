@@ -743,13 +743,6 @@ export class Session {
    */
   queuedSends: QueuedSendEntry[] = [];
 
-  /**
-   * Remote-only dequeue handshake. While set, the host has asked the owning
-   * browser to echo this claimed submission through the relay, but has not
-   * positively acknowledged its metered frame yet.
-   */
-  queuedSendDispatch?: { id: string; text: string };
-
   /** A queued send that has reached the host but not yet reached handleSend's
    * commit point. The queue remains authoritative until this claim commits.
    *
@@ -760,20 +753,6 @@ export class Session {
    * prompt twice. Do not widen this window without an ACP acceptance signal or
    * an explicit retained-prefix state plus a proven never-executed classifier. */
   queuedSendCommit?: { text: string; items: QueuedSendEntry[] };
-
-  /** Recently accepted dequeue ids. Delayed outbox copies are ignored even
-   * after the active dispatch has been retired. Bounded per live session. */
-  completedQueuedSendIds: string[] = [];
-
-  /** True when this queue originated in AFK Pilot and therefore must return
-   * through the relay's metered `send` path, even across a disconnected tab.
-   *
-   * Known limitation: if the relay accepts a dequeue but local preflight
-   * (for example, reading an attachment) fails, retrying the retained queue is
-   * metered again. Avoid changing this until the queue can distinguish an
-   * already-metered prefix from newly appended, unmetered text; conflating the
-   * two risks duplicate delivery or work loss. */
-  queuedSendRequiresRelay = false;
 
   /**
    * This view was re-homed onto a replacement while NO provider was connected,
@@ -1011,7 +990,6 @@ export function finishQueuedSendCommit(
     text: item.text,
     chips: item.chips ?? [],
   }));
-  if (!session.queuedSends.length) session.queuedSendRequiresRelay = false;
   return true;
 }
 

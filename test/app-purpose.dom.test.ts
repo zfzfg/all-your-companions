@@ -33,12 +33,6 @@ function gearText(h: Harness): string {
   return h.doc.getElementById("gear-popover")!.textContent || "";
 }
 
-function gearItems(h: Harness): string[] {
-  return [...h.doc.querySelectorAll("#gear-popover .toolbar-popover-item")].map(
-    (el) => (el.textContent || "").replace(/\s+/g, " ").trim(),
-  );
-}
-
 function findGearItem(h: Harness, re: RegExp): HTMLElement | undefined {
   return [...h.doc.querySelectorAll("#gear-popover .toolbar-popover-item")].find((el) =>
     re.test(el.textContent || ""),
@@ -177,69 +171,6 @@ describe("app purpose + session menu (DOM)", () => {
     expect(h.posted.find((m) => m.type === "newWorktreeSession")).toEqual({
       type: "newWorktreeSession",
     });
-  });
-
-  // The host runs worktree apply/remove against ITS focused session and creates
-  // one against ITS workspace root, ignoring the requesting session. So a remote
-  // tab in repo B could remove the worktree the desk was standing in — and
-  // Remove discards unapplied edits. The policy refuses these from remote; these
-  // two make sure the UI does not offer them anyway, because a control the host
-  // silently drops is worse than no control.
-  it("a remote client is never offered a worktree destination", async () => {
-    const h = bootWebview({ ready: true, remote: true });
-    dispatch(h.window, {
-      type: "initialState",
-      effort: "",
-      cwd: "/w",
-      useCtrlEnter: false,
-      extVersion: "9.9.9",
-      showThinking: false,
-      expandCommandOutputs: false,
-      steerByDefault: false,
-      soundNotifications: false,
-      processingSound: false,
-      readRepliesAloud: false,
-      appPurpose: "coding",
-      capabilities: {},
-    });
-    dispatch(h.window, { type: "worktreeSupported", value: true } as never);
-    dispatch(h.window, { type: "sessionName", sessionId: "active", name: "Active", cwd: "/w" });
-    click(h.window, findSessionMenuItem(h, /Continue in a new chat/)!);
-    await Promise.resolve();
-    // With only one destination the picker is skipped entirely and the fork
-    // goes straight through — which is the desired remote behaviour.
-    expect(findGearItem(h, /Use a new worktree/)).toBeFalsy();
-    expect(h.posted.find((m) => m.type === "newWorktreeSession")).toBeFalsy();
-  });
-
-  it("a remote client in a worktree is never offered Apply/Remove", async () => {
-    const h = bootWebview({ ready: true, remote: true });
-    dispatch(h.window, {
-      type: "initialState",
-      effort: "",
-      cwd: "/w",
-      useCtrlEnter: false,
-      extVersion: "9.9.9",
-      showThinking: false,
-      expandCommandOutputs: false,
-      steerByDefault: false,
-      soundNotifications: false,
-      processingSound: false,
-      readRepliesAloud: false,
-      appPurpose: "coding",
-      capabilities: {},
-    });
-    // `session` is what actually sets state.isWorktree — a bespoke "worktree"
-    // frame sets nothing, and the test would pass without the guard.
-    dispatch(h.window, {
-      type: "session",
-      currentModelId: "grok-4-5",
-      models: [],
-      worktree: { label: "feature", path: "/w/.worktrees/feature" },
-    } as never);
-    openGear(h);
-    expect(findGearItem(h, /Apply worktree/)).toBeFalsy();
-    expect(findGearItem(h, /Remove worktree/)).toBeFalsy();
   });
 
   it("posts forkSession / applyWorktree / removeWorktree with the confirmed-active sessionId", async () => {
@@ -393,53 +324,6 @@ describe("app purpose + session menu (DOM)", () => {
     const overlay = h.doc.getElementById("settings-overlay")!;
     expect(overlay.textContent).not.toContain("Show thinking traces");
     expect(overlay.textContent).not.toContain("Expand tool details");
-  });
-
-  it("Settings General exposes the three display toggles on a remote client", async () => {
-    // Rail mount → Basic/Advanced (not Config & debug). Toggles are per-client
-    // display prefs, so they must appear on remote before the host-config note.
-    const withRail = (window: any) => {
-      const el = window.document.createElement("aside");
-      el.id = "projects-rail";
-      el.hidden = true;
-      const scroll = window.document.createElement("div");
-      scroll.id = "rail-scroll";
-      el.appendChild(scroll);
-      const foot = window.document.createElement("div");
-      foot.className = "rail-foot";
-      el.appendChild(foot);
-      window.document.body.appendChild(el);
-    };
-    const h = bootWebview({ ready: true, remote: true, beforeScripts: withRail });
-    dispatch(h.window, {
-      type: "initialState",
-      effort: "",
-      cwd: "/w",
-      useCtrlEnter: false,
-      extVersion: "9.9.9",
-      showThinking: false,
-      expandCommandOutputs: false,
-      steerByDefault: false,
-      soundNotifications: false,
-      processingSound: false,
-      readRepliesAloud: false,
-      appPurpose: "coding",
-      capabilities: {},
-    });
-    click(h.window, h.doc.getElementById("rail-gear-btn") || h.doc.getElementById("gear-btn"));
-    expect(gearText(h)).toMatch(/Settings/);
-    expect(gearText(h)).not.toContain("Advanced settings");
-    click(h.window, findGearItem(h, /Settings/)!);
-    await Promise.resolve();
-    const overlay = h.doc.getElementById("settings-overlay")!;
-    expect(overlay.textContent).toContain("Show thinking traces");
-    expect(overlay.textContent).toContain("Expand tool details");
-    expect(overlay.textContent).toContain("Steer by default");
-    const advancedNav = [...overlay.querySelectorAll(".settings-nav-item")]
-      .find((el) => (el.textContent || "").trim() === "Advanced")!;
-    click(h.window, advancedNav);
-    expect(overlay.textContent).toContain("Host config is managed on the machine running this workspace");
-    expect(overlay.querySelector('[data-id="showThinking"]')).toBeNull();
   });
 });
 

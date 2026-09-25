@@ -16,13 +16,13 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
 const pkg = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
 const vsix = path.join(root, `${pkg.name}-${pkg.version}.vsix`);
 
 if (!existsSync(vsix)) {
   console.error(`No ${path.basename(vsix)} — run \`npm run package\` first.`);
-  console.error("Package it from a tree carrying the PRODUCTION relay URL: a .vsix");
-  console.error("built by scripts/install.ps1 points at staging by design.");
   process.exit(1);
 }
 

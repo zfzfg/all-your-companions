@@ -1,7 +1,7 @@
 import * as path from "node:path";
 import packageManifest from "../package.json";
 import { grokCliNeedsShell } from "./cli-process";
-import type { PromptContentBlock } from "./acp";
+import type { PromptContentBlock } from "./acp-types";
 import type {
   AcpBackend,
   BackendConfigState,

@@ -17,8 +17,8 @@ import { bootWebview, click, dispatch, type Harness } from "./webview-harness";
 
 type Caps = Record<string, boolean>;
 
-function boot(capabilities: Caps, opts: { remote?: boolean } = {}): Harness {
-  const h = bootWebview({ ready: true, remote: opts.remote });
+function boot(capabilities: Caps): Harness {
+  const h = bootWebview({ ready: true });
   dispatch(h.window, {
     type: "initialState",
     effort: "",
@@ -31,7 +31,7 @@ function boot(capabilities: Caps, opts: { remote?: boolean } = {}): Harness {
     soundNotifications: false,
     processingSound: false,
     readRepliesAloud: false,
-    capabilities: { uploadFile: true, remoteVoice: true, ...capabilities },
+    capabilities: { uploadFile: true, ...capabilities },
   });
   return h;
 }
@@ -61,18 +61,6 @@ function hasMoveViewSection(h: Harness): boolean {
   const overlay = h.doc.getElementById("settings-overlay");
   if (overlay) return !!overlay.querySelector('[data-id="moveView"]');
   return (h.doc.getElementById("gear-popover")!.textContent || "").includes("Move view");
-}
-
-/** Which ICON each destination carries, by the distinguishing path in the SVG.
- *  `M15 3v18` is the right-hand divider, `M9 3v18` the left, `M3 15h18` the
- *  bottom — the same three glyphs VS Code uses for its own layout controls. */
-function iconEdge(h: Harness, label: string): "right" | "left" | "bottom" | "none" {
-  const el = items(h).find((e) => text(e) === label);
-  const svg = el?.innerHTML || "";
-  if (svg.includes("M15 3v18")) return "right";
-  if (svg.includes("M9 3v18")) return "left";
-  if (svg.includes("M3 15h18")) return "bottom";
-  return "none";
 }
 
 describe("Move view menu (DOM)", () => {
@@ -194,25 +182,5 @@ describe("Move view menu (DOM)", () => {
     // And it stays gone across a session swap, which rebuilds the empty state.
     dispatch(h.window, { type: "clearMessages" });
     expect(h.doc.getElementById("welcome-tip")).toBeNull();
-  });
-
-  it("never shows the hint in the browser client", () => {
-    // The capability is mirrored to remotes with the rest of initialState, but
-    // `moveView` is host-local and the relay drops it — so a phone would be
-    // given advice it cannot take. Same guard the Move view section gets.
-    const h = boot(
-      { relocateView: true, secondarySideBar: false, moveViewHint: true },
-      { remote: true },
-    );
-    expect(h.doc.getElementById("welcome-tip")).toBeNull();
-  });
-
-  it("hides the section in the browser client — moveView is host-local", () => {
-    // The relay drops the message, so the control could never do anything from a
-    // phone. Capabilities set to the one host that WOULD show it, so this fails
-    // if the remote guard is removed rather than passing for the wrong reason.
-    const h = boot({ relocateView: true, secondarySideBar: false }, { remote: true });
-    openMoveView(h);
-    expect(hasMoveViewSection(h)).toBe(false);
   });
 });

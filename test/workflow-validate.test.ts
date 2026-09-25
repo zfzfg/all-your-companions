@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { IDEA_TO_DONE, applyMaxFixerPasses } from "../src/workflow";
+import { IDEA_TO_DONE } from "../src/workflow";
 import { validateWorkflowDefinition } from "../src/workflow-validate";
 import { readFileSync } from "node:fs";
 import { parseCrewPreset, presetToStageGraph } from "../src/crew-preset";

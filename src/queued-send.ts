@@ -79,22 +79,6 @@ export function queuedFlushText(items: readonly QueuedSendEntry[]): string | und
   return queuedSendsText(items);
 }
 
-/**
- * Open (or keep) the relay dequeue dispatch.
- *
- * `readyText === undefined` is "not ready". `readyText === ""` is a legitimate
- * image-only payload and must mint a dispatch.
- */
-export function claimQueuedSendDispatch(
-  existing: { id: string; text: string } | undefined,
-  readyText: string | undefined,
-  mintId: () => string,
-): { id: string; text: string } | undefined {
-  if (existing) return existing;
-  if (readyText === undefined) return undefined;
-  return { id: mintId(), text: readyText };
-}
-
 /** Additive host snapshot: `items` stays `string[]` for old webviews. */
 export function queuedSendsMessage(
   items: readonly QueuedSendEntry[],

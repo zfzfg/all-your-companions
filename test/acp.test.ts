@@ -61,6 +61,20 @@ function replyToWrites(
   };
 }
 
+describe("a request to a process that is gone", () => {
+  it("names the Grok process for a Grok client", async () => {
+    const { client } = clientWithFakeProc();
+    (client as any).proc.killed = true;
+    await expect((client as any).request("session/new", {})).rejects.toThrow("Grok process is not running (session/new)");
+  });
+
+  it("names the provider's own process, not Grok, for another provider", async () => {
+    const { client } = clientWithFakeProc({ backend: new CodexBackend() });
+    (client as any).proc.killed = true;
+    await expect((client as any).request("session/new", {})).rejects.toThrow("Codex ACP adapter is not running (session/new)");
+  });
+});
+
 describe("AcpClient notification metadata", () => {
   it("emits the live context count from the session/update envelope", () => {
     const { client } = clientWithFakeProc();
@@ -358,7 +372,7 @@ describe("AcpClient child-stream demux", () => {
     const child: unknown[] = [];
     client.on("messageChunk", (text: string) => parentChunks.push(text));
     client.on("thoughtChunk", (text: string) => parentChunks.push("T:" + text));
-    client.on("toolCall", (payload: unknown) => parentChunks.push("tool"));
+    client.on("toolCall", () => parentChunks.push("tool"));
     client.on("childStream", (ev: unknown) => child.push(ev));
 
     feed(client, childId, { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "child-prose" } });

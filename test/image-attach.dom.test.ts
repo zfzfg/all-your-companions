@@ -250,8 +250,8 @@ describe("image chips in the composer", () => {
     expect(overlay.querySelector("img")!.getAttribute("src")).toBe("vscode-webview://preview/image.png");
   });
 
-  it("reuses browser-owned paste bytes for a remote thumbnail", async () => {
-    const { window, doc, posted } = bootWebview({ remote: true });
+  it("reuses browser-owned paste bytes for a thumbnail", async () => {
+    const { window, doc, posted } = bootWebview();
     dispatch(window, { type: "session", sessionId: "session-a", models: [] });
     const input = doc.getElementById("input")!;
     input.dispatchEvent(pasteEvent(window, [{ kind: "file", type: "image/png", file: pngFile(window) }]));
@@ -262,8 +262,8 @@ describe("image chips in the composer", () => {
     dispatch(window, {
       type: "chips",
       chips: [{
-        id: "image:/staging/remote.png:1:8",
-        path: "/staging/remote.png",
+        id: "image:/staging/pasted.png:1:8",
+        path: "/staging/pasted.png",
         relPath: "Image #1",
         hidden: false,
         imageIndex: 1,
@@ -276,7 +276,7 @@ describe("image chips in the composer", () => {
   });
 
   it("keeps a paste made before the first session id is assigned", async () => {
-    const { window, doc, posted } = bootWebview({ remote: true });
+    const { window, doc, posted } = bootWebview();
     const input = doc.getElementById("input")!;
     input.dispatchEvent(pasteEvent(window, [{ kind: "file", type: "image/png", file: pngFile(window) }]));
     await vi.waitFor(() => expect(posted.some((m) => m.type === "pasteImage")).toBe(true));
@@ -299,15 +299,15 @@ describe("image chips in the composer", () => {
   });
 
   it("keeps a pasted thumbnail when switching away from its session and back", async () => {
-    const { window, doc, posted } = bootWebview({ remote: true });
+    const { window, doc, posted } = bootWebview();
     dispatch(window, { type: "session", sessionId: "session-a", models: [] });
     const input = doc.getElementById("input")!;
     input.dispatchEvent(pasteEvent(window, [{ kind: "file", type: "image/png", file: pngFile(window) }]));
     await vi.waitFor(() => expect(posted.some((m) => m.type === "pasteImage")).toBe(true));
     const previewId = posted.find((m) => m.type === "pasteImage")!.previewId;
     const chip = {
-      id: "image:/staging/remote.png:1:9",
-      path: "/staging/remote.png",
+      id: "image:/staging/pasted.png:1:9",
+      path: "/staging/pasted.png",
       relPath: "Image #1",
       hidden: false,
       imageIndex: 1,
@@ -329,7 +329,7 @@ describe("image chips in the composer", () => {
   });
 
   it("evicts the oldest browser preview after 24 pasted images", async () => {
-    const { window, doc, posted } = bootWebview({ remote: true });
+    const { window, doc, posted } = bootWebview();
     const input = doc.getElementById("input")!;
     for (let i = 0; i < 25; i++) {
       input.dispatchEvent(pasteEvent(window, [{ kind: "file", type: "image/png", file: pngFile(window) }]));

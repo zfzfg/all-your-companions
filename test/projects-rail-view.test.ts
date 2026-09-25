@@ -7,7 +7,6 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   COMPANIONS_PROJECTS_VIEW_ID,
-  GROK_PROJECTS_VIEW_ID,
   PANEL_CONTAINER_ID,
   PRIMARY_CONTAINER_ID,
   PROJECTS_CONTAINER_ID,

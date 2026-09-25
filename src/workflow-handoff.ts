@@ -11,7 +11,7 @@
  */
 
 import type { AcpProvider } from "./acp-backend";
-import type { EffortLevel } from "./acp";
+import type { EffortLevel } from "./acp-types";
 import {
   extractCompanionsResultJson,
   makeBriefing,

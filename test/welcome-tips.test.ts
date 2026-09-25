@@ -11,8 +11,6 @@
  * recognise — so the two never need a version check.
  */
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import {
   WELCOME_TIPS_DISMISS_LIMIT,
   WELCOME_TIPS_KEY,
@@ -32,29 +30,25 @@ import {
   welcomeTipsFor,
 } from "../media/webview-helpers.js";
 
-/** A fully set-up desk user: every tip that CAN retire itself, has. */
+/** A fully set-up user: every tip that CAN retire itself, has. */
 const SETTLED = {
   appPurpose: "knowledge",
-  isRemote: false,
   altAgentConnected: true,
   routineCount: 3,
   connectorCount: 2,
   readRepliesAloud: true,
   voiceConfigured: true,
-  remoteLinked: true,
   dismissed: [] as string[],
 };
 
-/** A first-run desk user: nothing set up, everything eligible. */
+/** A first-run user: nothing set up, everything eligible. */
 const FRESH = {
   appPurpose: "knowledge",
-  isRemote: false,
   altAgentConnected: false,
   routineCount: 0,
   connectorCount: 0,
   readRepliesAloud: false,
   voiceConfigured: false,
-  remoteLinked: false,
   dismissed: [] as string[],
 };
 
@@ -119,46 +113,6 @@ describe("host store (src/welcome-tips.ts)", () => {
     // One under the limit still writes.
     delete full.tip0;
     expect(withDismissedTip(full, "onemore")).not.toBeNull();
-  });
-});
-
-describe("the registries a device-global frame has to be named in", () => {
-  // SIX of them now, and TypeScript enforces none. The one that bit here is the
-  // last: DEVICE_GLOBAL_REMOTE_TYPES decides how a frame is ROUTED once
-  // something posts it, while buildRemoteSnapshot decides whether a browser
-  // that just connected receives it AT ALL. A frame can be in the first and
-  // missing from the second, which is exactly what happened: a phone came up
-  // with no tip facts, so every count read as unknown and the dismissed list
-  // read as empty — a tip the user had retired came back on every empty screen
-  // and the once-a-day rule never applied.
-  const sidebarSrc = readFileSync(
-    fileURLToPath(new URL("../src/sidebar.ts", import.meta.url)),
-    "utf8",
-  );
-
-  function block(marker: string, terminator: string): string {
-    const start = sidebarSrc.indexOf(marker);
-    expect(start, marker).toBeGreaterThan(-1);
-    const end = sidebarSrc.indexOf(terminator, start);
-    expect(end, marker).toBeGreaterThan(start);
-    return sidebarSrc.slice(start, end);
-  }
-
-  it("routes the tip facts device-wide rather than down the focused conversation", () => {
-    expect(block("private static readonly DEVICE_GLOBAL_REMOTE_TYPES", "]);"))
-      .toContain('"welcomeTips"');
-  });
-
-  it("puts the tip facts in the catch-up a newly connected remote receives", () => {
-    const snapshot = block("private buildRemoteSnapshot(", "\n  }");
-    expect(snapshot).toContain("this.welcomeTipsMessage()");
-  });
-
-  it("puts the project root there too, for the same reason", () => {
-    // Same miss, same frame set: without it the Add project form on a phone had
-    // no destination to preview until an attempt had already been made.
-    const snapshot = block("private buildRemoteSnapshot(", "\n  }");
-    expect(snapshot).toContain("this.projectSetupMessage(this.githubProjectSetupExtra(clientId))");
   });
 });
 
@@ -262,9 +216,9 @@ describe("tip catalogue (media/webview-helpers.js)", () => {
 });
 
 describe("eligibility", () => {
-  it("offers the full desk pool to a first-run user", () => {
+  it("offers the full pool to a first-run user", () => {
     expect(ids(FRESH)).toEqual([
-      "providers", "routines", "connectors", "remote", "readAloud", "voice", "mentions",
+      "providers", "routines", "connectors", "readAloud", "voice", "mentions",
     ]);
   });
 
@@ -311,16 +265,6 @@ describe("eligibility", () => {
     expect(tip.target).toBe("worktree");
   });
 
-  it("hides desk-only advice from a phone", () => {
-    const remote = ids({ ...FRESH, isRemote: true });
-    // Signing an agent in, linking a connector and starting a worktree are all
-    // host-local; "continue on your phone" is being read ON the phone.
-    for (const deskOnly of ["providers", "connectors", "remote", "worktrees"]) {
-      expect(remote, deskOnly).not.toContain(deskOnly);
-    }
-    expect(remote).toEqual(["routines", "readAloud", "voice", "mentions"]);
-  });
-
   it("suppresses count-dependent tips when the host never sent the counts", () => {
     // An older host posts no welcomeTips frame at all. Reading that absence as
     // "zero routines" would advertise routines to someone running twenty.
@@ -328,15 +272,6 @@ describe("eligibility", () => {
     expect(ids(noCounts)).not.toContain("routines");
     expect(ids(noCounts)).not.toContain("connectors");
     expect(ids(noCounts)).toContain("providers");
-  });
-
-  it("treats an unread device token (null) as no invitation to link", () => {
-    // remoteLinked is tri-state: null means the host has not answered yet, and
-    // inviting an already-linked machine to link again is the confusion that
-    // tri-state exists to prevent.
-    expect(ids({ ...FRESH, remoteLinked: null })).not.toContain("remote");
-    expect(ids({ ...FRESH, remoteLinked: false })).toContain("remote");
-    expect(ids({ ...FRESH, remoteLinked: true })).not.toContain("remote");
   });
 
   it("honours retirement, from either an array or a record map", () => {
@@ -349,7 +284,7 @@ describe("eligibility", () => {
     // again every time a conversation ends, which is how advice becomes
     // wallpaper.
     expect(ids({ ...FRESH, shownToday: ["providers", "routines"] })).toEqual([
-      "connectors", "remote", "readAloud", "voice", "mentions",
+      "connectors", "readAloud", "voice", "mentions",
     ]);
   });
 
@@ -365,7 +300,7 @@ describe("eligibility", () => {
   });
 
   it("empties for the day once every tip has had its turn", () => {
-    const all = ["providers", "routines", "connectors", "remote", "readAloud", "voice", "mentions"];
+    const all = ["providers", "routines", "connectors", "readAloud", "voice", "mentions"];
     expect(ids({ ...FRESH, shownToday: all })).toEqual([]);
   });
 

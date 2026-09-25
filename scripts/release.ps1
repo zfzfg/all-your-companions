@@ -11,10 +11,9 @@
     1. assert on `main`
     2. tsc --noEmit + npm test       (skip all gating with -NoTest)
        + npm run test:integration    (real Extension Host; skip with -SkipIntegration)
-       + npm run e2e:screens         (real Electron desktop; skip with -SkipScreens)
        + npm run test:live           (real grok — mandatory gate; skip with -SkipLive)
     3. assert tag vX.Y.Z is free     (bump the version if it isn't)
-    4. npm run package               -> grok-vscode-phuryn-X.Y.Z.vsix
+    4. npm run package               -> all-your-companions-X.Y.Z.vsix
     5. commit the working tree        (message from -MessageFile / -Message / default)
     6. push main
     6b. wait for CI to go GREEN on the pushed SHA  (skip with -SkipCiWait,
@@ -23,15 +22,9 @@
     8. gh release create vX.Y.Z       with the changelog section as notes
                                        AND the .vsix attached as a release asset
     9. npm run publish:ovsx           publish that .vsix to Open VSX
-   10. desktop installers             dispatch desktop-release.yml against the
-                                       TAG, wait, and assert the .exe/.dmg/.AppImage are
-                                       actually on the release (skip with
-                                       -SkipInstallers)
-   11. install.ps1 -VsixPath ... -All install the released .vsix into every
+   10. install.ps1 -VsixPath ... -All install the released .vsix into every
                                        detected local editor (skip with
                                        -NoInstall; never fails the release)
-
-  Missing installers fail the release after the local install attempt.
 
   Open VSX is part of the release. The VS Code Marketplace is deliberately NOT —
   that one is the owner's, a separate explicit step (`npm run publish`).
@@ -50,12 +43,9 @@ param(
   [switch]$NoTest,
   [switch]$SkipLive,
   [switch]$SkipIntegration,
-  [switch]$SkipScreens,
   [switch]$SkipCiWait,
   [int]$CiTimeoutMinutes = 20,
   [switch]$NoInstall,
-  [switch]$SkipInstallers,
-  [int]$InstallerTimeoutMinutes = 25,
   [switch]$DryRun
 )
 
@@ -108,14 +98,6 @@ if (-not $NoTest) {
   # explicit -SkipLive escape hatch, but the DEFAULT is to run it so it can't be
   # silently forgotten under release pressure. A live FAIL (non-zero exit) aborts the
   # release; a SKIP inside the suite (no subscription, grok declined to delegate) is exit 0.
-  # The desktop app ships the same compiled src/ as the extension, so a change
-  # can reach it without src/desktop/ being touched — 3.10.1 shipped an ACP
-  # capability change that way. This is the only gate that boots real Electron.
-  if (-not $SkipScreens) {
-    Run "npm run e2e:screens (real Electron desktop)" { npm run e2e:screens }
-  } else {
-    Step "SKIPPING the Electron desktop gate (-SkipScreens) - nothing else exercises the packaged app"
-  }
   if (-not $SkipLive) {
     Run "npm run test:live (real grok)" { npm run test:live }
   } else {
@@ -127,10 +109,7 @@ if (-not $NoTest) {
 if (git tag --list $tag) { throw "Tag $tag already exists - bump package.json/changelog first." }
 
 # 4. build the vsix that will be attached to the release
-$vsix = "grok-vscode-phuryn-$version.vsix"
-# install.ps1 sets this so a local staging vsix can build. A release must not
-# inherit it from the shell — that is how a staging artifact could ship.
-Remove-Item Env:GROK_ALLOW_STAGING_RELAY_VSIX -ErrorAction SilentlyContinue
+$vsix = "all-your-companions-$version.vsix"
 Run "npm run package" { npm run package }
 if (-not (Test-Path $vsix)) { throw "Expected $vsix but it wasn't produced." }
 
@@ -153,9 +132,6 @@ if ($DryRun) {
   Write-Host "`n[dry-run] would commit, tag $tag, push main + tag, and run:" -ForegroundColor Yellow
   Write-Host "  gh release create $tag --title `"Release $tag`" --notes-file <notes> $vsix"
   Write-Host "  npm run publish:ovsx"
-  if (-not $SkipInstallers) {
-    Write-Host "  gh workflow run desktop-release.yml --ref $tag -f release_tag=$tag   (then wait for the assets)"
-  }
   Write-Host "`n--- release notes ---`n$notes"
   return
 }
@@ -227,83 +203,10 @@ Run "gh release create $tag" { gh release create $tag --title "Release $tag" --n
 # owner's to run (`npm run publish`).
 Run "npm run publish:ovsx" { npm run publish:ovsx }
 
-# 10. The desktop installers, attached to the release that now exists.
-#
-# This used to be a manual second dispatch, remembered from the playbook, and
-# 3.2.9 shipped with only the .vsix because the FIRST dispatch had happened and
-# read like the job was done. The owner's question on 2026-08-26 was the right
-# one: a release should release everything. So the same argument the Open VSX
-# step above makes applies here — part of the release, not a reminder printed
-# after it.
-#
-# Two dispatches still exist and they are different things. The one BEFORE a
-# release (no release_tag, any branch) builds the owner's test installers and
-# creates nothing; that one stays manual because it is a testing choice. This is
-# the other one, and it was never a choice.
-#
-# `--ref $tag`, not main: the installers must be built from exactly what was
-# released, not from whatever landed on main in the meantime.
-#
-# Unconditional, rather than "only when src/desktop or media/chat.js changed".
-# That judgement has been got wrong once already, the workflow prunes installers
-# from all but the newest releases anyway, and a release whose assets are
-# consistent is worth five minutes of CI.
-#
-# What is asserted is the OUTCOME — the assets on the release — not that a run
-# was dispatched. `gh release view --json assets` is the check the playbook says
-# a release is not finished without, so the script makes it rather than asking a
-# human to remember to.
-$installerFailure = $null
-if ($SkipInstallers) {
-  Step "skipping the desktop installers (-SkipInstallers)"
-} else {
-  Run "gh workflow run desktop-release.yml (release_tag=$tag)" {
-    gh workflow run desktop-release.yml --ref $tag -f release_tag=$tag
-  }
-  Step "waiting for the installers to be attached to $tag (up to $InstallerTimeoutMinutes min)"
-  $deadline = (Get-Date).AddMinutes($InstallerTimeoutMinutes)
-  $attached = $false
-  $missing = @(".exe", ".dmg", ".AppImage")
-  while ((Get-Date) -lt $deadline) {
-    Start-Sleep -Seconds 20
-    # No `2>$null` here. Redirecting a native command's stderr under
-    # $ErrorActionPreference = "Stop" turns any warning line into a terminating
-    # NativeCommandError, which the catch would swallow as "no assets yet" —
-    # and the wait would then run to its timeout on a release that was fine.
-    $names = @()
-    try {
-      $ErrorActionPreference = "Continue"
-      $names = @(gh release view $tag --json assets --jq '.assets[].name')
-    } catch {
-      $names = @()
-    } finally {
-      $ErrorActionPreference = "Stop"
-    }
-    $hasWin = @($names | Where-Object { $_ -like "*.exe" }).Count -gt 0
-    $hasMac = @($names | Where-Object { $_ -like "*.dmg" }).Count -gt 0
-    $hasLinux = @($names | Where-Object { $_ -like "*.AppImage" }).Count -gt 0
-    $missing = @(
-      if (-not $hasWin) { ".exe" }
-      if (-not $hasMac) { ".dmg" }
-      if (-not $hasLinux) { ".AppImage" }
-    )
-    if ($hasWin -and $hasMac -and $hasLinux) { $attached = $true; break }
-  }
-  if ($attached) {
-    Step "installers attached to $tag"
-  } else {
-    $installerFailure = "Release $tag is incomplete: missing installer artifacts $($missing -join ', ') after $InstallerTimeoutMinutes min."
-    Write-Host "  $installerFailure" -ForegroundColor Yellow
-    Write-Host "  The GitHub Release and Open VSX publish already exist. Check the installer run, then re-run:" -ForegroundColor Yellow
-    Write-Host "    gh run list --workflow=desktop-release.yml --limit 3" -ForegroundColor Yellow
-    Write-Host "    gh workflow run desktop-release.yml --ref $tag -f release_tag=$tag" -ForegroundColor Yellow
-  }
-}
-
-# 11. Install what was just released into this machine's editors. The released
-# .vsix is passed by path on purpose, so install.ps1 skips its own build AND its
-# staging-relay swap — the editors end up running the exact artifact users get,
-# production relay included, rather than a look-alike rebuilt afterwards.
+# 10. Install what was just released into this machine's editors. The released
+# .vsix is passed by path on purpose, so install.ps1 skips its own build — the
+# editors end up running the exact artifact users get, rather than a look-alike
+# rebuilt afterwards.
 #
 # Never fatal. Everything above this line is published and irreversible, so a
 # missing editor CLI must read as "install it yourself" and not as a failed
@@ -323,12 +226,5 @@ if ($NoInstall) {
   }
 }
 
-if ($SkipInstallers) {
-  Write-Host "`nPublished $tag with $vsix attached and to Open VSX; installer completion was skipped (-SkipInstallers)." -ForegroundColor Yellow
-} elseif ($installerFailure) {
-  Write-Host "`nPublished $tag with $vsix attached and to Open VSX; installer completion failed." -ForegroundColor Yellow
-} else {
-  Write-Host "`nReleased $tag with $vsix and .exe/.dmg/.AppImage installers attached, and published to Open VSX." -ForegroundColor Green
-}
+Write-Host "`nReleased $tag with $vsix attached, and published to Open VSX." -ForegroundColor Green
 Write-Host "Marketplace publish is the owner's: npm run publish" -ForegroundColor DarkGray
-if ($installerFailure) { throw $installerFailure }

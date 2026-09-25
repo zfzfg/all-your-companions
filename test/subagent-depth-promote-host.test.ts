@@ -225,7 +225,7 @@ describe("who is handed the delegation server (D10, §7.9)", () => {
   it("notices a name collision instead of silently dropping the server", async () => {
     const { sidebar, emitted } = makeSidebar();
     sidebar.reservedMcpIdentityFor = vi.fn(() => ({ names: ["companions_subagents"] }));
-    sidebar.spawnCompanionsServer = GrokSidebar.prototype.spawnCompanionsServer;
+    sidebar.spawnCompanionsServer = (GrokSidebar.prototype as any).spawnCompanionsServer;
     const session = agentSession();
     expect(await sidebar.companionsMcpServer(session)).toBeUndefined();
     expect(session.companionsSkipReason).toBe("name-collision");
@@ -235,7 +235,7 @@ describe("who is handed the delegation server (D10, §7.9)", () => {
 
   it("notices unproven host MCP (gemini as parent) and still marks the skip", async () => {
     const { sidebar, emitted } = makeSidebar();
-    sidebar.spawnCompanionsServer = GrokSidebar.prototype.spawnCompanionsServer;
+    sidebar.spawnCompanionsServer = (GrokSidebar.prototype as any).spawnCompanionsServer;
     const session = agentSession();
     session.provider = "gemini";
     expect(await sidebar.companionsMcpServer(session)).toBeUndefined();
@@ -245,7 +245,7 @@ describe("who is handed the delegation server (D10, §7.9)", () => {
 
   it("hands grok a companions_subagents spec with the token in env, not argv", async () => {
     const { sidebar } = makeSidebar();
-    sidebar.spawnCompanionsServer = GrokSidebar.prototype.spawnCompanionsServer;
+    sidebar.spawnCompanionsServer = (GrokSidebar.prototype as any).spawnCompanionsServer;
     sidebar.revokeCompanionsToken = vi.fn();
     sidebar.companions = vi.fn(() => ({
       listen: async () => "\\\\.\\pipe\\companions-delegate-test",

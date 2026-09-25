@@ -19,7 +19,6 @@ function bootRail() {
   const posted: Posted[] = [];
   const window = new Window({ url: "https://example.test/" });
   const doc = window.document;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (window as any).acquireVsCodeApi = () => ({
     postMessage: (m: Posted) => {
       posted.push(m);
@@ -28,7 +27,6 @@ function bootRail() {
     setState: () => {},
   });
   // confirm for destructive menu items in tests that do not exercise them
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (window as any).confirm = () => true;
   doc.body.innerHTML = `
     <aside id="projects-rail" class="projects-rail" aria-label="Projects">
@@ -59,7 +57,6 @@ function repoLabels(doc: Document): string[] {
   return [...doc.querySelectorAll(".rail-repo-label")].map((e) => e.textContent || "");
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function railApi(window: any) {
   return window.__grokProjectsRail as {
     state: Record<string, unknown>;

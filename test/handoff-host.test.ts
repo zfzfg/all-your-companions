@@ -164,7 +164,7 @@ describe("the commands are host-answered", () => {
 describe("the briefing is built from the thread, not copied from it", () => {
   it("carries changed PATHS and no transcript", async () => {
     const h = harness({ callerEdits: ["src/checkout.ts", "src/token.ts"] });
-    await h.sidebar.handleHandoffCommand("/second-opinion", h.caller, "local");
+    await h.sidebar.handleHandoffCommand("/second-opinion", h.caller);
     const text = brief(h.storeRoot);
     expect(text).toContain("src/checkout.ts");
     expect(text).toContain("src/token.ts");
@@ -183,7 +183,7 @@ describe("the briefing is built from the thread, not copied from it", () => {
         ...Array.from({ length: 10 }, () => ({ type: "agentText", text: "chatter" })),
       ],
     });
-    await h.sidebar.handleHandoffCommand("/second-opinion", h.caller, "local");
+    await h.sidebar.handleHandoffCommand("/second-opinion", h.caller);
     const text = brief(h.storeRoot);
     expect(text).toContain("the real ask");
     expect(text).not.toContain("first ask");
@@ -197,7 +197,7 @@ describe("the briefing is built from the thread, not copied from it", () => {
         { id: "2", content: "Swap the writer", status: "pending" },
       ],
     });
-    await h.sidebar.handleHandoffCommand("/handoff", h.caller, "local");
+    await h.sidebar.handleHandoffCommand("/handoff", h.caller);
     const text = brief(h.storeRoot);
     expect(text).toContain("Swap the writer");
     expect(text).toContain("Already decided");
@@ -206,7 +206,7 @@ describe("the briefing is built from the thread, not copied from it", () => {
 
   it("says WHY there are no steps when the companion cannot report them", async () => {
     const h = harness({ provider: "grok", usable: ["grok"], callerEdits: ["src/a.ts"] });
-    await h.sidebar.handleHandoffCommand("/handoff", h.caller, "local");
+    await h.sidebar.handleHandoffCommand("/handoff", h.caller);
     const text = brief(h.storeRoot);
     expect(text).toContain("## Where this came from");
     expect(text).toContain("does not report a structured step list at all");
@@ -214,7 +214,7 @@ describe("the briefing is built from the thread, not copied from it", () => {
 
   it("merges the role's own standing rules into the derived ones", async () => {
     const h = harness({ callerEdits: ["src/a.ts"] });
-    await h.sidebar.handleHandoffCommand("/second-opinion", h.caller, "local");
+    await h.sidebar.handleHandoffCommand("/second-opinion", h.caller);
     const text = brief(h.storeRoot);
     // Kind-specific rule first, where it is read; the shared base still there.
     expect(text.indexOf("Do not edit, create or delete any file"))
@@ -227,7 +227,7 @@ describe("the briefing is built from the thread, not copied from it", () => {
 describe("refusing costs nothing", () => {
   it("does not start a role when the turn changed nothing", async () => {
     const h = harness();
-    await h.sidebar.handleHandoffCommand("/second-opinion", h.caller, "local");
+    await h.sidebar.handleHandoffCommand("/second-opinion", h.caller);
     expect(notices(h.posted).join("\n")).toContain("nothing to review");
     expect(h.started).toEqual([]);
     expect(runDirs(h.storeRoot)).toEqual([]);
@@ -238,7 +238,7 @@ describe("refusing costs nothing", () => {
     // Deriving happens BEFORE the dialog on purpose: a refusal is the cheapest
     // outcome there is and must not cost the user a decision.
     const h = harness();
-    await h.sidebar.startHandoff("second-opinion", undefined, h.caller, "local", true);
+    await h.sidebar.startHandoff("second-opinion", undefined, h.caller, true);
     expect(h.confirms).toEqual([]);
     expect(h.started).toEqual([]);
   });
@@ -247,7 +247,7 @@ describe("refusing costs nothing", () => {
 describe("the confirmation (decision 18.3)", () => {
   it("asks on the button path and names the role, provider and model", async () => {
     const h = harness({ callerEdits: ["src/a.ts"] });
-    await h.sidebar.startHandoff("second-opinion", undefined, h.caller, "local", true);
+    await h.sidebar.startHandoff("second-opinion", undefined, h.caller, true);
     expect(h.confirms).toHaveLength(1);
     expect(h.confirms[0].title).toContain("reviewer");
     expect(String(h.confirms[0].body)).toMatch(/Claude|Gemini/);
@@ -258,7 +258,7 @@ describe("the confirmation (decision 18.3)", () => {
     // cost on the result card afterwards is therefore the ONLY number about
     // money in this path, which is also why it must stay exact.
     const h = harness({ callerEdits: ["src/a.ts"] });
-    await h.sidebar.startHandoff("second-opinion", undefined, h.caller, "local", true);
+    await h.sidebar.startHandoff("second-opinion", undefined, h.caller, true);
     const text = JSON.stringify(h.confirms[0]);
     expect(text).not.toMatch(/\$/);
     expect(text).not.toMatch(/token/i);
@@ -269,14 +269,14 @@ describe("the confirmation (decision 18.3)", () => {
     // `/handoff reviewer` named the action and the role. `/agent` does not ask
     // either, and for the same reason.
     const h = harness({ callerEdits: ["src/a.ts"] });
-    await h.sidebar.handleHandoffCommand("/second-opinion", h.caller, "local");
+    await h.sidebar.handleHandoffCommand("/second-opinion", h.caller);
     expect(h.confirms).toEqual([]);
     expect(h.started).toHaveLength(1);
   });
 
   it("leaves nothing behind when declined", async () => {
     const h = harness({ confirm: false, callerEdits: ["src/a.ts"] });
-    await h.sidebar.startHandoff("second-opinion", undefined, h.caller, "local", true);
+    await h.sidebar.startHandoff("second-opinion", undefined, h.caller, true);
     expect(h.started).toEqual([]);
     expect(runDirs(h.storeRoot)).toEqual([]);
     expect(card(h.posted)).toBeUndefined();
@@ -287,7 +287,7 @@ describe("the confirmation (decision 18.3)", () => {
 describe("the run itself is AP-10's, unchanged", () => {
   it("runs in its own session and returns a card with the exact cost", async () => {
     const h = harness({ callerEdits: ["src/a.ts"] });
-    await h.sidebar.handleHandoffCommand("/second-opinion", h.caller, "local");
+    await h.sidebar.handleHandoffCommand("/second-opinion", h.caller);
     expect(h.sent).toHaveLength(1);
     expect(h.sent[0].session).not.toBe(h.caller);
     const c = card(h.posted);
@@ -299,14 +299,14 @@ describe("the run itself is AP-10's, unchanged", () => {
 
   it("marks a handoff card as a handoff", async () => {
     const h = harness({ callerEdits: ["src/a.ts"] });
-    await h.sidebar.handleHandoffCommand("/handoff", h.caller, "local");
+    await h.sidebar.handleHandoffCommand("/handoff", h.caller);
     expect(card(h.posted).origin).toBe("handoff");
   });
 
   it("refuses a second role while one is running", async () => {
     const h = harness({ callerEdits: ["src/a.ts"] });
     h.caller.agentRun = { runId: "run-x", step: 1, roleName: "fixer", roleSession: new Session(), cancelled: false };
-    await h.sidebar.handleHandoffCommand("/second-opinion", h.caller, "local");
+    await h.sidebar.handleHandoffCommand("/second-opinion", h.caller);
     expect(notices(h.posted).join("\n")).toContain("still running");
     expect(h.started).toEqual([]);
   });
@@ -316,13 +316,13 @@ describe("the run itself is AP-10's, unchanged", () => {
     // equivalent line because there was nothing to echo. Doing both put the
     // same request in the transcript twice.
     const typed = harness({ callerEdits: ["src/a.ts"] });
-    await typed.sidebar.handleHandoffCommand("/second-opinion reviewer", typed.caller, "local");
+    await typed.sidebar.handleHandoffCommand("/second-opinion reviewer", typed.caller);
     const typedEchoes = typed.posted.filter((m: any) => m?.type === "userMessage");
     expect(typedEchoes).toHaveLength(1);
     expect(typedEchoes[0].text).toBe("/second-opinion reviewer");
 
     const clicked = harness({ callerEdits: ["src/a.ts"] });
-    await clicked.sidebar.startHandoff("second-opinion", undefined, clicked.caller, "local", true);
+    await clicked.sidebar.startHandoff("second-opinion", undefined, clicked.caller, true);
     const clickedEchoes = clicked.posted.filter((m: any) => m?.type === "userMessage");
     expect(clickedEchoes).toHaveLength(1);
     expect(clickedEchoes[0].text).toBe("/second-opinion reviewer");
@@ -330,7 +330,7 @@ describe("the run itself is AP-10's, unchanged", () => {
 
   it("names a role that does not exist instead of falling back to one that does", async () => {
     const h = harness({ callerEdits: ["src/a.ts"] });
-    await h.sidebar.handleHandoffCommand("/handoff nope", h.caller, "local");
+    await h.sidebar.handleHandoffCommand("/handoff nope", h.caller);
     expect(notices(h.posted).join("\n")).toContain("`nope`");
     expect(h.started).toEqual([]);
   });

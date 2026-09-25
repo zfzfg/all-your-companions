@@ -65,6 +65,9 @@ function harness(options: HarnessOptions = {}) {
   const nodePath = require("node:path");
 
   const sidebar: any = Object.create(GrokSidebar.prototype);
+  // The debounced overview frame fires after the test has ended, against a
+  // half-built sidebar; nothing here asserts on it.
+  sidebar.postRunningChildren = () => {};
   sidebar.agentRuns = new AgentRunStore({
     root: join(storeRoot, "runs"),
     fs: {
@@ -158,7 +161,7 @@ describe("/agent is answered by the host", () => {
 
   it("consumes the message instead of sending it to the CLI", async () => {
     const h = harness();
-    const consumed = await h.sidebar.handleAgentCommand("/agent researcher where is the parser", h.caller, "local");
+    const consumed = await h.sidebar.handleAgentCommand("/agent researcher where is the parser", h.caller);
     expect(consumed).toBe(true);
     // handleSend was called exactly once, for the ROLE session with the
     // briefing — never for the caller with the slash text.
@@ -170,13 +173,13 @@ describe("/agent is answered by the host", () => {
 
   it("leaves ordinary prose alone", async () => {
     const h = harness();
-    expect(await h.sidebar.handleAgentCommand("please review /agent-style naming", h.caller, "local")).toBe(false);
+    expect(await h.sidebar.handleAgentCommand("please review /agent-style naming", h.caller)).toBe(false);
     expect(h.posted).toEqual([]);
   });
 
   it("lists the roles when no name is given", async () => {
     const h = harness();
-    await h.sidebar.handleAgentCommand("/agent", h.caller, "local");
+    await h.sidebar.handleAgentCommand("/agent", h.caller);
     const text = notices(h.posted).join("\n");
     for (const name of ["planner", "implementer", "reviewer", "researcher", "fixer"]) {
       expect(text).toContain(`/agent ${name}`);
@@ -186,21 +189,21 @@ describe("/agent is answered by the host", () => {
 
   it("asks for a task rather than briefing a role with nothing", async () => {
     const h = harness();
-    await h.sidebar.handleAgentCommand("/agent reviewer", h.caller, "local");
+    await h.sidebar.handleAgentCommand("/agent reviewer", h.caller);
     expect(notices(h.posted).join("\n")).toContain("needs a task");
     expect(h.started).toEqual([]);
   });
 
   it("names the unknown role and lists what does exist", async () => {
     const h = harness();
-    await h.sidebar.handleAgentCommand("/agent nope do a thing", h.caller, "local");
+    await h.sidebar.handleAgentCommand("/agent nope do a thing", h.caller);
     expect(notices(h.posted).join("\n")).toContain("There is no role `nope`");
     expect(h.started).toEqual([]);
   });
 
   it("echoes the typed command into the thread as a user message", async () => {
     const h = harness();
-    await h.sidebar.handleAgentCommand("/agent researcher find it", h.caller, "local");
+    await h.sidebar.handleAgentCommand("/agent researcher find it", h.caller);
     expect(h.posted.find((m) => m.type === "userMessage")?.text).toBe("/agent researcher find it");
   });
 });
@@ -229,7 +232,7 @@ describe("parseAgentCommand", () => {
 describe("a role runs in its own session", () => {
   it("writes the brief to disk BEFORE starting the role", async () => {
     const h = harness();
-    await h.sidebar.handleAgentCommand("/agent researcher where is the parser", h.caller, "local");
+    await h.sidebar.handleAgentCommand("/agent researcher where is the parser", h.caller);
     const [runId] = runDirs(h.storeRoot);
     expect(runId).toMatch(/^run-\d{8}-\d{6}-/);
     const brief = readFileSync(join(h.storeRoot, "runs", runId, "step-01.brief.md"), "utf8");
@@ -246,7 +249,7 @@ describe("a role runs in its own session", () => {
       },
       models: { claude: [{ modelId: "claude-haiku-4-5" }] },
     });
-    await h.sidebar.handleAgentCommand("/agent swift do the thing", h.caller, "local");
+    await h.sidebar.handleAgentCommand("/agent swift do the thing", h.caller);
     const roleSession = h.started[0];
     // The recipe must already be ON the session when startSession is called —
     // `startSessionBody` consumes it on the newSession path, ahead of turn one.
@@ -259,7 +262,7 @@ describe("a role runs in its own session", () => {
 
   it("writes the result and reports it on a card with the cost", async () => {
     const h = harness();
-    await h.sidebar.handleAgentCommand("/agent researcher where is the parser", h.caller, "local");
+    await h.sidebar.handleAgentCommand("/agent researcher where is the parser", h.caller);
     const [runId] = runDirs(h.storeRoot);
     const result = readFileSync(join(h.storeRoot, "runs", runId, "step-01.result.md"), "utf8");
     expect(result).toContain("## Summary");
@@ -280,7 +283,7 @@ describe("a role runs in its own session", () => {
 
   it("logs the run as JSON lines", async () => {
     const h = harness();
-    await h.sidebar.handleAgentCommand("/agent researcher find it", h.caller, "local");
+    await h.sidebar.handleAgentCommand("/agent researcher find it", h.caller);
     const [runId] = runDirs(h.storeRoot);
     const lines = readFileSync(join(h.storeRoot, "runs", runId, "log.jsonl"), "utf8").trim().split("\n");
     expect(lines.map((line) => JSON.parse(line).event)).toEqual(["briefed", "finished"]);
@@ -290,14 +293,14 @@ describe("a role runs in its own session", () => {
   it("refuses a second role while one is still running", async () => {
     const h = harness();
     h.caller.agentRun = { runId: "run-x", step: 1, roleName: "reviewer", roleSession: new Session(), cancelled: false };
-    await h.sidebar.handleAgentCommand("/agent researcher find it", h.caller, "local");
+    await h.sidebar.handleAgentCommand("/agent researcher find it", h.caller);
     expect(notices(h.posted).join("\n")).toContain("Role `reviewer` is still running");
     expect(h.started).toEqual([]);
   });
 
   it("reports a failed start as a failed card, not a silent nothing", async () => {
     const h = harness({ failStart: true });
-    await h.sidebar.handleAgentCommand("/agent researcher find it", h.caller, "local");
+    await h.sidebar.handleAgentCommand("/agent researcher find it", h.caller);
     const message = card(h.posted);
     expect(message.outcome).toBe("failed");
     expect(message.detail).toContain("could not start a session");
@@ -310,7 +313,7 @@ describe("provider and model validation", () => {
       roleFiles: { "bad.md": "---\nprovider: claude\nmodel: gpt-9\nwhen_to_use: nope\n---\n" },
       models: { claude: [{ modelId: "claude-opus-5" }] },
     });
-    await h.sidebar.handleAgentCommand("/agent bad do it", h.caller, "local");
+    await h.sidebar.handleAgentCommand("/agent bad do it", h.caller);
     expect(notices(h.posted).join("\n")).toContain("Claude does not have a model `gpt-9`");
     expect(h.started).toEqual([]);
   });
@@ -320,7 +323,7 @@ describe("provider and model validation", () => {
       roleFiles: { "cold.md": "---\nprovider: claude\nmodel: claude-opus-5\nwhen_to_use: whatever\n---\n" },
       models: {},
     });
-    await h.sidebar.handleAgentCommand("/agent cold do it", h.caller, "local");
+    await h.sidebar.handleAgentCommand("/agent cold do it", h.caller);
     expect(card(h.posted)?.outcome).toBe("completed");
     expect(h.logged.join("\n")).toContain("model list is not warmed yet");
   });
@@ -330,7 +333,7 @@ describe("provider and model validation", () => {
       roleFiles: { "offline.md": "---\nprovider: grok\nwhen_to_use: whatever\n---\n" },
       usable: ["claude"],
     });
-    await h.sidebar.handleAgentCommand("/agent offline do it", h.caller, "local");
+    await h.sidebar.handleAgentCommand("/agent offline do it", h.caller);
     expect(notices(h.posted).join("\n")).toContain("which is not connected");
     expect(h.started).toEqual([]);
   });
@@ -339,13 +342,13 @@ describe("provider and model validation", () => {
     // The built-ins carry a placeholder provider; without this the feature is
     // dead on any install that does not happen to have that one account.
     const h = harness({ usable: ["gemini"] });
-    await h.sidebar.handleAgentCommand("/agent researcher find it", h.caller, "local");
+    await h.sidebar.handleAgentCommand("/agent researcher find it", h.caller);
     expect(card(h.posted)?.provider).toBe("gemini");
   });
 
   it("reports a broken role file and still lists the working roles", async () => {
     const h = harness({ roleFiles: { "broken.md": "no frontmatter" } });
-    await h.sidebar.handleAgentCommand("/agent researcher find it", h.caller, "local");
+    await h.sidebar.handleAgentCommand("/agent researcher find it", h.caller);
     expect(notices(h.posted).join("\n")).toContain("could not be read");
     expect(card(h.posted)?.outcome).toBe("completed");
   });
@@ -354,7 +357,7 @@ describe("provider and model validation", () => {
     const h = harness();
     for (const name of ["planner", "implementer", "reviewer", "researcher", "fixer"]) {
       const fresh = harness();
-      await fresh.sidebar.handleAgentCommand(`/agent ${name} do it`, fresh.caller, "local");
+      await fresh.sidebar.handleAgentCommand(`/agent ${name} do it`, fresh.caller);
       expect(card(fresh.posted), name).toBeTruthy();
     }
     expect(h.posted).toEqual([]);
@@ -370,7 +373,7 @@ describe("cancellation", () => {
       h.sidebar.cancelAgentRun(h.caller);
       session.agentTextTap?.("");
     });
-    await h.sidebar.handleAgentCommand("/agent researcher find it", h.caller, "local");
+    await h.sidebar.handleAgentCommand("/agent researcher find it", h.caller);
     expect(h.removed).toHaveLength(1);
     expect(runDirs(h.storeRoot)).toEqual([]);
     const message = card(h.posted);
@@ -379,7 +382,7 @@ describe("cancellation", () => {
 
   it("keeps the artefacts when the role did produce something before Stop", async () => {
     const h = harness({ cancelDuringTurn: true, reply: "## Summary\nPartial.\n" });
-    await h.sidebar.handleAgentCommand("/agent researcher find it", h.caller, "local");
+    await h.sidebar.handleAgentCommand("/agent researcher find it", h.caller);
     expect(runDirs(h.storeRoot)).toHaveLength(1);
     expect(h.removed).toEqual([]);
     expect(card(h.posted).summary).toBe("Partial.");
@@ -421,7 +424,7 @@ describe("source pins", () => {
       sidebarSrc.indexOf('      case "send":'),
       sidebarSrc.indexOf("let queuedSendCommit"),
     );
-    expect(sendCase).toContain("this.handleAgentCommand(msg.text, session, origin)");
+    expect(sendCase).toContain("this.handleAgentCommand(msg.text, session)");
   });
 
   it("routes Stop to the role run before the session's own cancel", () => {
@@ -439,7 +442,7 @@ describe("the role's self-report is measured against what the host saw", () => {
       reply: "## Summary\nTidied up.\n\n## Files touched\n- src/a.ts\n",
       observedEdits: ["src/a.ts", "src/secret.ts"],
     });
-    await h.sidebar.handleAgentCommand("/agent implementer tidy up", h.caller, "local");
+    await h.sidebar.handleAgentCommand("/agent implementer tidy up", h.caller);
     const message = card(h.posted);
     expect(message.files).toEqual(["src/a.ts"]);
     expect(message.unreported).toEqual(["src/secret.ts"]);
@@ -455,7 +458,7 @@ describe("the role's self-report is measured against what the host saw", () => {
       reply: "## Summary\nDone.\n\n## Files touched\n- src/a.ts\n- docs/readme.md\n",
       observedEdits: ["src/a.ts"],
     });
-    await h.sidebar.handleAgentCommand("/agent implementer do it", h.caller, "local");
+    await h.sidebar.handleAgentCommand("/agent implementer do it", h.caller);
     expect(card(h.posted).claimedOnly).toEqual(["docs/readme.md"]);
     expect(card(h.posted).unreported).toBeUndefined();
   });
@@ -465,7 +468,7 @@ describe("the role's self-report is measured against what the host saw", () => {
       reply: "## Summary\nDone.\n\n## Files touched\n- src/a.ts\n",
       observedEdits: ["src/a.ts"],
     });
-    await h.sidebar.handleAgentCommand("/agent implementer do it", h.caller, "local");
+    await h.sidebar.handleAgentCommand("/agent implementer do it", h.caller);
     expect(card(h.posted).unreported).toBeUndefined();
     expect(card(h.posted).claimedOnly).toBeUndefined();
     const [runId] = runDirs(h.storeRoot);
@@ -479,7 +482,7 @@ describe("the role's self-report is measured against what the host saw", () => {
       reply: "## Summary\nDone.\n\n## Files touched\n- ./src/a.ts\n",
       observedEdits: ["src\\a.ts"],
     });
-    await h.sidebar.handleAgentCommand("/agent implementer do it", h.caller, "local");
+    await h.sidebar.handleAgentCommand("/agent implementer do it", h.caller);
     expect(card(h.posted).unreported).toBeUndefined();
     expect(card(h.posted).claimedOnly).toBeUndefined();
   });
@@ -488,14 +491,14 @@ describe("the role's self-report is measured against what the host saw", () => {
 describe("a review that cannot be an outside opinion says so", () => {
   it("steers the built-in reviewer to a different companion when one exists", async () => {
     const h = harness({ usable: ["claude", "gemini"] }); // the caller is on claude
-    await h.sidebar.handleAgentCommand("/agent reviewer check the diff", h.caller, "local");
+    await h.sidebar.handleAgentCommand("/agent reviewer check the diff", h.caller);
     expect(card(h.posted).provider).toBe("gemini");
     expect(card(h.posted).caution).toBeUndefined();
   });
 
   it("still runs on the only connected companion, but labels it honestly", async () => {
     const h = harness({ usable: ["claude"] });
-    await h.sidebar.handleAgentCommand("/agent reviewer check the diff", h.caller, "local");
+    await h.sidebar.handleAgentCommand("/agent reviewer check the diff", h.caller);
     const message = card(h.posted);
     expect(message.provider).toBe("claude");
     expect(message.outcome).toBe("completed");
@@ -504,7 +507,7 @@ describe("a review that cannot be an outside opinion says so", () => {
 
   it("leaves roles that did not ask for a fresh pair of eyes alone", async () => {
     const h = harness({ usable: ["claude", "gemini"] });
-    await h.sidebar.handleAgentCommand("/agent implementer do it", h.caller, "local");
+    await h.sidebar.handleAgentCommand("/agent implementer do it", h.caller);
     expect(card(h.posted).provider).toBe("claude");
     expect(card(h.posted).caution).toBeUndefined();
   });
@@ -516,7 +519,7 @@ describe("a review that cannot be an outside opinion says so", () => {
       },
       usable: ["claude"],
     });
-    await h.sidebar.handleAgentCommand("/agent auditor audit it", h.caller, "local");
+    await h.sidebar.handleAgentCommand("/agent auditor audit it", h.caller);
     // A project role's provider is never swapped — but the caution still fires.
     expect(card(h.posted).provider).toBe("claude");
     expect(card(h.posted).caution).toContain("same companion");
@@ -526,7 +529,7 @@ describe("a review that cannot be an outside opinion says so", () => {
 describe("fault injection on the run-artefact stream", () => {
   it("refuses to start the role when the briefing cannot be written", async () => {
     const h = harness({ failWrite: /brief\.md$/ });
-    await h.sidebar.handleAgentCommand("/agent researcher find it", h.caller, "local");
+    await h.sidebar.handleAgentCommand("/agent researcher find it", h.caller);
     // The brief IS the run — no session is spawned, and no card pretends one ran.
     expect(h.started).toEqual([]);
     expect(card(h.posted)).toBeUndefined();
@@ -536,7 +539,7 @@ describe("fault injection on the run-artefact stream", () => {
 
   it("still delivers the card when only the RESULT file cannot be written", async () => {
     const h = harness({ failWrite: /result\.md$/ });
-    await h.sidebar.handleAgentCommand("/agent researcher find it", h.caller, "local");
+    await h.sidebar.handleAgentCommand("/agent researcher find it", h.caller);
     // The turn was already paid for; losing the file must not also lose the answer.
     expect(card(h.posted).outcome).toBe("completed");
     expect(card(h.posted).summary).toBe("Done.");
@@ -545,7 +548,7 @@ describe("fault injection on the run-artefact stream", () => {
 
   it("still runs when the log cannot be appended — the log is the account, not the run", async () => {
     const h = harness({ failLog: true });
-    await h.sidebar.handleAgentCommand("/agent researcher find it", h.caller, "local");
+    await h.sidebar.handleAgentCommand("/agent researcher find it", h.caller);
     expect(card(h.posted).outcome).toBe("completed");
     expect(h.logged.join("\n")).toContain("could not append to the run log");
   });

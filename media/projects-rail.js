@@ -111,7 +111,6 @@
     /** Display form of the one directory new projects land in (`~/Grok Build`),
      *  from `projectSetup`. The form shows the destination as you type. */
     projectRoot: "",
-    projectGithub: null,
     githubState: null,
     githubRepos: null,
   };
@@ -1052,11 +1051,6 @@
   let addProjectFormKeydown = null;
 
   function closeAddProjectForm() {
-    const wasClone = !!(addProjectFormApi && addProjectFormApi.el && addProjectFormApi.el.dataset.kind === "clone");
-    if (wasClone) {
-      state.projectGithub = null;
-      vscode.postMessage({ type: "cancelDeviceLogin", provider: "github" });
-    }
     if (addProjectFormScrim) addProjectFormScrim.remove();
     // Capture-phase listener: leaving it attached would swallow Escape in this
     // view for the rest of the window.
@@ -1071,10 +1065,6 @@
     if (!helpers || typeof helpers.addProjectForm !== "function") return;
     closeAddProjectForm();
     closeMenu();
-    if (kind === "clone") {
-      state.projectGithub = null;
-      vscode.postMessage({ type: "cancelDeviceLogin", provider: "github" });
-    }
     const api = helpers.addProjectForm({
       kind,
       root: state.projectRoot,
@@ -1677,16 +1667,11 @@
         // `done` is the only close signal: a failed attempt also stops being
         // busy, and closing on that would throw away the error to be read.
         if (msg.done) {
-          state.projectGithub = null;
           closeAddProjectForm();
           break;
         }
-        if (msg.busy) state.projectGithub = null;
-        else if (addProjectFormApi && msg.github && typeof msg.github === "object") state.projectGithub = msg.github;
-        else if (msg.error) state.projectGithub = null;
         if (addProjectFormApi) addProjectFormApi.update({
           ...msg,
-          github: state.projectGithub || msg.github,
           githubState: state.githubState || undefined,
           repos: state.githubRepos,
         });

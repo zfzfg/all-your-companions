@@ -14,9 +14,7 @@ export default defineConfig({
     // a gate (test-support/complete-accounting.mjs).
     reporters: ["default", "./test-support/complete-accounting.mjs"],
     include: ["test/**/*.test.ts"],
-    // Electron e2e lives under test/desktop and needs a real BrowserWindow —
-    // run via `npm run test:desktop` only (not npm test / CI unit job).
-    exclude: ["**/node_modules/**", "**/dist/**", "test/desktop/**"],
+    exclude: ["**/node_modules/**", "**/dist/**"],
     environment: "node",
     // Vitest's 5s default is a hang detector for pure functions; several files
     // here spawn a real shell or a real Node ACP process, and the suite runs one

@@ -361,15 +361,6 @@ export interface HostContext {
   extensionVersion: string;
   /** True when running a production install (not Extension Development / Test). */
   isProduction: boolean;
-  /**
-   * True only for the build made to run as a CLOUD ENVIRONMENT.
-   *
-   * Such a build is packaged — `isProduction` is also true — but has no user at
-   * a keyboard, so it is allowed to take its relay and its device token from the
-   * environment. A VS Code extension is never one of these; the desktop app is
-   * one only when packaged with the flag.
-   */
-  isCloudBuild?: boolean;
   globalState: MementoLike;
   subscriptions: { push(...items: HostDisposable[]): void };
 }
@@ -562,14 +553,6 @@ export interface Host {
    * (e.g. `"grok.voiceApiKey"`). VS Code: `workbench.action.openSettings`.
    */
   openSettings(section?: string): Thenable<void>;
-  /**
-   * Start the AFK Pilot / remote device-link flow. On VS Code this runs the
-   * contributed `grok.linkRemote` command; a desktop host implements linking
-   * natively without emulating VS Code command IDs.
-   */
-  linkRemote(): Thenable<void>;
-  /** Unlink this device from AFK Pilot / remote access (symmetric to {@link linkRemote}). */
-  unlinkRemote(): Thenable<void>;
 
   // ── Terminals ──────────────────────────────────────────────────────────
   createTerminal(nameOrOptions: string | HostTerminalOptions): HostTerminal;
@@ -806,13 +789,6 @@ export interface Host {
    */
   readonly webviewReloadsUnderLiveSession: boolean;
   /**
-   * Suffix appended to the install id when talking to the AFK Pilot relay on
-   * device link. Empty for VS Code; `":desktop"` for the desktop app so the
-   * relay shares one device-cap slot with the same machine's VS Code install.
-   * Anything other than a bare id or `<id>:desktop` is rejected by the relay.
-   */
-  readonly remoteInstallIdSuffix: string;
-  /**
    * Gear → Move view. Wired into `initialState.capabilities.relocateView`.
    * Client treats absent/true as supported (older extensions); only false
    * hides the item — desktop has no view containers.
@@ -905,15 +881,6 @@ export function shouldRehydrateOnWebviewReady(
   hasLiveClient: boolean,
 ): boolean {
   return webviewReloadsUnderLiveSession && hasLiveClient;
-}
-
-/**
- * Form the install id sent to the AFK Pilot relay. Bare UUID for VS Code;
- * `<uuid>:desktop` for the desktop app.
- */
-export function formatRemoteInstallId(baseId: string, suffix: string): string {
-  if (!suffix) return baseId;
-  return baseId.endsWith(suffix) ? baseId : baseId + suffix;
 }
 
 /**

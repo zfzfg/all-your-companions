@@ -3,10 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import { GrokSidebar } from "../src/sidebar";
 import { Session } from "../src/session";
 import { collectMcpNameFiles, collectMcpNameLayers, hostMcpServers, mcpConfigLayer } from "../src/mcp-connectors";
-import { RemoteClientState } from "../src/remote-client-state";
 import {
   MCP_GLOBAL_SCOPE_WARNING,
-  MCP_REMOTE_SERVER_KEYS,
   filterMcpSettingsServers,
   mcpConfigFileName,
   mcpIsManaged,
@@ -15,8 +13,6 @@ import {
   mcpServerDetail,
   mergeMcpNotification,
   parseMcpListResponse,
-  projectMcpServerForRemote,
-  projectMcpServersMessageForRemote,
 } from "../src/mcp";
 
 describe("MCP ACP catalog", () => {
@@ -146,17 +142,7 @@ function leakyMcpWireServer() {
   };
 }
 
-function assertNoMcpLaunchLeak(value: unknown): void {
-  const wire = JSON.stringify(value);
-  expect(wire).not.toContain(LEAK_BEARER);
-  expect(wire).not.toContain(LEAK_TOKEN);
-  expect(wire).not.toContain("C:/Users/Alice");
-  expect(wire).not.toContain("Authorization");
-  expect(wire).not.toContain(LEAK_PATH);
-  expect(wire).not.toContain(LEAK_URL);
-}
-
-describe("MCP remote inventory projection", () => {
+describe("MCP inventory catalog", () => {
   it("the desk catalog still keeps the launch recipe from the reproduction payload", () => {
     const [desk] = parseMcpListResponse({ servers: [leakyMcpWireServer()] });
     expect(desk.command).toBe(LEAK_PATH);
@@ -169,22 +155,11 @@ describe("MCP remote inventory projection", () => {
     expect(JSON.stringify(desk)).toContain("C:/Users/Alice");
   });
 
-  it("the remote allowlist is page fields only — not a denylist of today's secrets", () => {
-    expect([...MCP_REMOTE_SERVER_KEYS]).toEqual([
-      "name", "displayName", "enabled", "source", "type", "managed", "scope", "scopeName", "status", "toolCount",
-    ]);
-    expect(MCP_REMOTE_SERVER_KEYS).not.toEqual(expect.arrayContaining(["tag", "configFile"]));
-    expect(MCP_REMOTE_SERVER_KEYS).not.toEqual(expect.arrayContaining([
-      "command", "args", "url", "error", "tools", "env", "headers",
-    ]));
-  });
-
   it("clears a stale error when a later status reports no failure", () => {
     // Nothing ever cleared `error`, so a server that failed once carried the
-    // text for the life of the session. Both renderers short-circuit on it, so
-    // a recovered server stayed red at the desk — and once the projection
-    // started translating a failure into `unavailable` for the phone, it
-    // stayed red there too. The error belongs to the event that reported it.
+    // text for the life of the session. The renderer short-circuits on it, so
+    // a recovered server stayed red. The error belongs to the event that
+    // reported it.
     const failed = mergeMcpNotification(
       [{ name: "linear", enabled: true }],
       "_x.ai/mcp/init_progress",
@@ -199,8 +174,6 @@ describe("MCP remote inventory projection", () => {
     );
     expect(recovered[0].status).toBe("ready");
     expect(recovered[0].error).toBeUndefined();
-    // And the phone sees the recovery rather than a frozen failure.
-    expect(projectMcpServerForRemote(recovered[0]).status).toBe("ready");
   });
 
   it("keeps a fresh failure, and does not let a status-only note erase it", () => {
@@ -212,90 +185,6 @@ describe("MCP remote inventory projection", () => {
     // A notification carrying neither status nor error changes neither.
     const noise = mergeMcpNotification(failed, "_x.ai/mcp/init_progress", { name: "linear" });
     expect(noise[0].error).toBe("connection refused");
-    expect(projectMcpServerForRemote(noise[0]).status).toBe("unavailable");
-  });
-
-  it("keeps a failure visible to a remote after the error text is stripped", () => {
-    // `status` and `error` arrive from the CLI as INDEPENDENT optionals, so a
-    // server can carry an error and no status at all. Dropping the error text
-    // (right — it can quote a launch recipe) then left the row with nothing
-    // negative on it, and the settings dot treats "enabled, no status, no
-    // error" as ready: green on the phone, red at the desk, for the same
-    // broken server. The fact of the failure has to survive; only the words
-    // are secret.
-    const remote = projectMcpServerForRemote({
-      name: "linear", enabled: true, source: "local", error: "spawn /usr/local/bin/linear-mcp --key sk-live-abc failed",
-    } as never);
-    expect(remote.status).toBe("unavailable");
-    expect(remote).not.toHaveProperty("error");
-    assertNoMcpLaunchLeak(remote);
-  });
-
-  it("lets a reported failure override a stale ready status", () => {
-    const remote = projectMcpServerForRemote({
-      name: "linear", enabled: true, status: "ready", error: "connection refused",
-    } as never);
-    expect(remote.status).toBe("unavailable");
-  });
-
-  it("strips the reproduction leak and any extra key a future parser might add", () => {
-    const [desk] = parseMcpListResponse({ servers: [leakyMcpWireServer()] });
-    const before = JSON.stringify(desk);
-    const remote = projectMcpServerForRemote({
-      ...desk,
-      env: { LINEAR_API_KEY: LEAK_TOKEN },
-      headers: { Authorization: LEAK_BEARER },
-    } as typeof desk & { env: unknown; headers: unknown });
-    expect(JSON.stringify(desk)).toBe(before);
-    expect(remote).toEqual({
-      name: "linear",
-      displayName: "Linear",
-      enabled: true,
-      source: "local",
-      type: "stdio",
-      scope: "global",
-      status: "unavailable",
-      toolCount: 1,
-    });
-    expect(Object.keys(remote).every((key) => (MCP_REMOTE_SERVER_KEYS as readonly string[]).includes(key))).toBe(true);
-    assertNoMcpLaunchLeak(remote);
-    expect(remote).not.toHaveProperty("command");
-    expect(remote).not.toHaveProperty("args");
-    expect(remote).not.toHaveProperty("url");
-    expect(remote).not.toHaveProperty("error");
-    expect(remote).not.toHaveProperty("tools");
-    expect(remote).not.toHaveProperty("env");
-    expect(remote).not.toHaveProperty("headers");
-  });
-
-  it("rebuilds the mcpServers envelope without ferrying the desk object", () => {
-    const [desk] = parseMcpListResponse({ servers: [leakyMcpWireServer()] });
-    const msg = {
-      type: "mcpServers" as const,
-      servers: [desk],
-      warning: MCP_GLOBAL_SCOPE_WARNING,
-      loading: false,
-    };
-    const out = projectMcpServersMessageForRemote(msg);
-    expect(out).not.toBe(msg);
-    expect(out.servers).not.toBe(msg.servers);
-    expect(msg.servers[0]).toBe(desk);
-    expect(desk.command).toBe(LEAK_PATH);
-    expect(out.warning).toBe(MCP_GLOBAL_SCOPE_WARNING);
-    expect(out.loading).toBe(false);
-    assertNoMcpLaunchLeak(out);
-  });
-
-  it("the desk message builder still emits the unprojected catalog", () => {
-    const src = readFileSync(new URL("../src/sidebar.ts", import.meta.url), "utf8");
-    const start = src.indexOf("private mcpServersMessage(");
-    const end = src.indexOf("private connectedConnectorStore(", start);
-    const body = src.slice(start, end);
-    expect(start).toBeGreaterThan(-1);
-    expect(end).toBeGreaterThan(start);
-    expect(body).toContain("this.mcpServersView");
-    expect(body).not.toContain("projectMcp");
-    expect(body).not.toContain("mcpServersMessageForCwd");
   });
 
   it("classifies Grok inventory against Grok config files even if Codex or Claude is focused", () => {
@@ -362,7 +251,7 @@ describe("MCP remote inventory projection", () => {
 
 describe("MCP settings sections", () => {
   it("treats source=managed and managed=true as grok.com, everything else as local", () => {
-    expect(mcpIsManaged({ source: "managed", scopeName: "Grok CLI" })).toBe(true);
+    expect(mcpIsManaged({ source: "managed", scopeName: "Grok CLI" } as { source: string })).toBe(true);
     expect(mcpIsManaged({ managed: true })).toBe(true);
     expect(mcpIsManaged({ source: "local" })).toBe(false);
     expect(mcpIsManaged({})).toBe(false);
@@ -418,66 +307,6 @@ describe("MCP settings sections", () => {
     );
     expect(filtered.map((s) => s.name)).toEqual(["notes"]);
     expect(filtered[0]?.configFile).toBe(".claude.json");
-  });
-
-  it("the remote projection copies scopeName, never tag or configFile, and never sees a project-file row", () => {
-    const layers = new Map<string, "project" | "user">([
-      ["docs", "project"],
-      ["notes", "user"],
-    ]);
-    const files = collectMcpNameFiles([
-      { layer: "user", path: "/home/.grok/config.toml", names: ["notes"] },
-    ]);
-    const filtered = filterMcpSettingsServers([
-      { name: "managed_gateway:linear", displayName: "Linear", enabled: true, source: "managed", managed: true, scopeName: "Grok CLI" },
-      { name: "docs", enabled: true, source: "local", command: "npx", args: ["-y", "secret"] },
-      { name: "notes", enabled: true, source: "local", command: "npx" },
-    ], { nameLayer: layers, nameFile: files });
-    const remote = projectMcpServersMessageForRemote({
-      type: "mcpServers",
-      servers: filtered,
-      warning: MCP_GLOBAL_SCOPE_WARNING,
-    });
-    expect(remote.servers.map((s) => s.name)).toEqual(["managed_gateway:linear", "notes"]);
-    expect(remote.servers[0]).toEqual({
-      name: "managed_gateway:linear",
-      displayName: "Linear",
-      enabled: true,
-      source: "managed",
-      managed: true,
-      scopeName: "Grok CLI",
-    });
-    expect(remote.servers[1]).toEqual({
-      name: "notes",
-      enabled: true,
-      source: "local",
-    });
-    expect(JSON.stringify(remote)).not.toContain("docs");
-    expect(JSON.stringify(remote)).not.toContain("npx");
-    expect(JSON.stringify(remote)).not.toContain("secret");
-    expect(JSON.stringify(remote)).not.toContain("tag");
-    expect(JSON.stringify(remote)).not.toContain("configFile");
-    expect(JSON.stringify(remote)).not.toContain("config.toml");
-    expect(filtered.find((s) => s.name === "notes")?.configFile).toBe("config.toml");
-
-    const one = projectMcpServerForRemote({
-      name: "notes",
-      enabled: true,
-      source: "local",
-      scopeName: "ignored-for-local",
-      configFile: "config.toml",
-      command: "npx",
-      args: ["-y", "secret"],
-    });
-    expect(one).toEqual({
-      name: "notes",
-      enabled: true,
-      source: "local",
-      scopeName: "ignored-for-local",
-    });
-    expect(one).not.toHaveProperty("command");
-    expect(one).not.toHaveProperty("tag");
-    expect(one).not.toHaveProperty("configFile");
   });
 
   it("omits a host-injected echo whose name is in no config layer, keeps a config-declared local", () => {
@@ -560,14 +389,13 @@ describe("MCP catalog classified against the workspace it was read from", () => 
 
   it("sidebar stores the classified view, so a B session cannot reclassify A's inventory", () => {
     const proto = GrokSidebar.prototype as unknown as {
-      mcpServersMessage(): { type: "mcpServers"; servers: Array<{ name: string }> };
       filterMcpServers: (servers: typeof catalogA) => Array<{ name: string }>;
     };
     const instance = Object.create(proto) as {
       mcpServers: typeof catalogA;
       mcpServersCwd: string | undefined;
       mcpServersView: Array<{ name: string }>;
-      mcpNameCatalogFor: ReturnType<typeof vi.fn>;
+      mcpNameCatalogFor: any;
     };
     instance.mcpServers = catalogA;
     instance.mcpServersCwd = "/proj-a";
@@ -581,23 +409,6 @@ describe("MCP catalog classified against the workspace it was read from", () => 
     expect(instance.mcpNameCatalogFor).toHaveBeenCalledWith("/proj-a");
     expect(instance.mcpNameCatalogFor).not.toHaveBeenCalledWith("/proj-b");
 
-    instance.mcpNameCatalogFor.mockClear();
-    const forB = proto.mcpServersMessage.call(instance);
-    expect(forB.servers.map((s) => s.name)).toEqual(["shared"]);
-    expect(forB.servers.find((s) => s.name === "a-only")).toBeUndefined();
-    expect(instance.mcpNameCatalogFor).not.toHaveBeenCalled();
-  });
-
-  it("a remote snapshot for a second tab on another project receives the stored global view", () => {
-    const src = readFileSync(new URL("../src/sidebar.ts", import.meta.url), "utf8");
-    const start = src.indexOf("private buildRemoteSnapshot(");
-    const end = src.indexOf("\n  private ", start + "private buildRemoteSnapshot(".length);
-    const body = src.slice(start, end < 0 ? src.length : end);
-    expect(body).toContain("this.mcpServersMessage()");
-    expect(body).not.toContain("mcpServersMessageForCwd");
-    expect(body).not.toContain("mcpViewCwd");
-    expect(body).not.toContain("this.mcpServersMessage(session || this.focused)");
-    expect(body).toContain("session && sessionCwdOk");
   });
 
   it("a startup notification updates dedup with no prior catalog read", () => {
@@ -641,26 +452,13 @@ describe("MCP catalog classified against the workspace it was read from", () => 
     expect(hostMcpServers(store, instance.grokMcpReserved)).toEqual([]);
   });
 
-  it("a worktree-cwd catalog read reaches the tab selected on the parent repo", () => {
-    const state = new RemoteClientState<object>("/repo");
-    state.ready("phone");
-    state.select("phone", "/repo");
-    expect(state.clientsForCwd("/repo-worktree")).toEqual([]);
-    expect(state.clientsForCwd("/repo")).toEqual(["phone"]);
-
+  it("posts the stored classified view, not the incoming payload", () => {
     const src = readFileSync(new URL("../src/sidebar.ts", import.meta.url), "utf8");
-    const deviceGlobal = src.slice(
-      src.indexOf("private static readonly DEVICE_GLOBAL_REMOTE_TYPES"),
-      src.indexOf("]);", src.indexOf("private static readonly DEVICE_GLOBAL_REMOTE_TYPES")) + 2,
-    );
-    expect(deviceGlobal).toContain("mcpServers");
     const post = src.slice(
       src.indexOf("private postMcpServers("),
-      src.indexOf("private mcpServersMessage("),
+      src.indexOf("private connectedConnectorStore("),
     );
     expect(post).toContain("this.post(view)");
-    expect(post).not.toContain("sendRemoteRepo");
-    expect(post).not.toContain("clientsForCwd");
 
     const proto = GrokSidebar.prototype as unknown as {
       postMcpServers(message: { type: "mcpServers"; servers: Array<{ name: string }>; warning: string }): void;

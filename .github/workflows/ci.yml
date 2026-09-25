@@ -14,20 +14,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # TWO operating systems, deliberately. The suite ran on Ubuntu only, the one
-  # dev box is Windows, and between them they share an assumption macOS breaks:
-  # `os.tmpdir()` there is `/var/folders/…`, a SYMLINK to `/private/var/…`. Six
-  # tests that hand a temp root to code whose job is to canonicalise paths were
-  # therefore red on macOS for at least ten days, and nothing in the pipeline
-  # could see it. The same blind spot hid a `dist/electron` path that does not
-  # exist on macOS (the binary lives inside `Electron.app`), which had made
-  # `npm run e2e:screens` unrunnable there since it was written.
-  # `fail-fast: false` so one platform's failure never hides the other's.
+  # Three operating systems, because each breaks assumptions the others share.
+  # Windows is the maintainer's platform and carries its own code paths (shell
+  # selection in terminal-manager.ts, PATHEXT and .cmd lookup in cli-path.ts /
+  # cli-locator.ts, taskkill tree teardown). macOS's `os.tmpdir()` is a symlink
+  # (`/var/folders/…` → `/private/var/…`), which catches code that canonicalises
+  # paths. Ubuntu is what the integration job runs on.
+  # `fail-fast: false` so one platform's failure never hides another's.
   test:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
@@ -38,6 +36,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run compile
+      - run: npm run typecheck
+      - run: npm run lint
       - run: npm test
       # The VSIX is platform-independent, so building it twice buys nothing.
       - run: npm run package

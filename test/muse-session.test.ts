@@ -42,7 +42,7 @@ function setup() {
     onProtocolError: (fn: typeof protocolError) => { protocolError = fn; }, onServerRequest: vi.fn(),
     initialize: vi.fn(async () => ({ connection, initializeResult: { serverInfo: { name: "muse", version: "1.3.0" } } })),
     close: vi.fn(async () => exited.promise) };
-  const client = { notify: vi.fn(async () => {}), request: vi.fn() };
+  const client = { notify: vi.fn(async (..._args: any[]) => {}), request: vi.fn((..._args: any[]): unknown => undefined) };
   const logs: string[] = [], fatal = vi.fn(), spawn = vi.fn((_options: { command: string; args: string[] }) => handshake);
   const session = new MuseSession(client as any, message => logs.push(message), fatal, spawn as any);
   const event = (method: string, params: any = {}) => notify({ method, params: { sessionId: "session", ...params } });
@@ -120,11 +120,11 @@ describe("Muse reasoning effort", () => {
   it("carries the advertised menu and accepted effort through the ACP host", async () => {
     const s = await ready();
     const host = new AcpClient({ cliPath: "/unused", cwd: "/workspace", backend: new MuseBackend(), log: () => {} });
-    vi.spyOn(host as any, "request").mockImplementation(async (method: string, params: any) => {
+    vi.spyOn(host as any, "request").mockImplementation((async (method: string, params: any) => {
       if (method === "session/new") return s.result;
       if (method === "session/set_config_option") return s.session.setReasoningEffort(params.sessionId, params.value);
       throw new Error(`Unexpected request: ${method}`);
-    });
+    }) as any);
     await host.newSession();
     expect(host.availableModels[0].reasoningEfforts).toEqual(levels);
     expect(host.currentModelSupportsEffort()).toBe(true);

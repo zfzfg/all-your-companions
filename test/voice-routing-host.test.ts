@@ -16,7 +16,6 @@ vi.mock("../src/voice-streamer", async () => {
 });
 import { GrokSidebar } from "../src/sidebar";
 import { Session } from "../src/session";
-import { RemoteClientState } from "../src/remote-client-state";
 import { DEFAULT_SEND_PHRASE } from "../src/voice";
 
 function host(provider: "grok" | "codex" | "claude" = "codex") {
@@ -25,10 +24,8 @@ function host(provider: "grok" | "codex" | "claude" = "codex") {
   s.sessionCwd = (session: Session) => session.cwd;
   s.workspaceRoot = () => "/repo";
   s.defaultProviderForProject = () => "grok";
-  s.remoteClients = new RemoteClientState<Session>("/repo");
-  s.remoteClients.ready("phone"); s.remoteClients.setActive("phone", s.focused);
-  s.remoteVoice = new Map(); s.lastVoiceConfiguredByCwd = new Map(); s.lastPostedVoiceConfigured = new Map();
-  s.postLocal = vi.fn(); s.sendRemoteClient = vi.fn();
+  s.lastVoiceConfiguredByCwd = new Map(); s.lastPostedVoiceConfigured = new Map();
+  s.postLocal = vi.fn();
   s.voiceSetting = vi.fn((_cwd: string, _key: string, fallback: any) => fallback);
   s.resolveSttApiKey = vi.fn((_cwd: string, backend: string) => backend + "-key");
   s.host = { appendLine: vi.fn(), showErrorMessage: vi.fn(), showWarningMessage: vi.fn() };
@@ -40,24 +37,13 @@ beforeEach(() => { mock.streams.length = 0; mock.startGate = mock.stopGate = und
 afterEach(() => { vi.restoreAllMocks(); });
 
 describe("backend-aware host readiness", () => {
-  it.each(["grok", "codex", "claude"] as const)("OpenAI-only %s is configured, including its remote destination", provider => {
+  it.each(["grok", "codex", "claude"] as const)("OpenAI-only %s is configured", provider => {
     const s = host(provider); s.resolveSttApiKey = (_cwd: string, backend: string) => backend === "openai" ? "key" : undefined;
     s.postVoiceConfigured();
     const message = s.postLocal.mock.calls[0][0];
     expect(message).toMatchObject({ type: "voiceConfigured", value: true, backendState: { provider, backend: "openai", hasXai: false, hasOpenAi: true } });
     expect(message.backendState.backends).toEqual({ grok: "openai", codex: "openai", claude: "openai", gemini: "openai", muse: "openai" });
-    expect(s.sendRemoteClient).toHaveBeenCalledWith("phone", message, "/repo");
     expect(JSON.stringify(message)).not.toContain("openai-key");
-  });
-
-  it("resolves each destination's provider and project instead of the desk provider", () => {
-    const s = host("codex");
-    const remote = new Session(); remote.provider = "claude"; remote.cwd = "/other";
-    s.remoteClients.setActive("phone", remote);
-    s.postVoiceConfigured();
-    expect(s.postLocal.mock.calls[0][0].backendState.backend).toBe("openai");
-    expect(s.sendRemoteClient.mock.calls[0]).toEqual(["phone", expect.objectContaining({ backendState: expect.objectContaining({ provider: "claude", backend: "xai" }) }), "/other"]);
-    expect(s.resolveSttApiKey).toHaveBeenCalledWith("/other", "openai");
   });
 
   it("refreshes a provider change even when the boolean and project are unchanged", () => {

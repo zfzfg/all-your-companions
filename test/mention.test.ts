@@ -47,13 +47,13 @@ describe("mention attachment workspace boundary", () => {
     expect(isMentionPathInsideWorkspace(root, "/outside/secret.png", "linux")).toBe(false);
   });
 
-  it("requires remote picks to match the host catalog while preserving the local fallback", () => {
-    expect(resolveMentionAttachmentPath("remote", "/work/repo", "docs/a.md", undefined, undefined, "linux"))
-      .toBeUndefined();
+  it("prefers the host catalog, then an open tab, then the workspace fallback", () => {
     expect(resolveMentionAttachmentPath(
-      "remote", "/work/repo", "docs/a.md", "/work/repo/docs/a.md", undefined, "linux",
+      "/work/repo", "docs/a.md", "/work/repo/docs/a.md", "/work/repo/other.md", "linux",
     )).toBe("/work/repo/docs/a.md");
-    expect(resolveMentionAttachmentPath("local", "/work/repo", "docs/a.md", undefined, undefined, "linux"))
+    expect(resolveMentionAttachmentPath("/work/repo", "docs/a.md", undefined, "/work/repo/open.md", "linux"))
+      .toBe("/work/repo/open.md");
+    expect(resolveMentionAttachmentPath("/work/repo", "docs/a.md", undefined, undefined, "linux"))
       .toBe("/work/repo/docs/a.md");
   });
 });

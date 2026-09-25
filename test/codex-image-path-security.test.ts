@@ -4,7 +4,6 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { GrokSidebar } from "../src/sidebar";
-import { RemoteClientState } from "../src/remote-client-state";
 import { Session } from "../src/session";
 import type { HostMsg } from "../src/protocol";
 
@@ -16,7 +15,7 @@ const adapterPath = path.join(
 const validSessionId = "0198f0d1-2b3c-7d4e-8f50-123456789abc";
 const validToolCallId = "exec-550e8400-e29b-41d4-a716-446655440000";
 
-function makeSidebar(cwd: string, readFile: ReturnType<typeof vi.fn>): any {
+function makeSidebar(cwd: string, readFile: any): any {
   const sidebar = Object.create(GrokSidebar.prototype) as any;
   const memento: Record<string, unknown> = {};
   sidebar.providerConnectionState = { grok: false, codex: true };
@@ -24,7 +23,6 @@ function makeSidebar(cwd: string, readFile: ReturnType<typeof vi.fn>): any {
   sidebar.connectedProviders = vi.fn(() => ["codex"]);
   sidebar.providerNeedsLogin = {};
   sidebar.providerCliVersions = {};
-  sidebar.remoteClients = new RemoteClientState<Session>(cwd);
   sidebar.pool = new Set<Session>();
   sidebar.focused = new Session();
   sidebar.focused.provider = "codex";
@@ -75,7 +73,6 @@ function makeSidebar(cwd: string, readFile: ReturnType<typeof vi.fn>): any {
   sidebar.reapPool = vi.fn();
   sidebar.maybeFlushQueuedSends = vi.fn(async () => {});
   sidebar.accumulateUsage = vi.fn(async () => {});
-  sidebar.sendRemoteSession = vi.fn();
   sidebar.mirrorToProjectsRail = vi.fn();
   return sidebar;
 }
@@ -126,11 +123,11 @@ describe("Codex generated-image adapter ids are hostile", () => {
   }) {
     process.env.FAKE_CODEX_SESSION_ID = options.sessionId;
     process.env.FAKE_CODEX_IMAGE_TOOL_CALL_ID = options.toolCallId;
-    const readFile = vi.fn(async () => Buffer.from("secret bytes"));
+    const readFile = vi.fn(async (..._args: any[]) => Buffer.from("secret bytes"));
     const sidebar = makeSidebar(cwd, readFile);
     if (options.refuseResolvedPath) sidebar.isServableFromDisk = vi.fn(() => false);
     const frames: HostMsg[] = [];
-    sidebar.sendRemoteSession = vi.fn((_session: Session, message: HostMsg) => frames.push(message));
+    sidebar.postTap = (message: HostMsg) => { frames.push(message); };
 
     const client = await sidebar.startSession(undefined, sidebar.focused);
     live.push(client);

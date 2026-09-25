@@ -287,7 +287,6 @@
     const activeIndex = Number.isInteger(src.activeIndex) ? src.activeIndex : -1;
     const tabFullWidths = Array.isArray(src.tabFullWidths) ? src.tabFullWidths : [];
     const tabIconWidths = Array.isArray(src.tabIconWidths) ? src.tabIconWidths : [];
-    const chipWidth = Math.max(0, Number(src.chipWidth) || STRIP_CHIP_WIDTH);
     const slack = Math.max(0, Number(src.slack) || 0);
     const all = stripRange(tabCount);
     const fullModes = all.map(() => "full");

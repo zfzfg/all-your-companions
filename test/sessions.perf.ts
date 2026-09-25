@@ -135,7 +135,6 @@ describe("session history performance (simulation, run via npm run test:perf)", 
     expect(paged.stats).toBe(N);
 
     const reduction = (1 - paged.reads / full.reads) * 100;
-    // eslint-disable-next-line no-console
     console.log(
       `\n[perf] first open @ N=${N}\n` +
         `  full scan : ${full.stats} stats + ${full.reads} reads  -> ~${projectedMs(full).toFixed(0)}ms (modeled)\n` +
@@ -165,7 +164,6 @@ describe("session history performance (simulation, run via npm run test:perf)", 
     expect(afterWarm.reads).toBe(PAGE); // first open read the page
     expect(secondOpenReads).toBe(0); // second open: all cache hits, no reads
 
-    // eslint-disable-next-line no-console
     console.log(
       `\n[perf] steady state @ N=${N}\n` +
         `  first open  : ${PAGE} reads (cache warm)\n` +
@@ -195,7 +193,6 @@ describe("session history performance (simulation, run via npm run test:perf)", 
     expect(afterFirst).toBe(N); // first search warms the whole catalog once
     expect(secondReads).toBe(0); // subsequent searches reuse the cache
 
-    // eslint-disable-next-line no-console
     console.log(
       `\n[perf] search @ N=${N}\n` +
         `  first query  : ${afterFirst} reads (warms full catalog for complete matching)\n` +
@@ -218,7 +215,6 @@ describe("session history performance (simulation, run via npm run test:perf)", 
     for (let i = 0; i < reps; i++) openFirstPage(pagedFs, overrides);
     const pagedMs = (performance.now() - t1) / reps;
 
-    // eslint-disable-next-line no-console
     console.log(
       `\n[perf] in-memory wall-clock @ N=${N} (avg of ${reps}, no disk latency — parse cost only)\n` +
         `  full scan : ${fullMs.toFixed(2)}ms/open\n` +

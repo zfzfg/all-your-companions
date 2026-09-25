@@ -5,12 +5,11 @@
  * the model picker showed a bare "Codex default" row, and history came back
  * empty. Both are auth-shaped failures (-32000) that the background probes
  * caught and logged. These drive the two probes through their real entry points
- * — a gear re-check and a remote history request — and assert the account state
+ * — a gear re-check and a history request — and assert the account state
  * changes rather than the surfaces degrading quietly.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GrokSidebar } from "../src/sidebar";
-import { RemoteClientState } from "../src/remote-client-state";
 import { Session } from "../src/session";
 import { projectProviderKey } from "../src/provider-ui";
 import { warmCodexModelCache } from "../src/codex-model-cache";
@@ -41,7 +40,6 @@ function makeSidebar(cwd = "/repo"): any {
   sidebar.locateProvider = vi.fn(() => "codex");
   sidebar.providerNeedsLogin = {};
   sidebar.loginReprobeTimers = new Map();
-  sidebar.remoteClients = new RemoteClientState<Session>(cwd);
   sidebar.pool = new Set<Session>();
   sidebar.focused = new Session();
   sidebar.focused.provider = "codex";
@@ -58,15 +56,13 @@ function makeSidebar(cwd = "/repo"): any {
   };
   sidebar.postProviderState = vi.fn();
   sidebar.postSessionsList = vi.fn();
-  sidebar.sendRemoteClient = vi.fn();
   sidebar.dotForId = vi.fn(() => "none");
   sidebar.sessionCwd = vi.fn((session: Session) => session.cwd || cwd);
   sidebar.setProviderConnected = vi.fn(async () => {});
   sidebar.rememberProjectProvider = vi.fn(async () => {});
   sidebar.startSession = vi.fn(async () => {});
   // A successful re-check now announces itself, so the re-check path reaches
-  // emit. The real one builds a remote snapshot and wants state this partial
-  // stub does not carry.
+  // emit, which wants state this partial stub does not carry.
   sidebar.emit = vi.fn();
   sidebar.postSessionModels = vi.fn();
   return sidebar;
@@ -91,7 +87,7 @@ describe("an agent that will not authenticate", () => {
   it("a real re-check classifies Codex's uncoded sign-in-required warm-up failure", async () => {
     const sidebar = makeSidebar();
 
-    await sidebar.onMessage({ type: "recheckConnection", provider: "codex" }, "local");
+    await sidebar.onMessage({ type: "recheckConnection", provider: "codex" });
 
     expect(codexState(sidebar)).toMatchObject({ id: "codex", connected: true, needsLogin: true });
     // The account stays connected: hiding the agent would take every
@@ -106,7 +102,7 @@ describe("an agent that will not authenticate", () => {
     sidebar.codexSessionCacheAt.set(projectProviderKey("/repo"), Date.now());
     vi.mocked(warmCodexModelCache).mockResolvedValueOnce(undefined as never);
 
-    await sidebar.onMessage({ type: "recheckConnection", provider: "codex" }, "local");
+    await sidebar.onMessage({ type: "recheckConnection", provider: "codex" });
 
     expect(warmCodexModelCache).toHaveBeenCalled();
     expect(codexState(sidebar).needsLogin).toBeUndefined();
@@ -121,7 +117,7 @@ describe("an agent that will not authenticate", () => {
     // probe.error is set in beforeEach, so the warm-up fails and Codex is still
     // unusable afterwards. Announcing success here would be a lie, and the
     // confirmation is the one place it would be believed.
-    await sidebar.onMessage({ type: "recheckConnection", provider: "codex" }, "local");
+    await sidebar.onMessage({ type: "recheckConnection", provider: "codex" });
 
     expect(codexState(sidebar).needsLogin).toBe(true);
     expect(onboardingStates(sidebar)).not.toContain("provider-connected");
@@ -131,7 +127,7 @@ describe("an agent that will not authenticate", () => {
     const sidebar = makeSidebar();
     probe.error = new Error("unauthorized model for project");
 
-    await sidebar.onMessage({ type: "recheckConnection", provider: "codex" }, "local");
+    await sidebar.onMessage({ type: "recheckConnection", provider: "codex" });
 
     expect(codexState(sidebar).needsLogin).toBeUndefined();
   });
@@ -144,7 +140,7 @@ describe("an agent that will not authenticate", () => {
         .mockResolvedValueOnce(false)
         .mockResolvedValueOnce(true);
 
-      await sidebar.onMessage({ type: "runGrokLogin", provider: "grok" }, "local");
+      await sidebar.onMessage({ type: "runGrokLogin", provider: "grok" });
       await Promise.resolve();
       expect(sidebar.reprobeProviderCredentials).toHaveBeenCalledTimes(1);
       expect(sidebar.reprobeProviderCredentials).toHaveBeenLastCalledWith("grok");
@@ -157,18 +153,17 @@ describe("an agent that will not authenticate", () => {
     }
   });
 
-  it("a real remote history request classifies the uncoded Codex failure, not an empty list", async () => {
+  it("a real history request classifies the uncoded Codex failure, not an empty list", async () => {
     const sidebar = makeSidebar();
-    sidebar.remoteTargetableCwd = vi.fn(() => true);
     sidebar.authorizedSessionCwds = vi.fn(() => ["/repo"]);
     sidebar.isAuthorizedCwd = vi.fn(() => true);
-    sidebar.remoteClients.ready("phone");
-    const session = new Session();
-    session.provider = "codex";
-    session.cwd = "/repo";
-    sidebar.remoteClients.setActive("phone", session);
+    // The real list builder, so the history probe runs through its entry point.
+    delete sidebar.postSessionsList;
+    sidebar.post = vi.fn();
+    sidebar.worktreeCache = [];
+    sidebar.buildGrokSessionsList = vi.fn(() => ({ type: "sessions", entries: [], dots: {}, offset: 0, total: 0, hasMore: false, nextOffset: 0, query: "" }));
 
-    sidebar.installTestHooks().fromRemote({ type: "listSessions", offset: 0, query: "" }, "phone");
+    await sidebar.installTestHooks().fromLocal({ type: "listSessions", offset: 0, query: "" });
     await sidebar.codexSessionRefresh.get(projectProviderKey("/repo"));
 
     expect(codexState(sidebar)).toMatchObject({ needsLogin: true });
@@ -179,19 +174,18 @@ describe("an agent that will not authenticate", () => {
 
   it("leaves an account alone when the failure is billing rather than credentials", async () => {
     const sidebar = makeSidebar();
-    sidebar.remoteTargetableCwd = vi.fn(() => true);
     sidebar.authorizedSessionCwds = vi.fn(() => ["/repo"]);
     sidebar.isAuthorizedCwd = vi.fn(() => true);
-    sidebar.remoteClients.ready("phone");
-    const session = new Session();
-    session.provider = "codex";
-    session.cwd = "/repo";
-    sidebar.remoteClients.setActive("phone", session);
+    // The real list builder, so the history probe runs through its entry point.
+    delete sidebar.postSessionsList;
+    sidebar.post = vi.fn();
+    sidebar.worktreeCache = [];
+    sidebar.buildGrokSessionsList = vi.fn(() => ({ type: "sessions", entries: [], dots: {}, offset: 0, total: 0, hasMore: false, nextOffset: 0, query: "" }));
     sidebar.refreshCodexHistory = vi.fn(async () => {
       throw new Error("Your subscription does not include this model");
     });
 
-    sidebar.installTestHooks().fromRemote({ type: "listSessions", offset: 0, query: "" }, "phone");
+    await sidebar.installTestHooks().fromLocal({ type: "listSessions", offset: 0, query: "" });
     await sidebar.codexSessionRefresh.get(projectProviderKey("/repo"));
 
     // A login screen cannot fix an entitlement problem (#58), so the account
@@ -202,40 +196,17 @@ describe("an agent that will not authenticate", () => {
   it("does not mark Codex needs-login for an unauthorized-model history failure", async () => {
     const sidebar = makeSidebar();
     probe.error = new Error("unauthorized model for project");
-    sidebar.remoteTargetableCwd = vi.fn(() => true);
     sidebar.authorizedSessionCwds = vi.fn(() => ["/repo"]);
     sidebar.isAuthorizedCwd = vi.fn(() => true);
-    sidebar.remoteClients.ready("phone");
-    const session = new Session();
-    session.provider = "codex";
-    session.cwd = "/repo";
-    sidebar.remoteClients.setActive("phone", session);
+    // The real list builder, so the history probe runs through its entry point.
+    delete sidebar.postSessionsList;
+    sidebar.post = vi.fn();
+    sidebar.worktreeCache = [];
+    sidebar.buildGrokSessionsList = vi.fn(() => ({ type: "sessions", entries: [], dots: {}, offset: 0, total: 0, hasMore: false, nextOffset: 0, query: "" }));
 
-    sidebar.installTestHooks().fromRemote({ type: "listSessions", offset: 0, query: "" }, "phone");
+    await sidebar.installTestHooks().fromLocal({ type: "listSessions", offset: 0, query: "" });
     await sidebar.codexSessionRefresh.get(projectProviderKey("/repo"));
 
     expect(codexState(sidebar).needsLogin).toBeUndefined();
-  });
-});
-
-describe("remote account boundary", () => {
-  it("drops durable re-check but allows retrying an already-connected provider session", async () => {
-    const sidebar = makeSidebar();
-    sidebar.remoteTargetableCwd = vi.fn(() => true);
-    sidebar.authorizedSessionCwds = vi.fn(() => ["/repo"]);
-    sidebar.isAuthorizedCwd = vi.fn(() => true);
-    sidebar.remoteClients.ready("phone");
-    const session = new Session();
-    session.provider = "codex";
-    session.cwd = "/repo";
-    sidebar.remoteClients.setActive("phone", session);
-
-    sidebar.installTestHooks().fromRemote({ type: "recheckConnection", provider: "codex" }, "phone");
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    expect(sidebar.setProviderConnected).not.toHaveBeenCalled();
-
-    sidebar.installTestHooks().fromRemote({ type: "retryProviderSession", provider: "codex" }, "phone");
-    await vi.waitFor(() => expect(sidebar.startSession).toHaveBeenCalledWith(undefined, session));
-    expect(sidebar.setProviderConnected).not.toHaveBeenCalled();
   });
 });

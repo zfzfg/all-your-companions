@@ -4,17 +4,17 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { bootWebview, click, dispatch } from "./webview-harness";
 
-// The rail is the relay page's surface: `#projects-rail` lives in web/chat.html,
-// never in the extension's getHtml(). So the harness has to add the mount the way
-// the browser client does — and the absence of that element is exactly what keeps
-// VS Code free of it.
+// The in-chat rail is the desktop host's surface: `#projects-rail` is only in
+// getHtml() when the host can switch workspace folders. So the harness has to add
+// the mount itself — and the absence of that element is exactly what keeps VS
+// Code (which has its own projects-rail view) free of it.
 const withRail = (window: any) => {
   const el = window.document.createElement("aside");
   el.id = "projects-rail";
   el.hidden = true;
   window.document.body.appendChild(el);
-  // The relay page's search box lives in the same shell, and the rail's filter
-  // reads it directly — so the mount is only faithful with it.
+  // The rail's filter reads a search box from the same shell, so the mount is
+  // only faithful with it.
   const search = window.document.createElement("input");
   search.id = "rail-search";
   window.document.body.appendChild(search);
@@ -45,7 +45,7 @@ const row = (id: string, cwd: string, name: string, updatedAt = 1) =>
   ({ id, cwd, displayName: name, rawSummary: "", updatedAt, createdAt: 1, numMessages: 2 });
 
 function boot(selectedCwd = "/work/alpha") {
-  const h = bootWebview({ remote: true, beforeScripts: withRail });
+  const h = bootWebview({ beforeScripts: withRail });
   dispatch(h.window, { type: "repos", entries: repos, selectedCwd, activeCwd: selectedCwd });
   return h;
 }
@@ -102,7 +102,7 @@ describe("projects rail", () => {
     // must not reappear from either the old preview or the selected snapshot.
     dispatch(window, { type: "repos", entries: repos, selectedCwd: "/work/beta", activeCwd: "/work/alpha" });
     expect(doc.querySelectorAll('[data-session-id="empty"]')).toHaveLength(0);
-    expect(doc.getElementById("session-head-title")?.textContent).toBe(kept.displayName);
+    expect(doc.getElementById("session-name-label")?.textContent).toBe(kept.displayName);
   });
 
   it("keeps the pending rail target while the empty session being left is removed", () => {
@@ -140,7 +140,7 @@ describe("projects rail", () => {
   });
 
   it("stays hidden until the host proves it speaks `repos`", () => {
-    const { doc, posted } = bootWebview({ remote: true, beforeScripts: withRail });
+    const { doc, posted } = bootWebview({ beforeScripts: withRail });
     expect(rail(doc).hidden).toBe(true);
     // No catalog means no probe: an older host must not be sent a dead frame
     // before it has even shown that it knows about repos.
@@ -234,7 +234,7 @@ describe("projects rail", () => {
       { cwd: "/work/alpha", label: "alpha", available: true, pinned: false, updatedAt: 100 },
       { cwd: "/work/beta", label: "beta", available: true, pinned: false, updatedAt: 90 },
     ];
-    const h = bootWebview({ remote: true, beforeScripts: withRail });
+    const h = bootWebview({ beforeScripts: withRail });
     dispatch(h.window, { type: "repos", entries: catalog, selectedCwd: "/work/alpha", activeCwd: "/work/alpha" });
     const before = repoNames(h.doc);
     expect(before).toEqual(["alpha", "beta", "gamma"]);
@@ -349,7 +349,7 @@ describe("projects rail", () => {
       // Freshly cleared: nothing in it, and the newest directory stamp in the rail.
       { cwd: "/work/acme", label: "acme", available: true, pinned: false, updatedAt: 999 },
     ];
-    const h = bootWebview({ remote: true, beforeScripts: withRail });
+    const h = bootWebview({ beforeScripts: withRail });
     dispatch(h.window, { type: "repos", entries: catalog, selectedCwd: "/work/zed", activeCwd: "/work/zed" });
     dispatch(h.window, sessionsFrame([]));
     dispatch(h.window, { type: "repoSessions", cwd: "/work/acme", entries: [], dots: {}, total: 0 });
@@ -438,7 +438,6 @@ describe("projects rail", () => {
 
   it("reports the timed-out project truthfully and offers a retry", async () => {
     const h = bootWebview({
-      remote: true,
       beforeScripts: (w: any) => { withRail(w); w.__grokRailProbeTimeoutMs = 5; },
     });
     dispatch(h.window, { type: "repos", entries: repos, selectedCwd: "/work/alpha", activeCwd: "/work/alpha" });
@@ -453,40 +452,8 @@ describe("projects rail", () => {
     expect(sessionNames(h.doc, repoNames(h.doc).indexOf("alpha"))).toEqual(["alpha one"]);
   });
 
-  it("paints the rail before any catalog on a cloud machine, and not on a laptop", () => {
-    // The rail waits for `repos` because an extension older than v2.0.5 never
-    // sends one. A cloud machine cannot be that: the relay provisions it and
-    // installs the host. Without this the old single-column layout — the one
-    // this product had before it had a rail — was the whole screen for as long
-    // as a sleeping machine took to wake (owner, 2026-08-31; measured at 4.2s
-    // against a host that answered in four seconds).
-    const cloud = bootWebview({
-      remote: true,
-      beforeScripts: (w: any) => { withRail(w); w.grokCloudHost = true; },
-    });
-    expect(cloud.doc.body.classList.contains("has-rail")).toBe(true);
-    expect((cloud.doc.getElementById("projects-rail") as HTMLElement).hidden).toBe(false);
-
-    // A linked laptop still waits: its host may predate the frame.
-    const laptop = bootWebview({ remote: true, beforeScripts: (w: any) => withRail(w) });
-    expect(laptop.doc.body.classList.contains("has-rail")).toBe(false);
-    expect((laptop.doc.getElementById("projects-rail") as HTMLElement).hidden).toBe(true);
-  });
-
-  it("fills the cloud rail from the catalog when it finally arrives", () => {
-    const h = bootWebview({
-      remote: true,
-      beforeScripts: (w: any) => { withRail(w); w.grokCloudHost = true; },
-    });
-    dispatch(h.window, { type: "repos", entries: repos, selectedCwd: "/work/alpha", activeCwd: "/work/alpha" });
-    dispatch(h.window, sessionsFrame([row("a1", "/work/alpha", "alpha one", 9)]));
-    expect(repoNames(h.doc)).toContain("alpha");
-    expect(sessionNames(h.doc, repoNames(h.doc).indexOf("alpha"))).toEqual(["alpha one"]);
-  });
-
   it("re-probes after a reconnect and clears the old request state", async () => {
     const h = bootWebview({
-      remote: true,
       beforeScripts: (w: any) => { withRail(w); w.__grokRailProbeTimeoutMs = 5; },
     });
     dispatch(h.window, { type: "repos", entries: repos, selectedCwd: "/work/alpha", activeCwd: "/work/alpha" });
@@ -495,7 +462,7 @@ describe("projects rail", () => {
     expect([...h.doc.querySelectorAll(".rail-note")].map((e) => e.textContent))
       .toContain("Couldn't load these conversations. Retry");
 
-    // A reconnect: every remote snapshot opens with initialState.
+    // A reconnect: every fresh host snapshot opens with initialState.
     h.posted.length = 0;
     dispatch(h.window, {
       type: "initialState", effort: "", cwd: "/work/alpha", useCtrlEnter: false, extVersion: "3.19.9",
@@ -512,7 +479,6 @@ describe("projects rail", () => {
 
   it("never shows that hint to a host that does answer", async () => {
     const h = bootWebview({
-      remote: true,
       beforeScripts: (w: any) => { withRail(w); w.__grokRailProbeTimeoutMs = 5; },
     });
     dispatch(h.window, { type: "repos", entries: repos, selectedCwd: "/work/alpha", activeCwd: "/work/alpha" });
@@ -530,7 +496,6 @@ describe("projects rail", () => {
   it("does not mark a transport-refused preview in flight and retries only on request", () => {
     let accept = false;
     const h = bootWebview({
-      remote: true,
       beforeScripts: withRail,
       postMessage: (message) => message.type === "listRepoSessions" ? accept : undefined,
     });
@@ -718,7 +683,7 @@ describe("projects rail", () => {
       { cwd: "/work/Foo", label: "Foo", available: true, pinned: false, updatedAt: 30 },
       { cwd: "/work/foo", label: "foo", available: true, pinned: false, updatedAt: 20 },
     ];
-    const h = bootWebview({ remote: true, beforeScripts: withRail });
+    const h = bootWebview({ beforeScripts: withRail });
     dispatch(h.window, { type: "repos", entries: cased, selectedCwd: "/work/Foo", activeCwd: "/work/Foo" });
     // Newer than the sibling's stamp: the rail orders projects by their newest
     // CONVERSATION, and a fixture whose session predates the sibling's catalog
@@ -738,7 +703,7 @@ describe("projects rail", () => {
       { cwd: "/srv/Foo\\bar", label: "Foo-bar", available: true, pinned: false, updatedAt: 30 },
       { cwd: "/srv/foo\\bar", label: "foo-bar", available: true, pinned: false, updatedAt: 20 },
     ];
-    const h = bootWebview({ remote: true, beforeScripts: withRail });
+    const h = bootWebview({ beforeScripts: withRail });
     dispatch(h.window, { type: "repos", entries: odd, selectedCwd: "/srv/Foo\\bar", activeCwd: "/srv/Foo\\bar" });
     dispatch(h.window, sessionsFrame([row("o1", "/srv/Foo\\bar", "upper only", 30)]));
 
@@ -750,7 +715,7 @@ describe("projects rail", () => {
     const cased = [
       { cwd: "C:\\Work\\Alpha\\", label: "Alpha", available: true, pinned: false, updatedAt: 30 },
     ];
-    const h = bootWebview({ remote: true, beforeScripts: withRail });
+    const h = bootWebview({ beforeScripts: withRail });
     // The host's own frames vary drive-letter case and slash direction freely.
     dispatch(h.window, { type: "repos", entries: cased, selectedCwd: "c:/work/alpha", activeCwd: "c:/work/alpha" });
     dispatch(h.window, sessionsFrame([row("w1", "C:\\Work\\Alpha", "windows row", 9)]));
@@ -1150,7 +1115,7 @@ describe("projects rail", () => {
         repo("c", ago(230)),
         repo("d", ago(240)),
       ];
-      const h = bootWebview({ remote: true, beforeScripts: withRail });
+      const h = bootWebview({ beforeScripts: withRail });
       dispatch(h.window, { type: "repos", entries: catalog, selectedCwd: "/work/home", activeCwd: "/work/home" });
       // Every project's rows, because the age rule only ever runs on rows it
       // actually has — see the guess test above.
@@ -1189,7 +1154,7 @@ describe("projects rail", () => {
         { cwd: "/work/third", label: "third", available: true, pinned: false, updatedAt: ago(402) },
         { cwd: "/work/fourth", label: "fourth", available: true, pinned: false, updatedAt: ago(403) },
       ];
-      const h = bootWebview({ remote: true, beforeScripts: withRail });
+      const h = bootWebview({ beforeScripts: withRail });
       dispatch(h.window, { type: "repos", entries: catalog, selectedCwd: "/work/home", activeCwd: "/work/home" });
 
       // No `repoSessions` ever answers — the whole point. Not even the projects
@@ -1321,7 +1286,7 @@ describe("projects rail", () => {
     });
 
     it("offers Set color, opens a swatch picker, and posts setRepoColor", () => {
-      const h = bootWebview({ remote: true, beforeScripts: withRail });
+      const h = bootWebview({ beforeScripts: withRail });
       dispatch(h.window, {
         type: "repos",
         entries: withColors(),
@@ -1354,7 +1319,7 @@ describe("projects rail", () => {
     });
 
     it("keeps a confirming color frame and yields to a contradicting one", () => {
-      const h = bootWebview({ remote: true, beforeScripts: withRail });
+      const h = bootWebview({ beforeScripts: withRail });
       dispatch(h.window, {
         type: "repos",
         entries: withColors(),
@@ -1393,7 +1358,7 @@ describe("projects rail", () => {
     });
 
     it("tints the folder stroke when the catalog carries a colour", () => {
-      const h = bootWebview({ remote: true, beforeScripts: withRail });
+      const h = bootWebview({ beforeScripts: withRail });
       dispatch(h.window, {
         type: "repos",
         entries: withColors(),
@@ -1482,7 +1447,7 @@ describe("projects rail", () => {
         { cwd: "/work/home", label: "home", available: true, pinned: false, updatedAt: Date.now(), archived: false, archivedAt: 0 },
         { cwd: "/work/old", label: "old", available: true, pinned: false, updatedAt: Date.now(), archived: true, archivedAt: Date.now() - 1000 },
       ];
-      const h = bootWebview({ remote: true, beforeScripts: withRail });
+      const h = bootWebview({ beforeScripts: withRail });
       dispatch(h.window, { type: "repos", entries: catalog, selectedCwd: "/work/home", activeCwd: "/work/home" });
       dispatch(h.window, sessionsFrame([row("h1", "/work/home", "home one", Date.now())]));
       dispatch(h.window, {
@@ -1503,7 +1468,7 @@ describe("projects rail", () => {
         { cwd: "/work/home", label: "home", available: true, pinned: false, updatedAt: Date.now(), archived: false, archivedAt: 0 },
         { cwd: "/work/old", label: "old", available: true, pinned: false, updatedAt: Date.now(), archived: true, archivedAt: Date.now() - 1000 },
       ];
-      const h = bootWebview({ remote: true, beforeScripts: withRail });
+      const h = bootWebview({ beforeScripts: withRail });
       dispatch(h.window, { type: "repos", entries: catalog, selectedCwd: "/work/home", activeCwd: "/work/home" });
       dispatch(h.window, sessionsFrame([row("h1", "/work/home", "home one", Date.now())]));
       dispatch(h.window, {
@@ -1547,7 +1512,7 @@ describe("projects rail", () => {
         { cwd: "/work/stale", label: "stale", available: true, pinned: false, updatedAt: t(80) },
         { cwd: "/work/ancient", label: "ancient", available: true, pinned: false, updatedAt: t(400) },
       ];
-      const h = bootWebview({ remote: true, beforeScripts: withRail });
+      const h = bootWebview({ beforeScripts: withRail });
       dispatch(h.window, { type: "repos", entries: catalog, selectedCwd: "/work/home", activeCwd: "/work/home" });
       dispatch(h.window, sessionsFrame([row("h1", "/work/home", "home one", t(0))]));
       for (const r of catalog.slice(1)) {
@@ -1919,7 +1884,6 @@ describe("continue-in-a-new-chat lives in the session ⋯ menu", () => {
   // NOT proof that identities agree; only an identity frame is. Fail closed.
   it("keeps them withheld after the watchdog gives up, until an identity frame lands", async () => {
     const { doc, window } = bootWebview({
-      remote: true,
       beforeScripts: (w: any) => {
         withRail(w);
         w.__grokRailTransitionTimeoutMs = 5;
@@ -1987,7 +1951,6 @@ describe("continue-in-a-new-chat lives in the session ⋯ menu", () => {
   // the watchdog would reopen the actions with the renderer still showing B.
   it("a non-matching identity frame mid-flight does not disarm the latch", async () => {
     const { doc, window } = bootWebview({
-      remote: true,
       beforeScripts: (w: any) => {
         withRail(w);
         w.__grokRailTransitionTimeoutMs = 5;
@@ -2045,7 +2008,6 @@ describe("continue-in-a-new-chat lives in the session ⋯ menu", () => {
   // abandoned is what made that stale B frame look authoritative.
   it("a superseded confirmation arriving after the watchdog does not settle identity", async () => {
     const { doc, window } = bootWebview({
-      remote: true,
       beforeScripts: (w: any) => {
         withRail(w);
         w.__grokRailTransitionTimeoutMs = 5;
@@ -2207,24 +2169,24 @@ describe("rail transition (optimistic highlight)", () => {
     });
     dispatch(window, { type: "sessionName", sessionId: "a1", name: "alpha one", cwd: "/work/alpha" });
     dispatch(window, { type: "userMessage", text: "old transcript" });
-    expect(doc.getElementById("session-head-title")!.textContent).toBe("alpha one");
+    expect(doc.getElementById("session-name-label")!.textContent).toBe("alpha one");
     expect(doc.querySelector(".msg.user")?.textContent).toContain("old transcript");
 
     const section = doc.querySelectorAll(".rail-repo")[repoNames(doc).indexOf("alpha")];
     click(window, section.querySelectorAll(".rail-session")[1] as HTMLElement);
 
-    expect(doc.getElementById("session-head-title")!.textContent).toBe("alpha two");
+    expect(doc.getElementById("session-name-label")!.textContent).toBe("alpha two");
     expect((doc.querySelector(".msg.user") as HTMLElement).hidden).toBe(true);
     expect(welcomeStatus(doc)).toBe("Loading conversation");
 
     dispatch(window, { type: "sessionName", sessionId: "a2", name: "alpha two", cwd: "/work/alpha" });
-    expect(doc.getElementById("session-head-title")!.textContent).toBe("alpha two");
+    expect(doc.getElementById("session-name-label")!.textContent).toBe("alpha two");
 
     dispatch(window, { type: "clearMessages" });
     dispatch(window, { type: "historyReplay", active: true });
     dispatch(window, { type: "userMessage", text: "new transcript" });
     dispatch(window, { type: "historyReplay", active: false });
-    expect(doc.getElementById("session-head-title")!.textContent).toBe("alpha two");
+    expect(doc.getElementById("session-name-label")!.textContent).toBe("alpha two");
     expect(doc.querySelector(".msg.user")?.textContent).toContain("new transcript");
   });
 
@@ -2241,10 +2203,10 @@ describe("rail transition (optimistic highlight)", () => {
 
     const section = doc.querySelectorAll(".rail-repo")[repoNames(doc).indexOf("alpha")];
     click(window, section.querySelectorAll(".rail-session")[1] as HTMLElement);
-    expect(doc.getElementById("session-head-title")!.textContent).toBe("alpha two");
+    expect(doc.getElementById("session-name-label")!.textContent).toBe("alpha two");
 
     dispatch(window, { type: "error", text: "not found", resumeFailed: { id: "a2" } });
-    expect(doc.getElementById("session-head-title")!.textContent).toBe("alpha one");
+    expect(doc.getElementById("session-name-label")!.textContent).toBe("alpha one");
     expect(activeName(doc, "alpha")).toBe("alpha one");
   });
 
@@ -2264,14 +2226,14 @@ describe("rail transition (optimistic highlight)", () => {
     click(window, doc.querySelector(".confirm-primary") as HTMLElement);
     await Promise.resolve();
 
-    expect(doc.getElementById("session-head-title")!.textContent).toBe("Renamed on rail");
+    expect(doc.getElementById("session-name-label")!.textContent).toBe("Renamed on rail");
     expect(sessionNames(doc, repoNames(doc).indexOf("alpha"))[0]).toBe("Renamed on rail");
 
     dispatch(window, {
       ...sessionsFrame([row("a1", "/work/alpha", "Catalog title", 9)]),
       activeId: "a1",
     });
-    expect(doc.getElementById("session-head-title")!.textContent).toBe("Catalog title");
+    expect(doc.getElementById("session-name-label")!.textContent).toBe("Catalog title");
     expect(sessionNames(doc, repoNames(doc).indexOf("alpha"))[0]).toBe("Catalog title");
   });
 
@@ -2566,26 +2528,6 @@ describe("rail overflow menus toggle", () => {
     expect(plus("offline").disabled).toBe(true);
   });
 
-  it("releases the switch lock when the catalog confirms the selection", () => {
-    // Without this the repo chip and popover stay locked forever on a selection
-    // that opens no conversation.
-    const { doc, window } = boot();
-    const beta = doc.querySelectorAll(".rail-repo")[repoNames(doc).indexOf("beta")];
-    click(window, beta.querySelector(".rail-action-btn") as HTMLElement);
-
-    // The lock is observable through the repo chip, which disables while a
-    // switch is in flight.
-    const chip = () => doc.getElementById("repo-btn") as HTMLButtonElement;
-    expect(chip().disabled).toBe(true);
-
-    // A catalog for some OTHER selection must not unlock a transition in flight.
-    dispatch(window, { type: "repos", entries: repos, selectedCwd: "/work/gamma", activeCwd: "/work/gamma" });
-    expect(chip().disabled).toBe(true);
-
-    dispatch(window, { type: "repos", entries: repos, selectedCwd: "/work/beta", activeCwd: "/work/beta" });
-    expect(chip().disabled).toBe(false);
-  });
-
   it("offers Hide project only where the host can close folders", async () => {
     // Desktop's rail IS the open-folder set, so putting a project away means
     // closing it.
@@ -2602,7 +2544,7 @@ describe("rail overflow menus toggle", () => {
       showThinking: true, expandCommandOutputs: false, steerByDefault: false,
       soundNotifications: false, processingSound: false, readRepliesAloud: false,
       capabilities: {
-        uploadFile: true, remoteVoice: false,
+        uploadFile: true,
         addProjectFolder: true, removeProjectFolder: true,
       },
     });

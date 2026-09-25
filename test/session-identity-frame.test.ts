@@ -8,8 +8,8 @@ import { Session } from "../src/session";
 /**
  * Re-focusing a LIVE conversation must say which agent it belongs to.
  *
- * The symptom was reported from a phone and is worth recording, because the
- * one detail that looks like a contradiction is the thing that identifies it:
+ * The symptom is worth recording, because the one detail that looks like a
+ * contradiction is the thing that identifies it:
  * switching to a live Codex conversation updated the MODEL PICKER (it showed
  * `gpt-5.6-sol`) while everything around it still said Grok — the composer read
  * "Ask Grok", the working indicator read "grokking", and steering was attempted
@@ -18,12 +18,12 @@ import { Session } from "../src/session";
  * That split is exact. `sessionUiSnapshot` carries `modelChanged`, which sets
  * the model id, and the re-focus paths sent it. `session` is the ONLY frame
  * that sets `state.activeProvider`, `state.availableModels` and the composer
- * placeholder (`media/chat.js` case "session"), and neither re-focus path sent
- * it: cold loads reach it through `startSession`, live re-focuses never did.
+ * placeholder (`media/chat.js` case "session"), and the re-focus path did not
+ * send it: cold loads reach it through `startSession`, live re-focuses never did.
  *
  * It is the same omission the `sessionName` comment in `focusSession` already
  * records — a small identity frame missing from a path that replays everything
- * else — so this guards both surfaces at once. The desk had the same hole.
+ * else.
  *
  * A source-shape guard, and honest about it: it proves the call is present and
  * ordered before the transcript replay, not that the frame reaches a client.
@@ -55,11 +55,9 @@ describe("the identity frame on a live re-focus", () => {
    * Behavioural, not source-shape — and the reason this file needed one.
    *
    * `modelsForSession` maps over the model array unconditionally, and a session
-   * can hold a sessionId before its models arrive: a phone JOINING a
-   * conversation the desk already holds is exactly that. So the frame builder
-   * threw, AFTER `focusRemoteSession` had already sent `clearMessages` — the
-   * client was left wiped with an error instead of a transcript, and the frame
-   * sequence CI reported was `repos,clearMessages,error`.
+   * can hold a sessionId before its models arrive. A throwing frame builder
+   * runs AFTER the re-focus has already sent `clearMessages` — the view would
+   * be left wiped with an error instead of a transcript.
    *
    * Ten integration tests caught it and the unit suite did not, because the
    * guards above only assert the shape of the call. This asserts it runs.
@@ -81,21 +79,13 @@ describe("the identity frame on a live re-focus", () => {
     expect(frame.models).toEqual([]);
   });
 
-  it("is sent to the browser client before the transcript replay", () => {
-    const body = methodBody("private focusRemoteSession(");
+  it("is sent to the webview before the transcript replay", () => {
+    const body = methodBody("private focusSession(");
     expect(body).toContain("this.sessionIdentityFrame(session)");
-    const identityAt = body.indexOf("sessionIdentityFrame");
-    const replayAt = body.indexOf("bracketRemoteSnapshot");
+    const identityAt = body.indexOf("if (identity) wv.postMessage(identity)");
+    const replayAt = body.indexOf('wv.postMessage({ type: "historyReplay", active: true })');
     expect(identityAt).toBeGreaterThan(-1);
     expect(replayAt).toBeGreaterThan(-1);
     expect(identityAt).toBeLessThan(replayAt);
-  });
-
-  it("is sent on the desk path too, to the webview and to remote holders", () => {
-    const body = methodBody("private focusSession(");
-    expect(body).toContain("this.sessionIdentityFrame(session)");
-    // Both surfaces, not just the one that reported the bug.
-    expect(body).toContain("if (identity) wv.postMessage(identity)");
-    expect(body).toContain("...(identity ? [identity] : [])");
   });
 });

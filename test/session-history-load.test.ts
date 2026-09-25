@@ -62,9 +62,9 @@ describe("runExclusiveHistoryLoad", () => {
   it("does not clear replaying when the first of two overlapping loads finishes first", async () => {
     const session = new Session();
     let releaseFirst!: () => void;
-    let releaseSecond!: () => void;
+    let _releaseSecond!: () => void;
     const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
-    const secondGate = new Promise<void>((resolve) => { releaseSecond = resolve; });
+    const secondGate = new Promise<void>((resolve) => { _releaseSecond = resolve; });
     let secondStarted = false;
 
     const first = runExclusiveHistoryLoad(session, async () => {
@@ -192,14 +192,8 @@ describe("replayLoadedHistory exclusive join", () => {
   function makeSidebar() {
     const sidebar = Object.create(GrokSidebar.prototype) as any;
     const emitted: HostMsg[] = [];
-    let snapshots = 0;
     sidebar.emit = (_session: Session, message: HostMsg) => { emitted.push(message); };
-    sidebar.sendRemoteHistorySnapshot = () => { snapshots += 1; };
-    return {
-      sidebar,
-      emitted,
-      snapshotCount: () => snapshots,
-    };
+    return { sidebar, emitted };
   }
 
   // upstream ce12449: an old but EMPTY conversation must be able to switch
@@ -218,7 +212,7 @@ describe("replayLoadedHistory exclusive join", () => {
   });
 
   it("does not run a second load or emit a second replay pair", async () => {
-    const { sidebar, emitted, snapshotCount } = makeSidebar();
+    const { sidebar, emitted } = makeSidebar();
     const session = new Session();
     const events: string[] = [];
     let release!: () => void;
@@ -244,18 +238,12 @@ describe("replayLoadedHistory exclusive join", () => {
       { type: "historyReplay", active: true },
       { type: "historyReplay", active: false },
     ]);
-    expect(snapshotCount()).toBe(1);
   });
 });
 
 describe("history-load exclusivity wiring", () => {
   const root = fileURLToPath(new URL("..", import.meta.url));
   const sidebarSrc = readFileSync(new URL("../src/sidebar.ts", import.meta.url), "utf8");
-
-  it("keeps the remote-forwarding gate as a boolean any-replay check", () => {
-    expect(sidebarSrc).toMatch(/if \(!session\.replaying\) this\.sendRemoteSession/);
-    expect(sidebarSrc).toMatch(/if \(session && sessionCwdOk && !session\.replaying\)/);
-  });
 
   it("routes session/load through the exclusive join helper", () => {
     expect(sidebarSrc).toContain("runExclusiveHistoryLoad");

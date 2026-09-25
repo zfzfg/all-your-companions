@@ -5,7 +5,6 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-// @ts-expect-error — plain JS module, no types
 import { exportSessionMarkdown, exportSessionFilename } from "../media/webview-helpers.js";
 import { buildPrompt, buildPromptWithImages } from "../src/prompt-builder";
 import { makeExplicitChip, makeImageChip } from "../src/chips";
@@ -130,21 +129,6 @@ describe("exportSessionMarkdown", () => {
     expect(md).toContain("- Subagent · Demo subagent file count");
     expect(md).toContain("rootFileCount");
     expect(md).not.toContain("This is the output of the subagent:");
-  });
-
-  it("labels a windowed remote export as last N turns", () => {
-    const md = exportSessionMarkdown([
-      { type: "userMessage", text: "one", chips: [] },
-      { type: "messageChunk", text: "a1" },
-      { type: "agentEnd" },
-      { type: "userMessage", text: "two", chips: [] },
-      { type: "messageChunk", text: "a2" },
-      { type: "agentEnd" },
-    ], { title: "Recent", windowed: true });
-
-    expect(md).toMatch(/^# Recent\n\nLast 2 turns\.\n/);
-    expect(md).toContain("## User");
-    expect(md).toContain("two");
   });
 
   it("does not present an MCP row as a shell command", () => {

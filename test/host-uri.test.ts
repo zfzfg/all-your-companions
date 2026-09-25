@@ -226,15 +226,13 @@ describe("asRelativePath takes Uri (remote identity)", () => {
 });
 
 describe("typed Host command surface (design #5)", () => {
-  it("declares openResource, openDiff, setContext, relocateView, openSettings, link/unlink on Host", () => {
+  it("declares openResource, openDiff, setContext, relocateView, openSettings on Host", () => {
     const hostSrc = readFileSync(path.join(root, "src", "host.ts"), "utf8");
     expect(hostSrc).toMatch(/openResource\(/);
     expect(hostSrc).toMatch(/openDiff\(/);
     expect(hostSrc).toMatch(/setContext\(/);
     expect(hostSrc).toMatch(/relocateView\(/);
     expect(hostSrc).toMatch(/openSettings\(/);
-    expect(hostSrc).toMatch(/linkRemote\(/);
-    expect(hostSrc).toMatch(/unlinkRemote\(/);
     expect(hostSrc).toMatch(/openGlobalConfig\(/);
     expect(hostSrc).toMatch(/openProjectConfig\(/);
     expect(hostSrc).toMatch(/openHostResolvedPath\(/);
@@ -259,8 +257,6 @@ describe("typed Host command surface (design #5)", () => {
     expect(sidebar).toMatch(/\.setContext\(/);
     expect(sidebar).toMatch(/\.relocateView\(/);
     expect(sidebar).toMatch(/\.openSettings\(/);
-    expect(sidebar).toMatch(/\.linkRemote\(/);
-    expect(sidebar).toMatch(/\.unlinkRemote\(/);
   });
 });
 

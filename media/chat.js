@@ -1,64 +1,19 @@
 (function () {
   const vscode = acquireVsCodeApi();
-  const CHAT_SCRIPT_URL = document.currentScript?.src || window.location.href;
-  // True in the relay's browser client (its chat.html shim sets the flag before
-  // loading this file); always false inside the VS Code webview. Gates the
-  // host-only affordances: worktree/rewind actions (their host flows run native
-  // VS Code UI a browser user can't see) and the AFK Pilot account section.
-  const IS_REMOTE = !!window.grokRemoteClient;
   // Desktop Electron preload sets grokDesktopShell; VS Code webview never does.
-  // Client-owned font scale (localStorage + keyboard/wheel) applies to remote AND desktop
-  // — not the VS Code sidebar, which stays on host `grok.chatFontScale`.
+  // Client-owned font scale (localStorage + keyboard/wheel) applies to desktop
+  // only — not the VS Code sidebar, which stays on host `grok.chatFontScale`.
   // Do not key off the file-tree bridge — that API is panel-only; chat.js must not call it.
   const IS_DESKTOP_CLIENT = !!window.grokDesktopShell;
-  const CLIENT_OWNS_FONT_SCALE = IS_REMOTE || IS_DESKTOP_CLIENT;
-  const REMOTE_FONT_SCALE_KEY = "grok.remote.fontScale";
+  const CLIENT_OWNS_FONT_SCALE = IS_DESKTOP_CLIENT;
   const DESKTOP_FONT_SCALE_KEY = "grok.desktop.fontScale";
-  const CLIENT_FONT_SCALE_KEY = IS_REMOTE ? REMOTE_FONT_SCALE_KEY : DESKTOP_FONT_SCALE_KEY;
-  /** Client zoom bounds (fraction of 1). Matches AFK Pilot's 80–160% slider. */
+  const CLIENT_FONT_SCALE_KEY = DESKTOP_FONT_SCALE_KEY;
+  /** Client zoom bounds (fraction of 1). */
   const CLIENT_FONT_SCALE_MIN = 0.8;
   const CLIENT_FONT_SCALE_MAX = 1.6;
   const CLIENT_FONT_SCALE_STEP = 0.1;
-  const REMOTE_TTS_KEY = "grok.remote.tts";
-  const REMOTE_TTS_SUMMARY_KEY = "grok.remote.ttsSummary";
-  const REMOTE_STORAGE_SUFFIX = (
-    typeof location !== "undefined"
-      ? new URLSearchParams(location.search || "").get("device") || "default"
-      : "default"
-  );
-  const REMOTE_SESSION_KEY = "grok.remote.tabSession:" + REMOTE_STORAGE_SUFFIX;
-  /**
-   * "The user CHOSE to leave that conversation, and has not landed on another."
-   *
-   * The remembered identity is cleared both when a conversation is lost and
-   * when the user deliberately switches repo, starts a new session, or opens a
-   * row in another project. Downstream those two collapse into the same null,
-   * so the relay page reported a deliberate switch as
-   *   "1 queued action was not sent because this tab had no remembered
-   *    conversation to restore"
-   * — telling the owner his message had failed when he had simply moved on,
-   * mid-turn, on a phone (2026-09-01).
-   *
-   * A sibling storage key rather than a field on the identity, because the
-   * whole point is that there IS no identity at that moment. It is cleared the
-   * instant a real one is saved, so it bounds itself on an EVENT rather than a
-   * timer: it can only ever describe the gap between letting go and landing.
-   */
-  const REMOTE_SWITCH_KEY = "grok.remote.tabSwitchedByChoice:" + REMOTE_STORAGE_SUFFIX;
-  // Set by the relay's page before this file loads. Only ever says "the host on
-  // the other end is one the relay installed", which is why it can skip a
-  // compatibility wait rather than change any behaviour.
-  const IS_CLOUD_HOST = typeof window !== "undefined" && window.grokCloudHost === true;
-  const REMOTE_TAB_TOKEN_KEY = "grok.remote.tabToken:" + REMOTE_STORAGE_SUFFIX;
-  const REMOTE_TAB_OWNER_KEY = "grok.remote.tabOwner:" + REMOTE_STORAGE_SUFFIX;
-  const REMOTE_TAB_CHANNEL = "grok.remote.tabClaim:" + REMOTE_STORAGE_SUFFIX;
-  const REMOTE_TAB_CLAIM_TIMEOUT_MS = 250;
-  let remoteTabToken = null;
-  let priorRemoteTabOwner = null;
-  let remoteTabInstanceId = null;
-  let rememberedRemoteSession = null;
-
-  function newRemoteTabToken() {
+  /** A random hex id, used for paste-preview correlation. */
+  function randomHexId() {
     try {
       const bytes = new Uint8Array(24);
       crypto.getRandomValues(bytes);
@@ -72,157 +27,6 @@
     }
   }
 
-  if (IS_REMOTE) {
-    try {
-      remoteTabToken = sessionStorage.getItem(REMOTE_TAB_TOKEN_KEY);
-      priorRemoteTabOwner = sessionStorage.getItem(REMOTE_TAB_OWNER_KEY);
-      if (!remoteTabToken) {
-        remoteTabToken = newRemoteTabToken();
-        if (remoteTabToken) sessionStorage.setItem(REMOTE_TAB_TOKEN_KEY, remoteTabToken);
-      }
-    } catch (_) {
-      remoteTabToken = newRemoteTabToken();
-    }
-    try {
-      const saved = JSON.parse(sessionStorage.getItem(REMOTE_SESSION_KEY) || "null");
-      if (
-        saved &&
-        typeof saved.id === "string" &&
-        typeof saved.repoCwd === "string" &&
-        (!saved.cwd || typeof saved.cwd === "string")
-      ) rememberedRemoteSession = saved;
-    } catch (_) { /* storage unavailable/private mode */ }
-  }
-  function saveRememberedRemoteSession(value) {
-    if (!IS_REMOTE) return;
-    rememberedRemoteSession = value;
-    try {
-      if (value) {
-        sessionStorage.setItem(REMOTE_SESSION_KEY, JSON.stringify(value));
-        // Landed. Whatever the user left behind is no longer the current story.
-        sessionStorage.removeItem(REMOTE_SWITCH_KEY);
-      } else sessionStorage.removeItem(REMOTE_SESSION_KEY);
-    } catch (_) { /* storage unavailable/private mode */ }
-  }
-
-  /**
-   * Let go of the remembered conversation BECAUSE THE USER ASKED TO.
-   *
-   * Same clearing as `saveRememberedRemoteSession(null)`, plus a note saying so.
-   * Used only where a person acted: the repo chip, New session, and a rail row
-   * or repo in another project. Host-driven clears (a session deleted under us,
-   * a refused restore) deliberately keep the plain form — those really are
-   * losses and should still read as such.
-   */
-  function forgetRememberedSessionByChoice() {
-    saveRememberedRemoteSession(null);
-    try { sessionStorage.setItem(REMOTE_SWITCH_KEY, "1"); } catch (_) { /* private mode */ }
-  }
-
-  function replaceRemoteTabIdentity() {
-    const replacement = newRemoteTabToken();
-    if (!replacement) return;
-    remoteTabToken = replacement;
-    saveRememberedRemoteSession(null);
-    // Unsaved file edits go with the identity. They are in memory only now, so a
-    // duplicated tab cannot inherit them in the first place — this is here so
-    // the rule survives if they are ever made durable again, which is exactly
-    // how the leak arrived the first time.
-    state.filesBrowse.component?.clearMemory?.();
-    try {
-      sessionStorage.setItem(REMOTE_TAB_TOKEN_KEY, replacement);
-    } catch (_) { /* storage unavailable/private mode */ }
-  }
-
-  function markRemoteTabClaimed() {
-    if (!remoteTabInstanceId) return;
-    try {
-      sessionStorage.setItem(REMOTE_TAB_OWNER_KEY, remoteTabInstanceId);
-    } catch (_) { /* storage unavailable/private mode */ }
-  }
-
-  function clearRemoteTabOwner() {
-    if (!remoteTabInstanceId) return;
-    try {
-      if (sessionStorage.getItem(REMOTE_TAB_OWNER_KEY) === remoteTabInstanceId) {
-        sessionStorage.removeItem(REMOTE_TAB_OWNER_KEY);
-      }
-    } catch (_) { /* storage unavailable/private mode */ }
-  }
-
-  function claimRemoteTabIdentity(done) {
-    if (!IS_REMOTE || !remoteTabToken) {
-      done(remoteTabToken || undefined);
-      return;
-    }
-    remoteTabInstanceId = newRemoteTabToken();
-    if (!remoteTabInstanceId) {
-      if (priorRemoteTabOwner) replaceRemoteTabIdentity();
-      done(remoteTabToken || undefined);
-      return;
-    }
-    window.addEventListener("pagehide", clearRemoteTabOwner, { once: true });
-
-    const finish = (replace) => {
-      if (replace) replaceRemoteTabIdentity();
-      markRemoteTabClaimed();
-      done(remoteTabToken || undefined);
-    };
-    if (typeof BroadcastChannel !== "function") {
-      finish(!!priorRemoteTabOwner);
-      return;
-    }
-    let channel;
-    try {
-      channel = new BroadcastChannel(REMOTE_TAB_CHANNEL);
-    } catch (_) {
-      finish(!!priorRemoteTabOwner);
-      return;
-    }
-    let claimed = false;
-    let settled = false;
-    let timer;
-    const settle = (replace) => {
-      if (settled) return;
-      settled = true;
-      if (timer) clearTimeout(timer);
-      claimed = true;
-      finish(replace);
-    };
-    channel.onmessage = (event) => {
-      const message = event && event.data;
-      if (!message || message.token !== remoteTabToken || message.instanceId === remoteTabInstanceId) return;
-      if (message.type === "probe") {
-        if (claimed || remoteTabInstanceId < message.instanceId) {
-          channel.postMessage({
-            type: "occupied",
-            token: remoteTabToken,
-            instanceId: remoteTabInstanceId,
-            target: message.instanceId,
-          });
-        } else {
-          settle(true);
-        }
-      } else if (message.type === "occupied" && message.target === remoteTabInstanceId) {
-        settle(true);
-      }
-    };
-    if (priorRemoteTabOwner) {
-      channel.postMessage({ type: "probe", token: remoteTabToken, instanceId: remoteTabInstanceId });
-      timer = setTimeout(() => settle(false), REMOTE_TAB_CLAIM_TIMEOUT_MS);
-    } else {
-      settle(false);
-    }
-    window.addEventListener("pagehide", () => channel.close(), { once: true });
-  }
-
-  let resolveRemoteTabTokenReady;
-  window.__grokTabTokenReady = new Promise((resolve) => {
-    resolveRemoteTabTokenReady = resolve;
-  });
-
-  const SESSION_SUPERSEDED_CODE = "session-superseded";
-
   /** Explicit user actions set `claim`. Reconnect restore MUST omit it. */
   function postResumeSession(id, cwd, opts) {
     const msg = { type: "resumeSession", id, cwd: cwd || undefined };
@@ -230,19 +34,6 @@
     vscode.postMessage(msg);
   }
 
-  function restoreRememberedRemoteSession() {
-    const saved = rememberedRemoteSession;
-    if (!IS_REMOTE || !saved) return;
-    if (saved.repoCwd && saved.repoCwd !== state.cwd) {
-      vscode.postMessage({ type: "selectRepo", cwd: saved.repoCwd });
-    }
-    // Startup restore has no display name in the remembered payload, and the
-    // page is already on the welcome/"Starting" hold. Treating it like a
-    // user click would invent a title we do not have.
-    // Deliberately NOT a claim: a thawing background tab must not steal the
-    // conversation back from the tab that asked for it.
-    postResumeSession(saved.id, saved.cwd || undefined);
-  }
   const ttsAvailable = !!window.speechSynthesis && typeof window.SpeechSynthesisUtterance === "function";
 
   function storedNumber(key, fallback) {
@@ -263,7 +54,7 @@
     }
   }
 
-  function storeRemotePref(key, value) {
+  function storeClientPref(key, value) {
     try { window.localStorage.setItem(key, String(value)); } catch { /* unavailable */ }
   }
 
@@ -276,11 +67,6 @@
 
   function stepClientFontScale(current, delta) {
     return clampClientFontScale(Number(current) + Number(delta));
-  }
-
-  function remoteUsesTouchComposer() {
-    return IS_REMOTE && typeof window.matchMedia === "function" &&
-      window.matchMedia("(hover: none), (pointer: coarse)").matches;
   }
 
   /**
@@ -390,8 +176,6 @@
   }
 
   const historyBtn = $("history-btn");
-  const remoteBtn = $("remote-btn");
-  const repoBtn = $("repo-btn");
   const modeBtn = $("mode-btn");
   const gearBtn = $("gear-btn");
   const addBtn = $("add-btn");
@@ -407,7 +191,6 @@
   const gearPopover = $("gear-popover");
   const addPopover = $("add-popover");
   const historyPopover = $("history-popover");
-  const repoPopover = $("repo-popover");
   const scrollBottomBtn = $("scroll-bottom-btn");
   // Agent step checklist (AP-02). Absent in shells that predate it (the relay
   // serves its own page), so every use is null-guarded rather than assumed.
@@ -439,11 +222,9 @@
   // model advertises no menu (`max` is not a real grok level — see #3/#4).
   const GROK_EFFORT_LEVELS = ["none", "minimal", "low", "medium", "high", "xhigh"];
   const CLAUDE_EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max", "ultracode"];
-  const EFFORT_LEVELS = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultracode"];
   const GROK_ACTIVITY_VERB = "Grokking";
   const CODEX_ACTIVITY_VERB = "Opening AI";
   const CLAUDE_ACTIVITY_VERB = "Clauding";
-  const GEMINI_ACTIVITY_VERB = "Thinking\u2026";
   const COMPOSER_PLACEHOLDER = {
     grok: "Ask Grok\u2026",
     codex: "Ask GPT\u2026",
@@ -496,10 +277,6 @@
     return [...known, ...extra];
   }
 
-  const storedRemoteTts = IS_REMOTE && storedBool(REMOTE_TTS_KEY, false);
-  const storedRemoteTtsSummary = storedRemoteTts && storedBool(REMOTE_TTS_SUMMARY_KEY, true);
-  if (IS_REMOTE && !storedRemoteTts) storeRemotePref(REMOTE_TTS_SUMMARY_KEY, false);
-
   const state = {
     welcomeVisible: true,
     currentModelId: null,
@@ -522,9 +299,6 @@
     githubRepos: null,
     onboardingMode: null,
     onboardingInfo: {},
-    /** provider -> the device-login card last sent by the host. Mirrored into
-     *  Settings so a connect started there reports where the click happened. */
-    deviceLoginByProvider: {},
     // Which provider the composer's sign-in card is offering, so the moment it
     // clears (renewed) can be told from the moment it is merely replaced.
     signInCardFor: "",
@@ -536,15 +310,14 @@
     sessionTypeLocked: false,
     sessionTypeId: "",
     workflowRun: null,
-    workflows: [],
-    defaultWorkflow: "idea-to-done",
     selectedWorkflow: "",
     effort: "",
     cwd: "",
     contextWindow: 200000,
     usedTokens: 0,
     useCtrlEnter: false,
-    commands: (typeof EXTENSION_HOST_SLASH_COMMANDS !== "undefined" ? [...EXTENSION_HOST_SLASH_COMMANDS] : []),
+    // The host appends its own slash commands to every commandsUpdate.
+    commands: [],
     chips: [],
     // Start busy+locked: opening the view immediately spins up a session
     // (ready → startSession), so the send button shows the spinner from the
@@ -570,19 +343,16 @@
     voiceKeyterms: [],
     telemetryEnabled: undefined,
     thumbsFeedback: false,
-    // Client-owned zoom (remote + desktop). VS Code uses hostFontScale only.
-    remoteFontScale: CLIENT_OWNS_FONT_SCALE
+    // Client-owned zoom (desktop). VS Code uses hostFontScale only.
+    clientFontScale: CLIENT_OWNS_FONT_SCALE
       ? clampClientFontScale(storedNumber(CLIENT_FONT_SCALE_KEY, 1))
       : 1,
     hostFontScale: Number(document.body.style.getPropertyValue("--chat-zoom")) || 1,
-    remoteTts: storedRemoteTts,
-    remoteSummarizeRepliesAloud: storedRemoteTtsSummary,
     readRepliesAloud: false,
     // The host posts the configured value immediately after initialState. Keep
     // the pre-sync render conservative so a read-aloud toggle cannot summon a
     // summary request before that config message arrives.
     summarizeRepliesAloud: false,
-    remotePreferencesSupported: false,
     ttsTurnText: "",
     // Render MIRROR of the focused session's host-owned send queue (#37) —
     // messages typed/dictated while Grok was busy. Entries are `{text, chips}`.
@@ -592,16 +362,6 @@
     // turn ends.
     sendQueue: [],
     queuedWrapEl: null, // the .queued-msgs container pinned to the end of the chat
-    queuedSubmissionPending: false,
-    queuedSubmissionRejected: false,
-    submittedQueuedSendIds: new Set(),
-    queuedSubmissionId: null,
-    pendingSubmissionText: "",
-    pendingSubmissionId: null,
-    pendingSubmissionChipIds: [],
-    rejectedSubmissionText: "",
-    // Remote-only placeholder bubble shown between a send and the host's echo.
-    optimisticSendEl: null,
     // Steer (#52). `steerSupported` is the per-webview latch the host lowers on
     // -32601 (`steerUnavailable`). `hostSteerSupported` is the backend's own
     // answer at initialize for `steeringProvider` (upstream 2f67d9a) and wins
@@ -642,9 +402,6 @@
     // survive the session id being assigned after the first send and survives
     // switching away from a conversation.
     imagePreviews: new Map(),
-    // The full-size render the overlay is currently waiting on, so a late reply
-    // for a closed or replaced preview is dropped rather than painted.
-    pendingImageFullId: null,
     imageFullTimer: null,
     activeThoughtEl: null,
     activeThoughtHdrEl: null,
@@ -716,10 +473,6 @@
     // that drops `toggleSessionPin`, which is a control that looks broken
     // rather than absent (the same trap the repo chip avoids).
     pinnedSessionsKnown: false,
-    // Remote tab lost this conversation to another tab's explicit claim.
-    // Transcript stays; composer and turn controls freeze until Continue here
-    // (a claim) or a different conversation is opened.
-    sessionSuperseded: null,
     /** Desktop update rail — `updateAvailable` (notice) or `updateReady` (restart). */
     appUpdate: null,
     repoPreviews: {},
@@ -733,14 +486,6 @@
     // Host shell language for command View all (initialState.commandLanguage).
     // Empty on older hosts — View all then omits language.
     commandLanguage: "",
-    // Remote file browse (list + open + optional edit). Capability-gated; never
-    // mounted in the local VS Code / desktop webview even if the host flag is
-    // true — those hosts already have a real explorer. Phone UI stays collapsed
-    // by default (screen space is scarce; the rail is already a drawer).
-    filesBrowse: {
-      open: false,
-      component: null,
-    },
     railCollapsed: {},
     /** The project the live conversation was in at the last render. Only used to
      *  notice it MOVED, so a fold can be corrected once on arrival instead of
@@ -822,10 +567,8 @@
     historyPrefixPlans: [],
     historyPrefixPermissions: [],
     historyHydrating: false,
-    // Host events this client has actually rendered — the export source. A
-    // remote snapshot is only the recent window; exportWindowed labels that.
+    // Host events this client has actually rendered — the export source.
     exportEvents: [],
-    exportWindowed: false,
     // Live ask_user_question tool calls (toolCallId → {questions, fromReplay}).
     // grok emits a tool_call alongside the live x.ai/ask_user_question request; we
     // stash it to suppress the generic tool chip (the interactive card from
@@ -882,10 +625,8 @@
     planModeRecheckable: false,
     // Extension version (from initialState) — shown in Settings → About.
     extVersion: "",
-    // Which GUI is on the other end and what the desk machine is called. Only a
-    // remote needs these; a local webview is already looking at the thing.
+    // Which GUI is on the other end ("extension" | "desktop").
     hostKind: "",
-    hostName: "",
     // Which gear-popover view is showing ("main"|"model"|"config").
     gearView: "main",
     // Which button opened the popover: "composer" (this conversation — model,
@@ -984,22 +725,11 @@
     // grok.worktree — true when the focused session runs in an isolated git
     // worktree (from the `session` message). Gates the gear Apply/Remove items.
     isWorktree: false,
-    // Whether the host machine holds a relay device token (`remoteStatus`).
-    // Drives the gear AFK Pilot items; never sent to remote clients.
-    // THREE states, not two: null = not answered yet. The host reads the token
-    // from secret storage asynchronously, so defaulting to false told an
-    // already-linked machine to "Sign in (link this device)" for that window —
-    // inviting the user to re-link a device that was working. Unknown shows
-    // nothing at all.
-    remoteLinked: null,
     // Display form of the one directory new and cloned projects land in
     // (`projectSetup.root`, e.g. `~/Grok Build`). Empty until the host says —
     // the Add project form shows the destination as you type, so it needs this
     // before anyone has typed anything.
     projectRoot: "",
-    // Live `projectSetup.github` while the clone form is open. Closing or
-    // reopening cancels the login; this is not a reason to pop the modal.
-    projectGithub: null,
     // Empty-state tip facts from the host (`welcomeTips`): the two counts the
     // chat client never receives on its own plus the retired ids. null until
     // the frame lands, which suppresses the count-dependent tips rather than
@@ -1445,13 +1175,6 @@
   newBtn.innerHTML = ICON.squarePen;
   historyBtn.innerHTML = ICON.clock;
   ensureVisibleNewSession();
-  // "Continue remotely", one tap from the chat instead of buried in the gear
-  // menu — the desk is where someone decides to get up and keep going on
-  // their phone. Local client only (a remote is already remote), and only
-  // once this machine is linked; syncRemoteButton flips it live.
-  if (remoteBtn) {
-    remoteBtn.hidden = true;
-  }
   updateSendButton(); // spinner by default — session is starting up (busy+locked)
   gearBtn.innerHTML = ICON.gear;
   addBtn.innerHTML = ICON.plus;
@@ -1470,7 +1193,7 @@
 
   // ---------- markdown ----------
 
-  const { formatWaitElapsed, planEntriesProgress, formatReviewHeadline, looksLikeFileRef, formatRelativeTime, modelPickerLabel, modelDisplayName, nextMicState, trailingSendPhrase, versionedSiblingUrl, buildQuestionAnswers, isFreeTextOptionLabel, isSubagentToolCall, subagentLabel, cleanSubagentOutput, parseSubagentTaskResult, shouldStickToBottom, stickThresholdPx, splitMath, stripUnsupportedTex, toolFailureText, isMediaGenToolCall, mediaGenZeroRetentionHint, TOOL_LABEL_MAX, middleElide, isAdvertisedSkill, getSlashQuery, applySlashPick, filterCommands, appendHighlightedText, commandProgramLabel, commandTextPreview, extractToolResultOutput, commandOutputWasCancelled, commandOutputTruncationNote, computeLineDiff, parseAttachmentContext, parseSelectionBlocks, parseImageTags, parseContextBlocks, contextChipLabel, contextChipTitle, isKnownHostMessage, composerHasSendIntent, explicitVisibleChips, normalizeQueuedSends, queuedSendsText, queuedSendsChips, contextOverheadTokens, nextContextBreakdown, contextBreakdownIsCurrent, createPendingOverlay, getMentionQuery, applyMentionPick, orderPermissionOptions, defaultPermissionIndex, shouldFocusPermissionCard, isTypeThroughKey, isInterjectionText, stripInterjectionEnvelope, spokenTextFromMarkdown, isRelaySendRejection, wireFullscreenSafeReclamp, distributeSidePanelWidths, chatZoomFactor, unzoomClientPx, exportSessionMarkdown, exportSessionFilename, isExportableSessionEvent, replayedUserBubbleVerdict, truncateExportEvents, flattenHistoryMessages, splitHistoryWindow, countHistoryReplayCounters, partitionHistoryCards } = globalThis.GrokWebviewHelpers;
+  const { formatWaitElapsed, planEntriesProgress, formatReviewHeadline, looksLikeFileRef, formatRelativeTime, modelPickerLabel, modelDisplayName, nextMicState, trailingSendPhrase, buildQuestionAnswers, isFreeTextOptionLabel, isSubagentToolCall, subagentLabel, cleanSubagentOutput, parseSubagentTaskResult, shouldStickToBottom, stickThresholdPx, splitMath, stripUnsupportedTex, toolFailureText, isMediaGenToolCall, mediaGenZeroRetentionHint, TOOL_LABEL_MAX, middleElide, isAdvertisedSkill, getSlashQuery, applySlashPick, filterCommands, appendHighlightedText, commandProgramLabel, commandTextPreview, extractToolResultOutput, commandOutputWasCancelled, commandOutputTruncationNote, computeLineDiff, parseAttachmentContext, parseSelectionBlocks, parseImageTags, parseContextBlocks, contextChipLabel, contextChipTitle, isKnownHostMessage, composerHasSendIntent, explicitVisibleChips, normalizeQueuedSends, queuedSendsText, queuedSendsChips, contextOverheadTokens, nextContextBreakdown, contextBreakdownIsCurrent, createPendingOverlay, getMentionQuery, applyMentionPick, orderPermissionOptions, defaultPermissionIndex, shouldFocusPermissionCard, isTypeThroughKey, isInterjectionText, stripInterjectionEnvelope, spokenTextFromMarkdown, wireFullscreenSafeReclamp, distributeSidePanelWidths, chatZoomFactor, unzoomClientPx, exportSessionMarkdown, exportSessionFilename, isExportableSessionEvent, replayedUserBubbleVerdict, truncateExportEvents, flattenHistoryMessages, splitHistoryWindow, countHistoryReplayCounters, partitionHistoryCards } = globalThis.GrokWebviewHelpers;
 
   function escapeAttr(s) {
     return String(s == null ? "" : s)
@@ -1488,14 +1211,11 @@
     // Remote clients download the PNG in-browser and have no host to "Open as
     // PNG" on — drop that action there and label the download for what it does.
     // Copy (the source) and Download work in both the webview and the browser.
-    const dlTitle = IS_REMOTE ? "Download PNG" : "Download as PNG / SVG";
-    return (
-      `<span class="expr-actions" contenteditable="false">` +
-        `<button class="expr-btn" type="button" data-expr-act="copy" title="Copy ${label}">${ICON.copy}</button>` +
-        `<button class="expr-btn" type="button" data-expr-act="download" title="${dlTitle}">${ICON.download}</button>` +
-        (IS_REMOTE ? "" : `<button class="expr-btn" type="button" data-expr-act="open" title="Open as PNG">${ICON.file}</button>`) +
-      `</span>`
-    );
+    const dlTitle = "Download as PNG / SVG";
+    return (`<span class="expr-actions" contenteditable="false">` +
+      `<button class="expr-btn" type="button" data-expr-act="copy" title="Copy ${label}">${ICON.copy}</button>` +
+      `<button class="expr-btn" type="button" data-expr-act="download" title="${dlTitle}">${ICON.download}</button>` +
+      (`<button class="expr-btn" type="button" data-expr-act="open" title="Open as PNG">${ICON.file}</button>`) + `</span>`);
   }
 
   // Render one LaTeX span to an SVG string via the vendored MathJax (loaded
@@ -1795,10 +1515,10 @@
     vscode.postMessage({ type: "exportExpr", action, kind, png, svgDark, svgLight, current });
   }
 
-  // Trigger the browser's own downloader for a data: URL. Remote clients only —
+  // Trigger the browser's own downloader for a data: URL. Browser hosts only —
   // the VS Code webview has no download surface, so it routes saves through the
   // host (exportExpr) instead. Kept tiny and self-contained (no host round-trip).
-  async function remoteDownload(url, filename) {
+  async function browserDownload(url, filename) {
     if (!url) return;
     // Multi-MB data: URLs (generated images, big diagram PNGs) download
     // unreliably on mobile; a blob: URL is dependable. Fall back to the raw URL
@@ -1850,7 +1570,7 @@
     let png = null;
     try { png = await svgToPng(wysiwyg, w, h, 3, colors.bg); } catch (_) { png = null; }
     if (!png) return;
-    await remoteDownload(png, (kind === "mermaid" ? "diagram" : "equation") + ".png");
+    await browserDownload(png, (kind === "mermaid" ? "diagram" : "equation") + ".png");
     ackBtn(btn);
   }
 
@@ -2249,7 +1969,6 @@
     gearPopover.hidden = true;
     addPopover.hidden = true;
     historyPopover.hidden = true;
-    repoPopover.hidden = true;
     contextPopover.hidden = true;
   }
 
@@ -2620,27 +2339,6 @@
     popover.style.minWidth = Math.min(280, available) + "px";
   }
 
-  function positionRepoPopover() {
-    const z = chatZoomFactor();
-    const parentRect = repoPopover.parentElement.getBoundingClientRect();
-    const btnRect = repoBtn.getBoundingClientRect();
-    const EDGE = 6;
-    const parentW = unzoomClientPx(parentRect.width, z);
-    const available = Math.max(0, parentW - EDGE * 2);
-    const maxWidth = Math.min(360, available);
-    const chipLeft = unzoomClientPx(btnRect.left - parentRect.left, z);
-    const left = Math.min(
-      Math.max(EDGE, chipLeft),
-      Math.max(EDGE, parentW - EDGE - maxWidth),
-    );
-    repoPopover.style.bottom = "auto";
-    repoPopover.style.top = (unzoomClientPx(btnRect.bottom - parentRect.top, z) + 4) + "px";
-    repoPopover.style.left = left + "px";
-    repoPopover.style.right = "auto";
-    repoPopover.style.maxWidth = maxWidth + "px";
-    repoPopover.style.minWidth = Math.min(280, available) + "px";
-  }
-
   // ---------- gear popover ----------
 
   /** Coding purpose unlocks worktrees, thinking traces, and tool-detail toggles. */
@@ -2760,7 +2458,7 @@
   // In-app preview overlay. OPT-IN via capabilities.previewInApp (desktop).
   // Absent / remote / VS Code keep the host editor or inline-expand path.
   function hostPreviewsInApp() {
-    return !IS_REMOTE && state.hostCaps && state.hostCaps.previewInApp === true;
+    return state.hostCaps && state.hostCaps.previewInApp === true;
   }
 
   const PREVIEW_EXT_BY_LANG = {
@@ -2827,7 +2525,7 @@
     return { path: frag[1], range: { start, end } };
   }
 
-  // Workspace-relative path the file panel / readProjectFile will accept, or
+  // Workspace-relative path the file panel will accept, or
   // "" when the path is out of cwd scope (~/Downloads, another drive, …).
   function workspaceRelPath(pathStr) {
     const raw = String(pathStr || "").replace(/\\/g, "/").trim();
@@ -2854,114 +2552,7 @@
     if (!hostPreviewsInApp()) return null;
     const desk = window.__grokDeskFilePanel;
     if (desk && typeof desk.openPath === "function") return desk;
-    const remote = state.filesBrowse && state.filesBrowse.component;
-    if (remote && typeof remote.openPath === "function") return remote;
     return null;
-  }
-
-  let previewFileSeq = 0;
-  let previewOverlayGen = 0;
-  const previewFilePending = new Map();
-
-  function fetchPreviewFile(relPath) {
-    const cwd = state.cwd || "";
-    if (!cwd || !relPath) return Promise.resolve({ ok: false, reason: "no path" });
-    return new Promise((resolve) => {
-      const requestId = "preview-" + (++previewFileSeq);
-      const timer = setTimeout(() => {
-        if (!previewFilePending.has(requestId)) return;
-        previewFilePending.delete(requestId);
-        resolve({ ok: false, reason: "timed out" });
-      }, 15000);
-      previewFilePending.set(requestId, { resolve, timer });
-      vscode.postMessage({ type: "readProjectFile", cwd, relPath, requestId });
-    });
-  }
-
-  function settlePreviewFileRequest(msg) {
-    if (!msg || typeof msg.requestId !== "string") return false;
-    const pending = previewFilePending.get(msg.requestId);
-    if (!pending) return false;
-    clearTimeout(pending.timer);
-    previewFilePending.delete(msg.requestId);
-    pending.resolve(msg);
-    return true;
-  }
-
-  // The host serves text files up to FILE_PREVIEW_MAX_BYTES (2 MiB), and a
-  // 2 MiB file of one-character lines is a million rows — four DOM nodes each,
-  // built synchronously on the UI thread. Rendering all of it would wedge the
-  // renderer for a file the host considers perfectly ordinary. So a window is
-  // rendered around the range the agent read, which is the only part anyone
-  // opened this to see; the count says what was left out, because a silently
-  // truncated file is the same lie as a silently substituted one.
-  const PREVIEW_MAX_LINES = 4000;
-  const PREVIEW_CONTEXT_LINES = 400;
-
-  function previewLineWindow(total, range) {
-    if (total <= PREVIEW_MAX_LINES) return { from: 1, to: total, clipped: false };
-    const start = Math.min(Math.max(1, (range && range.start) || 1), total);
-    const end = Math.min(Math.max(start, (range && range.end) || start), total);
-    const span = end - start + 1;
-
-    // The lines the agent READ are never trimmed to make room for context —
-    // context is the thing that gives way. An earlier version computed a budget
-    // that grew with the span and then clamped it straight back to the cap, so
-    // a 4000-line read starting at 5000 rendered 4600-8599 and silently
-    // dropped 400 lines the user had asked to see.
-    if (span >= PREVIEW_MAX_LINES) {
-      const to = Math.min(total, start + PREVIEW_MAX_LINES - 1);
-      return { from: start, to, clipped: start > 1 || to < total };
-    }
-
-    // Spend whatever is left on context, split either side, and give the unused
-    // half to the other when the range sits near a file boundary.
-    const slack = PREVIEW_MAX_LINES - span;
-    const before = Math.min(Math.floor(slack / 2), start - 1);
-    const from = Math.max(1, start - before);
-    const to = Math.min(total, from + PREVIEW_MAX_LINES - 1);
-    return { from, to, clipped: from > 1 || to < total };
-  }
-
-  function buildNumberedFilePreview(text, language, pathStr, range) {
-    const wrap = document.createElement("div");
-    wrap.className = "tool-diff-region preview-file-region";
-    const lines = String(text ?? "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
-    const start = range && range.start;
-    const end = range && range.end;
-    const win = previewLineWindow(lines.length, range);
-    let firstRead = null;
-    for (let i = win.from - 1; i < win.to; i++) {
-      const n = i + 1;
-      const inRange = start != null && end != null && n >= start && n <= end;
-      const row = document.createElement("div");
-      row.className = "tdl" + (inRange ? " tdl-read" : "");
-      row.dataset.line = String(n);
-      const sign = document.createElement("span");
-      sign.className = "tdl-sign";
-      sign.textContent = "";
-      const num = document.createElement("span");
-      num.className = "tdl-num";
-      num.textContent = String(n);
-      const code = document.createElement("span");
-      code.className = "tdl-code";
-      const line = lines[i];
-      if (line === "") code.textContent = " ";
-      else code.innerHTML = highlightPreviewHtml(line, language, pathStr);
-      row.appendChild(sign);
-      row.appendChild(num);
-      row.appendChild(code);
-      if (inRange && !firstRead) {
-        row.id = "preview-read-start";
-        firstRead = row;
-      }
-      wrap.appendChild(row);
-    }
-    wrap.style.setProperty("--tdl-num-w", tdlGutterCh(win.to));
-    wrap._firstRead = firstRead;
-    wrap._window = win;
-    wrap._totalLines = lines.length;
-    return wrap;
   }
 
   function highlightPreviewHtml(text, language, pathStr) {
@@ -3128,71 +2719,14 @@
         "This file is outside the project, so only the excerpt the agent read is shown.",
       );
     } else {
-      const notice = document.createElement("div");
-      notice.className = "preview-notice";
-      notice.textContent = "Loading file…";
-      body.appendChild(notice);
-      const token = ++previewOverlayGen;
-      overlay._previewToken = token;
-      fetchPreviewFile(relPath).then((result) => {
-        if (overlay._closed || overlay._previewToken !== token) return;
-        // `readProjectFile` PRETTY-PRINTS JSON (file-tree.ts: JSON.stringify of
-        // the parsed value). That is right for the file panel, which edits and
-        // writes it back, and wrong here: the numbers in our gutter would count
-        // reformatted lines, and the highlighted range would mark the wrong
-        // ones. A one-line `{"n":1e3}` becomes three lines reading `"n": 1000`.
-        // The host tells us when it did this, so take the honest path instead
-        // of numbering a file the user does not have.
-        if (result && result.ok && result.reformatted) {
-          clearPreviewBody(body);
-          renderPreviewFallback(
-            body,
-            excerpt,
-            language,
-            opts.path,
-            "This JSON file is reformatted when loaded, so line numbers would not match the file on disk — showing the excerpt the agent read.",
-          );
-        } else if (result && result.ok && typeof result.text === "string") {
-          payload.text = result.text;
-          clearPreviewBody(body);
-          // The band marks the line numbers the agent asked for. That is a
-          // POSITIONAL reference, exactly what an editor host does when it
-          // opens the file at those lines, and it stays true whether or not the
-          // file has moved on since.
-          //
-          // A guard that tried to verify the content still matched was removed
-          // rather than tuned: the excerpt is the CLI's rendered transcript,
-          // not the file's bytes. A ranged read arrives decorated —
-          // `... 2219 lines not shown ...` and `  2220|  }` — so comparing it
-          // against raw file lines never matched, and the guard fired on every
-          // ordinary ranged read, stripped the markers, and announced a change
-          // that had not happened. Parsing those decorations would mean
-          // tracking a format that differs per CLI, to defend against a
-          // staleness the editor host has always had and nobody minds.
-          const region = buildNumberedFilePreview(result.text, language, opts.path, opts.range);
-          body.appendChild(region);
-          if (region._window && region._window.clipped) {
-            const clip = document.createElement("div");
-            clip.className = "preview-notice";
-            clip.textContent =
-              `Showing lines ${region._window.from}–${region._window.to} of ${region._totalLines} — the file is too long to render in full.`;
-            body.insertBefore(clip, region);
-          }
-          insertPreviewPanelButton(actions, saveBtn, relPath);
-          const startEl = region._firstRead;
-          if (startEl && typeof startEl.scrollIntoView === "function") {
-            startEl.scrollIntoView({ block: "center", inline: "nearest" });
-          }
-        } else {
-          renderPreviewFallback(
-            body,
-            excerpt,
-            language,
-            opts.path,
-            "Couldn't load the full file — showing the excerpt the agent read.",
-          );
-        }
-      });
+      renderPreviewFallback(
+        body,
+        excerpt,
+        language,
+        opts.path,
+        "Showing the excerpt the agent read.",
+      );
+      insertPreviewPanelButton(actions, saveBtn, relPath);
     }
     panel.appendChild(body);
     overlay.appendChild(panel);
@@ -3221,19 +2755,16 @@
   let settingsSurface = null;
 
   function hostOpensSettingsEditor() {
-    return !IS_REMOTE && state.hostCaps && state.hostCaps.settingsEditor === true;
+    return state.hostCaps && state.hostCaps.settingsEditor === true;
   }
 
   function settingsEnv() {
     return {
-      isRemote: IS_REMOTE,
       isDesktop: isDesktopHostCaps(),
-      deviceLogin: state.deviceLoginByProvider,
       clientOwnsFontScale: CLIENT_OWNS_FONT_SCALE,
       ttsAvailable,
       steerSupported: state.steerSupported !== false,
       providersKnown: !!state.providersKnown,
-      remoteLinked: state.remoteLinked,
       hostCaps: state.hostCaps || {},
     };
   }
@@ -3244,11 +2775,11 @@
       showThinking: !!state.showThinking,
       expandCommandOutputs: !!state.expandCommandOutputs,
       steerByDefault: !!state.steerByDefault,
-      fontScale: CLIENT_OWNS_FONT_SCALE ? state.remoteFontScale : state.hostFontScale,
+      fontScale: CLIENT_OWNS_FONT_SCALE ? state.clientFontScale : state.hostFontScale,
       soundNotifications: !!state.soundNotifications,
       processingSound: !!state.processingSound,
-      readRepliesAloud: IS_REMOTE ? !!state.remoteTts : !!state.readRepliesAloud,
-      summarizeRepliesAloud: IS_REMOTE ? !!state.remoteSummarizeRepliesAloud : !!state.summarizeRepliesAloud,
+      readRepliesAloud: !!state.readRepliesAloud,
+      summarizeRepliesAloud: !!state.summarizeRepliesAloud,
       voiceConfigured: !!state.voiceConfigured,
       voiceSendPhrase: typeof state.voiceSendPhrase === "string" ? state.voiceSendPhrase : "grok send",
       voiceKeyterms: Array.isArray(state.voiceKeyterms) ? state.voiceKeyterms : [],
@@ -3262,7 +2793,6 @@
       extVersion: state.extVersion,
       cliVersion: state.cliVersion,
       hostKind: state.hostKind,
-      hostName: state.hostName,
       grokUpdate: state.grokUpdate,
       mcpServers: state.mcpServers,
       mcpLoading: state.mcpLoading,
@@ -3290,8 +2820,6 @@
       permissionRulesOrderCopy: state.permissionRulesOrderCopy,
       permissionRulesPending: state.permissionRulesPending,
       mcpConnectors: state.mcpConnectors,
-      mcpRemoteConnect: state.mcpRemoteConnect === true,
-      mcpConnectorAuthorization: state.mcpConnectorAuthorization,
       routines: state.routines,
       routineProjects: state.routineProjects,
       routineModels: state.routineModels,
@@ -3323,10 +2851,6 @@
         if (CLIENT_OWNS_FONT_SCALE) setClientFontScale(Number(value) / 100);
         return;
       case "readRepliesAloud":
-        if (IS_REMOTE) {
-          setRemoteTtsEnabled(!!value);
-          return;
-        }
         state.readRepliesAloud = !!value;
         if (!state.readRepliesAloud) {
           cancelPendingSpeech();
@@ -3337,10 +2861,6 @@
         }
         break;
       case "summarizeRepliesAloud":
-        if (IS_REMOTE) {
-          setRemoteTtsSummaryEnabled(!!value);
-          return;
-        }
         state.summarizeRepliesAloud = !!value;
         invalidatePendingSpeechSummary();
         break;
@@ -3438,13 +2958,6 @@
       },
       apply: applySettingsChange,
       onLocal: (name) => {
-        if (name === "explainRemote") showRemoteExplainer();
-        if (name === "openDeviceManager") window.open("/", "_blank", "noopener");
-        // Settings → Providers → Connect. The overlay stays open behind the
-        // wizard so closing it returns the reader where they were.
-        if (typeof name === "string" && name.indexOf("connectWizard:") === 0) {
-          openConnectWizard(name.slice("connectWizard:".length));
-        }
       },
       closeOnAction: true,
       onClose: closeSettingsOverlay,
@@ -3527,94 +3040,6 @@
       field.focus();
       field.select();
     });
-  }
-
-  function showRemoteExplainer() {
-    const overlay = document.createElement("div");
-    overlay.className = "confirm-overlay remote-explainer-overlay";
-    const panel = document.createElement("div");
-    panel.className = "confirm-panel remote-explainer-panel";
-
-    const closeBtn = document.createElement("button");
-    closeBtn.type = "button";
-    closeBtn.className = "remote-explainer-close";
-    closeBtn.innerHTML = ICON.x;
-    closeBtn.title = "Close";
-    closeBtn.setAttribute("aria-label", "Close");
-
-    const title = document.createElement("div");
-    title.className = "confirm-title";
-    title.textContent = "How AFK Pilot works";
-
-    const body = document.createElement("div");
-    body.className = "confirm-body remote-explainer-body";
-    const steps = document.createElement("ol");
-    const step1 = document.createElement("li");
-    step1.textContent = "Link this device. Sign in with your account.";
-    const step2 = document.createElement("li");
-    step2.textContent = isDesktopHostCaps()
-      ? "Keep this app open."
-      : "Keep VS Code, Cursor, or Antigravity open.";
-    const step3 = document.createElement("li");
-    step3.append("Open ");
-    const urlBtn = document.createElement("button");
-    urlBtn.type = "button";
-    urlBtn.className = "remote-url-copy";
-    urlBtn.textContent = "afkpilot.com";
-    urlBtn.title = "Copy afkpilot.com";
-    const copied = document.createElement("span");
-    copied.className = "remote-url-copied";
-    copied.setAttribute("aria-live", "polite");
-    step3.append(urlBtn, copied, " on your phone and sign in.");
-    steps.append(step1, step2, step3);
-
-    const note = document.createElement("p");
-    note.textContent = "You can then work 100% remotely — it keeps this device awake, and never stores your prompts or code.";
-    body.append(steps, note);
-
-    const actions = document.createElement("div");
-    actions.className = "confirm-actions";
-    const moreBtn = document.createElement("button");
-    moreBtn.type = "button";
-    moreBtn.className = "confirm-btn confirm-primary";
-    moreBtn.textContent = "More & FAQ";
-    actions.appendChild(moreBtn);
-
-    const done = () => {
-      document.removeEventListener("keydown", onKey, true);
-      overlay.remove();
-    };
-    const onKey = (e) => {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        done();
-      }
-    };
-    document.addEventListener("keydown", onKey, true);
-    closeBtn.onclick = (e) => { e.stopPropagation(); done(); };
-    overlay.onclick = (e) => {
-      if (e.target === overlay) {
-        e.stopPropagation();
-        done();
-      }
-    };
-    urlBtn.onclick = (e) => {
-      e.stopPropagation();
-      navigator.clipboard.writeText("https://afkpilot.com").then(() => {
-        copied.textContent = "Copied";
-        urlBtn.classList.add("copied");
-      }).catch(() => {});
-    };
-    moreBtn.onclick = (e) => {
-      e.stopPropagation();
-      vscode.postMessage({ type: "openRemotePortal" });
-      done();
-    };
-
-    panel.append(closeBtn, title, body, actions);
-    overlay.appendChild(panel);
-    document.body.appendChild(overlay);
-    moreBtn.focus();
   }
 
   function renderGearMain() {
@@ -3731,7 +3156,7 @@
     // Worktree Apply/Remove only while already in a worktree (Coding or not —
     // you're already in one, so the controls must stay reachable). Never from a
     // remote: the host acts on its own focused session, not the requester's.
-    if (state.isWorktree && !IS_REMOTE) {
+    if (state.isWorktree) {
       addSection("Session");
       addGearItem(`<span class="gear-lead">${ICON.gitBranch}<span>Apply worktree</span></span>`, () => {
         closePopovers();
@@ -3788,7 +3213,7 @@
     addSection("Settings");
     addGearItem(`<span class="gear-lead">${ICON.gear}<span>Settings</span></span>`, () => openAllSettings());
     // Older hosts have no provider account frame; retain their existing action.
-    if (!IS_REMOTE && !state.providersKnown) {
+    if (!state.providersKnown) {
       addGearItem("<span>Log out</span>", () => {
         vscode.postMessage({ type: "logout" });
         closePopovers();
@@ -3811,7 +3236,7 @@
    * cannot answer, so it must not count as the thing that hides this.
    */
   function gearShowsProviderAccounts() {
-    if (IS_REMOTE || !state.providersKnown) return false;
+    if (!state.providersKnown) return false;
     const list = state.providers || [];
     return !list.some((p) => p.connected && p.needsLogin !== true);
   }
@@ -3868,7 +3293,7 @@
     // rather than the session that asked, so a remote tab working in another
     // repo would get a checkout somewhere it never chose. Offering the option
     // here would promise a placement the host does not honour.
-    if (isCodingPurpose() && state.worktreeSupported && !state.isWorktree && !IS_REMOTE) {
+    if (isCodingPurpose() && state.worktreeSupported && !state.isWorktree) {
       dests.push({
         id: "worktree",
         label: "Use a new worktree",
@@ -4632,25 +4057,6 @@
     return { state: "yes" };
   }
 
-  /**
-   * Rewind and edit-and-resend: Grok uses `_x.ai/rewind/*` (client snapshots
-   * as fallback); Codex/Claude/Gemini use client-side checkpoints (AP-08).
-   * The capability matrix is the gate — no per-provider branch in this UI.
-   */
-  function rewindCapableProvider() {
-    if (state.providerCapabilities && state.providerCapabilities.rewind) {
-      if (state.providerCapabilities.rewind.state !== "yes") return false;
-    } else if (state.activeProvider === "claude" || state.activeProvider === "codex" || state.activeProvider === "gemini") {
-      return false;
-    }
-    // A host older than 4.1.0 classifies rewindSession / editLastMessage as
-    // host-local and drops them without a reply, so the buttons would be dead
-    // for every remote user who has not updated — and the relay always ships
-    // first. Field presence, never a version check; the desk is never gated.
-    if (IS_REMOTE && !(state.hostCaps && state.hostCaps.remoteRewind)) return false;
-    return true;
-  }
-
   function rewindCapability() {
     if (state.providerCapabilities && state.providerCapabilities.rewind) {
       return state.providerCapabilities.rewind;
@@ -4756,7 +4162,6 @@
   function paintSessionSurfaces() {
     if (!historyPopover.hidden) renderSessionRows();
     renderSessionName();
-    renderSessionHead();
     renderRail();
   }
 
@@ -4804,120 +4209,6 @@
     const parts = String(cwd || "").replace(/[\\/]+$/, "").split(/[\\/]+/).filter(Boolean);
     return parts[parts.length - 1] || "Repository";
   };
-
-  // The repo switcher is a REMOTE-only affordance, and even there only once the
-  // host has proved it speaks `repos`. Two independent reasons:
-  //  - In VS Code the window already IS the repo — you switch by opening a
-  //    folder, and a second, weaker switcher beside it is just confusing.
-  //  - A remote client is served by the relay and can outrun the extension a
-  //    user has installed. An older host never sends `repos`, so an
-  //    unconditional chip would render empty with a menu saying "no
-  //    repositories" — a dead control that looks broken. Waiting for the frame
-  //    makes the chip appear only where it works.
-  function repoSwitcherAvailable() {
-    return IS_REMOTE && state.reposKnown;
-  }
-
-  function repoSwitcherLocked() {
-    return state.repoSwitchPending || state.replaying;
-  }
-
-  function applyRepoSwitcherVisibility() {
-    const on = repoSwitcherAvailable();
-    repoBtn.hidden = !on;
-    if (!on || repoSwitcherLocked()) repoPopover.hidden = true;
-  }
-
-  function renderRepoChip() {
-    applyRepoSwitcherVisibility();
-    // The conversation header names the repo too, and a switch changes it.
-    renderSessionHead();
-    if (!repoSwitcherAvailable()) return;
-    const locked = repoSwitcherLocked();
-    const selected = state.repos.find((r) => sameCwd(r.cwd, state.selectedRepoCwd));
-    const label = selected?.label || cwdLeaf(state.selectedRepoCwd || state.activeRepoCwd);
-    const browsing = !!state.selectedRepoCwd && !!state.activeRepoCwd &&
-      !sameCwd(state.selectedRepoCwd, state.activeRepoCwd);
-    repoBtn.disabled = locked;
-    repoBtn.classList.toggle("disabled", locked);
-    repoBtn.setAttribute("aria-disabled", String(locked));
-    repoBtn.classList.toggle("browsing", browsing);
-    repoBtn.innerHTML =
-      `<span class="repo-chip-icon">${selected?.worktreeLabel ? ICON.gitBranch : ICON.folder}</span>` +
-      `<span class="repo-chip-label"></span>${ICON.chevronDown}`;
-    repoBtn.querySelector(".repo-chip-label").textContent = label;
-    repoBtn.title = locked
-      ? "Loading conversation... repository switching is disabled until it finishes."
-      : browsing
-        ? `Browsing ${state.selectedRepoCwd}; live session is in ${state.activeRepoCwd}`
-        : (state.selectedRepoCwd || "Choose repository");
-  }
-
-  function renderRepoPopover() {
-    repoPopover.innerHTML = "";
-    if (!state.repos.length) {
-      const empty = document.createElement("div");
-      empty.className = "history-empty";
-      empty.textContent = "No repositories with Grok sessions.";
-      repoPopover.appendChild(empty);
-      return;
-    }
-    // Same ordering as the rail — by name. Two lists of the same projects in two
-    // different orders is worse than either order on its own.
-    for (const repo of railRepos()) {
-      const row = document.createElement("div");
-      const selected = sameCwd(repo.cwd, state.selectedRepoCwd);
-      const live = sameCwd(repo.cwd, state.activeRepoCwd);
-      row.className = "repo-row" + (selected ? " selected" : "") + (repo.available ? "" : " unavailable");
-      row.title = repo.cwd;
-
-      const main = document.createElement("button");
-      main.type = "button";
-      main.className = "repo-row-main";
-      main.disabled = !repo.available || repoSwitcherLocked();
-      main.innerHTML = `<span class="repo-row-icon">${repo.worktreeLabel ? ICON.gitBranch : ICON.folder}</span><span class="repo-row-copy"><span class="repo-row-name"></span><span class="repo-row-meta"></span></span>`;
-      main.querySelector(".repo-row-name").textContent = repo.label || cwdLeaf(repo.cwd);
-      const meta = main.querySelector(".repo-row-meta");
-      meta.textContent = repo.available
-        ? [repo.worktreeLabel, live ? "Live" : ""].filter(Boolean).join(" · ")
-        : "Unavailable";
-      main.onclick = (e) => {
-        e.stopPropagation();
-        if (!repo.available || repoSwitcherLocked()) return;
-        state.repoSwitchPending = true;
-        renderRepoChip();
-        forgetRememberedSessionByChoice();
-        vscode.postMessage({ type: "selectRepo", cwd: repo.cwd });
-        closePopovers();
-      };
-      row.appendChild(main);
-
-      const actions = document.createElement("div");
-      actions.className = "history-row-actions repo-row-actions";
-      const pin = document.createElement("button");
-      pin.type = "button";
-      pin.className = "history-action-btn" + (repo.pinned ? " active" : "");
-      pin.disabled = repoSwitcherLocked();
-      pin.innerHTML = ICON.pin;
-      pin.title = repo.pinned ? "Unpin repository" : "Pin repository";
-      pin.onclick = (e) => {
-        e.stopPropagation();
-        vscode.postMessage({ type: "toggleRepoPin", cwd: repo.cwd, pinned: !repo.pinned });
-      };
-      actions.appendChild(pin);
-      row.appendChild(actions);
-      repoPopover.appendChild(row);
-    }
-  }
-
-  function openRepoPopover() {
-    if (!repoSwitcherAvailable()) return;
-    if (!repoPopover.hidden) { closePopovers(); return; }
-    closePopovers();
-    renderRepoPopover();
-    positionRepoPopover();
-    repoPopover.hidden = false;
-  }
 
   // Live references to the popover's list + footer, so a `sessions` message can repaint
   // just the rows (without rebuilding the search input, which would drop focus mid-type).
@@ -5232,7 +4523,7 @@
       // Disable rename there; delete still works. The browser client allows the
       // rename (it only sets the display name; the branch icon keeps carrying
       // the real checkout name).
-      if (s.worktreeLabel && !IS_REMOTE) {
+      if (s.worktreeLabel) {
         renameBtn.disabled = true;
         renameBtn.classList.add("disabled");
         renameBtn.title = "Worktree name is fixed to the checkout";
@@ -5279,18 +4570,9 @@
     state.sessionLoading = false;
     state.sessionHasMore = false;
     renderHistoryList();
-    // Where the rail exists the app-wide bar is gone, so `historyBtn` has no box
-    // to hang a dropdown off — the conversation header carries its own History
-    // icon and that is the anchor. The browser page reparents the popover to
-    // match.
-    positionDropdownPopover(historyPopover, railHistoryAnchor() || historyBtn);
+    positionDropdownPopover(historyPopover, historyBtn);
     historyPopover.hidden = false;
     requestSessions(0);
-  }
-
-  function railHistoryAnchor() {
-    if (!railAvailable() || !document.body.classList.contains("has-rail")) return null;
-    return document.getElementById("session-history") || document.getElementById("session-head-main");
   }
 
   // ---------- projects rail ----------
@@ -5358,12 +4640,6 @@
     return document.body.classList.contains("desk") && !!railMount();
   }
 
-  /** A cloud machine, as the page that served this client was told by the
-   *  relay that provisioned it. */
-  function cloudHostLayout() {
-    return IS_CLOUD_HOST && !!railMount();
-  }
-
   /**
    * May this surface paint the rail chrome BEFORE the catalog arrives?
    *
@@ -5374,7 +4650,7 @@
    * sends one and an empty sidebar is worse than a plain column.
    */
   function railChromeBeforeCatalog() {
-    return desktopLargeLayout() || cloudHostLayout();
+    return desktopLargeLayout() || false;
   }
 
   /**
@@ -5385,9 +4661,9 @@
     return !!railMount() && (railChromeBeforeCatalog() || state.reposKnown);
   }
 
-  /** The list body. The browser page wraps the rail in fixed chrome (brand,
-   *  search, account) and gives the scrolling middle its own element, so the
-   *  only thing this file may empty is that middle — clearing the whole aside
+  /** The list body. The desktop page wraps the rail in fixed chrome (brand,
+   *  search) and gives the scrolling middle its own element, so the only
+   *  thing this file may empty is that middle — clearing the whole aside
    *  would take the chrome with it on every render. Falls back to the aside so
    *  a page without the wrapper still works. */
   function rail() {
@@ -6065,18 +5341,6 @@
     );
   }
 
-  /** Whether the live (or pending) conversation is one of THIS project's.
-   *
-   *  `sessionCwd` is the live session's own cwd, and for a worktree session
-   *  that is the worktree — a directory that is deliberately not a catalog row.
-   *  So the parent project has to recognise its own conversation by the rows it
-   *  actually draws, or the project holding the conversation you are reading
-   *  claims to hold nothing. Takes an explicit target so a pending cross-repo
-   *  selection still owns its project (see railDisplayTarget). */
-  function railRepoOwnsActive(repo, row) {
-    return railRepoOwnsTarget(repo, row, railDisplayTarget());
-  }
-
   function isRailPendingSessionId(id) {
     return typeof id === "string" && id.startsWith("pending-new:");
   }
@@ -6099,7 +5363,6 @@
    * model.
    */
   function startRailTransition(fields) {
-    if (state.sessionSuperseded) clearSessionSuperseded();
     clearRailTransitionTimer();
     const token = ++railTransitionSeq;
     state.railTransition = { token, ...fields };
@@ -6131,7 +5394,6 @@
     setConversationLoading(true);
     if (fields.kind === "resume") {
       renderSessionName();
-      renderSessionHead();
     }
     const ms = Number(window.__grokRailTransitionTimeoutMs) > 0
       ? Number(window.__grokRailTransitionTimeoutMs)
@@ -6183,7 +5445,6 @@
     }
     renderRail();
     renderSessionName();
-    renderSessionHead();
   }
 
   function completeRailTransition(token) {
@@ -6540,16 +5801,8 @@
     if (panel) panel.hidden = !on;
     root.hidden = !on;
     document.body.classList.toggle("has-rail", on);
-    // The rail's arrival moves where conversation controls live — `.top-bar` is
-    // hidden from here on — so the file button has to be re-homed with it. It is
-    // usually built long before `repos` lands, i.e. while the top bar was still
-    // the right answer. Re-place only: a full ensure() would re-render the file
-    // panel on every rail rebuild, and a session load produces a burst of those.
-    const filesBtn = document.getElementById("files-browse-btn");
-    if (filesBtn) placeRemoteFilesButton(filesBtn);
     if (!on) {
       const openMenuKey = railMenuEl ? railMenuEl.dataset.anchorId || "" : "";
-      renderSessionHead();
       reanchorOpenRailMenu(openMenuKey);
       return;
     }
@@ -6693,13 +5946,6 @@
       }
     }
 
-    // Re-anchor AFTER renderSessionHead: the top-right ⋯ lives in
-    // #session-head-actions (key "session-head"), which fillSessionHeadActions
-    // rebuilds. Searching only `root` here used to miss that button and slam
-    // the menu shut on every catalog frame — the thing the owner hit while
-    // projects were still loading. Search the document so both a rail-row
-    // menu and the header menu survive the wipe.
-    renderSessionHead();
     reanchorOpenRailMenu(openMenuKey);
     // Colour picker is one-shot and short-lived — the rebuild destroys its
     // anchor button, and re-opening it mid-catalog-refresh is not worth the
@@ -6842,7 +6088,7 @@
     const caps = state.hostCaps || {};
     return {
       appPurpose: state.appPurpose === "coding" ? "coding" : "knowledge",
-      canImport: !IS_REMOTE && caps.addProjectFolder === true,
+      canImport: caps.addProjectFolder === true,
       canCreate: caps.createProject === true,
       canClone: caps.cloneProject === true,
     };
@@ -6918,24 +6164,7 @@
   let addProjectFormScrim = null;
   let addProjectFormKeydown = null;
 
-  /**
-   * Cancel a GitHub device login, but only at a host that knows what that
-   * means. An older one maps every unrecognised provider to `grok`, so sending
-   * it there either does nothing (no Grok login running) or cancels somebody
-   * else's Grok sign-in. Silence costs the abandoned login its 15-minute
-   * timeout, which is exactly the behaviour those hosts already had.
-   */
-  function cancelGithubDeviceLoginIfSupported() {
-    if (IS_REMOTE && !(state.hostCaps && state.hostCaps.remoteGithubToken)) return;
-    vscode.postMessage({ type: "cancelDeviceLogin", provider: "github" });
-  }
-
   function closeAddProjectForm() {
-    const wasClone = !!(addProjectFormApi && addProjectFormApi.el && addProjectFormApi.el.dataset.kind === "clone");
-    if (wasClone) {
-      state.projectGithub = null;
-      cancelGithubDeviceLoginIfSupported();
-    }
     if (addProjectFormScrim) addProjectFormScrim.remove();
     // Capture-phase, so it must come off again — a listener left behind would
     // swallow Escape everywhere else in the app for the rest of the session.
@@ -6957,21 +6186,11 @@
     if (!helpers || typeof helpers.addProjectForm !== "function") return;
     closeAddProjectForm();
     closeRailMenu();
-    if (kind === "clone") {
-      state.projectGithub = null;
-      cancelGithubDeviceLoginIfSupported();
-    }
-    const githubSignIn = !IS_REMOTE || !!(state.hostCaps && state.hostCaps.remoteGithubSignIn);
-    // The token path is NOT covered by remoteGithubSignIn: that flag promises
-    // the device-code flow and nothing else, and a host advertising it but
-    // predating `githubLoginWithToken` takes the credential across the relay
-    // and drops it, clearing the field with no error.
-    const githubToken = !IS_REMOTE || !!(state.hostCaps && state.hostCaps.remoteGithubToken);
     const api = helpers.addProjectForm({
       kind,
       root: state.projectRoot,
-      canGithubCli: githubSignIn,
-      canUseToken: githubToken,
+      canGithubCli: true,
+      canUseToken: true,
       onSubmit: (value, extra) => {
         vscode.postMessage(
           kind === "clone"
@@ -6983,22 +6202,6 @@
         vscode.postMessage({ type: "githubLoginWithToken", token });
       },
       onConnect: () => {
-        // Same gate as onFix below, and for the same reason: a host that
-        // predates `remoteGithubSignIn` drops `setupGithubCli` silently, so
-        // without this the picker's Connect row is a button that does nothing.
-        // The client is always as new as the relay deploy while the extension
-        // is whatever the person installed, so "older host" is the ordinary
-        // case, not an edge one.
-        if (IS_REMOTE && !(state.hostCaps && state.hostCaps.remoteGithubSignIn)) {
-          if (addProjectFormApi) {
-            addProjectFormApi.update({
-              error: IS_CLOUD_HOST
-                ? "This machine's app is too old to connect GitHub from here. It updates itself shortly."
-                : "Sign in to GitHub on the computer running this workspace — a terminal opens there — then try again here.",
-            });
-          }
-          return;
-        }
         vscode.postMessage({ type: "setupGithubCli", action: "auth" });
       },
       onRequestRepos: () => {
@@ -7006,56 +6209,14 @@
       },
       githubState: state.githubState || undefined,
       repos: state.githubRepos,
-      terminalSignIn: !IS_REMOTE,
+      terminalSignIn: true,
       onRecheck: () => vscode.postMessage({ type: "refreshProviders" }),
-      touch: remoteUsesTouchComposer() || (typeof window.matchMedia === "function"
-        && window.matchMedia("(hover: none), (pointer: coarse)").matches),
+      touch: (typeof window.matchMedia === "function" && window.matchMedia("(hover: none), (pointer: coarse)").matches),
       onCancel: closeAddProjectForm,
-      // Local: signing in happens in a terminal, and the form stays open so
-      // they can clone again afterwards.
-      //
-      // Remote: older hosts classify `setupGithubCli` as host-local and DROP
-      // it silently. A new host advertises `remoteGithubSignIn` and runs the
-      // headless device-code flow into this form. Capability, never a version
-      // check — the same reason Connect is gated on `remoteAgentSignIn`.
+      // Signing in happens in a terminal, and the form stays open so they can
+      // clone again afterwards.
       onFix: (fix) => {
         const install = fix === "install-gh";
-        // INSTALL has no headless path and is not getting one: a package
-        // manager asks for elevation, so the host opens a terminal for it. On a
-        // cloud machine that terminal is an Xvfb screen nobody is at, and
-        // pressing the button again just opens another one — the very dead end
-        // the sign-in flow exists to remove, reintroduced on the other branch.
-        // Caught by review before release. The capability says the host can
-        // sign in headlessly; it says nothing about installing.
-        if (IS_REMOTE && install) {
-          if (addProjectFormApi) {
-            addProjectFormApi.update({
-              error: IS_CLOUD_HOST
-                // A cloud machine ships gh, so this is a broken machine rather
-                // than a missing step, and there is no computer to walk to.
-                ? "The GitHub CLI is missing on this cloud machine, which should not happen. "
-                  + "Reset the machine from Settings, or tell us and we will look."
-                // Literal, not the host's GITHUB_CLI_DOWNLOAD: that constant
-                // lives in project-create.ts and is not in scope here, so
-                // referencing it would throw at the moment of the click.
-                : "Install the GitHub CLI on the computer running this workspace — cli.github.com — then try again here.",
-            });
-          }
-          return;
-        }
-        if (IS_REMOTE && !(state.hostCaps && state.hostCaps.remoteGithubSignIn)) {
-          const cloud = IS_CLOUD_HOST;
-          if (addProjectFormApi) {
-            addProjectFormApi.update({
-              error: cloud
-                ? "Signing in to GitHub needs a terminal, and a cloud machine has none. "
-                  + "Public repositories clone as they are; private ones need this, and it is coming."
-                : "Sign in to GitHub on the computer running this workspace — a terminal opens there — then try again here.",
-            });
-          }
-          return;
-        }
-        // Local keeps both actions: a terminal there is one the person can see.
         vscode.postMessage({ type: "setupGithubCli", action: install ? "install" : "auth" });
       },
     });
@@ -7231,25 +6392,8 @@
 
   function exportCurrentSession() {
     const title = exportConversationTitle();
-    const markdown = exportSessionMarkdown(state.exportEvents, {
-      title,
-      windowed: !!state.exportWindowed,
-    });
+    const markdown = exportSessionMarkdown(state.exportEvents, { title });
     const filename = exportSessionFilename(title);
-    if (IS_REMOTE) {
-      const blob = new Blob([markdown], { type: "text/markdown;charset=utf-8" });
-      const href = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = href;
-      a.download = filename;
-      a.rel = "noopener";
-      a.addEventListener("click", (e) => e.stopPropagation());
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(href), 10000);
-      return;
-    }
     // filename is a save-as hint. The host chooses delivery (untitled tab vs
     // OS save dialog). An older host ignores the field and still opens text.
     vscode.postMessage({ type: "openText", content: markdown, language: "markdown", filename });
@@ -7278,8 +6422,8 @@
     edit.editBtn.hidden = false;
     // After the input is gone — paintSessionSurfaces rebuilds the label.
     if (commit && next !== edit.original) paintPendingRename(edit.id, next);
-    else if (edit.surface === "local") renderSessionName();
-    else renderSessionHead();
+    else if (edit.surface === "local")
+      renderSessionName();
   }
 
   function beginSessionNameEdit(surface, labelEl, editBtn) {
@@ -7347,7 +6491,6 @@
     // the new conversation (they must differ from previousSessionId).
     const previousSessionId = state.activeSessionId;
     const repoCwd = state.selectedRepoCwd || state.activeRepoCwd || "";
-    forgetRememberedSessionByChoice();
     // Veil before the host-style reset so the click can unhide the welcome.
     // resetForNewSession marks the old nodes pending-clear, and a pending-clear
     // transcript must not grow an empty-state panel on top of it.
@@ -7356,41 +6499,13 @@
     vscode.postMessage({ type: "newSession" });
   }
 
-  function wireSessionNewButton(btn) {
-    if (!btn || btn.dataset.railWired) return;
-    btn.dataset.railWired = "1";
-    btn.hidden = false;
-    btn.type = "button";
-    btn.title = "New session";
-    btn.setAttribute("aria-label", "New session");
-    btn.innerHTML = ICON.squarePen;
-    btn.onclick = (e) => {
-      e.stopPropagation();
-      closePopovers();
-      beginNewSession();
-    };
-  }
-
-  // History stays a dedicated control; New sits next to it on every surface
-  // (top-bar `#new-btn`, remote `#session-new`). Older remote pages omit the
-  // latter — inject it after History so current-project New is still there
-  // when the rail is closed (see railSessionMenuItems).
+  // History stays a dedicated control; New sits next to it in the top bar
+  // (`#new-btn`) so current-project New is still there when the rail is
+  // closed (see railSessionMenuItems).
   function ensureVisibleNewSession() {
     if (newBtn) {
       newBtn.hidden = false;
       newBtn.title = "New session";
-    }
-    const history = document.getElementById("session-history");
-    let sessionNew = document.getElementById("session-new");
-    if (!sessionNew && history && history.parentElement) {
-      sessionNew = document.createElement("button");
-      sessionNew.id = "session-new";
-      sessionNew.className = (history.className ? history.className + " " : "") + "icon-btn";
-      history.insertAdjacentElement("afterend", sessionNew);
-    }
-    if (sessionNew) {
-      if (!sessionNew.classList.contains("icon-btn")) sessionNew.classList.add("icon-btn");
-      wireSessionNewButton(sessionNew);
     }
   }
 
@@ -7478,7 +6593,6 @@
   }
 
   function renderSessionName() {
-    if (IS_REMOTE) return;
     const chip = $("session-name-chip");
     const label = $("session-name-label");
     const editBtn = $("session-name-edit");
@@ -7550,75 +6664,6 @@
     el.textContent = label;
     el.title = projectCwd === cwd ? cwd : `${cwd}
 (in ${projectCwd})`;
-  }
-
-  function renderSessionHead() {
-    if (!IS_REMOTE) return;
-    const head = document.getElementById("session-head");
-    if (!head) return;
-    const titleEl = document.getElementById("session-head-title");
-    const subEl = document.getElementById("session-head-sub");
-    if (!titleEl || !subEl) return;
-
-    const record = activeSessionRecord();
-    // A brand-new conversation has no stored name until its first turn is
-    // summarised, so say what it is rather than showing an empty bar.
-    const name = displayedSessionName(record);
-    const editingRemote = state.sessionNameEditing?.surface === "remote";
-    if (!editingRemote) titleEl.textContent = name;
-    titleEl.title = name;
-
-    const cwd = record?.cwd || state.selectedRepoCwd;
-    // Owner decision 2026-08-15: no project line under the name, anywhere —
-    // the rail says the project, the header tooltip keeps the full path.
-    subEl.textContent = "";
-    subEl.hidden = true;
-    // The name has its own tooltip on the title element; leave the header's to
-    // the full path, which the truncated repo line below cannot show.
-    head.title = cwd || "";
-
-    let editBtn = document.getElementById("session-head-edit");
-    const canRename = !!sessionNameTarget();
-    if (!editBtn && canRename && titleEl.parentElement) {
-      editBtn = document.createElement("button");
-      editBtn.id = "session-head-edit";
-      editBtn.className = "session-name-edit session-name-edit-remote icon-btn";
-      titleEl.parentElement.appendChild(editBtn);
-    }
-    if (editBtn) {
-      editBtn.hidden = !canRename;
-      editBtn.title = "Rename conversation";
-      editBtn.setAttribute("aria-label", "Rename conversation");
-      editBtn.innerHTML = ICON.pencil;
-      editBtn.onclick = (e) => { e.stopPropagation(); beginSessionNameEdit("remote", titleEl, editBtn); };
-    }
-    if (canRename) {
-      titleEl.classList.add("session-name-label");
-      titleEl.setAttribute("role", "button");
-      titleEl.tabIndex = 0;
-      titleEl.setAttribute("aria-label", `Conversation: ${name}. Activate to rename.`);
-      if (!state.sessionNameEditing || state.sessionNameEditing.surface !== "remote") {
-        wireSessionNameLabel(titleEl, editBtn || { hidden: true }, "remote");
-      }
-    } else {
-      titleEl.classList.remove("session-name-label");
-      titleEl.removeAttribute("role");
-      titleEl.removeAttribute("tabindex");
-      titleEl.removeAttribute("aria-label");
-      titleEl.onclick = null;
-      titleEl.onkeydown = null;
-    }
-
-    fillSessionHeadActions();
-
-    const history = document.getElementById("session-history");
-    if (history && !history.dataset.railWired) {
-      history.dataset.railWired = "1";
-      history.innerHTML = ICON.clock;
-      history.title = history.title || "Session history";
-      history.onclick = (e) => { e.stopPropagation(); openHistoryPopover(); };
-    }
-    ensureVisibleNewSession();
   }
 
   function renderRailRepo(repo, inArchive) {
@@ -7732,7 +6777,7 @@
     add.className = "rail-action-btn";
     add.innerHTML = ICON.squarePen;
     add.title = selected ? "New session here" : "Switch to this project and start a new session";
-    // Deliberately NOT gated on repoSwitcherLocked(). Starting a conversation is
+    // Deliberately NOT gated on repoSwitchPending. Starting a conversation is
     // the one thing that should always be available, and a lock that disables it
     // in EVERY project at once is indistinguishable from the app being broken —
     // which is how it read. A click during a transition supersedes it rather
@@ -7971,7 +7016,6 @@
     // confirmed one, so `active` is already the right answer.
     const target = railDisplayTarget();
     const active = !!(target && s.id === target.id && railRepoOwnsTarget(repo, s, target));
-    const hostActive = railIdlessActionsAllowed() && active;
     row.className = "rail-session" + (active ? " active" : "");
     row.dataset.sessionId = s.id || "";
     row.title = sessionRowName(s);
@@ -8149,7 +7193,7 @@
       // unapplied edits. Hidden rather than shown-and-dropped: the host now
       // refuses these from remote, and a control that silently does nothing is
       // worse than one that isn't there.
-      if (state.isWorktree && !IS_REMOTE) {
+      if (state.isWorktree) {
         items.push({
           label: "Apply worktree",
           icon: ICON.gitBranch,
@@ -8265,7 +7309,7 @@
   function railSessionOpener(s, repo, active) {
     return () => {
       // Already the display target (confirmed or this pending click) — no-op.
-      // Deliberately NOT gated on repoSwitcherLocked: a new click supersedes any
+      // Deliberately NOT gated on repoSwitchPending: a new click supersedes any
       // in-flight rail transition, and stacking resumeSession is the host's job
       // to serialise. Locking here is what made a second click during load feel
       // dropped.
@@ -8276,8 +7320,7 @@
       // `cwd` rides along so a session in another repo reopens in ITS checkout —
       // the host resolves sessions by cwd, and omitting it would look the id up
       // under the repo we happen to be in.
-      if (!sameCwd(repo.cwd, state.selectedRepoCwd)) forgetRememberedSessionByChoice();
-      postResumeSession(s.id, s.cwd || repo.cwd, { claim: true });
+            postResumeSession(s.id, s.cwd || repo.cwd, { claim: true });
     };
   }
 
@@ -8295,7 +7338,6 @@
     state.railSelectedRowsKnown = true;
     state.railSessionsStale = false;
     renderRail();
-    renderSessionHead();
   }
 
   function selectRailRepo(repo) {
@@ -8314,8 +7356,6 @@
     if (window.__grokRailNewIntent && !sameCwd(window.__grokRailNewIntent, repo.cwd)) {
       window.__grokRailNewIntent = null;
     }
-    renderRepoChip();
-    forgetRememberedSessionByChoice();
     vscode.postMessage({ type: "selectRepo", cwd: repo.cwd });
   }
 
@@ -8335,9 +7375,6 @@
    *  tell "the conversation finished loading" from "startup finished" without
    *  comparing display strings. */
   function setWelcomeStatus(text, busy) {
-    // body.identity-restoring: the wrapper's "Restoring conversation…" is the
-    // only copy. Call sites already skip a painted-conversation hold.
-    if (identityRestoring()) return;
     const ver = $("welcome-version");
     if (!ver) return;
     ver.classList.toggle("welcome-status-busy", !!busy);
@@ -8373,7 +7410,7 @@
     }
     // A host clear already owns these nodes; revealing the empty state on top
     // of them is the reconnect flash. The click path veils *before* that clear.
-    if (welcome && !hasPendingClearNodes() && !identityRestoring()) {
+    if (welcome && !hasPendingClearNodes()) {
       welcome.hidden = false;
       state.welcomeVisible = true;
     }
@@ -8507,7 +7544,6 @@
     );
     return {
       appPurpose: state.appPurpose === "coding" ? "coding" : "knowledge",
-      isRemote: IS_REMOTE,
       // Mirrors continueChatDestinations(), so the tip is never offered where
       // the action it links to would be refused.
       worktreeSupported: state.worktreeSupported !== false,
@@ -8516,14 +7552,11 @@
       // A cloud machine can connect agents from here and cannot connect Claude
       // Code at all; both change what the providers tip should say and whether
       // it may be shown.
-      cloudHost: !!(state.hostCaps && state.hostCaps.remoteAgentSignOut),
-      remoteCanConnectAgents: !!(state.hostCaps && state.hostCaps.remoteAgentSignIn),
       routineCount: host.routineCount,
       connectorCount: host.connectorCount,
       // A phone's read-aloud is its own client-side preference, not the desk's.
-      readRepliesAloud: IS_REMOTE ? !!state.remoteTts : !!state.readRepliesAloud,
+      readRepliesAloud: !!state.readRepliesAloud,
       voiceConfigured: !!state.voiceConfigured,
-      remoteLinked: state.remoteLinked,
       // Host list plus anything retired here. The union, so the control works
       // before the first frame and keeps working if the host never answers.
       dismissed: (Array.isArray(host.dismissed) ? host.dismissed : [])
@@ -8782,7 +7815,7 @@
     // the rest of initialState, but where the chat sits is a property of the
     // machine running the extension - `moveView` is host-local and the relay
     // drops it, so a phone would get advice it cannot take.
-    if (!IS_REMOTE && state.hostCaps && state.hostCaps.moveViewHint === true) {
+    if (state.hostCaps && state.hostCaps.moveViewHint === true) {
       const existing = $("welcome-tip");
       if (existing && existing.dataset.tip !== "moveView") existing.remove();
       renderMoveViewTip();
@@ -8795,25 +7828,21 @@
 
   // clearMessages marks existing transcript nodes instead of destroying them.
   // Destroy at the first replacement append (same task) or on the next frame
-  // if nothing replaces it. body.identity-restoring suspends that next-frame
-  // flush: a restore is a replacement we already know is coming, so wait for
-  // the class to lift and flush then only if nothing arrived. Welcome, title,
-  // composer focus, and the reader's pin stay put while a conversation is
+  // if nothing replaces it. Welcome, title, composer focus, and the reader's pin stay put while a conversation is
   // still on screen — a resync must not blank, refocus, re-pin, or paint
   // "Starting" over it, even before those nodes are marked pending-clear.
   const PENDING_CLEAR_ATTR = "data-pending-clear";
   let pendingTranscriptClear = false;
   let pendingTranscriptClearRaf = 0;
   // Status resetForNewSession would have stamped immediately. Held while a
-  // conversation is still on screen (pending-clear or not) or while
-  // body.identity-restoring is set; applied in the flush if nothing replaces
-  // them, dropped if a replacement arrives.
+  // conversation is still on screen (pending-clear or not); applied in the
+  // flush if nothing replaces them, dropped if a replacement arrives.
   // "loading" / "no-project" / "starting" match the three special cases at
   // the welcome block.
   let pendingWelcomeReveal = null;
   // Title, worktree flag, in-progress rename, composer focus, and the
-  // reader's pin: same hold. A resync must not blank the name, move focus
-  // (a returning phone tab would pop the keyboard), or yank a scrolled-up
+  // reader's pin: same hold. A resync must not blank the name, move focus,
+  // or yank a scrolled-up
   // reader to the bottom. Flush still applies them for an empty swap; a
   // sessionName with a different id applies focus + pin for a real swap.
   let pendingSessionChromeReset = false;
@@ -8853,16 +7882,7 @@
     state.welcomeVisible = true;
   }
 
-  function identityRestoring() {
-    return !!(document.body && document.body.classList.contains("identity-restoring"));
-  }
-
   function welcomeHoldActive() {
-    // Cold load of a remembered conversation: the wrapper owns the wait
-    // ("Restoring conversation…") and the welcome starts visible with no .msg
-    // nodes, so the painted-conversation hold below would not apply. Hide it
-    // in syncIdentityRestoreHold — this predicate only refuses to stamp/reveal.
-    if (identityRestoring()) return true;
     const welcome = $("welcome");
     if (!welcome || !welcome.hidden) return false;
     // A painted conversation, whether already marked pending-clear or not.
@@ -8900,7 +7920,6 @@
       child.setAttribute(PENDING_CLEAR_ATTR, "1");
     }
     cancelPendingTranscriptClearRaf();
-    if (identityRestoring()) return;
     schedulePendingTranscriptClearFlush();
   }
 
@@ -8932,7 +7951,6 @@
     state.isWorktree = false;
     state.sessionName = null;
     renderSessionName();
-    if (IS_REMOTE) renderSessionHead();
     focusComposerIfAllowed();
     setStickToBottom(true); // a fresh/loaded session starts pinned
     updateScrollBtn();
@@ -8945,8 +7963,6 @@
     // has not landed yet. Keep the conversation until it does, or until the
     // replay ends empty and calls us again.
     if (state.replaying) return;
-    // Same for the wrapper's restore veil: stay armed until the class lifts.
-    if (identityRestoring()) return;
     pendingTranscriptClear = false;
     const kind = pendingWelcomeReveal;
     pendingWelcomeReveal = null;
@@ -8962,46 +7978,6 @@
     }
     if (chrome) resetSessionChrome();
     revealWelcome();
-  }
-
-  // The relay wrapper sets body.identity-restoring while it restores a
-  // remembered session on a fresh page. Both layers share this document, so
-  // read the class rather than waiting for a host frame.
-  let identityRestoreHeld = false;
-
-  function scheduleEmptyWelcomeFlush() {
-    pendingTranscriptClear = true;
-    if (pendingWelcomeReveal == null) pendingWelcomeReveal = welcomeRevealKind();
-    schedulePendingTranscriptClearFlush();
-  }
-
-  function syncIdentityRestoreHold() {
-    const now = identityRestoring();
-    if (now) {
-      const welcome = $("welcome");
-      if (welcome) welcome.hidden = true;
-      if (pendingWelcomeReveal == null) pendingWelcomeReveal = welcomeRevealKind();
-      identityRestoreHeld = true;
-      cancelPendingTranscriptClearRaf();
-      return;
-    }
-    if (!identityRestoreHeld) return;
-    identityRestoreHeld = false;
-    // Pending-clear nodes still count as painted, so welcomeHoldActive cannot
-    // decide this. Flag dropped → replacement landed. Still armed → flush.
-    if (!pendingTranscriptClear && welcomeHoldActive()) {
-      pendingWelcomeReveal = null;
-      return;
-    }
-    scheduleEmptyWelcomeFlush();
-  }
-
-  syncIdentityRestoreHold();
-  if (typeof MutationObserver === "function" && document.body) {
-    new MutationObserver(syncIdentityRestoreHold).observe(document.body, {
-      attributes: true,
-      attributeFilter: ["class"],
-    });
   }
 
   // Last N counted user bubbles render on open; earlier turns prepend on scroll
@@ -10550,12 +9526,8 @@
   }
 
   function resetForNewSession() {
-    clearSessionSuperseded();
     stopProcessingCue();
     cancelPendingSpeech();
-    // The transcript is about to be emptied wholesale; drop the reference so a
-    // later echo can't try to remove a node from the previous session.
-    state.optimisticSendEl = null;
     markTranscriptPendingClear();
     // Incoming `session` / `sessionName` re-set these. Clearing them first is
     // why a resync blanks the title and then paints it back. Hold while the
@@ -10637,7 +9609,6 @@
     state.replayDepth = 0;
     clearHistoryWindow();
     state.exportEvents = [];
-    state.exportWindowed = false;
     state.planHistoryQueue = [];
     state.permissionHistoryQueue = [];
     state.userMsgCount = 0;
@@ -10679,12 +9650,6 @@
     if (state.queuedWrapEl) state.queuedWrapEl.remove();
     state.sendQueue = [];
     state.queuedWrapEl = null;
-    state.queuedSubmissionPending = false;
-    state.queuedSubmissionRejected = false;
-    state.pendingSubmissionText = "";
-    state.pendingSubmissionId = null;
-    state.pendingSubmissionChipIds = [];
-    state.rejectedSubmissionText = "";
     updateSendButton();
     // Body-attached lightbox / preview overlay outlive #messages — close them
     // on every session swap so the previous conversation cannot cover the next.
@@ -10781,365 +9746,6 @@
     }
   }
 
-  /**
-   * Connecting an agent from a phone.
-   *
-   * This panel used to say "accounts can only be connected on the computer
-   * running this workspace" and stop there. That was true of the old
-   * implementation — `runGrokLogin` opened a terminal on the desk, which a
-   * remote cannot see — and it was a dead end at the exact moment someone most
-   * wanted a next step. The host now runs the CLI's headless device-code flow
-   * for a remote request, so the answer is a URL and a short code instead.
-   *
-   * Everything below renders from what the host reported. The client makes no
-   * judgement about which providers have a headless flow: it offers the button,
-   * and a provider that cannot be signed in from here comes back `unavailable`
-   * with a sentence saying so. That way a CLI that grows the flow starts working
-   * without a client change, and one that loses it stops lying.
-   */
-  /** Host-supplied panel text: escaped, then `**bold**` and `[label](https://…)`
-   *  re-admitted. Never the other way round — see the note on the steps below. */
-  function onbRich(text) {
-    return escapeHtml(String(text == null ? "" : text))
-      .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
-      .replace(
-        /\[([^\]\n]+)\]\((https:\/\/[^\s)]+)\)/g,
-        (_m, label, url) => `<a href="${url}" target="_blank" rel="noopener noreferrer">${label}</a>`,
-      );
-  }
-
-  function remoteConnectPanel(mode, info, ver) {
-    const device = info.device;
-    const provider = info.provider
-      || (mode === "codex-login" ? "codex" : mode === "claude-login" ? "claude" : mode === "gemini-login" ? "gemini" : mode === "muse-login" ? "muse" : mode === "auth-required" ? "grok" : "");
-    // The products' own names, everywhere this panel speaks. Not "Grok": that
-    // is the model, the extension is Grok Build, and a heading that disagrees
-    // with the button beneath it reads as two different things to connect.
-    const NAMES = { grok: "Grok Build", codex: "Codex", claude: "Claude Code", gemini: "Gemini CLI" };
-    const name = NAMES[provider] || "an agent";
-    const status = (text) => { if (ver) setWelcomeStatus(text, false); };
-
-    // The relay serves this page, so it is always as new as the last deploy
-    // while the host is whatever the user installed. A host built before remote
-    // sign-in existed classifies `runGrokLogin` as host-local and DROPS it
-    // silently — so offering Connect there would be a button that does nothing,
-    // which is worse than the honest dead end it replaced. Capability, never a
-    // version check.
-    if (!(state.hostCaps && state.hostCaps.remoteAgentSignIn)) {
-      status("Sign in at the desk");
-      return `<div class="onb">` +
-        `<p class="onb-heading">Sign in at the desk</p>` +
-        `<p class="onb-desc">${escapeHtml(name === "an agent" ? "Agent" : name)} accounts can only be connected on the computer running this workspace. Sign in there, then refresh this remote view.</p>` +
-      `</div>`;
-    }
-    const cancel = `<button class="onb-action onb-secondary" type="button" data-act="cancelDeviceLogin" `
-      + `data-provider="${escapeHtml(provider)}">Cancel</button>`;
-
-    if (device && device.status === "waiting" && device.url) {
-      status(device.needsCode ? (device.submitted ? "Confirming sign-in" : "Paste the code") : "Confirm the code");
-      const paste = !!device.needsCode;
-      const codeChip = !paste && device.code
-        ? `<p class="onb-desc">Open the link, then confirm this code:</p>` +
-          // Same markup as every other copyable value in this panel, so it
-          // inherits the existing copy handler and its copied state.
-          `<div class="onb-cmd">` +
-            `<code>${escapeHtml(device.code)}</code>` +
-            `<button class="onb-copy" type="button" title="Copy" data-cmd="${escapeHtml(device.code)}">${ICON.copy}</button>` +
-          `</div>`
-        : (!paste ? `<p class="onb-desc">Open the link to finish signing in.</p>` : "");
-      // Paste-code is a SEQUENCE, and the card now reads in that order: what
-      // you are about to do, the link that does it, then the field for what it
-      // gives you back. The field used to sit ABOVE the link, so the first
-      // thing on screen was somewhere to paste a code you had no way to have
-      // yet (owner, 2026-09-01).
-      const pasteIntro = paste && !device.submitted
-        ? `<p class="onb-desc">Open the sign-in page, sign in, then paste the code it shows you:</p>`
-        : "";
-      const pasteEntry = paste && !device.submitted
-        ? `<div class="onb-cmd onb-code-entry">` +
-            `<input class="onb-code-input" type="text" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Paste code" aria-label="Paste sign-in code">` +
-            `<button class="onb-action" type="button" data-act="submitDeviceLoginCode" data-provider="${escapeHtml(provider)}">Submit</button>` +
-          `</div>`
-        : "";
-      return `<div class="onb">` +
-        `<p class="onb-heading">${device.preflight ? "Step 2 of 2 &mdash; confirm the code" : `Finish signing in to ${escapeHtml(name)}`}</p>` +
-        // The vendor's own page warns that device codes are used in phishing
-        // and to continue only if the CLI started the sign-in. Saying that
-        // BEFORE they meet it turns an alarming page into an expected one
-        // (owner, with the screenshot, 2026-08-31).
-        (device.note ? `<p class="onb-desc onb-note">${onbRich(device.note)}</p>` : "") +
-        codeChip +
-        pasteIntro +
-        `<a class="onb-action" href="${escapeHtml(device.url)}" target="_blank" rel="noopener noreferrer">Open the sign-in page</a>` +
-        // AFTER the link: you cannot have a code until you have been there.
-        pasteEntry +
-        // The setting to check, beside the code it gates — not on a screen
-        // before it that cost an extra click to get past.
-        (device.preflight && Array.isArray(device.preflight.steps) && device.preflight.steps.length
-          ? `<p class="onb-desc">${onbRich(device.preflight.reason || "")}</p>` +
-            `<ol class="onb-steps">${device.preflight.steps
-              .map((s) => `<li>${onbRich(s)}</li>`)
-              .join("")}</ol>`
-          : "") +
-        cancel +
-        // Device-code finishes without another tap. Paste-code does not, until
-        // the code has been written back.
-        `<p class="onb-desc">${paste
-          ? (device.submitted
-            ? "Code sent &mdash; keep this page open, it finishes on its own."
-            : "This page stays open so you can paste the code back.")
-          : "Keep this page open &mdash; it finishes on its own."}</p>` +
-      `</div>`;
-    }
-
-    if (device && device.status === "starting") {
-      status("Starting sign-in");
-      return `<div class="onb">` +
-        `<p class="onb-heading">Connecting ${escapeHtml(name)}</p>` +
-        `<p class="onb-desc">Asking the ${escapeHtml(name)} CLI for a sign-in code&hellip;</p>` +
-        cancel +
-      `</div>`;
-    }
-
-    if (device && device.status === "verifying") {
-      status("Confirming sign-in");
-      return `<div class="onb">` +
-        `<p class="onb-heading">Almost there</p>` +
-        `<p class="onb-desc">Signed in — confirming the credential on this machine…</p>` +
-      `</div>`;
-    }
-
-    if (device && device.status === "done") {
-      status("Connected");
-      return `<div class="onb">` +
-        `<p class="onb-heading">${escapeHtml(name)} connected</p>` +
-        `<p class="onb-desc">You can start a conversation.</p>` +
-      `</div>`;
-    }
-
-    // Shown BEFORE anything is attempted, when a sign-in is likely to fail for a
-    // reason the reader can fix in seconds. Codex device-code login is off by
-    // default on every account — telling somebody that after a wait and a
-    // failure is telling them too late.
-    if (device && device.preflight) {
-      status("One setting first");
-      const pf = device.preflight;
-      // Escape FIRST, then allow `**bold**` and one link — never the other way
-      // round. The step strings come from the host, and the point of the escape
-      // is that nothing in them can become markup; re-admitting two shapes
-      // afterwards, on text that is already inert, keeps that true. Both are
-      // needed here: the setting people cannot find sits at the bottom of a
-      // long page, and the page it sits on should be one tap away.
-      const steps = (pf.steps || [])
-        .map((s) => `<li>${onbRich(s)}</li>`)
-        .join("");
-      return `<div class="onb">` +
-        `<p class="onb-heading">${escapeHtml(pf.title || `Turn on device sign-in for ${name}`)}</p>` +
-        `<p class="onb-desc">${onbRich(pf.reason || "")}</p>` +
-        (steps ? `<ol class="onb-steps">${steps}</ol>` : "") +
-        (pf.url
-          ? `<a class="onb-action" href="${escapeHtml(pf.url)}" target="_blank" rel="noopener noreferrer">Open ${escapeHtml(name)} settings</a>`
-          : "") +
-        // Still offered, because the setting may already be on — and because a
-        // screen that only sends you elsewhere is a dead end with a link on it.
-        `<button class="onb-action onb-secondary" type="button" data-act="connectRemote" data-provider="${escapeHtml(provider)}">${escapeHtml(pf.continueLabel || "I've turned it on — connect")}</button>` +
-      `</div>`;
-    }
-
-    if (device && (device.status === "failed" || device.status === "unavailable")) {
-      const stuck = device.status === "unavailable";
-      status(stuck ? "Sign in at your computer" : "Sign-in failed");
-      // `unavailable` gets no retry button. Offering one for a flow that cannot
-      // work here is how a dead end gets disguised as a loop.
-      return `<div class="onb">` +
-        `<p class="onb-heading">${stuck ? `Connect ${escapeHtml(name)} at your computer` : `Could not connect ${escapeHtml(name)}`}</p>` +
-        `<p class="onb-desc">${escapeHtml(device.message || "")}</p>` +
-        (stuck
-          ? ""
-          : `<button class="onb-action" type="button" data-act="connectRemote" data-provider="${escapeHtml(provider)}">Try again</button>`) +
-      `</div>`;
-    }
-
-    // No flow started yet. `connect-agent` means nothing is connected at all, so
-    // offer each rather than guessing which one the person wants. The client
-    // does not decide which of these can work headlessly — it asks, and the host
-    // answers `unavailable` with a reason for any that cannot.
-    status("Connect an agent");
-    // A cloud machine with NOTHING connected gets the whole menu, even when the
-    // frame names one provider (the session's agent needing auth). On a fresh
-    // machine that narrowing hid the choice entirely: the owner saw only Grok
-    // where all three belong (2026-08-31). Once something IS connected, the
-    // frame's provider is the specific thing being asked for again.
-    const nothingConnected = !((state.providers || []).some((p) => p && p.connected));
-    const cloudFresh = !!(state.hostCaps && state.hostCaps.remoteAgentSignOut) && nothingConnected;
-    const offer = provider && !cloudFresh ? [provider] : ["grok", "codex", "claude", "gemini", "muse"];
-    // A cloud machine's three agents are not equal offers: Grok is the native
-    // one. Ranking is the cloud-only part; every agent that has a headless
-    // flow is offered, including Claude Code's paste-code sign-in.
-    const cloudHost = !!(state.hostCaps && state.hostCaps.remoteAgentSignOut);
-    const buttons = offer
-      .map((id) => {
-        const rec = cloudHost && id === "grok" ? " (recommended)" : "";
-        // The mark the reader already knows from the model picker and the
-        // provider rows. currentColor, so it takes the button's foreground.
-        return `<button class="onb-action" type="button" data-act="connectRemote" data-provider="${id}">`
-          + providerLogoMarkup(id)
-          + `<span>Connect ${NAMES[id]}${rec}</span></button>`;
-      })
-      .join("");
-    return `<div class="onb">` +
-      `<p class="onb-heading">${provider ? `Connect ${escapeHtml(name)}` : "Connect an agent"}</p>` +
-      `<p class="onb-desc">Sign in with your own account. You will open a link and confirm a short code &mdash; no password is typed here, and nothing is stored on this page.</p>` +
-      buttons +
-    `</div>`;
-  }
-
-  /** `beforeRender` runs after the mode is set and before markup is built, so a
-   *  host-launched terminal can be recorded against the panel it belongs to. */
-  /**
-   * Connecting an agent, in ONE place.
-   *
-   * There used to be two renderers for this flow: the transcript's onboarding
-   * card, and a set of rows inside Settings → Providers. The second existed
-   * only because the first cannot paint over a conversation
-   * (`revealWelcome` holds while `.msg` nodes exist), so a Connect clicked in
-   * Settings had nowhere to report. Two implementations of one auth flow is
-   * one too many to keep true (owner, 2026-08-31).
-   *
-   * A dialog is subject to no such hold, so the flow lives here and both
-   * surfaces become entry points. The markup is the SAME builder the welcome
-   * card uses, and the document-level `.onb-action` delegation already wires
-   * every button inside it, so there is nothing to duplicate and nothing to
-   * keep in step.
-   */
-  let connectWizard = null;
-
-  function connectWizardProvider() {
-    return connectWizard ? connectWizard.provider : "";
-  }
-
-  function closeConnectWizard() {
-    if (!connectWizard) return;
-    document.removeEventListener("keydown", connectWizard.onKey, true);
-    delete document.body.dataset.modalAbove;
-    connectWizard.overlay.remove();
-    const opener = connectWizard.opener;
-    connectWizard = null;
-    if (opener && typeof opener.focus === "function" && document.contains(opener)) {
-      try { opener.focus(); } catch { /* the opener may have gone with a repaint */ }
-    }
-  }
-
-  function openConnectWizard(provider, opener) {
-    if (connectWizard && connectWizard.provider === provider) {
-      renderConnectWizard();
-      return;
-    }
-    closeConnectWizard();
-    const overlay = document.createElement("div");
-    overlay.className = "confirm-overlay connect-wizard-overlay";
-    const panel = document.createElement("div");
-    panel.className = "confirm-panel connect-wizard-panel";
-    panel.setAttribute("role", "dialog");
-    panel.setAttribute("aria-modal", "true");
-    panel.setAttribute("aria-label", `Connect ${provider}`);
-    const body = document.createElement("div");
-    body.className = "connect-wizard-body";
-    panel.appendChild(body);
-    const actions = document.createElement("div");
-    actions.className = "confirm-actions";
-    const closeBtn = document.createElement("button");
-    closeBtn.type = "button";
-    closeBtn.className = "confirm-btn";
-    closeBtn.textContent = "Close";
-    // Closing the window never cancels the sign-in: the flow lives on the host
-    // and finishes on its own, which is exactly what the card promises.
-    // Cancelling is a separate, explicit button inside the panel.
-    closeBtn.onclick = (e) => { e.stopPropagation(); closeConnectWizard(); };
-    actions.appendChild(closeBtn);
-    panel.appendChild(actions);
-    overlay.appendChild(panel);
-    overlay.onclick = (e) => { if (e.target === overlay) { e.stopPropagation(); closeConnectWizard(); } };
-    const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); closeConnectWizard(); } };
-    document.addEventListener("keydown", onKey, true);
-    // Tells any page underneath (the settings overlay has its own Escape and
-    // Tab trap) that a modal owns the keyboard while this is up.
-    document.body.dataset.modalAbove = "connect-wizard";
-    document.body.appendChild(overlay);
-    connectWizard = { provider, overlay, panel, body, onKey, opener: opener || document.activeElement };
-    // Nothing has come back from the host yet — and on a cloud machine the
-    // first frame is seconds away. Open on "starting" rather than repainting
-    // the offer that was just clicked, which read as a click that did nothing
-    // (owner, 2026-08-31). A real frame replaces this on arrival.
-    if (!state.deviceLoginByProvider[provider]) connectWizard.lastDevice = { status: "starting" };
-    renderConnectWizard();
-    const focusTarget = body.querySelector(".onb-action") || closeBtn;
-    try { focusTarget.focus(); } catch { /* focus is a courtesy, never a failure */ }
-  }
-
-  /** Paint the wizard from the flow state the host last sent. */
-  function renderConnectWizard() {
-    if (!connectWizard) return;
-    const provider = connectWizard.provider;
-    // The mirror is the live source, but a confirmed account retires its
-    // mirror, so a settled panel keeps its own copy of the last thing it was
-    // told rather than falling back to the empty-state offer.
-    const device = state.deviceLoginByProvider[provider] || connectWizard.lastDevice;
-    // `ver` is null on purpose: the welcome status line belongs to the welcome
-    // card, and a modal must not rewrite it.
-    connectWizard.body.innerHTML = remoteConnectPanel(
-      "auth-required",
-      { provider, device, platform: state.onboardingInfo && state.onboardingInfo.platform },
-      null,
-    );
-  }
-
-  /**
-   * Keep the wizard in step with the host, and open it when a flow begins
-   * wherever the click came from — the card, Settings, or another tab.
-   */
-  function syncConnectWizard(provider, device) {
-    if (!IS_REMOTE || !provider) return;
-    // Only a RUNNING flow opens a wizard. A settled outcome renders wherever
-    // the reader already is: in this dialog when one is open (which it is
-    // whenever they got here by clicking Connect), and in the card otherwise.
-    // Opening one for `failed` meant the card and the dialog both painted the
-    // same retry button — the relay's sign-in check found it as a strict-mode
-    // locator violation, which is a person seeing the same panel twice.
-    const live = !!device && (device.status === "starting" || device.status === "waiting"
-      || device.status === "verifying" || !!device.preflight);
-    if (live) {
-      openConnectWizard(provider);
-      if (connectWizard) connectWizard.lastDevice = device;
-      return;
-    }
-    if (!connectWizard || connectWizard.provider !== provider) return;
-    if (device && device.status === "done") {
-      // Show the confirmation, then get out of the way. The account is
-      // connected; keeping a dialog up over it is make-work.
-      connectWizard.lastDevice = device;
-      connectWizard.settled = true;
-      renderConnectWizard();
-      setTimeout(() => {
-        if (connectWizard && connectWizard.provider === provider) closeConnectWizard();
-      }, 1600);
-      return;
-    }
-    // Nothing repaints a finished panel. Between "connected" and the close
-    // there is a window where the mirror is already gone, and repainting in
-    // it turned a success into an offer to start over.
-    if (connectWizard.settled) return;
-    // No flow left to show — a cancel, or a bare frame after one ends. The
-    // wizard exists to RUN a flow, so with nothing to run it gets out of the
-    // way rather than repainting itself as an invitation to start another;
-    // the card underneath is the entry point and is already offering one.
-    if (!device) {
-      closeConnectWizard();
-      return;
-    }
-    renderConnectWizard();
-  }
-
   /** The onboarding modes that are asking for an account to be connected. */
   const CONNECT_ONBOARDING_MODES = {
     "connect-agent": true,
@@ -11182,7 +9788,7 @@
     // unless a replay is already putting the conversation back, in which case
     // revealing now is the reconnect flash (a buffered provider-connected
     // confirmation used to unhide on top of the messages still waiting to go).
-    const holdWelcome = identityRestoring() || (state.replaying && welcomeHoldActive());
+    const holdWelcome = (state.replaying && welcomeHoldActive());
     if (!holdWelcome) {
       flushPendingTranscriptClear();
       revealWelcome();
@@ -11190,42 +9796,11 @@
     const onb = $("welcome-onboarding");
     const ver = $("welcome-version");
     if (!onb) return;
-    if (IS_REMOTE && (mode === "connect-agent" || mode === "codex-login" || mode === "claude-login" || mode === "gemini-login" || mode === "auth-required")) {
-      // The card is an ENTRY POINT, not a second renderer: a live flow belongs
-      // to the wizard, so the card keeps showing the offer underneath it.
-      // The card NEVER renders a live flow. Stripping it only while the wizard
-      // was already open left a window -- this function runs before
-      // syncConnectWizard on the very frame that starts a flow -- where both
-      // painted it, so the code and its Cancel existed twice on the page. The
-      // relay's own sign-in check caught that as a strict-mode locator
-      // violation; a person would have seen it by closing the dialog.
-      //
-      // A SETTLED outcome still lands here when no wizard is open, so nothing
-      // is lost if the reader closed it.
-      const device = info && info.device;
-      const liveFlow = !!device && (device.status === "starting" || device.status === "waiting"
-        || device.status === "verifying" || !!device.preflight);
-      const wizardOwnsIt = !!connectWizard && info && info.provider === connectWizard.provider;
-      const forCard = device && (liveFlow || wizardOwnsIt)
-        ? Object.assign({}, info, { device: undefined })
-        : info;
-      onb.innerHTML = remoteConnectPanel(mode, forCard, ver);
-      return;
-    }
     if (mode === "no-project") {
       // Desktop with nothing open. Names the block and points at the same
       // action the rail already offers — do not leave the baked Starting
       // spinner up (that is the first-run hang).
       if (ver) setWelcomeStatus("No project folder", false);
-      if (IS_REMOTE) {
-        onb.innerHTML =
-          `<div class="onb">` +
-            `<p class="onb-heading">No project folder</p>` +
-            `<p class="onb-desc">Add a project folder on the computer running this workspace, then start a conversation there.</p>` +
-          `</div>`;
-        updateSendButton();
-        return;
-      }
       onb.innerHTML =
         `<div class="onb">` +
           `<p class="onb-heading">No project folder</p>` +
@@ -11279,11 +9854,6 @@
         `</div>`;
     } else if (mode === "missing-cli") {
       if (ver) setWelcomeStatus("CLI not installed", false);
-      if (IS_REMOTE) {
-        onb.innerHTML = `<div class="onb"><p class="onb-heading">Grok CLI is missing at the desk</p>` +
-          `<p class="onb-desc">Install it on the computer running this workspace, then refresh this remote view.</p></div>`;
-        return;
-      }
       const installCmd = info.platform === "win32"
         ? "irm https://x.ai/cli/install.ps1 | iex"
         : "curl -fsSL https://x.ai/cli/install.sh | bash";
@@ -11299,11 +9869,6 @@
         `</div>`;
     } else if (mode === "missing-codex") {
       if (ver) setWelcomeStatus("Codex CLI not found", false);
-      if (IS_REMOTE) {
-        onb.innerHTML = `<div class="onb"><p class="onb-heading">Codex CLI is missing at the desk</p>` +
-          `<p class="onb-desc">Install or configure Codex on the computer running this workspace, then refresh this remote view.</p></div>`;
-        return;
-      }
       const installCmd = "npm i -g @openai/codex";
       const install = state.codexInstall;
       const installing = install.phase !== "idle";
@@ -11340,11 +9905,6 @@
         `</div>`;
     } else if (mode === "missing-claude") {
       if (ver) setWelcomeStatus("Claude Code not found", false);
-      if (IS_REMOTE) {
-        onb.innerHTML = `<div class="onb"><p class="onb-heading">Claude Code is missing at the desk</p>` +
-          `<p class="onb-desc">Install Anthropic's Claude Code CLI on the computer running this workspace, then refresh this remote view.</p></div>`;
-        return;
-      }
       onb.innerHTML =
         `<div class="onb">` +
           `<p class="onb-heading">Install Claude Code</p>` +
@@ -11363,11 +9923,6 @@
         `</div>`;
     } else if (mode === "missing-gemini") {
       if (ver) setWelcomeStatus("Antigravity CLI not found", false);
-      if (IS_REMOTE) {
-        onb.innerHTML = `<div class="onb"><p class="onb-heading">Antigravity / Gemini CLI is missing at the desk</p>` +
-          `<p class="onb-desc">Install Google's Antigravity (Gemini) CLI on the computer running this workspace, then refresh this remote view.</p></div>`;
-        return;
-      }
       const installCmd = info.platform === "win32"
         ? "irm https://antigravity.google/cli/install.ps1 | iex"
         : "curl -fsSL https://antigravity.google/cli/install.sh | bash";
@@ -11663,24 +10218,14 @@
       if (ed) ed.hidden = true;
     }
     const prefixCount = state.historyPrefixUserCount || 0;
-    // One provider gate for both buttons: the RPC underneath either exists on
-    // this session's CLI or it does not. If unsupported by the provider, buttons
-    // remain visible but disabled with an explanatory tooltip.
-    const remoteBlocked = IS_REMOTE && !(state.hostCaps && state.hostCaps.remoteRewind);
     const rewindCap = rewindCapability();
     const providerSupported = rewindCap.state === "yes";
-    // A conversation another tab has taken is frozen: these act on it, so they
-    // are disabled rather than merely dimmed. Visible, so the transcript still
-    // reads normally, but genuinely unclickable.
-    const frozen = !!state.sessionSuperseded;
     users.forEach((el, i) => {
       el.dataset.userBubbleIndex = String(prefixCount + i);
       const isLast = i === users.length - 1;
       const btn = el.querySelector(".msg-rewind-btn");
       if (btn) {
-        if (remoteBlocked) {
-          btn.hidden = true;
-        } else {
+        {
           // Hide on the tip: that message is Edit's, which does the same rewind
           // and returns the text. Not a wire limitation — execute accepts the tip.
           const slotVisible = users.length > 1 && !isLast;
@@ -11690,7 +10235,7 @@
               btn.disabled = true;
               btn.title = rewindCap.reason || "Rewind is not supported by this provider.";
             } else {
-              btn.disabled = frozen;
+              btn.disabled = false;
               btn.title = "Rewind conversation to this point";
             }
           }
@@ -11700,9 +10245,7 @@
       // rewind can't remove and the one you most often want to retype (#56).
       const edit = el.querySelector(".msg-edit-btn");
       if (edit) {
-        if (remoteBlocked) {
-          edit.hidden = true;
-        } else {
+        {
           const slotVisible = isLast;
           edit.hidden = !slotVisible;
           if (slotVisible) {
@@ -11710,7 +10253,7 @@
               edit.disabled = true;
               edit.title = rewindCap.reason || "Rewind is not supported by this provider.";
             } else {
-              edit.disabled = frozen;
+              edit.disabled = false;
               edit.title = "Edit message and resend";
             }
           }
@@ -12046,7 +10589,6 @@
   //   "inline"  a remote. `openFile` is host-local in remote-policy, so a phone
   //             can only reveal the text already on the wire.
   function readLinkMode() {
-    if (IS_REMOTE) return "inline";
     if (hostPreviewsInApp()) return "overlay";
     return "file";
   }
@@ -12542,18 +11084,6 @@
     el.classList.toggle("expanded", open);
   }
 
-  function revealToolDiff(toolCallId) {
-    const item = state.toolItemsByToolCallId.get(toolCallId);
-    if (!item) return false;
-    const details = item.querySelector(".tool-item-diff");
-    if (!details) return false;
-    const group = item.closest(".tool-group");
-    if (group) setGroupExpanded(group, true);
-    setDetailExpanded(item, true);
-    item.scrollIntoView({ block: "nearest" });
-    return true;
-  }
-
   function setDetailExpanded(row, open) {
     const d = row.querySelector(".tool-item-details");
     if (!d) return;
@@ -12644,48 +11174,40 @@
     const ensureViewAll = () => {
       if (viewAll) {
         viewAll._setCollapsedText?.(previewLabel);
-        if (!IS_REMOTE) viewAll.textContent = previewLabel;
+        viewAll.textContent = previewLabel;
         return viewAll;
       }
-      viewAll = IS_REMOTE
-        ? makeInlineExpandToggle(previewLabel, "msg-collapse-btn command-view-all", (expanding) => {
-            expanded = expanding;
-            pre.classList.toggle("command-full", expanding);
-            pre.classList.toggle("command-preview-capped", !expanding);
-          })
-        : document.createElement("button");
-      if (!IS_REMOTE) {
-        viewAll.type = "button";
-        viewAll.className = "preview-link command-view-all";
-        viewAll.textContent = previewLabel;
-        viewAll.onclick = (e) => {
-          e.stopPropagation();
-          // A Read row's "View all" means the file, not a copy of the lines the
-          // agent happened to request (#122). Editor hosts post openFile with
-          // the range; desktop's openTextFile cannot honour a line selection,
-          // so the in-app preview fetches the file and marks those lines.
-          if (openRef && !hostPreviewsInApp()) {
-            vscode.postMessage({ type: "openFile", path: openRef });
-            return;
-          }
-          const openLanguage = language
-            || (className === "tool-cmd" ? state.commandLanguage : "");
-          if (hostPreviewsInApp()) {
-            const parsed = previewFileRef(openRef);
-            openPreviewOverlay({
-              kind: "text",
-              content: fullText,
-              language: openLanguage,
-              path: parsed.path || undefined,
-              range: parsed.range,
-            });
-            return;
-          }
-          const message = { type: "openText", content: fullText };
-          if (openLanguage) message.language = openLanguage;
-          vscode.postMessage(message);
-        };
-      }
+      viewAll = document.createElement("button");
+      viewAll.type = "button";
+      viewAll.className = "preview-link command-view-all";
+      viewAll.textContent = previewLabel;
+      viewAll.onclick = (e) => {
+        e.stopPropagation();
+        // A Read row's "View all" means the file, not a copy of the lines the
+        // agent happened to request (#122). Editor hosts post openFile with
+        // the range; desktop's openTextFile cannot honour a line selection,
+        // so the in-app preview fetches the file and marks those lines.
+        if (openRef && !hostPreviewsInApp()) {
+          vscode.postMessage({ type: "openFile", path: openRef });
+          return;
+        }
+        const openLanguage = language
+          || (className === "tool-cmd" ? state.commandLanguage : "");
+        if (hostPreviewsInApp()) {
+          const parsed = previewFileRef(openRef);
+          openPreviewOverlay({
+            kind: "text",
+            content: fullText,
+            language: openLanguage,
+            path: parsed.path || undefined,
+            range: parsed.range,
+          });
+          return;
+        }
+        const message = { type: "openText", content: fullText };
+        if (openLanguage) message.language = openLanguage;
+        vscode.postMessage(message);
+      };
       container.appendChild(viewAll);
       return viewAll;
     };
@@ -13751,71 +12273,6 @@
     scrollToBottom();
   }
 
-  function sessionSupersededCwd(id) {
-    const row = (state.sessions || []).find((s) => s && s.id === id)
-      || (state.pinnedSessions || []).find((s) => s && s.id === id)
-      || (state.railSelectedRows || []).find((s) => s && s.id === id);
-    return (row && row.cwd) || state.activeRepoCwd || state.selectedRepoCwd || state.cwd || "";
-  }
-
-  /** Every composer control, not just the textarea. A frozen conversation that
-   *  still offers Add context, the mode picker or Send is offering actions the
-   *  host will refuse — and `disabled` is what makes them genuinely unclickable
-   *  rather than merely faded (owner, 2026-09-01). */
-  function setComposerFrozen(frozen) {
-    for (const el of [input, micBtn, addBtn, gearBtn, modeBtn, sendBtn]) {
-      if (el) el.disabled = frozen;
-    }
-    // Rewind and Edit hang off the message bubbles rather than the composer,
-    // and they act on this conversation, so they freeze with it.
-    refreshUserRewindButtons();
-  }
-
-  function renderSessionSupersededBanner() {
-    let el = document.getElementById("session-superseded-banner");
-    if (!state.sessionSuperseded) {
-      if (el) el.remove();
-      document.body.classList.remove("session-superseded");
-      setComposerFrozen(false);
-      updateSendButton();
-      return;
-    }
-    document.body.classList.add("session-superseded");
-    setComposerFrozen(true);
-    if (!el) {
-      el = document.createElement("div");
-      el.id = "session-superseded-banner";
-      el.className = "session-superseded-banner";
-      const composer = document.querySelector(".composer");
-      if (composer) composer.insertBefore(el, composer.firstChild);
-      else return;
-    }
-    // A CARD standing where the composer would be, not a stripe above it.
-    // The composer is the thing that no longer works, so the explanation takes
-    // its place instead of hovering over something that still looks usable — a
-    // 12px strip over a live-looking composer read as ignorable chrome, and the
-    // wording had to carry the whole state in one muted line (owner,
-    // 2026-09-01, from a phone).
-    el.replaceChildren();
-    const title = document.createElement("p");
-    title.className = "session-superseded-title";
-    title.textContent = "This conversation moved to another tab";
-    const body = document.createElement("p");
-    body.className = "session-superseded-body";
-    // Says the thing a person actually wants to know first: nothing is lost.
-    body.textContent = "Nothing was lost — it is still here. Take it back to carry on in this tab.";
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "session-superseded-btn";
-    btn.textContent = "Continue here";
-    btn.onclick = () => {
-      const held = state.sessionSuperseded;
-      if (!held) return;
-      postResumeSession(held.id, held.cwd, { claim: true });
-    };
-    el.append(title, body, btn);
-  }
-
   /** "Your sign-in worked", where the person is looking: nothing else says
    *  it, and the vendor's refusal stays the last line in the transcript. Quiet
    *  on an empty transcript, where the onboarding panel already says it. */
@@ -13854,10 +12311,6 @@
       composer.insertBefore(el, composer.firstChild);
     }
     const name = providerDisplayName(provider);
-    // STATUS ONLY: a device flow is running while it waits or verifies; the
-    // card must not offer "Sign in" again at the moment it is working.
-    const status = (state.deviceLoginByProvider[provider] || {}).status;
-    const signingIn = status === "starting" || status === "waiting" || status === "verifying";
     el.replaceChildren();
     const title = document.createElement("p");
     title.className = "provider-signin-title";
@@ -13866,13 +12319,6 @@
     body.className = "provider-signin-body";
     body.textContent = "The account is still linked — its sign-in expired, so replies are refused until you renew it.";
     el.append(title, body);
-    if (signingIn) {
-      const busy = document.createElement("p");
-      busy.className = "provider-signin-busy";
-      busy.textContent = "Signing in…";
-      el.appendChild(busy);
-      return;
-    }
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "provider-signin-btn";
@@ -13881,44 +12327,12 @@
     el.appendChild(btn);
   }
 
-  function enterSessionSuperseded(id, cwd) {
-    if (!id) return;
-    state.sessionSuperseded = { id, cwd: cwd || sessionSupersededCwd(id) };
-    // STOP THE MICROPHONE FIRST, and treat a takeover as a cancel.
-    //
-    // The frozen card hides the composer, and the mic button lives in it — so
-    // the only in-page way to stop a capture goes away with it. A start already
-    // waiting on the browser's permission prompt is worse: it resumes after the
-    // takeover, checks only its own `cancelled` flag, installs the capture and
-    // starts streaming. The tab would then be recording with no visible control
-    // and nothing but the 120-second timer to end it.
-    //
-    // Both halves of that were introduced here — admitting voice without a
-    // bound session, and hiding the composer — so both are closed here.
-    if (IS_REMOTE) {
-      if (remoteMicStart) remoteMicStart.cancelled = true;
-      if (remoteMic) stopBrowserMic(true);
-      else if (remoteMicStart) remoteMicStart = null;
-      state.mic = "idle";
-      clearVoiceInsertion();
-      state.voiceLive = false;
-      renderMic();
-    }
-    renderSessionSupersededBanner();
-  }
-
-  function clearSessionSuperseded() {
-    if (!state.sessionSuperseded) return;
-    state.sessionSuperseded = null;
-    renderSessionSupersededBanner();
-  }
-
   // Does this surface open files in a host editor tab? Opt-out polarity on
   // capabilities.openInEditor (absent/true = yes). Remote always answers no:
   // the caps a phone receives are the DESK machine's, and a tap must never
   // open an editor 200 km away.
   function hostOpensInEditor() {
-    return !IS_REMOTE && !(state.hostCaps && state.hostCaps.openInEditor === false);
+    return !(state.hostCaps && state.hostCaps.openInEditor === false);
   }
 
   // Hover actions for an inlined image/video, anchored top-right like the
@@ -13927,26 +12341,6 @@
   function buildMediaActions(path, src) {
     const actions = document.createElement("div");
     actions.className = "generated-media-actions";
-
-    // Remote clients: there is no host to copy a path to or open a file in — the
-    // one action that means anything on a phone is saving the image, which
-    // arrives inlined as a self-contained data: URI. Show only Download; the
-    // copy-path / open-file buttons would post host-local messages the
-    // relay drops.
-    if (IS_REMOTE) {
-      const dlBtn = document.createElement("button");
-      dlBtn.type = "button";
-      dlBtn.className = "generated-media-btn";
-      dlBtn.title = "Download image";
-      dlBtn.innerHTML = ICON.download;
-      dlBtn.onclick = async (e) => {
-        e.stopPropagation();
-        await remoteDownload(src, (String(path || "").split(/[\\/]/).pop() || "image.png"));
-        ackBtn(dlBtn);
-      };
-      actions.appendChild(dlBtn);
-      return actions;
-    }
 
     const copyBtn = document.createElement("button");
     copyBtn.type = "button";
@@ -15313,7 +13707,7 @@
   }
 
   function applyChatZoom() {
-    const zoom = CLIENT_OWNS_FONT_SCALE ? state.remoteFontScale : state.hostFontScale;
+    const zoom = CLIENT_OWNS_FONT_SCALE ? state.clientFontScale : state.hostFontScale;
     document.body.style.setProperty("--chat-zoom", String(zoom));
   }
 
@@ -15336,12 +13730,11 @@
 
   /** Set client-owned zoom, persist, report (remote), refresh gear if open. */
   function setClientFontScale(next) {
-    if (!CLIENT_OWNS_FONT_SCALE) return state.remoteFontScale;
+    if (!CLIENT_OWNS_FONT_SCALE) return state.clientFontScale;
     const clamped = clampClientFontScale(next);
-    state.remoteFontScale = clamped;
-    storeRemotePref(CLIENT_FONT_SCALE_KEY, clamped);
+    state.clientFontScale = clamped;
+    storeClientPref(CLIENT_FONT_SCALE_KEY, clamped);
     applyChatZoom();
-    if (IS_REMOTE) reportRemotePreferences();
     const slider = document.getElementById("remote-font-scale");
     if (slider) {
       slider.value = String(Math.round(clamped * 100));
@@ -15356,7 +13749,7 @@
     window.__grokFontScaleWired = true;
     // Test seam (also handy for manual probes).
     window.__grokFontScale = {
-      get: () => state.remoteFontScale,
+      get: () => state.clientFontScale,
       set: setClientFontScale,
       clamp: clampClientFontScale,
       step: stepClientFontScale,
@@ -15372,10 +13765,10 @@
       const key = e.key;
       if (key === "=" || key === "+" || key === "Add") {
         e.preventDefault();
-        setClientFontScale(stepClientFontScale(state.remoteFontScale, CLIENT_FONT_SCALE_STEP));
+        setClientFontScale(stepClientFontScale(state.clientFontScale, CLIENT_FONT_SCALE_STEP));
       } else if (key === "-" || key === "Subtract") {
         e.preventDefault();
-        setClientFontScale(stepClientFontScale(state.remoteFontScale, -CLIENT_FONT_SCALE_STEP));
+        setClientFontScale(stepClientFontScale(state.clientFontScale, -CLIENT_FONT_SCALE_STEP));
       } else if (key === "0" || key === "Digit0" || key === "Numpad0") {
         // Ctrl/Cmd+0 resets to 100%.
         if (key === "0" || e.code === "Digit0" || e.code === "Numpad0") {
@@ -15391,48 +13784,10 @@
         // Continuous scale; prevent Chromium page-zoom fighting us.
         e.preventDefault();
         const delta = e.deltaY === 0 ? 0 : e.deltaY > 0 ? -0.05 : 0.05;
-        if (delta) setClientFontScale(stepClientFontScale(state.remoteFontScale, delta));
+        if (delta) setClientFontScale(stepClientFontScale(state.clientFontScale, delta));
       },
       { passive: false },
     );
-  }
-
-  function setRemoteTtsEnabled(enabled) {
-    const next = !!enabled;
-    if (state.remoteTts === next && (next || !state.remoteSummarizeRepliesAloud)) return next;
-    state.remoteTts = next;
-    storeRemotePref(REMOTE_TTS_KEY, state.remoteTts);
-    if (!state.remoteTts) {
-      state.remoteSummarizeRepliesAloud = false;
-      storeRemotePref(REMOTE_TTS_SUMMARY_KEY, false);
-      cancelPendingSpeech();
-    }
-    window.dispatchEvent(new CustomEvent("grokRemoteTtsChange", {
-      detail: { available: ttsAvailable, enabled: state.remoteTts },
-    }));
-    reportRemotePreferences();
-    return state.remoteTts;
-  }
-
-  function setRemoteTtsSummaryEnabled(enabled) {
-    const next = state.remoteTts && !!enabled;
-    if (state.remoteSummarizeRepliesAloud === next) return next;
-    state.remoteSummarizeRepliesAloud = next;
-    storeRemotePref(REMOTE_TTS_SUMMARY_KEY, next);
-    invalidatePendingSpeechSummary();
-    reportRemotePreferences();
-    return next;
-  }
-
-  function reportRemotePreferences() {
-    if (!IS_REMOTE || !state.remotePreferencesSupported) return;
-    vscode.postMessage({
-      type: "remotePreferences",
-      fontScale: Math.round(state.remoteFontScale * 100),
-      readRepliesAloud: state.remoteTts,
-      summarizeRepliesAloud: state.remoteSummarizeRepliesAloud,
-      usesTouch: remoteUsesTouchComposer(),
-    });
   }
 
   function clearPendingSpeechSummary() {
@@ -15456,26 +13811,22 @@
   }
 
   function requestSpeech(markdownText) {
-    const enabled = IS_REMOTE ? state.remoteTts : state.readRepliesAloud;
+    const enabled = state.readRepliesAloud;
     if (!enabled || !ttsAvailable || state.replaying) return;
     const text = spokenTextFromMarkdown(markdownText);
     if (!text) return;
     clearPendingSpeechSummary();
     const requestId = ++speechRequestId;
     window.speechSynthesis.cancel();
-    const summarize = IS_REMOTE
-      ? state.remoteSummarizeRepliesAloud
-      : state.summarizeRepliesAloud;
+    const summarize = state.summarizeRepliesAloud;
     if (summarize) {
       const pending = { requestId, text, timer: 0 };
       pending.timer = setTimeout(() => {
         if (pendingSpeechSummary !== pending) return;
         pendingSpeechSummary = null;
         if (speechRequestId !== requestId) return;
-        const enabledNow = IS_REMOTE ? state.remoteTts : state.readRepliesAloud;
-        const summarizeNow = IS_REMOTE
-          ? state.remoteSummarizeRepliesAloud
-          : state.summarizeRepliesAloud;
+        const enabledNow = state.readRepliesAloud;
+        const summarizeNow = state.summarizeRepliesAloud;
         if (enabledNow && summarizeNow && ttsAvailable) speakText(text);
       }, SPEECH_SUMMARY_FALLBACK_MS);
       pendingSpeechSummary = pending;
@@ -16214,7 +14565,6 @@
       // the card in one press instead of walking every option.
       btn.tabIndex = i === (defaultIndex >= 0 ? defaultIndex : 0) ? 0 : -1;
       btn.onclick = () => {
-        if (state.sessionSuperseded) return;
         vscode.postMessage({
           type: "permissionAnswer",
           requestId,
@@ -16279,7 +14629,6 @@
         sug.scope ? h("span", { class: "cx-pill cx-pill--outline" },
           (sug.scope === "session" && state.relayScopeWord) || RULE_SCOPE_WORDS[sug.scope] || sug.scope) : null);
       btn.onclick = () => {
-        if (state.sessionSuperseded) return;
         const opt = preferredAllowOnce(el._permOptions);
         if (!opt) return;
         vscode.postMessage({
@@ -16420,8 +14769,7 @@
       el.appendChild(subtitle);
 
       const openDiff = () => {
-        if (IS_REMOTE) revealToolDiff(req.toolCall?.toolCallId);
-        else requestDiffPreview(diff, req.id);
+        requestDiffPreview(diff, req.id);
       };
       const preview = document.createElement("button");
       preview.className = "preview-link";
@@ -16440,7 +14788,7 @@
       // the reader had closed — on top of the files they were actually working
       // in (#132). A new edit is a new request id and still opens, which is the
       // behaviour that was wanted.
-      if (!IS_REMOTE && !hostPreviewsInApp() && !state.autoOpenedDiffRequests.has(req.id)) {
+      if (!hostPreviewsInApp() && !state.autoOpenedDiffRequests.has(req.id)) {
         rememberAutoOpenedDiff(req.id);
         openDiff();
       }
@@ -16833,7 +15181,7 @@
             // because a phone keyboard has no other way to.
             const sendKey = state.useCtrlEnter
               ? e.key === "Enter" && (e.metaKey || e.ctrlKey)
-              : !remoteUsesTouchComposer() && e.key === "Enter" && !e.shiftKey;
+              : e.key === "Enter" && !e.shiftKey;
             if (sendKey && submitBtn && !submitBtn.disabled) {
               e.preventDefault();
               submit();
@@ -17288,7 +15636,6 @@
     state.imageFullTimer = setTimeout(() => {
       const late = document.querySelector(".image-preview-spinner");
       if (late) late.hidden = true;
-      state.pendingImageFullId = null;
       state.imageFullTimer = null;
     }, 20000);
   }
@@ -17309,7 +15656,6 @@
       }
     }
     setImagePreviewLoading(false);
-    state.pendingImageFullId = null;
   }
 
   function openImagePreview(src, label, fullId, isOriginal = false) {
@@ -17343,17 +15689,7 @@
       : !(hostFullId || originalSrc) ? "Full-resolution image unavailable." : "";
     copy.onclick = () => copyPreviewImage(overlay, hostFullId, originalSrc);
 
-    // A remote only ever holds a 320px thumbnail, so enlarging it shows a blurry
-    // copy of what was already on screen. Ask the host for a real render and
-    // swap it in when it lands — the thumbnail stays up meanwhile, so a slow or
-    // unanswered request degrades to exactly the old behaviour.
-    state.pendingImageFullId = null;
     setImagePreviewLoading(false);
-    if (IS_REMOTE && fullId) {
-      state.pendingImageFullId = fullId;
-      setImagePreviewLoading(true);
-      vscode.postMessage({ type: "requestImageFull", fullId });
-    }
   }
 
   document.addEventListener("keydown", (e) => {
@@ -17376,18 +15712,6 @@
       previews.delete(oldest);
     }
     return true;
-  }
-
-  if (IS_REMOTE) {
-    // The relay registers its decoded/uploaded preview before sending the host
-    // frame. Generate the id here so it uses the same opaque-token contract as
-    // the rest of the remote UI, while keeping imagePreviews private to chat.js.
-    window.grokRegisterRemoteImagePreview = (previewSrc) => {
-      if (typeof previewSrc !== "string" || !previewSrc.startsWith("data:image/")) return null;
-      const previewId = newRemoteTabToken();
-      if (!previewId || !/^[A-Za-z0-9_-]{20,128}$/.test(previewId)) return null;
-      return rememberImagePreview(previewId, previewSrc) ? previewId : null;
-    };
   }
 
   /** One attachment row for a non-file context chip: icon, label, remove.
@@ -17810,15 +16134,7 @@
     modeBtn.disabled = state.busyLocked;
     modeBtn.classList.toggle("disabled", state.busyLocked);
     modeBtn.title = modeButtonTitle(state.currentModeId);
-    if (state.sessionSuperseded) {
-      sendBtn.innerHTML = ICON.arrowUp;
-      sendBtn.title = "This conversation is open in another tab";
-      sendBtn.disabled = true;
-      if (newBtn) {
-        newBtn.disabled = false;
-        newBtn.title = "New session";
-      }
-    } else if (state.onboardingMode === "no-project") {
+    if (state.onboardingMode === "no-project") {
       sendBtn.innerHTML = ICON.arrowUp;
       sendBtn.title = "Add a project folder first";
       sendBtn.disabled = true;
@@ -17856,7 +16172,6 @@
   // both Enter and the button click funnel through, so send-intent can never
   // turn into a cancel (#37). A composer holding only an attachment is send-intent.
   function queueFromComposer() {
-    if (state.sessionSuperseded) return true;
     if (state.pendingPaste > 0) return true;
     const t = input.value.trim();
     const chips = explicitVisibleChips(state.chips);
@@ -17877,61 +16192,7 @@
     return true;
   }
 
-  function syncRemoteButton() {
-    if (remoteBtn) remoteBtn.hidden = true;
-  }
-
-  // REMOTE ONLY — paint the user's message the instant they send it.
-  //
-  // A local webview echoes back in microseconds, so waiting for the host's
-  // `userMessage` is invisible. Over a relay on a weak phone connection that
-  // round trip is 1-2s, during which the composer had already cleared and the
-  // message existed nowhere on screen — the send read as lost. This is a
-  // PLACEHOLDER, not a second source of truth: the host's echo is still
-  // authoritative and replaces it (clearOptimisticSend runs first, so the
-  // real bubble carries the true chips, rewind index and counter). If the
-  // relay rejects the send instead, the placeholder is removed and the
-  // existing "Not sent" recovery block takes over.
-  function showOptimisticSend(text, chips) {
-    clearOptimisticSend();
-    if (!text && !(chips && chips.length)) return;
-    // addMessage returns the message BODY; the placeholder we later remove is
-    // its whole bubble.
-    const body = addMessage("user", text, chips || []);
-    state.optimisticSendEl = body && body.closest ? body.closest(".msg") : null;
-    if (state.optimisticSendEl) state.optimisticSendEl.dataset.optimistic = "1";
-    forceScrollToBottom();
-    showGrokking();
-  }
-
-  function clearOptimisticSend() {
-    const el = state.optimisticSendEl;
-    state.optimisticSendEl = null;
-    if (el && el.parentNode) el.remove();
-  }
-
-  // NOTHING here retires a pending submission on the strength of a queue event,
-  // and that is deliberate. `sendQueue` is SESSION-wide — every attached view
-  // contributes to one collapsed string — while `pendingSubmission*` belongs to
-  // this tab alone, and the queue carries no per-contribution id to correlate
-  // the two. So a queue action (edit, remove, steer) or a process exit says
-  // nothing about whether THIS tab's in-flight send survived, and clearing the
-  // pending state on one of them would destroy the only thing a relay rejection
-  // can rebuild the message from. Only the host's own `userMessage` echo, which
-  // carries the submission id, retires a pending submission.
-
-  function visibleChipIds(chips) {
-    return (chips || []).filter((chip) => !chip.hidden).map((chip) => String(chip.id || ""));
-  }
-
-  function sameChipIds(chips, expectedIds) {
-    const actualIds = visibleChipIds(chips);
-    return actualIds.length === expectedIds.length &&
-      actualIds.every((id, index) => id === expectedIds[index]);
-  }
-
   function sendOrStop() {
-    if (state.sessionSuperseded) return;
     if (state.onboardingMode === "no-project") return;
     if (state.busy) {
       // Typed text signals send-intent — queue it; text present never cancels.
@@ -17948,8 +16209,6 @@
       if (state.sendQueue.length) {
         input.value = queuedSendsText(state.sendQueue);
         state.sendQueue = [];
-        state.queuedSubmissionPending = false;
-        state.queuedSubmissionRejected = false;
         renderQueuedBlocks();
         vscode.postMessage({ type: "clearQueuedSends", restore: true });
         renderInputHighlight();
@@ -17986,14 +16245,6 @@
     state.thoughtStartTime = null;
     state.activeToolGroupEl = null;
     let submissionId;
-    if (IS_REMOTE) {
-      const visibleChips = state.chips.filter((c) => !c.hidden);
-      submissionId = newRemoteTabToken();
-      state.pendingSubmissionText = sendText;
-      state.pendingSubmissionId = submissionId;
-      state.pendingSubmissionChipIds = visibleChipIds(visibleChips);
-      showOptimisticSend(sendText, visibleChips);
-    }
     // Chips are host-owned state (every mutation routes through the host and
     // comes back via postChips) — the host snapshots its own copy on send.
     vscode.postMessage({ type: "send", text: sendText, ...(submissionId ? { submissionId } : {}) });
@@ -18017,17 +16268,9 @@
     micBtn.classList.toggle("listening", state.mic === "listening");
     micBtn.classList.toggle("transcribing", state.mic === "transcribing");
     micBtn.classList.toggle("connecting", state.mic === "connecting");
-    if (IS_REMOTE && (!navigator.mediaDevices?.getUserMedia || !window.AudioWorkletNode)) {
-      micBtn.innerHTML = ICON.mic;
-      micBtn.title = "Dictation is not supported by this browser";
-      micBtn.disabled = true;
-    } else if (IS_REMOTE && state.mic === "listening" && !remoteMic) {
+    if (state.mic === "listening") {
       micBtn.innerHTML = ICON.micWaves;
-      micBtn.title = "Dictation is active in another tab on this repository";
-      micBtn.disabled = true;
-    } else if (state.mic === "listening") {
-      micBtn.innerHTML = ICON.micWaves;
-      micBtn.title = IS_REMOTE ? "Listening — click to stop dictating" : "Listening — say 'grok send' to submit, or click to stop";
+      micBtn.title = "Listening — say 'grok send' to submit, or click to stop";
       micBtn.disabled = false;
     } else if (state.mic === "connecting") {
       micBtn.innerHTML = ICON.spinner;
@@ -18036,10 +16279,6 @@
     } else if (state.mic === "transcribing") {
       micBtn.innerHTML = ICON.spinner;
       micBtn.title = "Transcribing…";
-      micBtn.disabled = true;
-    } else if (IS_REMOTE && !state.voiceConfigured && !voiceNeedsGrokAccount()) {
-      micBtn.innerHTML = ICON.mic;
-      micBtn.title = "Voice dictation is unavailable because the host has no Speech-to-Text credential";
       micBtn.disabled = true;
     } else {
       micBtn.innerHTML = ICON.mic;
@@ -18075,11 +16314,6 @@
   }
 
   function toggleMic() {
-    if (state.sessionSuperseded) return;
-    if (IS_REMOTE) {
-      toggleBrowserMic();
-      return;
-    }
     if (state.mic === "idle") {
       if (voiceNeedsGrokAccount()) {
         void explainVoiceNeedsGrok();
@@ -18104,163 +16338,6 @@
     // "transcribing": ignore clicks until the transcript or an error arrives.
   }
 
-  let remoteMic = null;
-  let remoteMicStart = null;
-  const REMOTE_MIC_PREROLL_MAX_BYTES = 16 * 16000 * 2;
-
-  function browserMicErrorText(error) {
-    const name = error && typeof error.name === "string" ? error.name : "";
-    if (name === "NotAllowedError" || name === "SecurityError") {
-      return "Microphone access was denied. Allow microphone access for this site in your browser settings, then try again.";
-    }
-    if (name === "NotFoundError" || name === "DevicesNotFoundError") {
-      return "No microphone was found on this device.";
-    }
-    if (name === "NotReadableError" || name === "TrackStartError") {
-      return "The microphone is unavailable. Close other apps using it, check your device settings, then try again.";
-    }
-    return "The browser could not start the microphone. Check its microphone permissions and try again.";
-  }
-
-  function pcmBase64(buffer) {
-    const bytes = new Uint8Array(buffer);
-    let binary = "";
-    for (let i = 0; i < bytes.length; i += 8192) {
-      binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
-    }
-    return btoa(binary);
-  }
-
-  function postRemotePcm(buffer) {
-    if (!remoteMic) return;
-    if (!remoteMic.ready) {
-      if (
-        !buffer ||
-        typeof buffer.byteLength !== "number" ||
-        remoteMic.pendingBytes + buffer.byteLength > REMOTE_MIC_PREROLL_MAX_BYTES
-      ) {
-        remoteMic.stopping = true;
-        cleanupRemoteMic();
-        setMic("error");
-        addError("Speech recognition took too long to start. No audio was sent; please try dictating again.");
-        vscode.postMessage({ type: "remoteVoiceStop", cancel: true });
-        return;
-      }
-      remoteMic.pending.push(buffer);
-      remoteMic.pendingBytes += buffer.byteLength;
-      return;
-    }
-    vscode.postMessage({ type: "remoteVoiceChunk", data: pcmBase64(buffer) });
-  }
-
-  function cleanupRemoteMic() {
-    const mic = remoteMic;
-    remoteMic = null;
-    if (!mic) return;
-    clearTimeout(mic.timer);
-    if (mic.flushTimer) clearTimeout(mic.flushTimer);
-    try { mic.source.disconnect(); } catch {}
-    try { mic.node.disconnect(); } catch {}
-    try { mic.silent.disconnect(); } catch {}
-    for (const track of mic.stream.getTracks()) {
-      try { track.stop(); } catch {}
-    }
-    void mic.context.close().catch(() => {});
-  }
-
-  function discardBrowserMicSetup(stream, context) {
-    if (stream) {
-      for (const track of stream.getTracks()) {
-        try { track.stop(); } catch {}
-      }
-    }
-    if (context) {
-      try {
-        const closing = context.close();
-        if (closing && typeof closing.catch === "function") void closing.catch(() => {});
-      } catch {}
-    }
-  }
-
-  async function startBrowserMic() {
-    if (!state.voiceConfigured || remoteMic || remoteMicStart || state.mic !== "idle") return;
-    const attempt = { cancelled: false };
-    remoteMicStart = attempt;
-    captureVoiceInsertion();
-    state.voiceLive = false;
-    state.voiceDiscarded = false;
-    setMic("start");
-    let stream;
-    let context;
-    let installed = false;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-      });
-      if (attempt.cancelled) return;
-      const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
-      context = new AudioContextCtor();
-      if (context.state === "suspended") await context.resume();
-      await context.audioWorklet.addModule(versionedSiblingUrl("pcm-worklet.js", CHAT_SCRIPT_URL));
-      if (attempt.cancelled) return;
-      const source = context.createMediaStreamSource(stream);
-      const node = new AudioWorkletNode(context, "grok-pcm-capture", {
-        numberOfInputs: 1,
-        numberOfOutputs: 1,
-        outputChannelCount: [1],
-      });
-      const silent = context.createGain();
-      silent.gain.value = 0;
-      node.port.onmessage = (event) => {
-        if (event.data && event.data.type === "flushed") {
-          if (remoteMic?.stopping) finishBrowserMicStop(remoteMic);
-          return;
-        }
-        postRemotePcm(event.data);
-      };
-      source.connect(node);
-      node.connect(silent);
-      silent.connect(context.destination);
-      remoteMic = {
-        stream, context, source, node, silent, ready: false, pending: [], pendingBytes: 0,
-        timer: setTimeout(() => stopBrowserMic(false), 120000),
-      };
-      for (const track of stream.getTracks()) {
-        track.addEventListener?.("ended", () => stopBrowserMic(true), { once: true });
-      }
-      installed = true;
-      vscode.postMessage({ type: "remoteVoiceStart" });
-    } catch (error) {
-      if (installed) cleanupRemoteMic();
-      if (!attempt.cancelled) {
-        addError(browserMicErrorText(error));
-        setMic("error");
-      }
-    } finally {
-      if (remoteMicStart === attempt) remoteMicStart = null;
-      if (!installed) discardBrowserMicSetup(stream, context);
-    }
-  }
-
-  function stopBrowserMic(cancel) {
-    const mic = remoteMic;
-    if (!mic || mic.stopping) return;
-    mic.stopping = true;
-    if (cancel) {
-      cleanupRemoteMic();
-      setMic("error");
-      vscode.postMessage({ type: "remoteVoiceStop", cancel: true });
-      return;
-    }
-    setMic("stop");
-    mic.flushTimer = setTimeout(() => finishBrowserMicStop(mic), 500);
-    try {
-      mic.node.port.postMessage("flush");
-    } catch {
-      finishBrowserMicStop(mic);
-    }
-  }
-
   // Manual Send/Queue means "send exactly what is visible now". It cancels
   // capture and blocks in-flight voice results from repopulating the cleared
   // composer. The mic button's stop path deliberately does not use this.
@@ -18270,47 +16347,10 @@
     clearVoiceInsertion();
     state.voiceLive = false;
     state.voiceDiscarded = true;
-    if (IS_REMOTE) {
-      if (remoteMicStart) remoteMicStart.cancelled = true;
-      if (remoteMic) stopBrowserMic(true);
-      else if (remoteMicStart) remoteMicStart = null;
-    } else {
-      vscode.postMessage({ type: "voiceStop", discard: true });
-    }
+    vscode.postMessage({ type: "voiceStop", discard: true });
     renderMic();
   }
 
-  function finishBrowserMicStop(mic) {
-    if (remoteMic !== mic) return;
-    if (mic.flushTimer) clearTimeout(mic.flushTimer);
-    cleanupRemoteMic();
-    vscode.postMessage({ type: "remoteVoiceStop" });
-  }
-
-  function toggleBrowserMic() {
-    if (remoteMic && (state.mic === "listening" || state.mic === "connecting")) {
-      stopBrowserMic(false);
-    } else if (remoteMicStart && state.mic === "connecting") {
-      remoteMicStart.cancelled = true;
-      setMic("error");
-    } else if (state.mic === "idle") {
-      if (voiceNeedsGrokAccount()) {
-        void explainVoiceNeedsGrok();
-        return;
-      }
-      void startBrowserMic();
-    }
-  }
-
-  function teardownBrowserMic() {
-    if (!IS_REMOTE || !remoteMic) return;
-    remoteMic.stopping = true;
-    cleanupRemoteMic();
-    vscode.postMessage({ type: "remoteVoiceStop", cancel: true });
-  }
-
-  window.addEventListener("pagehide", teardownBrowserMic);
-  window.addEventListener("beforeunload", teardownBrowserMic);
 
   // Append a transcript to whatever's typed (batch mode — one-shot result).
   function insertTranscript(text) {
@@ -18452,13 +16492,6 @@
     state.thoughtStartTime = null;
     state.activeToolGroupEl = null;
     let submissionId;
-    if (IS_REMOTE) {
-      submissionId = newRemoteTabToken();
-      state.pendingSubmissionText = t;
-      state.pendingSubmissionId = submissionId;
-      state.pendingSubmissionChipIds = [];
-      showOptimisticSend(t, []);
-    }
     vscode.postMessage({ type: "send", text: t, ...(submissionId ? { submissionId } : {}) });
   }
 
@@ -18477,7 +16510,6 @@
   // back to the queue, which is the safe home for the text either way.
   // Attachments ride `_x.ai/interject` `content` (same encoder as a send).
   function queueOutgoing(text, chips) {
-    if (state.sessionSuperseded) return;
     const attachments = Array.isArray(chips) ? chips : explicitVisibleChips(state.chips);
     if (
       state.steerByDefault && state.steerSupported && steerableProvider() && state.busy && !state.busyLocked
@@ -18492,41 +16524,10 @@
     vscode.postMessage(msg);
   }
 
-  // THE pending user block (the host keeps at most one queued message —
-  // composing more appends to it), pinned to the end of the conversation.
-  // Italic + dashed border + clock tag reads "not sent yet"; Edit pulls the
-  // whole pending text back to the composer, Remove drops it.
-  /** Does the host's queue hold `text` as a WHOLE contribution?
-   *
-   *  Exact equality only, and deliberately so. The host joins contributions with
-   *  a blank line and a message may itself contain blank lines, so the joined
-   *  string genuinely cannot say where one contribution ends — queued
-   *  "prefix\n\nfix\n\nup" is indistinguishable from a queue holding "fix" as its
-   *  own entry. Only an item that IS the text is unambiguous. Deciding otherwise
-   *  needs per-contribution ids the queue does not carry (see divertRacingSend in
-   *  the host, which explains why it cannot).
-   *
-   *  So this answers "yes" for the case that actually produced the duplicate — a
-   *  send diverted into an empty queue — and "no" once another view has already
-   *  queued something. A "no" leaves a stale placeholder beside the queued block
-   *  until the next refresh, which is cosmetic; a wrong "yes" would retire a
-   *  submission that is still in flight, which is not. */
-  function queueHoldsContribution(entries, text) {
-    if (!text) return false;
-    for (var i = 0; i < entries.length; i++) {
-      const entryText = typeof entries[i] === "string" ? entries[i] : (entries[i] && entries[i].text) || "";
-      if (entryText === text) return true;
-    }
-    return false;
-  }
-
   function renderQueuedBlocks() {
     let wrap = state.queuedWrapEl;
-    // One visual block: the flush is still one combined prompt. Text is joined
-    // the way it will send; chips from every contribution are shown on it.
-    const rejected = !!state.rejectedSubmissionText;
-    const text = rejected ? state.rejectedSubmissionText : queuedSendsText(state.sendQueue);
-    const chips = rejected ? [] : queuedSendsChips(state.sendQueue);
+    const text = queuedSendsText(state.sendQueue);
+    const chips = queuedSendsChips(state.sendQueue);
     if (!text && !chips.length) {
       if (wrap) wrap.remove();
       state.queuedWrapEl = null;
@@ -18546,10 +16547,8 @@
     hdr.className = "queued-hdr";
     const tag = document.createElement("span");
     tag.className = "queued-tag";
-    tag.innerHTML = `${ICON.clock}<span>${state.queuedSubmissionRejected || rejected ? "Not sent" : "Queued"}</span>`;
-    tag.title = state.queuedSubmissionRejected || rejected
-      ? "The relay rejected this prompt. Edit it to retry, or remove it."
-      : "Sends when Grok finishes";
+    tag.innerHTML = `${ICON.clock}<span>${"Queued"}</span>`;
+    tag.title = "Sends when Grok finishes";
     const actions = document.createElement("span");
     actions.className = "queued-actions";
     const editBtn = document.createElement("button");
@@ -18561,12 +16560,7 @@
     editBtn.onpointerdown = (e) => {
       e.preventDefault();
       e.stopPropagation();
-      if (rejected) {
-        state.rejectedSubmissionText = "";
-        renderQueuedBlocks();
-      } else {
-        vscode.postMessage({ type: "clearQueuedSends", restore: true });
-      }
+      vscode.postMessage({ type: "clearQueuedSends", restore: true });
       input.value = input.value.trim() ? text + "\n\n" + input.value : text;
       renderInputHighlight();
       input.focus();
@@ -18578,12 +16572,7 @@
     rmBtn.onpointerdown = (e) => {
       e.preventDefault();
       e.stopPropagation();
-      if (rejected) {
-        state.rejectedSubmissionText = "";
-        renderQueuedBlocks();
-      } else {
-        vscode.postMessage({ type: "clearQueuedSends" });
-      }
+      vscode.postMessage({ type: "clearQueuedSends" });
     };
     // Steer (#52): send this into the RUNNING turn instead of waiting for it.
     // Rendered whenever the CLI supports it; `body.turn-busy` (updateSendButton)
@@ -18609,7 +16598,6 @@
         steerBtn.onpointerdown = (e) => {
           e.preventDefault();
           e.stopPropagation();
-          if (state.sessionSuperseded) return;
           // steerSend first so the host can snapshot the queue before this
           // clear races (webview handlers are not serialized across awaits).
           const msg = { type: "steerSend", text, fromQueue: true };
@@ -18746,8 +16734,6 @@
   }
 
   function isFindHotkey(e) {
-    // Remote: the browser owns Ctrl/Cmd+F (and the primary device is a phone).
-    if (IS_REMOTE) return false;
     if (e.altKey || e.shiftKey) return false;
     if (String(e.key).toLowerCase() !== "f") return false;
     // Cmd+F is find on every desk. Ctrl+F is find except on Mac, where it is
@@ -19427,14 +17413,12 @@
     if (find.open && find.query) runFindSearchNow();
   }
 
-  if (!IS_REMOTE) {
-    document.addEventListener("keydown", (e) => {
-      if (!isFindHotkey(e)) return;
-      e.preventDefault();
-      e.stopPropagation();
-      openFind();
-    }, true);
-  }
+  document.addEventListener("keydown", (e) => {
+    if (!isFindHotkey(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    openFind();
+  }, true);
 
   onFindPreferenceChange = () => {
     if (find.open) runFindSearchNow();
@@ -19503,7 +17487,7 @@
     "initialState", "showThinking", "appPurpose", "expandCommandOutputs",
     "steerByDefault", "steerUnavailable", "soundNotifications", "processingSound",
     "readRepliesAloud", "summarizeRepliesAloud", "fontScale", "voiceConfigured",
-    "providerState", "githubState", "mcpServers", "mcpConnectors", "remoteStatus", "telemetryEnabled", "thumbsFeedback", "grokUpdateStatus", "initialized", "ruleFiles", "permissionRules", "agentRoles",
+    "providerState", "githubState", "mcpServers", "mcpConnectors", "telemetryEnabled", "thumbsFeedback", "grokUpdateStatus", "initialized", "ruleFiles", "permissionRules", "agentRoles",
   ]);
 
   function handleHostMessage(msg) {
@@ -19522,7 +17506,6 @@
         // the About panel then keeps its local shape rather than naming a
         // machine or a GUI it was never told about.
         state.hostKind = msg.hostKind || "";
-        state.hostName = msg.hostName || "";
         // What this particular host can do, as the host itself reports it. Every
         // remote snapshot carries an initialState, so this is answered before
         // any control is drawn — and a host that says nothing is a host that
@@ -19535,9 +17518,6 @@
         // reconnect lands. Whatever the rail concluded from silence belongs to
         // the host that was quiet, not to this one.
         forgetRailProbeVerdict();
-        restoreRememberedRemoteSession();
-        // Capability field presence — never a version check. Local hosts ignore.
-        ensureRemoteFilesBrowser();
         if (typeof msg.showThinking === "boolean") state.showThinking = msg.showThinking;
         if (typeof msg.expandCommandOutputs === "boolean") state.expandCommandOutputs = msg.expandCommandOutputs;
         if (typeof msg.steerByDefault === "boolean") state.steerByDefault = msg.steerByDefault;
@@ -19549,10 +17529,6 @@
         state.appPurpose = msg.appPurpose === "coding" ? "coding" : "knowledge";
         if (typeof msg.readRepliesAloud === "boolean") {
           state.readRepliesAloud = msg.readRepliesAloud;
-          if (IS_REMOTE && !state.remotePreferencesSupported) {
-            state.remotePreferencesSupported = true;
-            reportRemotePreferences();
-          }
         }
         if (typeof msg.telemetryEnabled === "boolean") state.telemetryEnabled = msg.telemetryEnabled;
         if (typeof msg.thumbsFeedback === "boolean") state.thumbsFeedback = msg.thumbsFeedback;
@@ -19578,16 +17554,11 @@
         // also stops being busy, and closing on that would throw away the error
         // the user needs to read.
         if (msg.done) {
-          state.projectGithub = null;
           closeAddProjectForm();
           break;
         }
-        if (msg.busy) state.projectGithub = null;
-        else if (addProjectFormApi && msg.github && typeof msg.github === "object") state.projectGithub = msg.github;
-        else if (msg.error) state.projectGithub = null;
         if (addProjectFormApi) addProjectFormApi.update({
           ...msg,
-          github: state.projectGithub || msg.github,
           githubState: state.githubState || undefined,
           repos: state.githubRepos,
         });
@@ -19625,27 +17596,6 @@
         state.providersKnown = true;
         state.providers = Array.isArray(msg.providers) ? msg.providers.filter((provider) =>
           provider && (provider.id === "grok" || provider.id === "codex" || provider.id === "claude" || provider.id === "gemini" || provider.id === "muse")) : [];
-        // A confirmed account retires its device-flow mirror. Without this the
-        // "Connected" flow row would resurface in Settings after a later
-        // sign-out, describing a connection that no longer exists.
-        for (const provider of state.providers) {
-          const mirrored = state.deviceLoginByProvider[provider.id];
-          if (!mirrored) continue;
-          // A terminal "done" can always lie: connected, it is redundant with
-          // the snapshot; disconnected, it claims an account the user just
-          // signed out of. A `failed` or `unavailable` mirror is the
-          // explanation for what just happened, so it survives the refresh
-          // Providers sends on open (round 2) — but only while the provider is
-          // still unhealthy. Once a snapshot says the account is connected and
-          // working, that explanation is history, and keeping it left a row
-          // offering Sign out above the reason a previous attempt failed
-          // (round 3).
-          var healthy = provider.connected && provider.needsLogin !== true;
-          var terminal = mirrored.status === "failed" || mirrored.status === "unavailable";
-          if (mirrored.status === "done" || (healthy && terminal)) {
-            delete state.deviceLoginByProvider[provider.id];
-          }
-        }
         // Read, never latched on click: a host too old to know `refreshProviders`
         // sends no frame at all, and a locally-set flag would spin forever.
         // Absent means idle, which is also what every pre-refresh host means.
@@ -19748,19 +17698,8 @@
           : null;
         refreshSettingsOverlay();
         break;
-      case "mcpConnectorAuthorization":
-        if (msg.status === "finished") {
-          if (!state.mcpConnectorAuthorization || state.mcpConnectorAuthorization.attemptId === msg.attemptId) {
-            state.mcpConnectorAuthorization = msg.error ? msg : undefined;
-          }
-        } else {
-          state.mcpConnectorAuthorization = msg;
-        }
-        refreshSettingsOverlay();
-        break;
       case "mcpConnectors":
         state.mcpConnectors = Array.isArray(msg.connectors) ? msg.connectors : [];
-        state.mcpRemoteConnect = msg.remoteConnect === true;
         refreshSettingsOverlay();
         break;
       case "routines":
@@ -19821,15 +17760,6 @@
         state.crewRun = msg.run && typeof msg.run === "object" ? msg.run : null;
         renderCrewRun();
         break;
-      case "remoteStatus":
-        state.remoteLinked = !!msg.linked;
-        syncRemoteButton();
-        // The answer can land while the gear is already open (it usually
-        // arrives within a frame of boot, but a slow secret read is exactly
-        // the case this guards): repaint so the section appears rather than
-        // waiting for the next open.
-        if (!gearPopover.hidden && state.gearView === "main") renderGearMain();
-        break;
       case "promptNav":
         state.promptNav = !!msg.value;
         if (!state.promptNav) setPromptNavPin(null);
@@ -19859,7 +17789,7 @@
       case "readRepliesAloud": {
         const wasEnabled = state.readRepliesAloud;
         state.readRepliesAloud = !!msg.value;
-        if (!state.readRepliesAloud && !IS_REMOTE) {
+        if (!state.readRepliesAloud) {
           if (wasEnabled) cancelPendingSpeech();
           if (state.summarizeRepliesAloud) {
             state.summarizeRepliesAloud = false;
@@ -19869,8 +17799,8 @@
         break;
       }
       case "summarizeRepliesAloud":
-        state.summarizeRepliesAloud = !IS_REMOTE && state.readRepliesAloud && !!msg.value;
-        if (!IS_REMOTE && !state.readRepliesAloud && msg.value) {
+        state.summarizeRepliesAloud = state.readRepliesAloud && !!msg.value;
+        if (!state.readRepliesAloud && msg.value) {
           vscode.postMessage({ type: "setSummarizeRepliesAloud", value: false });
         }
         invalidatePendingSpeechSummary();
@@ -19887,8 +17817,8 @@
           pending &&
           pending.requestId === msg.requestId &&
           msg.requestId === speechRequestId &&
-          (IS_REMOTE ? state.remoteTts : state.readRepliesAloud) &&
-          (IS_REMOTE ? state.remoteSummarizeRepliesAloud : state.summarizeRepliesAloud) &&
+          (state.readRepliesAloud) &&
+          (state.summarizeRepliesAloud) &&
           ttsAvailable
         ) {
           clearPendingSpeechSummary();
@@ -20134,7 +18064,6 @@
         }
         state.contextBreakdown = null;
         updateDonut(0);
-        reportRemotePreferences();
         break;
       }
       case "sessionName": {
@@ -20166,7 +18095,6 @@
         // swap still lands the caret in the composer and pins like a fresh open.
         if (!sameVisible) {
           renderSessionName();
-          renderSessionHead();
         }
         pendingSessionChromeReset = false;
         if (prev && !sameId) {
@@ -20214,12 +18142,6 @@
         if (state.voiceDiscarded && msg.status !== "idle") break;
         if (msg.status === "listening" || msg.status === "transcribing") {
           state.mic = msg.status;
-          if (IS_REMOTE && msg.status === "listening" && remoteMic && !remoteMic.ready) {
-            remoteMic.ready = true;
-            const pending = remoteMic.pending.splice(0);
-            remoteMic.pendingBytes = 0;
-            for (const buffer of pending) postRemotePcm(buffer);
-          }
           renderMic();
         } else if (msg.status === "idle") {
           // Hard reset — the host stopped voice (e.g. session switch). Clear the
@@ -20227,7 +18149,6 @@
           state.mic = "idle";
           state.voiceLive = false;
           clearVoiceInsertion();
-          if (IS_REMOTE) cleanupRemoteMic();
           renderMic();
         }
         break;
@@ -20242,14 +18163,8 @@
         break;
       case "voicePartial":
         if (state.voiceDiscarded) break;
-        // Live streaming update: replace only the dictated text at the captured
-        // insertion point. Passive remote tabs do not own the capture.
-        // Same-repo passive tabs receive the shared partial too, but their
-        // independently typed composer must remain untouched.
-        if (!IS_REMOTE || remoteMic) {
-          state.voiceLive = true;
-          renderVoiceInsertion(msg.text || "");
-        }
+        state.voiceLive = true;
+        renderVoiceInsertion(msg.text || "");
         break;
       case "voiceSubmit": {
         if (state.voiceDiscarded) break;
@@ -20284,7 +18199,6 @@
         }
         state.voiceLive = false;
         clearVoiceInsertion();
-        if (IS_REMOTE) cleanupRemoteMic();
         setMic("transcript");
         // "grok send" detected: submit hands-free — but only when idle, so it
         // never doubles as a "stop" on an in-flight turn.
@@ -20294,7 +18208,6 @@
         // Setup/record/transcribe failed (the host already showed the reason).
         state.voiceLive = false;
         clearVoiceInsertion();
-        if (IS_REMOTE) cleanupRemoteMic();
         setMic("error");
         break;
       case "chips":
@@ -20303,18 +18216,8 @@
         updateSendButton();
         break;
       case "commandsUpdate": {
-        const incoming = Array.isArray(msg.commands) ? msg.commands : [];
-        const extra = (typeof EXTENSION_HOST_SLASH_COMMANDS !== "undefined") ? EXTENSION_HOST_SLASH_COMMANDS : [];
-        const seen = new Set(incoming.map((c) => (c.name || "").replace(/^\//, "")));
-        const merged = [...incoming];
-        for (const cmd of extra) {
-          const raw = (cmd.name || "").replace(/^\//, "");
-          if (!seen.has(raw)) {
-            merged.push(cmd);
-            seen.add(raw);
-          }
-        }
-        state.commands = merged;
+        // Already merged with the host's own commands (sidebar.ts).
+        state.commands = Array.isArray(msg.commands) ? [...msg.commands] : [];
         break;
       }
       case "mentionResults": {
@@ -20340,24 +18243,7 @@
         // Live send, including a buffer rebuild inside historyReplay. A prior
         // hidden turn's skip ends here — this event is never hidden.
         state.skipUserBubble = false;
-        // A co-attached view also receives sends from the other view. Prefer our
-        // submission id; old hosts omit it, so fall back to exact text + chip
-        // identity. agentStart has no ownership signal and must not clear the
-        // recovery copy.
-        if (!IS_REMOTE || (
-          state.pendingSubmissionId &&
-          (msg.submissionId !== undefined
-            ? msg.submissionId === state.pendingSubmissionId
-            : msg.text === state.pendingSubmissionText &&
-              sameChipIds(msg.chips, state.pendingSubmissionChipIds))
-        )) {
-          clearOptimisticSend();
-          state.pendingSubmissionText = "";
-          state.pendingSubmissionId = null;
-          state.pendingSubmissionChipIds = [];
-          state.rejectedSubmissionText = "";
-          renderQueuedBlocks();
-        }
+        renderQueuedBlocks();
         // A steer/interjection is part of the already-running turn: it renders
         // as a bubble but never advances the prompt counter or drains cards at
         // a new prompt boundary. Real sends do both.
@@ -20407,18 +18293,6 @@
       case "userMessageChunk":
         appendUserChunk(msg.text, msg.timestampMs, msg.images);
         break;
-      case "imageFull": {
-        // Ignore an answer for a picture the overlay has moved on from, so a
-        // slow reply cannot replace whatever the user is looking at now.
-        if (state.pendingImageFullId !== msg.fullId) break;
-        const overlay = document.querySelector(".image-preview-overlay");
-        // A missing src means the source is gone (swept, or deleted). Stop the
-        // spinner either way — the thumbnail already on screen is the answer.
-        if (msg.src && overlay && !overlay.hidden) overlay.querySelector("img").src = msg.src;
-        setImagePreviewLoading(false);
-        state.pendingImageFullId = null;
-        break;
-      }
       case "imageOriginal": {
         const job = pendingImageCopy;
         if (job && job.fullId === msg.fullId && job.requestId === msg.requestId) job.resolve(msg.src);
@@ -20435,7 +18309,6 @@
             state.replayHold = true;
             state.replayHeld = [];
             setConversationLoading(true);
-            renderRepoChip();
           }
           state.replayDepth += 1;
           state.replaying = true;
@@ -20463,7 +18336,6 @@
           // belongs now. A replacement already dropped the pending flag.
           if (pendingTranscriptClear) flushPendingTranscriptClear();
           takeDesktopLaunchComposerFocus();
-          renderRepoChip();
           // A remote snapshot can end while its latest turn is still running.
           // Seed the already-rendered prefix only in that case, so the eventual
           // live agentEnd speaks the complete reply. Finished buffered turns
@@ -20487,21 +18359,14 @@
           // Older CLIs may not replay turn_completed; finalize that last footer
           // here too. Without agentTimestampMs it deliberately stays blank.
           revealTurnFooter();
-          // Remote reconnect/cold-load delivers only a recent window. Label
-          // the export so it cannot be read as the whole transcript.
-          if (IS_REMOTE) state.exportWindowed = true;
           // Follow the pin. Do not re-pin: a reader (or a cache restore) who
           // is not at the bottom must stay put. A pinned reader still lands
           // at the bottom so new messages stay visible. Fresh open / empty
           // flush pin in resetSessionChrome; a swap pins when sessionName
-          // names a different id. Skip while the wrapper is restoring
-          // identity — that class means a place is already owned.
-          if (!identityRestoring()) scrollToBottom();
+          // names a different id.
+          scrollToBottom();
           onFindTranscriptSettled();
         }
-        break;
-      case "historyBatch":
-        for (const nested of msg.messages || []) handleHostMessage(nested);
         break;
       case "permissionHistoryQueue":
         // Answered permission cards from the resumed session, interleaved inline
@@ -21087,31 +18952,6 @@
         if (msg.status || msg.durationMs != null) {
           revealTurnFooter(undefined, { status: msg.status || "failed", durationMs: msg.durationMs });
         }
-        // A process that dies takes the host's send queue with it: that text
-        // never reached Grok, and the host empties the queue in the very next
-        // breath after this message — so this is the last moment it exists
-        // anywhere. Hand it back as the "Not sent" recovery block, which is
-        // exactly what it is.
-        //
-        // Read from the QUEUE, not from the pending submission. A queued
-        // contribution can be merged with another view's and flushed under a
-        // combined text this tab cannot recognise as its own, which leaves the
-        // pending marker set on a message that WAS delivered — rebuilding that
-        // as "Not sent" would invite sending it twice. The queue is the honest
-        // source: it still holds what never left, and is already empty once it
-        // did.
-        //
-        // Remote only. The same text loss exists in the VS Code webview, but
-        // there the queued block disappearing on exit is long-standing,
-        // deliberate behaviour with a test of its own — and the desk still has
-        // the composer, the transcript and the terminal in front of it. This
-        // fixes the surface where the loss was actually reported and where a
-        // phone has nothing else to fall back on.
-        if (IS_REMOTE && state.sendQueue.length) {
-          state.rejectedSubmissionText = queuedSendsText(state.sendQueue);
-          state.sendQueue = [];
-          renderQueuedBlocks();
-        }
         state.busy = false;
         state.busyLocked = false; // a dead process ends any startup lock too
         updateSendButton();
@@ -21122,57 +18962,8 @@
         // Prefer additive `queued` (text + chips); `items` is the text-only fallback.
         state.sendQueue = normalizeQueuedSends(msg);
         if (!state.sendQueue.length) {
-          state.queuedSubmissionPending = false;
-          state.queuedSubmissionRejected = false;
-        }
-        // A send the host QUEUED never produces the `userMessage` echo that
-        // normally retires the optimistic placeholder, so the same text was left
-        // on screen twice — once as a sent bubble, once as a queued block. The
-        // queue is the host's answer to that submission, so treat it as the
-        // acknowledgement: the queued block is now the truthful rendering, and
-        // it carries Steer/edit/cancel the placeholder never had.
-        //
-        // Matched on text because the queue deliberately collapses several
-        // contributions into one string and cannot carry a submission id (see
-        // divertRacingSend in the host).
-        if (state.optimisticSendEl && state.pendingSubmissionText) {
-          if (queueHoldsContribution(state.sendQueue, state.pendingSubmissionText)) {
-            // ONLY the placeholder. The pending submission id and text stay put:
-            // they are what the "Not sent" recovery block is rebuilt from if the
-            // relay bounces this send, and a queue snapshot is not proof the
-            // send was accepted — only the host's own `userMessage` echo is, and
-            // that path clears them. Retiring them here would mean a wrong match
-            // could swallow the text instead of merely tidying the transcript.
-            clearOptimisticSend();
-            // The placeholder's Grokking was ours to show and ours to take back;
-            // a genuinely running turn re-shows it from agentStart.
-            if (!state.busy) hideGrokking();
-          }
         }
         renderQueuedBlocks();
-        break;
-      case "submitQueuedSend":
-        // Remote dequeue boundary: echo the host-owned text through the browser
-        // as the exact ordinary send frame the relay meters. Do not optimistically
-        // enter busy state — an over-quota relay bounces `error` and never
-        // forwards the frame, so the queued block stays pending and usable.
-        if (
-          IS_REMOTE &&
-          typeof msg.id === "string" &&
-          msg.id &&
-          typeof msg.text === "string" &&
-          !state.submittedQueuedSendIds.has(msg.id)
-        ) {
-          state.submittedQueuedSendIds.add(msg.id);
-          if (state.submittedQueuedSendIds.size > 32) {
-            state.submittedQueuedSendIds.delete(state.submittedQueuedSendIds.values().next().value);
-          }
-          state.queuedSubmissionPending = true;
-          state.queuedSubmissionRejected = false;
-          state.queuedSubmissionId = msg.id;
-          renderQueuedBlocks();
-          vscode.postMessage({ type: "send", text: msg.text.trim(), queuedSendId: msg.id });
-        }
         break;
       case "steerUnavailable":
         // This CLI can't interject (#52). Latch the button off — the queue,
@@ -21212,7 +19003,6 @@
         state.busyLocked = !!msg.locked;
         if (!state.busy && !state.replaying) {
           state.repoSwitchPending = false;
-          renderRepoChip();
         }
         updateSendButton();
         if (!state.busy) {
@@ -21253,35 +19043,11 @@
           // Record the host-launched terminal BEFORE rendering, so the panel is
           // painted with the done mark already on rather than flashing an
           // untouched button first.
-          showOnboarding(msg.state, { platform: msg.platform, reason: msg.reason, provider: msg.provider, device: msg.device }, () => {
+          showOnboarding(msg.state, { platform: msg.platform, reason: msg.reason, provider: msg.provider }, () => {
             if (msg.launched) markOnboardingLaunchedByHost(msg.provider);
           });
-          // Mirror the device flow into Settings → Providers. The welcome card
-          // above cannot render over a painted conversation, so for a click
-          // made from the settings overlay this mirror IS the feedback.
           if (msg.provider) {
-            // A terminal "done" is only worth mirroring while the snapshot has
-            // not caught up. Storing it unconditionally left a latent card that
-            // reappeared as "Connected" after a later sign-out in the same tab,
-            // hiding the real Connect row (review, 2026-08-31) -- providerState
-            // can arrive BEFORE this frame, so the retirement below cannot be
-            // the only cure.
-            var settledDone = msg.device && msg.device.status === "done";
-            var alreadyConnected = (state.providers || []).some(function (p) {
-              return p && p.id === msg.provider && p.connected;
-            });
-            if (msg.device && !(settledDone && alreadyConnected)) {
-              state.deviceLoginByProvider[msg.provider] = msg.device;
-            } else {
-              delete state.deviceLoginByProvider[msg.provider];
-            }
             refreshSettingsOverlay();
-            // AFTER the mirror: renderConnectWizard reads it, and syncing
-            // first painted the previous state every time (caught by driving
-            // the states in a browser, 2026-08-31).
-            syncConnectWizard(msg.provider, msg.device);
-            // The composer card reads the same mirror, and this is the only
-            // frame that moves it while a sign-in is being verified.
             renderProviderSignInCard();
           }
         break;
@@ -21290,10 +19056,6 @@
         // Keeping that id meant the next reload asked for the same dead
         // session, drew the same error, and re-armed itself — the owner could
         // only escape by clicking New session (2026-08-31).
-        if (msg.resumeFailed && typeof msg.resumeFailed.id === "string"
-          && rememberedRemoteSession && rememberedRemoteSession.id === msg.resumeFailed.id) {
-          saveRememberedRemoteSession(null);
-        }
         // The relay bounces a quota-refused frame as a plain error, which
         // renders in the transcript — behind the settings overlay the reader is
         // looking at. At the paywall that made Create appear to do nothing, at
@@ -21308,65 +19070,14 @@
         if (state.repoSwitchPending) {
           state.repoSwitchPending = false;
           setConversationLoading(false);
-          renderRepoChip();
-        }
-        {
-          const supersededId = msg.code === SESSION_SUPERSEDED_CODE
-            && msg.resumeFailed && typeof msg.resumeFailed.id === "string"
-            ? msg.resumeFailed.id
-            : (msg.code === SESSION_SUPERSEDED_CODE ? (state.activeSessionId || "") : "");
-          // A takeover names the conversation it displaced. Abort only a rail
-          // transition TO that id — an unrelated newer click must not be
-          // cancelled by it, and must not freeze this view into the old one.
-          if (supersededId) {
-            const resumeToThis = state.railTransition
-              && state.railTransition.kind === "resume"
-              && state.railTransition.sessionId === supersededId;
-            const transitioningElsewhere = !!state.railTransition && !resumeToThis;
-            if (resumeToThis) abortRailTransition();
-            if (!transitioningElsewhere) {
-              // Deliberately no transcript error. The card IS the message, and
-              // adding one printed the same sentence twice — once calmly where
-              // the composer used to be, once in red above it, which reads as
-              // two different things having gone wrong (owner, 2026-09-01).
-              // Nothing failed here: the conversation moved, and it is one tap
-              // back.
-              enterSessionSuperseded(supersededId, sessionSupersededCwd(supersededId));
-            }
-            break;
-          }
         }
         // A generic error cannot be attributed to a specific rail transition
-        // (the frame carries no request id). An error from a superseded resume
-        // therefore aborts whatever is currently in flight — worst case the
+        // (the frame carries no request id), so it aborts whatever is currently
+        // in flight — worst case the
         // highlight backs out early and the real confirmation re-establishes
         // it (a flicker, not work loss). Leaving a stranded highlight forever
         // would be worse.
         if (state.railTransition) abortRailTransition();
-        if (state.queuedSubmissionPending && isRelaySendRejection(msg.text)) {
-          state.queuedSubmissionPending = false;
-          state.queuedSubmissionRejected = true;
-          if (state.queuedSubmissionId) state.submittedQueuedSendIds.delete(state.queuedSubmissionId);
-          state.queuedSubmissionId = null;
-          renderQueuedBlocks();
-        } else if (
-          state.pendingSubmissionId &&
-          isRelaySendRejection(msg.text)
-        ) {
-          // Rejected by the relay (quota/rate cap): the message was never
-          // sent, so the optimistic bubble must go — the "Not sent" recovery
-          // block below is the honest representation.
-          clearOptimisticSend();
-          hideGrokking();
-          state.rejectedSubmissionText = state.pendingSubmissionText;
-          state.pendingSubmissionText = "";
-          state.pendingSubmissionId = null;
-          state.pendingSubmissionChipIds = [];
-          state.busy = false;
-          state.busyLocked = false;
-          renderQueuedBlocks();
-          updateSendButton();
-        }
         addError(msg.text, msg.code);
         break;
       case "hostNotice":
@@ -21395,7 +19106,6 @@
           }
         }
         delete state.dots[msg.id];
-        if (rememberedRemoteSession?.id === msg.id) saveRememberedRemoteSession(null);
         // A removal carries no focus confirmation. Preserve an in-flight rail
         // transition until sessionName names the conversation being opened.
         if (!historyPopover.hidden) renderSessionRows(false);
@@ -21456,28 +19166,6 @@
           if (state.activeSessionId) {
             const activeEntry = entries.find((entry) => entry.id === state.activeSessionId)
               || state.sessions.find((entry) => entry.id === state.activeSessionId);
-            // repoCwd must name the repo this SESSION lives in, not the one the
-            // list happens to be showing. Those diverge whenever you browse
-            // another repo's history (the chip literally says "Browsing X; live
-            // session is in Y"), and remembering the browsed one pairs a repo
-            // with a session that does not belong to it. On the next reconnect
-            // restoreRememberedRemoteSession then issues two contradictory
-            // commands — selectRepo(X) followed by resumeSession(a session in
-            // Y) — and the host obeys both in order. That is the A→B→A→B
-            // bouncing: the second command lands after the first has finished
-            // loading, and whichever repo you end on gets remembered, so the
-            // next reconnect can flip you straight back.
-            // repoCwd must be something `selectRepo` can actually accept — i.e.
-            // a row in the catalog. A worktree session's activeCwd is the
-            // ISOLATED CHECKOUT, which is deliberately not a repo row, so
-            // remembering it produced a reconnect that asked to select a repo
-            // the host would silently refuse: identity restore then never
-            // completed and the outbox stayed queued until the tab was closed,
-            // taking anything typed meanwhile with it. Fall back to the repo
-            // that owns it.
-            // Also deliberately uses host-confirmed activeSessionId only — a
-            // pending rail click must not be remembered as this tab's session.
-            const activeRepoRow = state.repos.find((r) => sameCwd(r.cwd, state.activeRepoCwd));
             // An EMPTY conversation is deliberately forgotten, not remembered:
             // the host reaps an untouched session the moment this tab lets go
             // of it (#24), so a remembered empty id turns every refresh into
@@ -21486,15 +19174,9 @@
             // mean no restore attempt. Both signals have to agree — the host's
             // message count AND a blank view — so a refresh mid-first-turn,
             // where the count still lags at 0, keeps remembering.
-            if (activeEntry?.numMessages === 0 && transcriptHasNoTurns()) {
-              saveRememberedRemoteSession(null);
-            } else saveRememberedRemoteSession({
-              id: state.activeSessionId,
-              repoCwd: (activeRepoRow && activeRepoRow.cwd) ||
-                state.selectedRepoCwd || state.activeRepoCwd || state.cwd || "",
-              cwd: activeEntry?.cwd || state.activeRepoCwd || state.cwd || "",
-            });
-          } else saveRememberedRemoteSession(null);
+            if (activeEntry?.numMessages === 0 && transcriptHasNoTurns())
+              {}
+          }
         }
         // Merge (not replace) so dots from earlier pages survive a load-more, which
         // only carries dots for the new page.
@@ -21527,7 +19209,6 @@
         // A searched or paged answer skips adoptRailRows, but it can still be
         // the frame that renames the open conversation — the header reads the
         // active record, so refresh it either way.
-        else renderSessionHead();
         // After adopt so railCatalogHasSession sees the new rows. Confirms a
         // resume only when activeId equals the requested id; for new, binds /
         // drops the placeholder only when activeId left the previous session
@@ -21545,7 +19226,6 @@
         state.dots = Object.assign({}, state.dots, msg.dots || {});
         if (settlePendingRename(state.pinnedSessions)) {
           renderSessionName();
-          renderSessionHead();
         }
         renderRail();
         break;
@@ -21572,7 +19252,6 @@
         state.dots = Object.assign({}, state.dots, msg.dots || {});
         if (!msg.error && settlePendingRename(state.repoPreviews[key].entries)) {
           renderSessionName();
-          renderSessionHead();
         }
         // First answer: the probe only asked about one repo, so now ask for the rest.
         if (!known) requestRailPreviews();
@@ -21643,25 +19322,12 @@
           // yet — still allow phase advance when selectedCwd matches.
           noteRailTransitionRepos(msg);
         }
-        renderRepoChip();
         // The catalog is what decides whether the conversation's project label
         // is worth showing at all (one project — nothing to disambiguate) and
         // what it reads. It usually lands after the name.
         renderSessionName();
-        if (!repoPopover.hidden) renderRepoPopover();
         renderRail();
         requestRailPreviews();
-        // Selected repo is the file-browse root — a switch must not leave the
-        // panel listing another project's paths under the new name.
-        //
-        // Unconditionally, NOT only while the panel is open. A closed panel kept
-        // its viewer, and reopening skips the directory request whenever a
-        // viewer exists — so close the panel in project A, switch to B, reopen,
-        // and A's file was sitting there under B's heading.
-        // Shared state is keyed by scope. Switching projects changes the active
-        // scope but keeps each project's tabs/drafts parked in memory; it cannot
-        // render one scope's content under another scope's title.
-        ensureRemoteFilesBrowser();
         // A rail "+" on another repo waits for the switch to land before starting
         // the session, so it can never open one in the repo we were leaving.
         break;
@@ -21671,15 +19337,6 @@
         else delete state.dots[msg.id];
         if (!historyPopover.hidden) patchSessionDot(msg.id);
         patchSessionDot(msg.id, rail());
-        break;
-      case "projectDirListing":
-        handleProjectDirListing(msg);
-        break;
-      case "projectFileContent":
-        handleProjectFileContent(msg);
-        break;
-      case "projectFileWriteResult":
-        handleProjectFileWriteResult(msg);
         break;
       default:
         // No case ran. Either the host posted a type outside the contract (drift
@@ -21740,267 +19397,11 @@
   modeBtn.onclick = (e) => { e.stopPropagation(); if (state.busyLocked) return; openModePopover(); };
   gearBtn.onclick = (e) => { e.stopPropagation(); openGearPopover(); };
 
-  // ---------- remote project files ----------
-  //
-  // Browse + open under the tab's selected repo; edit+save when the host also
-  // advertises editProjectFiles. Host fence is repoScopeFor + resolveTreePath
-  // (see src/remote-files.ts). No create/delete/rename. Capability-gated (field
-  // presence); local VS Code / desktop never mount it even when the host
-  // advertises the flag.
-
-  function remoteFilesBrowseAvailable() {
-    return IS_REMOTE && !!(state.hostCaps && state.hostCaps.browseProjectFiles);
-  }
-
-  /** Edit is a separate capability so a host can offer browse without a write path. */
-  function remoteFilesEditAvailable() {
-    return remoteFilesBrowseAvailable() && !!(state.hostCaps && state.hostCaps.editProjectFiles);
-  }
-
-  function remoteFilesRepoCwd() {
-    return state.selectedRepoCwd || state.activeRepoCwd || state.cwd || "";
-  }
-
-  // Promise adapter over the relay's message round trip. New hosts echo the
-  // additive requestId; released extensions may not, so requests to an
-  // unproven/legacy host are serialized per operation+repo+path. A timed-out
-  // legacy key is poisoned until refresh: sending another indistinguishable
-  // request would let the late first answer satisfy the second and cross-wire
-  // editor state. Refresh is the intentionally acceptable recovery here.
-  let remoteFileRequestSeq = 0;
-  let remoteFileRequestIdsSupported = null;
-  const remoteFilePending = new Map();
-  const remoteFileTails = new Map();
-  const remoteFilePoisoned = new Set();
-
-  function remoteFileRequestKey(kind, cwd, relPath) {
-    return kind + "\0" + String(cwd || "") + "\0" + String(relPath || "");
-  }
-
-  function postRemoteFileRequest(kind, payload) {
-    const key = remoteFileRequestKey(kind, payload.cwd, payload.relPath);
-    if (remoteFilePoisoned.has(key)) {
-      return Promise.resolve({ ok: false, reason: "Request state is stale. Refresh this page and try again." });
-    }
-    const send = () => new Promise((resolve) => {
-      const requestId = "file-" + (++remoteFileRequestSeq);
-      const timer = setTimeout(() => {
-        remoteFilePending.delete(requestId);
-        if (remoteFileRequestIdsSupported !== true) remoteFilePoisoned.add(key);
-        resolve({ ok: false, reason: "File request timed out. Refresh this page and try again." });
-      }, 30000);
-      remoteFilePending.set(requestId, {
-        requestId,
-        kind,
-        cwd: payload.cwd,
-        relPath: payload.relPath || "",
-        key,
-        timer,
-        resolve,
-      });
-      vscode.postMessage({ ...payload, requestId });
-    });
-    if (remoteFileRequestIdsSupported === true) return send();
-    const previous = remoteFileTails.get(key) || Promise.resolve();
-    const request = previous.then(send, send);
-    remoteFileTails.set(key, request);
-    request.finally(() => {
-      if (remoteFileTails.get(key) === request) remoteFileTails.delete(key);
-    });
-    return request;
-  }
-
-  function settleRemoteFileRequest(kind, msg) {
-    if (!state.filesBrowse.component) return false;
-    let pending = null;
-    if (typeof msg.requestId === "string") {
-      remoteFileRequestIdsSupported = true;
-      const candidate = remoteFilePending.get(msg.requestId) || null;
-      // Correlation is necessary but not sufficient: retain the repo/path fence
-      // at the renderer boundary too. A relayed response carrying a real id for
-      // a different operation or scope must not populate this request's tab.
-      if (
-        candidate
-        && candidate.kind === kind
-        && candidate.cwd === msg.cwd
-        && candidate.relPath === (msg.relPath || "")
-      ) {
-        pending = candidate;
-      }
-    } else {
-      if (remoteFileRequestIdsSupported === null) remoteFileRequestIdsSupported = false;
-      for (const candidate of remoteFilePending.values()) {
-        if (
-          candidate.kind === kind
-          && candidate.cwd === msg.cwd
-          && candidate.relPath === (msg.relPath || "")
-        ) {
-          pending = candidate;
-          break;
-        }
-      }
-    }
-    // A response with no live consumer is stale. Once the shared component is
-    // mounted it must never fall through into the legacy renderer's state.
-    if (!pending) return true;
-    clearTimeout(pending.timer);
-    remoteFilePending.delete(pending.requestId);
-    pending.resolve(msg);
-    return true;
-  }
-
-  function currentRemoteFileScope() {
-    const cwd = remoteFilesRepoCwd();
-    return cwd ? { id: cwd, label: cwdLeaf(cwd) || "Project", title: cwd } : null;
-  }
-
-  function ensureSharedRemoteFilePanel() {
-    if (!remoteFilesBrowseAvailable()) return false;
-    const shared = window.GrokFilePanel;
-    if (!shared || typeof shared.createFilePanel !== "function") return false;
-    let panel = state.filesBrowse.component;
-    if (!panel) {
-      const componentScript = document.querySelector('script[src*="file-panel.js"]');
-      const iconBase = componentScript && componentScript.src
-        ? new URL("file-icons/", componentScript.src).href
-        : "";
-      const access = {
-        currentScope: async () => currentRemoteFileScope(),
-        list: (cwd, relPath) => postRemoteFileRequest("list", {
-          type: "listProjectDir", cwd, relPath: relPath || "",
-        }),
-        read: (cwd, relPath) => postRemoteFileRequest("read", {
-          type: "readProjectFile", cwd, relPath,
-        }),
-      };
-      if (remoteFilesEditAvailable()) {
-        access.write = (cwd, request) => postRemoteFileRequest("write", {
-          type: "writeProjectFile",
-          cwd,
-          relPath: request.relPath,
-          text: request.text,
-          stamp: request.stamp,
-          expectedAbsPath: request.expectedAbsPath,
-        });
-      }
-      let initialOpen = false;
-      try {
-        initialOpen = sessionStorage.getItem("grok.remote.filesOpen") === "1"
-          && !remoteUsesTouchComposer();
-      } catch (_) { /* private mode */ }
-      panel = shared.createFilePanel({
-        access,
-        mount: {
-          panelHost: document.querySelector(".app-main") || document.body,
-          // The relay adds this right-column host. Until then (and on phones),
-          // responsive presentation deliberately falls back to an overlay.
-          dockHost: document.getElementById("file-panel-dock"),
-          // The element the panel must not starve. Available width is this plus
-          // whatever the panel already occupies — NOT the whole row, which also
-          // contains the projects rail and would let a drag squeeze the chat to
-          // nothing.
-          widthPeer: document.getElementById("chat-stack")
-            || document.getElementById("chat-column"),
-          // As an overlay the panel stops below the bar its toggle lives in,
-          // the way the docked one does, rather than covering that bar and the
-          // button that opened it. A function because which bar that is changes
-          // at runtime: `.top-bar` is hidden and `#session-head` takes over the
-          // moment a project catalog arrives.
-          overlayTopFrom: () => remoteFilesButtonHost(),
-          toggleHost: remoteFilesButtonHost(),
-          presentation: "responsive",
-          id: "files-browse-panel",
-          // Same content-area maximize as desktop. The panel hides the control
-          // while it is an overlay (phone / <900) and toggles the shared body
-          // class itself.
-          maximize: true,
-        },
-        ui: {
-          confirm: uiChoice,
-          renderMarkdown,
-          fileIcons: { baseUrl: iconBase },
-        },
-        initialOpen,
-        onOpenChanged: (open) => {
-          state.filesBrowse.open = open;
-          document.body.classList.toggle("files-browse-open", open);
-          try { sessionStorage.setItem("grok.remote.filesOpen", open ? "1" : "0"); } catch (_) { /* private mode */ }
-        },
-      });
-      state.filesBrowse.component = panel;
-      panel.toggleElement.id = "files-browse-btn";
-      panel.toggleElement.classList.add("icon-btn");
-    }
-    placeRemoteFilesButton(panel.toggleElement);
-    panel.toggleElement.hidden = false;
-    void panel.setScope(currentRemoteFileScope());
-    return true;
-  }
-  function remoteFilesButtonHost() {
-    if (document.body.classList.contains("has-rail")) {
-      const head = document.getElementById("session-head");
-      if (head) return head;
-    }
-    return document.querySelector(".top-bar");
-  }
-
-  function placeRemoteFilesButton(btn) {
-    const host = remoteFilesButtonHost();
-    if (!host) return;
-    let sep = document.getElementById("files-browse-sep");
-    if (!sep) {
-      sep = document.createElement("span");
-      sep.id = "files-browse-sep";
-      sep.className = "files-browse-sep";
-      sep.setAttribute("aria-hidden", "true");
-    }
-    if (host.lastElementChild === btn && sep.nextElementSibling === btn) return;
-    host.appendChild(sep);
-    host.appendChild(btn);
-  }
-
-  function ensureRemoteFilesBrowser() {
-    const available = remoteFilesBrowseAvailable();
-    const panel = state.filesBrowse.component;
-    if (!available) {
-      const button = document.getElementById("files-browse-btn");
-      if (button) button.hidden = true;
-      if (panel) panel.setOpen(false);
-      return;
-    }
-    // file-panel.js is part of the remote page's vendored UI bundle. There is no
-    // second renderer here: a missing component is a packaging error, surfaced
-    // visibly and recoverable by refreshing after the deploy is corrected.
-    if (!ensureSharedRemoteFilePanel()) {
-      console.error("Remote project files require media/file-panel.js");
-    }
-  }
-
-  function handleProjectDirListing(msg) {
-    settleRemoteFileRequest("list", msg);
-  }
-
-  function handleProjectFileContent(msg) {
-    if (settlePreviewFileRequest(msg)) return;
-    settleRemoteFileRequest("read", msg);
-  }
-
-  function handleProjectFileWriteResult(msg) {
-    settleRemoteFileRequest("write", msg);
-  }
   // Welcome screen's "about" link → Settings → About.
   const welcomeAboutLink = $("welcome-about-link");
   if (welcomeAboutLink) welcomeAboutLink.onclick = (e) => { e.preventDefault(); e.stopPropagation(); openAboutPanel(); };
   addBtn.onclick = (e) => { e.stopPropagation(); openAddPopover(); };
   historyBtn.onclick = (e) => { e.stopPropagation(); openHistoryPopover(); };
-  repoBtn.onclick = (e) => {
-    e.stopPropagation();
-    if (repoSwitcherLocked()) return;
-    openRepoPopover();
-  };
-  // Hidden from the first paint: the chip has nothing to say until a `repos`
-  // frame arrives, and in VS Code it never appears at all.
-  applyRepoSwitcherVisibility();
   donutEl.onclick = (e) => {
     e.stopPropagation();
     if (contextPopover.hidden) openContextPopover(); else closePopovers();
@@ -22008,7 +19409,6 @@
   modePopover.addEventListener("click", (e) => e.stopPropagation());
   gearPopover.addEventListener("click", (e) => e.stopPropagation());
   contextPopover.addEventListener("click", (e) => e.stopPropagation());
-  repoPopover.addEventListener("click", (e) => e.stopPropagation());
   addPopover.addEventListener("click", (e) => e.stopPropagation());
   historyPopover.addEventListener("click", (e) => e.stopPropagation());
   document.addEventListener("click", (e) => {
@@ -22021,7 +19421,7 @@
       if (host) {
         const act = exprBtn.getAttribute("data-expr-act");
         if (act === "copy") copyExprSource(host.getAttribute("data-export-src"), exprBtn);
-        else if (act === "download" && IS_REMOTE) void exportExprBrowser(host, exprBtn);
+        else if (act === "download" && false) void exportExprBrowser(host, exprBtn);
         else if (act === "download" || act === "open") void exportExpr(host, act);
       }
       return;
@@ -22069,36 +19469,6 @@
       else if (act === "connectProvider") vscode.postMessage({ type: "runGrokLogin", provider: onbAction.dataset.provider });
       else if (act === "recheckProvider") vscode.postMessage({ type: "recheckConnection", provider: onbAction.dataset.provider });
       else if (act === "retryProvider") vscode.postMessage({ type: "retryProviderSession", provider: onbAction.dataset.provider });
-      // Same message the desk sends. The host, not the client, decides that a
-      // remote request means the headless flow — so there is one capability
-      // here, not two, and nothing new for the policy table to gate.
-      else if (act === "connectRemote") vscode.postMessage({ type: "runGrokLogin", provider: onbAction.dataset.provider });
-      else if (act === "submitDeviceLoginCode") {
-        const root = onbAction.closest(".onb");
-        const input = root && root.querySelector(".onb-code-input");
-        const code = input ? String(input.value || "").trim() : "";
-        if (!code) return;
-        vscode.postMessage({ type: "submitDeviceLoginCode", provider: onbAction.dataset.provider, code: code });
-        // Deliberately NOT disabled here. This message can be dropped: the
-        // relay client's outbox keeps queue releases and authored input across
-        // a reconnect and drops everything else, and the reconnect is not an
-        // edge case in this flow — a phone leaves for the vendor's page to get
-        // the code and comes back on a new socket, which is the ONLY way to
-        // reach this button. Disabling on the click meant a dropped code left a
-        // dead field, a waiting CLI, and no way back but reopening Connect.
-        //
-        // The host echoes `submitted: true` once it has actually written the
-        // code to the CLI, and the card disables the field on that frame. No
-        // acknowledgement, no disable — so tapping Submit again just works.
-      }
-      else if (act === "cancelDeviceLogin") {
-        vscode.postMessage({ type: "cancelDeviceLogin", provider: onbAction.dataset.provider });
-        // Close on the click, not on the host's answer. The person has said
-        // they are done; leaving the dialog up until a frame comes back makes
-        // Cancel feel ignored, and if the answer never comes it stays up over
-        // a flow that is already gone.
-        if (connectWizardProvider() === onbAction.dataset.provider) closeConnectWizard();
-      }
       else if (act === "addProjectFolder") openAddProjectMenu(onbAction);
       return;
     }
@@ -22215,11 +19585,7 @@
     e.preventDefault();
     const href = a.getAttribute("href") || "";
     if (/^https?:\/\//i.test(href)) {
-      // A remote has no host to route through: openUrl is host-local and is
-      // dropped there, which is why the gear's repository link already opens
-      // its own window. Same rule for a link in the transcript.
-      if (IS_REMOTE) window.open(href, "_blank", "noopener");
-      else vscode.postMessage({ type: "openUrl", url: href });
+      vscode.postMessage({ type: "openUrl", url: href });
     } else if (/^file:\/\//i.test(href)) {
       let p = href.replace(/^file:\/\//i, "");
       if (/^\/[a-zA-Z]:[/\\]/.test(p)) p = p.slice(1);
@@ -22228,14 +19594,6 @@
     } else if (/^[a-zA-Z]:[\\/]/.test(href) || href.startsWith("\\\\") || !/^[a-z][a-z0-9+.-]*:/i.test(href)) {
       vscode.postMessage({ type: "openFile", path: href });
     }
-  });
-  document.addEventListener("keydown", (e) => {
-    if (e.key !== "Enter") return;
-    const input = e.target && e.target.closest && e.target.closest(".onb-code-input");
-    if (!input || input.disabled) return;
-    e.preventDefault();
-    const btn = input.closest(".onb") && input.closest(".onb").querySelector('[data-act="submitDeviceLoginCode"]');
-    if (btn && !btn.disabled) btn.click();
   });
 
   /** Href a user would paste elsewhere, or "" when the link has no external
@@ -22298,10 +19656,9 @@
         onSelect: () => writeClipboardText(selected),
       });
     }
-    // AP-04: host-local (writes a local file, resolved by a native QuickPick
-    // the host shows itself) — a remote client has neither, same reasoning
-    // as every other hostLocal row in settings.js.
-    if (selected && !IS_REMOTE) {
+    // AP-04: writes a local file, resolved by a native QuickPick the host
+    // shows itself.
+    if (selected) {
       items.push({
         label: "Add as rule",
         icon: ICON.file,
@@ -22355,7 +19712,7 @@
         const dataUrl = String(reader.result || "");
         const m = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
         if (m) {
-          const previewId = newRemoteTabToken();
+          const previewId = randomHexId();
           rememberImagePreview(previewId, dataUrl);
           vscode.postMessage({ type: "pasteImage", mimeType: m[1], data: m[2], previewId });
         }
@@ -22366,11 +19723,11 @@
   });
 
   input.addEventListener("focus", () => {
-    if (!IS_REMOTE) vscode.postMessage({ type: "composerFocus", focused: true });
+    vscode.postMessage({ type: "composerFocus", focused: true });
   });
   input.addEventListener("blur", () => {
     composerPreferredColumn = null;
-    if (!IS_REMOTE) vscode.postMessage({ type: "composerFocus", focused: false });
+    vscode.postMessage({ type: "composerFocus", focused: false });
   });
   input.addEventListener("pointerdown", () => { composerPreferredColumn = null; });
   input.addEventListener("input", () => {
@@ -22438,7 +19795,7 @@
     }
     const sendKey = state.useCtrlEnter
       ? e.key === "Enter" && (e.metaKey || e.ctrlKey)
-      : !remoteUsesTouchComposer() && e.key === "Enter" && !e.shiftKey;
+      : e.key === "Enter" && !e.shiftKey;
     if (sendKey) {
       e.preventDefault();
       if (state.busy) {
@@ -22478,11 +19835,7 @@
   // otherwise leave it stale until close+reopen. Only the history dropdown is panel-width
   // dependent (the composer popovers are bottom-anchored), so just re-run its positioning.
   window.addEventListener("resize", () => {
-    // The SAME anchor the opener used. Where the rail exists, `historyBtn` sits
-    // in a display:none top bar and measures as a zero rect, so a rotate or a
-    // window drag would re-place the popover against nothing.
-    if (!historyPopover.hidden) positionDropdownPopover(historyPopover, railHistoryAnchor() || historyBtn);
-    if (!repoPopover.hidden) positionRepoPopover();
+    if (!historyPopover.hidden) positionDropdownPopover(historyPopover, historyBtn);
   });
 
   // A resize can also happen while Grok is hidden (another panel tab / extension focused),
@@ -22517,24 +19870,8 @@
   input.focus({ preventScroll: true });
   if (IS_DESKTOP_CLIENT) resetDocumentScroll();
 
-  if (IS_REMOTE) {
-    // Host-page TTS seam; changes also emit `grokRemoteTtsChange` with { available, enabled }.
-    window.grokRemoteTts = Object.freeze({
-      get available() { return ttsAvailable; },
-      get enabled() { return state.remoteTts; },
-      setEnabled: setRemoteTtsEnabled,
-      toggle: () => setRemoteTtsEnabled(!state.remoteTts),
-    });
-  }
   syncProviderVoice();
   initMermaid();
   initMathJax();
-  claimRemoteTabIdentity((finalToken) => {
-    resolveRemoteTabTokenReady(finalToken);
-    vscode.postMessage({
-      type: "ready",
-      ...(IS_REMOTE && finalToken ? { tabToken: finalToken } : {}),
-    });
-    reportRemotePreferences();
-  });
+  vscode.postMessage({ type: "ready" });
 })();

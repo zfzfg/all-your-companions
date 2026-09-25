@@ -246,7 +246,7 @@ describe("Agents & Crew — the role editor", () => {
   it("posts the edited draft, the scope and the original name", () => {
     // Requirement 6. Posting the host's original view instead of the draft is
     // the bug that makes an editor look like it works and change nothing.
-    const { root, posted, window } = mount();
+    const { root, posted } = mount();
     openCard(root, "reviewer");
     const when = q(root, '.settings-agent-form [data-field="whenToUse"]') as unknown as {
       value: string;
@@ -266,7 +266,7 @@ describe("Agents & Crew — the role editor", () => {
   it("tells the host where the role used to live when the scope changes", () => {
     // Without `originalScope` the host cannot remove the project file, which
     // keeps winning — so the move succeeds and looks like it failed.
-    const { root, posted, window } = mount();
+    const { root, posted } = mount();
     openCard(root, "reviewer");
     const scope = q(root, '.settings-agent-form select[data-field="cardScope"]') as unknown as {
       value: string;
@@ -423,7 +423,7 @@ describe("Agents & Crew — the flow editor", () => {
   });
 
   it("posts the parallel flag as edited", () => {
-    const { root, posted, window } = mount();
+    const { root, posted } = mount();
     openFlow(root, "default");
     // An on/off in the editor is the page's switch, not a bare checkbox.
     const toggle = q(root, '.settings-agent-form [role="switch"][data-field="parallel"]') as unknown as {

@@ -79,24 +79,6 @@ export function sessionBoundToClosedFolder(
   return false;
 }
 
-/**
- * Remote messages that carry no cwd still act on a **bound** session or
- * client-selected repo. Refuse when that binding is no longer authorized.
- *
- * `selectRepo` is excluded by the caller: its target cwd is checked via
- * {@link allowRemoteRepoTarget} / the authorized catalog, so a tab can leave a
- * revoked binding.
- */
-export function remoteBoundCwdStillAuthorized(
-  boundCwd: string | undefined,
-  authorizedCwds: readonly string[],
-  sameCwd: (a: string, b: string) => boolean = pathsEqual,
-): boolean {
-  // No binding yet (pre-ready) — not an authorization grant.
-  if (!boundCwd) return false;
-  return cwdIsAuthorized(boundCwd, authorizedCwds, sameCwd);
-}
-
 /** Handles whose paths sit under a just-closed folder. */
 export function imageHandlesToRevoke(
   handleToPath: Iterable<readonly [string, string]>,

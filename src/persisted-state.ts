@@ -186,7 +186,7 @@ export class PersistedState {
       const ingested = this.ingest(key, disk.value);
       this.cache.set(key, ingested.value);
       void this.memento.update(key, ingested.value);
-      if (ingested.changed) this.enqueueWrite(key, ingested.value, disk.value);
+      if (ingested.changed) void this.enqueueWrite(key, ingested.value, disk.value);
       return;
     }
     const shadow = this.shadowValue(key);
@@ -209,7 +209,7 @@ export class PersistedState {
         // not create the disk file. Cap first so a fat `autoName` never lands
         // in either copy, then write once if anything actually changed.
         void this.memento.update(key, ingested.value);
-        if (ingested.changed) this.enqueueWrite(key, ingested.value, disk.value);
+        if (ingested.changed) void this.enqueueWrite(key, ingested.value, disk.value);
       } else if (shadow !== undefined) {
         // First run after the upgrade: seed the file from what VS Code already
         // holds. Critically this PRESERVES the existing install id — minting a
@@ -219,7 +219,7 @@ export class PersistedState {
         this.cache.set(key, ingested.value);
         // A malformed existing file is evidence to preserve, not a migration
         // target. An absent file is safe to seed from the shadow.
-        if (!disk) this.enqueueWrite(key, ingested.value);
+        if (!disk) void this.enqueueWrite(key, ingested.value);
       }
     }
   }

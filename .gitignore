@@ -1,7 +1,6 @@
 node_modules/
 out/
 out-integration/
-dist-desktop/
 *.vsix
 !releases/*.vsix
 .vscode-test/
@@ -39,13 +38,12 @@ terminals/
 src/**/*.js
 src/**/*.js.map
 
-# Screenshot frames from `npm run e2e:screens` — regenerated per run, never committed.
+# Screenshot frames from the e2e:* screens checks and ui:screens — regenerated per run, never committed.
 .screens/
-.screens-live/
-
-# Local electron-updater feed override (see docs/desktop-update-spec.md).
-dev-app-update.yml
 
 # Release signing runbook — names the Apple Team ID, the enrolled identity and the
 # full signing pipeline. Private: this repo's docs/internal/ is otherwise public.
 docs/internal/macos-code-signing.md
+
+# Probe output: each research/*-probe.cjs run rewrites its log.
+research/*.log

@@ -1,7 +1,7 @@
 /**
- * Packaging policy — marketplace description vs GitHub README, and VSIX
- * exclusion of the desktop app. These silently regress at publish time if the
- * scripts or ignore rules drift, so they are pinned here.
+ * Packaging policy — marketplace description vs GitHub README, and what the
+ * VSIX contains. These silently regress at publish time if the scripts or
+ * ignore rules drift, so they are pinned here.
  */
 import { describe, it, expect } from "vitest";
 import * as fs from "node:fs";
@@ -83,43 +83,22 @@ describe("marketplace vs GitHub README", () => {
   });
 });
 
-describe("VSIX excludes desktop app", () => {
+describe("VSIX contents", () => {
   const vscodeignore = read(".vscodeignore");
   const pkg = JSON.parse(read("package.json")) as {
     scripts: Record<string, string>;
   };
 
-  it(".vscodeignore excludes desktop sources, launcher, and dist output", () => {
-    expect(vscodeignore).toMatch(/^\s*out\/desktop\/\*\*/m);
-    expect(vscodeignore).toMatch(/^\s*src\/desktop\/\*\*/m);
-    expect(vscodeignore).toMatch(/^\s*scripts\/run-desktop\.cjs\s*$/m);
-    expect(vscodeignore).toMatch(/^\s*scripts\/lifecycle-host\.mjs\s*$/m);
-    expect(vscodeignore).toMatch(/^\s*vitest\.desktop\.config\.ts\s*$/m);
-    expect(vscodeignore).toMatch(/^\s*electron-builder\.yml\s*$/m);
-    expect(vscodeignore).toMatch(/^\s*docs\/desktop-update-spec\.md\s*$/m);
-    expect(vscodeignore).toMatch(/^\s*dist-desktop\/\*\*/m);
+  it(".vscodeignore keeps readme sources and screenshots out of the package", () => {
     // Both readmes excluded as files; vsce embeds marketplace content only.
     expect(vscodeignore).toMatch(/^\s*README\.marketplace\.md\s*$/m);
     expect(vscodeignore).toMatch(/^\s*README\.md\s*$/m);
-    // Trap: `!out/**/*.js` re-includes out/desktop/** and a LATER exclude rule
-    // does not win it back under vsce's matcher. A negation placed after the
-    // exclusion does work — that is how the two modules below are re-included —
-    // but the broad form must stay out.
+    // The store readme references screenshots by absolute URL; nothing at
+    // runtime reads them.
+    expect(vscodeignore).toMatch(/^\s*docs\/screenshots\/\*\*\s*$/m);
+    // Only top-level compiled JS is re-included.
     expect(vscodeignore).toMatch(/^\s*!out\/\*\.js\s*$/m);
     expect(vscodeignore).not.toMatch(/^\s*!out\/\*\*\/\*\.js\s*$/m);
-  });
-
-  it("re-includes the desktop modules the EXTENSION requires at runtime", () => {
-    // #101: out/sidebar.js requires ./desktop/desktop-policy, which requires
-    // ./file-tree. Excluding them shipped six releases (3.2.0-3.2.5) that threw
-    // during activation before registering a command, so every Grok command
-    // reported "not found" and the sidebar never appeared.
-    //
-    // A tripwire, not the enforcement — `npm run check:vsix` resolves every
-    // require in the packed output against the packed file list and fails
-    // packaging. This just stops the two lines being deleted as dead weight.
-    expect(vscodeignore).toMatch(/^\s*!out\/desktop\/desktop-policy\.js\s*$/m);
-    expect(vscodeignore).toMatch(/^\s*!out\/desktop\/file-tree\.js\s*$/m);
   });
 
   it("packaging cannot run without the require check", () => {

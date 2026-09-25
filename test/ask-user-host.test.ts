@@ -141,7 +141,7 @@ describe("dropping a card the user never acted on", () => {
     // The two are deliberately different verbs. The grok CLI owns its own
     // request and has already settled it by the time a sweep runs; a response
     // then is a stale write on a live pipe. A user pressing Skip is not that.
-    const client = { respondQuestion: vi.fn(() => true), respondQuestionCancelled: vi.fn(() => true) };
+    const client = { respondQuestion: vi.fn((..._args: unknown[]) => true), respondQuestionCancelled: vi.fn((..._args: unknown[]) => true) };
     const responder: QuestionResponder = {
       answer: (answers, annotations) => client.respondQuestion(1, answers, annotations),
       cancel: () => client.respondQuestionCancelled(1),

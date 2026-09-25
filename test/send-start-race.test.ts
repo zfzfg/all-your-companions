@@ -4,7 +4,6 @@
  * These tests drive the real handleSend / startSession pair.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { RemoteClientState } from "../src/remote-client-state";
 import {
   INTERRUPTED_SEND_TEXT,
   Session,
@@ -97,7 +96,6 @@ function makeSidebar(cwd: string): any {
   sidebar.connectedProviders = vi.fn(() => ["grok"]);
   sidebar.providerNeedsLogin = {};
   sidebar.providerCliVersions = {};
-  sidebar.remoteClients = new RemoteClientState<Session>(cwd);
   sidebar.pool = new Set<Session>();
   sidebar.focused = new Session();
   sidebar.focused.provider = "grok";
@@ -156,9 +154,6 @@ function makeSidebar(cwd: string): any {
   sidebar.emitContextUsage = vi.fn();
   sidebar.restoreUsage = vi.fn();
   sidebar.restorePersistedDraft = vi.fn();
-  sidebar.sendRemoteSession = vi.fn();
-  sidebar.sendRemoteClient = vi.fn();
-  sidebar.sendRemoteHistorySnapshot = vi.fn();
   sidebar.mirrorToProjectsRail = vi.fn();
   sidebar.localizeHistoryMessage = (message: HostMsg) => message;
   sidebar.maybeUpdateCliOnUpgrade = vi.fn(async () => {});

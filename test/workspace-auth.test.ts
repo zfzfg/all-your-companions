@@ -18,7 +18,6 @@ import {
   imageHandlesToRevoke,
   imagePathStillAuthorized,
   pathBoundToClosedFolder,
-  remoteBoundCwdStillAuthorized,
   sessionBoundToClosedFolder,
   sessionCwdFromGrokMediaPath,
 } from "../src/workspace-auth";
@@ -63,42 +62,14 @@ describe("authorizedListCwd / filterEntriesByAuthorizedCwd (outbound send gate)"
   });
 
   it("mutation: trusting stale tab cwd without authorizedListCwd reopens the leak", () => {
-    // Simulates postSessionsList / buildRemoteSnapshot using remoteClients.cwd
-    // alone as the list scope after a project close.
+    // Simulates a list builder using a stale cwd alone as the list scope
+    // after a project close.
     const tabCwd = "/work/closed";
     const authorized = ["/work/open"];
     const buggyWouldScan = tabCwd; // old path: always scan tab cwd
     expect(buggyWouldScan).toBe("/work/closed");
     const fixed = authorizedListCwd(tabCwd, authorized, pathsEqual);
     expect(fixed).toBeUndefined(); // empty sessions list, no disk scan
-  });
-});
-
-describe("remoteBoundCwdStillAuthorized (no-cwd remote ops)", () => {
-  it("refuses a send bound to a closed folder even when the message has no cwd", () => {
-    // Production: handleRemoteMessage checks bound session/client cwd for every
-    // remote op except selectRepo. A plain send carries no cwd and used to skip
-    // allowRemoteRepoTarget's catalog check entirely.
-    const open = ["/work/open"];
-    const closed = "/work/closed";
-    expect(remoteBoundCwdStillAuthorized(closed, open, pathsEqual)).toBe(false);
-    expect(remoteBoundCwdStillAuthorized("/work/open", open, pathsEqual)).toBe(true);
-    expect(remoteBoundCwdStillAuthorized(undefined, open, pathsEqual)).toBe(false);
-  });
-
-  it("mutation: skipping the bound-cwd check reopens the hole", () => {
-    // Old allowRemoteRepoTarget default branch: messages without cwd → true.
-    const allowRemoteRepoTargetDefault = (_msgType: string, hasCwd: boolean) =>
-      hasCwd ? false : true; // buggy: no-cwd always allowed
-    expect(allowRemoteRepoTargetDefault("send", false)).toBe(true);
-
-    // Fixed path: still check bound session cwd.
-    const bound = "/work/closed";
-    const authorized = ["/work/open"];
-    const fixed =
-      allowRemoteRepoTargetDefault("send", false) &&
-      remoteBoundCwdStillAuthorized(bound, authorized, pathsEqual);
-    expect(fixed).toBe(false);
   });
 });
 
@@ -181,11 +152,10 @@ describe("pathBoundToClosedFolder", () => {
 });
 
 describe("sidebar close-revocation wiring (source)", () => {
-  it("removeProjectFolder revokes sessions, remote ownership, and image handles", () => {
+  it("removeProjectFolder revokes sessions and image handles", () => {
     const src = sidebarSrc();
     expect(src).toContain("revokeClosedProjectFolder");
     expect(src).toContain("isAuthorizedCwd");
-    expect(src).toContain("remoteBoundCwdStillAuthorized");
     expect(src).toContain("invalidateImageHandlesUnder");
     expect(src).toContain("isImagePathAuthorizedNow");
 
@@ -197,11 +167,6 @@ describe("sidebar close-revocation wiring (source)", () => {
     expect(removeBody).toContain("revokeClosedProjectFolder(target)");
     expect(removeBody).toContain("removeWorkspaceFolder(target)");
 
-    // Bound-cwd gate on remote ops (not only cwd-bearing messages).
-    const remoteStart = src.indexOf("private handleRemoteMessage(");
-    const remoteBody = src.slice(remoteStart, remoteStart + 2500);
-    expect(remoteBody).toContain("remoteBoundCwdStillAuthorized");
-    expect(remoteBody).toContain('m.type !== "selectRepo"');
 
     // startSession refuses unauthorized target.cwd even with resumeId.
     const startStart = src.indexOf("private async startSessionBody(");
@@ -213,11 +178,8 @@ describe("sidebar close-revocation wiring (source)", () => {
     expect(startBody).toContain("isAuthorizedCwd(target.cwd)");
     expect(startBody).toContain("refused startSession");
 
-    // Held-session adopt refuses closed folder.
-    expect(src).toContain("refused held-session adopt");
-
-    // requestImageFull revalidates.
-    const imgStart = src.indexOf('case "requestImageFull"');
+    // requestImageOriginal revalidates.
+    const imgStart = src.indexOf('case "requestImageOriginal"');
     const imgBody = src.slice(imgStart, imgStart + 800);
     expect(imgBody).toContain("isImagePathAuthorizedNow");
 
@@ -227,21 +189,21 @@ describe("sidebar close-revocation wiring (source)", () => {
     );
   });
 
-  it("single authorization query is consulted by remote + start + image paths", () => {
+  it("single authorization query is consulted by start + list + image paths", () => {
     const src = sidebarSrc();
     // The shared query exists once.
     const queryDef = src.indexOf("private isAuthorizedCwd(");
     expect(queryDef).toBeGreaterThan(0);
-    // remoteTargetableCwd delegates — not a second open-set walk.
-    const remoteTarget = src.indexOf("private remoteTargetableCwd(");
-    const remoteTargetBody = src.slice(remoteTarget, remoteTarget + 200);
-    // Delegates to the shared authorized set, narrowed for remotes — not a
-    // second walk of the open set, and not the catalog (which is wider).
-    expect(remoteTargetBody).toContain("authorizedSessionCwds");
-    expect(remoteTargetBody).not.toContain("localRepoCatalogEntries");
+    expect(src.indexOf("private isAuthorizedCwd(", queryDef + 1)).toBe(-1);
+    // The list snapshot reads the same trusted set — not a second walk of the
+    // open set, and not the catalog (which is wider).
+    const snapshot = src.indexOf("private authorizedSessionCwds(");
+    const snapshotBody = src.slice(snapshot, snapshot + 300);
+    expect(snapshotBody).toContain("localTrustedSessionCwds");
+    expect(snapshotBody).not.toContain("localRepoCatalogEntries");
   });
 
-  it("every outbound remote builder enforces authorizedListCwd at build time", () => {
+  it("every outbound list builder enforces authorizedListCwd at build time", () => {
     const src = sidebarSrc();
     // buildSessionsList: gate before disk scan.
     const listStart = src.indexOf("private buildSessionsList(");
@@ -260,31 +222,8 @@ describe("sidebar close-revocation wiring (source)", () => {
     expect(pinBody).toContain("authorizedListCwd");
     expect(pinBody).toContain("filterEntriesByAuthorizedCwd");
 
-    // buildRemoteSnapshot: buffer + sessions only for authorized session cwd.
-    const snapStart = src.indexOf("private buildRemoteSnapshot(");
-    const snapEnd = src.indexOf("private getHtml(", snapStart);
-    const snapBody = src.slice(snapStart, snapEnd);
-    expect(snapBody).toContain("authorizedListCwd");
-    expect(snapBody).toContain("authorizedSessionCwds");
-    expect(snapBody).toContain("buildSessionsList");
-    expect(snapBody).toContain("buildPinnedSessions");
-    // Must not assume revoke already cleared per-tab cwd.
-    expect(snapBody).toMatch(/sessionCwdOk/);
-    // Project-bearing fields scrubbed: never listCwd ?? closedTabCwd.
-    expect(snapBody).toContain("buildRemoteReposMsg");
-    expect(snapBody).toMatch(/cwd:\s*listCwd\s*\?\?\s*""/);
-    expect(snapBody).not.toMatch(/selectedCwd:\s*cwd\b/);
-
     // localRepoCatalogEntries remains the catalog source (open folders desktop).
     expect(src).toContain("localRepoCatalogEntries");
-    // Remote repos builder scrubs closed selectedCwd before the choke point.
-    const reposMsgStart = src.indexOf("private buildRemoteReposMsg(");
-    expect(reposMsgStart).toBeGreaterThan(0);
-    const reposMsgBody = src.slice(reposMsgStart, reposMsgStart + 1600);
-    expect(reposMsgBody).toContain("authorizedListCwd");
-    expect(reposMsgBody).toContain('selectedCwd');
-    // Rows for removed projects cannot reach the wire.
-    expect(reposMsgBody).toContain("entries.filter((r) => cwdIsAuthorized(r.cwd, authorized, pathsEqual))");
   });
 
 
@@ -299,7 +238,7 @@ describe("sidebar close-revocation wiring (source)", () => {
   });
 
 
-  it("revokeClosedProjectFolder cancels local and remote voice for the closed folder", () => {
+  it("revokeClosedProjectFolder cancels voice for the closed folder", () => {
     const src = sidebarSrc();
     const revokeStart = src.indexOf("private revokeClosedProjectFolder(");
     const revokeBody = src.slice(revokeStart, revokeStart + 900);
@@ -309,8 +248,7 @@ describe("sidebar close-revocation wiring (source)", () => {
     expect(voiceStart).toBeGreaterThan(0);
     const voiceBody = src.slice(voiceStart, voiceStart + 1200);
     expect(voiceBody).toContain("stopVoiceInput");
-    expect(voiceBody).toContain("dropRemoteVoice");
     expect(voiceBody).toContain("localVoiceCwd");
-    expect(voiceBody).toContain("credentialCwd");
+    expect(voiceBody).toContain("localVoiceCredentialCwd");
   });
 });

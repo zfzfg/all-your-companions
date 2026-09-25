@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-// @ts-expect-error — plain JS module, no types
-import { formatWaitElapsed, looksLikeFileRef, formatRelativeTime, FILE_EXTS, modelPickerLabel, modelDisplayName, nextMicState, trailingSendPhrase, versionedSiblingUrl, buildQuestionAnswers, isFreeTextOptionLabel, isSubagentToolCall, subagentLabel, cleanSubagentOutput, parseSubagentTaskResult, shouldStickToBottom, stickThresholdPx, splitMath, stripUnsupportedTex, parseAttachmentContext, parseSelectionBlocks, parseImageTags, toolFailureText, isMediaGenToolCall, mediaGenZeroRetentionHint, TOOL_LABEL_MAX, middleElide, filterCommands, highlightQueryParts, appendHighlightedText, commandProgramLabel, commandTextPreview, MAX_COMMAND_OUTPUT_CHARS, capCommandOutput, extractToolResultOutput, commandOutputWasCancelled, commandOutputTruncationNote, computeLineDiff, spokenTextFromMarkdown, isRelaySendRejection, panelReclampOnResizeAllowed, wireFullscreenSafeReclamp, distributeSidePanelWidths, chatZoomFactor, unzoomClientPx, createPendingOverlay, contextOverheadTokens, nextContextBreakdown, contextBreakdownIsCurrent, flattenHistoryMessages, splitHistoryWindow, countHistoryReplayCounters, partitionHistoryCards } from "../media/webview-helpers.js";
+import { formatWaitElapsed, looksLikeFileRef, formatRelativeTime, FILE_EXTS, modelPickerLabel, modelDisplayName, nextMicState, trailingSendPhrase, versionedSiblingUrl, buildQuestionAnswers, isFreeTextOptionLabel, isSubagentToolCall, subagentLabel, cleanSubagentOutput, parseSubagentTaskResult, shouldStickToBottom, stickThresholdPx, splitMath, stripUnsupportedTex, parseAttachmentContext, parseSelectionBlocks, parseImageTags, toolFailureText, isMediaGenToolCall, mediaGenZeroRetentionHint, TOOL_LABEL_MAX, middleElide, filterCommands, highlightQueryParts, appendHighlightedText, commandProgramLabel, commandTextPreview, MAX_COMMAND_OUTPUT_CHARS, capCommandOutput, extractToolResultOutput, commandOutputWasCancelled, commandOutputTruncationNote, computeLineDiff, spokenTextFromMarkdown, panelReclampOnResizeAllowed, wireFullscreenSafeReclamp, distributeSidePanelWidths, chatZoomFactor, unzoomClientPx, createPendingOverlay, contextOverheadTokens, nextContextBreakdown, contextBreakdownIsCurrent, flattenHistoryMessages, splitHistoryWindow, countHistoryReplayCounters, partitionHistoryCards } from "../media/webview-helpers.js";
 import { Window } from "happy-dom";
 import { buildPrompt, buildPromptWithImages } from "../src/prompt-builder";
 import { makeExplicitChip, makeImplicitChip, makeImageChip } from "../src/chips";
@@ -122,32 +121,6 @@ describe("spokenTextFromMarkdown", () => {
     expect(spokenTextFromMarkdown(
       "## Done\nSee [the guide](https://example.com).\n```ts\nconst noisy = true;\n```\n- Restart now.",
     )).toBe("Done See the guide. Restart now.");
-  });
-});
-
-describe("isRelaySendRejection", () => {
-  it("accepts only the relay's canonical refused-frame errors", () => {
-    expect(isRelaySendRejection("Slow down — at most 5 messages per minute.")).toBe(true);
-    expect(isRelaySendRejection(
-      "Free plan limit reached (25 messages this week). Resets in 2 days. Upgrade to Remote Max for unlimited use.",
-    )).toBe(true);
-    expect(isRelaySendRejection("Device offline — VS Code isn't connected to the relay.")).toBe(false);
-    expect(isRelaySendRejection("Could not rename this conversation.")).toBe(false);
-    expect(isRelaySendRejection("Weekly prompt limit reached.")).toBe(false);
-  });
-
-  // The relay shortened this sentence. Pinning the full text here meant a
-  // refused send silently stopped becoming the editable "Not sent" block,
-  // losing the user's text. Both shapes must classify, so the relay's exact
-  // wording and this regex are no longer coupled.
-  it("classifies the quota refusal with or without the trailing sentence", () => {
-    expect(isRelaySendRejection("Free plan limit reached (100 messages this week). Resets in 2d.")).toBe(true);
-    expect(isRelaySendRejection(
-      "Free plan limit reached (100 messages this week). Resets in 2d. Upgrade to Remote Max for unlimited use.",
-    )).toBe(true);
-    // Still anchored on the identifying shape — a bare mention is not a refusal.
-    expect(isRelaySendRejection("Free plan limit reached.")).toBe(false);
-    expect(isRelaySendRejection("Free plan limit reached (100 messages this week).")).toBe(false);
   });
 });
 

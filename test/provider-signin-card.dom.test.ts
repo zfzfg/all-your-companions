@@ -5,21 +5,21 @@
  * account row, the model picker and Settings into a sign-in — but every one of
  * those is somewhere else, and the welcome card that spells it out refuses to
  * paint over a live conversation on purpose. So the case this file covers is
- * the one the owner hit from a phone on 2026-09-14: a real conversation on
- * screen, the vendor's "Authentication required" in red, and no route back.
+ * a real conversation on screen, the vendor's "Authentication required" in
+ * red, and no route back.
  */
 import { describe, expect, it } from "vitest";
 import { bootWebview, click, dispatch, type Harness } from "./webview-harness";
 
-function boot(opts: { remote?: boolean; caps?: Record<string, unknown> } = {}) {
-  const h = bootWebview({ remote: opts.remote });
+function boot(opts: { caps?: Record<string, unknown> } = {}) {
+  const h = bootWebview();
   dispatch(h.window, {
     type: "initialState",
     effort: "", cwd: "/w", useCtrlEnter: false, extVersion: "4.5.2",
     showThinking: false, expandCommandOutputs: false, steerByDefault: false,
     soundNotifications: false, processingSound: false, readRepliesAloud: false,
     appPurpose: "coding",
-    capabilities: opts.caps ?? { remoteAgentSignIn: true },
+    capabilities: opts.caps ?? {},
   } as any);
   return h;
 }
@@ -96,97 +96,12 @@ describe("the lapsed-account offer above the composer", () => {
 });
 
 /**
- * The tail of the flow, both halves reported by the owner from a phone on
- * 2026-09-14: the offer came back for a second or two while the code he had
- * just pasted was being checked, and then the sign-in succeeded in total
- * silence with the vendor's red refusal still the last thing on screen.
+ * The tail of the flow: a sign-in that succeeds must not do so in silence
+ * with the vendor's red refusal still the last thing on screen.
  */
 describe("the tail of the sign-in", () => {
-  const flow = (h: Harness, device: Record<string, unknown>) =>
-    dispatch(h.window, {
-      type: "onboarding", state: "claude-login", provider: "claude", device,
-    } as any);
   const notices = (h: Harness) =>
     [...h.doc.querySelectorAll(".plan-notice")].map((el) => el.textContent);
-
-  // The frame that carries "verifying" is the ONLY one that moves during the
-  // check, so this also pins that the card re-renders on it: no providerState
-  // is dispatched here, and the next one would arrive already-connected.
-  it("stops offering the sign-in it is already running", () => {
-    const h = boot();
-    session(h, "claude");
-    providers(h, [lapsed("claude")]);
-    expect(card(h)!.querySelector("button")).not.toBeNull();
-    flow(h, { status: "verifying" });
-    expect(card(h)!.querySelector("button")).toBeNull();
-    expect(card(h)!.textContent).toContain("Signing in");
-  });
-
-  it("holds the offer through every live stage of the flow", () => {
-    for (const device of [
-      { status: "starting" },
-      { status: "waiting", url: "https://x", code: "ABCD" },
-      { status: "verifying" },
-      // Advice riding along WITH a live code is still a live flow -- `waiting`
-      // is what says so, not the advice.
-      { status: "waiting", code: "ABCD", preflight: { reason: "off", steps: ["x"] } },
-    ]) {
-      const h = boot();
-      session(h, "claude");
-      providers(h, [lapsed("claude")]);
-      flow(h, device);
-      expect(card(h)!.querySelector("button"), JSON.stringify(device)).toBeNull();
-    }
-  });
-
-  // A flow that ends without connecting must hand the offer back, or the card
-  // says "Signing in…" forever over an account nobody is signing in to.
-  //
-  // The `preflight` frames are the ones that got this wrong. Codex sign-in on
-  // a cloud workspace needs an account setting turned on first, so the host
-  // sends that advice ONCE with nothing started -- and then copies it onto
-  // every later frame of the real flow, terminal ones included. A liveness
-  // test that counted `preflight` left the card stuck on both (review).
-  it("gives the offer back on every way a flow can end", () => {
-    for (const device of [
-      { status: "failed", message: "That code expired" },
-      { status: "unavailable", message: "Turn device authorization on", preflight: { reason: "off", steps: ["x"] } },
-      { status: "failed", message: "That code expired", preflight: { reason: "off", steps: ["x"] } },
-      { status: "done" },
-    ]) {
-      const h = boot();
-      session(h, "codex");
-      providers(h, [lapsed("codex")]);
-      dispatch(h.window, {
-        type: "onboarding", state: "codex-login", provider: "codex", device: { status: "verifying" },
-      } as any);
-      expect(card(h)!.querySelector("button")).toBeNull();
-      dispatch(h.window, {
-        type: "onboarding", state: "codex-login", provider: "codex", device,
-      } as any);
-      expect(card(h)!.querySelector("button"), JSON.stringify(device)).not.toBeNull();
-    }
-  });
-
-  // The very first tap on Codex from a cloud workspace: advice, and nothing
-  // running. Owning the card at that point costs the reader the only button on
-  // the page that starts the sign-in they just asked for.
-  it("keeps offering the sign-in when the first tap only returned advice", () => {
-    const h = boot();
-    session(h, "codex");
-    providers(h, [lapsed("codex")]);
-    dispatch(h.window, {
-      type: "onboarding",
-      state: "codex-login",
-      provider: "codex",
-      device: {
-        status: "unavailable",
-        message: "Codex device authorization is off for this account",
-        preflight: { reason: "off by default", steps: ["Open the ChatGPT settings"] },
-      },
-    } as any);
-    expect(card(h)!.querySelector("button")).not.toBeNull();
-  });
 
   it("says the sign-in worked, under the refusal that asked for it", () => {
     const h = boot();

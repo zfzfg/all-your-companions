@@ -1,6 +1,6 @@
 import { isCredentialError } from "./acp-dispatch";
 import type { AcpBackend, BackendConfigState, BackendSessionListResult, BackendSpawnOptions } from "./acp-backend";
-import type { EffortLevel, PromptContentBlock } from "./acp";
+import type { EffortLevel, PromptContentBlock } from "./acp-types";
 import { grokCliNeedsShell } from "./cli-process";
 import { compareVersionTuple, parseGrokVersion } from "./cli-locator";
 

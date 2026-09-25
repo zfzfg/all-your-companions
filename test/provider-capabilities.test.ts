@@ -5,7 +5,6 @@ import {
   PROVIDER_CAPABILITIES,
   PROVIDER_CAPABILITY_NAMES,
   providerCapability,
-  type ProviderCapability,
 } from "../src/provider-capabilities";
 
 describe("provider-capabilities (AP-01)", () => {

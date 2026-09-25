@@ -191,8 +191,8 @@ describe("two roles, same provider, different models", () => {
       expect(metaA?.modelId).toBe("role-a-model");
       expect(metaB?.modelId).toBe("role-b-model");
     } finally {
-      roleA.dispose();
-      roleB.dispose();
+      void roleA.dispose();
+      void roleB.dispose();
     }
   }, SUBPROCESS_WAIT_MS);
 

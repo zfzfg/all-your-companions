@@ -12,10 +12,7 @@ import { readFileSync } from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import {
-  formatRemoteInstallId,
-  shouldRehydrateOnWebviewReady,
-} from "../src/host";
+import { shouldRehydrateOnWebviewReady } from "../src/host";
 import {
   rehydrateBusyChrome,
   Session,
@@ -48,20 +45,6 @@ describe("shouldRehydrateOnWebviewReady", () => {
   });
 });
 
-describe("formatRemoteInstallId", () => {
-  it("leaves a bare id unchanged for VS Code (empty suffix)", () => {
-    expect(formatRemoteInstallId("abc-123", "")).toBe("abc-123");
-  });
-
-  it("appends :desktop for the desktop app", () => {
-    expect(formatRemoteInstallId("abc-123", ":desktop")).toBe("abc-123:desktop");
-  });
-
-  it("does not double-suffix", () => {
-    expect(formatRemoteInstallId("abc-123:desktop", ":desktop")).toBe("abc-123:desktop");
-  });
-});
-
 describe("source gates — capability at the ownership boundary", () => {
   it("sidebar gates rehydrate on shouldRehydrateOnWebviewReady, not bare focused.client", () => {
     const sidebar = readFileSync(path.join(root, "src", "sidebar.ts"), "utf8");
@@ -75,10 +58,9 @@ describe("source gates — capability at the ownership boundary", () => {
     expect(body).not.toMatch(/if\s*\(\s*this\.focused\.client\s*\)/);
   });
 
-  it("VS Code host declares rehydrate capability false and empty install suffix", () => {
+  it("VS Code host declares rehydrate capability false", () => {
     const src = readFileSync(path.join(root, "src", "vscode-host.ts"), "utf8");
     expect(src).toMatch(/webviewReloadsUnderLiveSession:\s*false/);
-    expect(src).toMatch(/remoteInstallIdSuffix:\s*""/);
     expect(src).toMatch(/canRelocateView:\s*true/);
     expect(src).toMatch(/canShowOutput:\s*true/);
     expect(src).toMatch(/canToggleDevTools:\s*false/);
@@ -138,10 +120,11 @@ describe("rehydrate during priming does not lose a prompt", () => {
     session.priming = true;
     session.client = fakeClient(undefined);
     session.status = "idle";
+    const status = session.status as Session["status"];
 
     // The bug: setBusy({ locked: false }) unconditionally on rehydrate.
     const buggy = {
-      value: session.status === "working" || session.status === "needs-you" || !!session.turnToken,
+      value: status === "working" || status === "needs-you" || !!session.turnToken,
       locked: false as boolean,
     };
     expect(buggy.locked).toBe(false);

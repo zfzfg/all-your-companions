@@ -10,7 +10,7 @@
 // temp directory and ask the installed git, so a porcelain change or a
 // platform difference shows up as a failure instead of as a wrong number on
 // someone's phone.
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -52,7 +52,7 @@ function fakeIo(replies: Record<string, FakeReply>, seen?: string[][]): GitIo {
         return;
       }
       if (reply.code && reply.code !== 0) {
-        const err = new Error(`Command failed`) as NodeJS.ErrnoException & { code: number };
+        const err = new Error(`Command failed`) as Error & { code?: number };
         err.code = reply.code;
         cb(err, reply.stdout || "", reply.stderr || "");
         return;
@@ -265,7 +265,16 @@ describe("GitRunGate", () => {
 
 const run = promisify(execFile);
 
-let gitAvailable = true;
+// Decided at load time: `describe.runIf` reads it while collecting, before
+// any beforeAll has run.
+const gitAvailable = (() => {
+  try {
+    execFileSync("git", ["--version"], { windowsHide: true, stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+})();
 let tmpRoot = "";
 
 async function git(cwd: string, ...args: string[]): Promise<string> {
@@ -304,11 +313,6 @@ async function makeRepo(name: string, opts?: { empty?: boolean }): Promise<strin
 
 beforeAll(async () => {
   tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "grok-git-status-"));
-  try {
-    await run("git", ["--version"], { windowsHide: true });
-  } catch {
-    gitAvailable = false;
-  }
 });
 
 afterAll(() => {
@@ -321,7 +325,7 @@ afterAll(() => {
   }
 });
 
-describe.runIf(gitAvailable !== false)("readGitStatus against real git", () => {
+describe.runIf(gitAvailable)("readGitStatus against real git", () => {
   it.each(["tracked", "untracked", "created"] as const)("reads the complete %s before-side without changing the index or refs", async kind => {
     const root = await makeRepo(`turn-editor-${kind}`);
     const name = kind === "tracked" ? "README.md" : "new.txt";

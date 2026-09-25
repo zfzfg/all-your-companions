@@ -24,7 +24,6 @@ import {
   isEmptySession,
   isPathInside,
   listSessions,
-  mostRecentSession,
   neighbourAfterDelete,
   normalizeRepoPath,
   orderedResumeCwdCandidates,
@@ -38,7 +37,6 @@ import {
   sessionDirFor,
   sessionsDirFor,
   discoverRepos,
-  type SessionListEntry,
 } from "../src/sessions";
 
 // Real grok chat_history.jsonl shape: role keyed on `type`, content is an array of
@@ -139,7 +137,7 @@ describe("capSessionMetaAutoNames", () => {
 });
 
 describe("capUsageLog", () => {
-  const entry = (n: number) => ({
+  const entry = (n: number): { afterUserMessage: number; afterHistoryEvent: number; usage: { inputTokens: number; outputTokens: number; totalTokens: number; costUsdTicks: number }; contextUsed: number; compacted?: boolean } => ({
     afterUserMessage: n,
     afterHistoryEvent: n * 10,
     usage: { inputTokens: 100, outputTokens: 10, totalTokens: 110, costUsdTicks: 7 },
@@ -219,32 +217,6 @@ describe("capSessionMetaUsageLogs", () => {
     const first = capSessionMetaUsageLogs(meta);
     expect(first.changed).toBe(false);
     expect(first.value).toBe(meta);
-  });
-});
-
-describe("mostRecentSession", () => {
-  const entry = (id: string, updatedAt: number, kind?: "subagent"): SessionListEntry => ({
-    id,
-    cwd: "/work/repo",
-    displayName: id,
-    rawSummary: id,
-    updatedAt,
-    createdAt: updatedAt,
-    numMessages: 1,
-    kind,
-  });
-
-  it("chooses the newest session in a repository scope", () => {
-    expect(mostRecentSession([entry("older", 10), entry("newest", 30), entry("middle", 20)])?.id)
-      .toBe("newest");
-  });
-
-  it("returns no session when the scoped history is empty", () => {
-    expect(mostRecentSession([])).toBeUndefined();
-  });
-
-  it("does not treat a subagent catalog entry as conversation history", () => {
-    expect(mostRecentSession([entry("child", 40, "subagent"), entry("chat", 20)])?.id).toBe("chat");
   });
 });
 
@@ -1427,8 +1399,6 @@ describe("subagent child sessions (session_kind)", () => {
     });
     const out = readSessionEntries({ fs, grokHome, cwd, ids: ["headless"], overrides: {} });
     expect(out.find((e) => e.id === "headless")?.kind).toBe("headless");
-    // Visible to the picker's newest-row pick — the filter hides only subagents.
-    expect(mostRecentSession(out)?.id).toBe("headless");
   });
 });
 

@@ -64,9 +64,7 @@ describe("turn end refreshes the project preview", () => {
   it("never stamps send-time ordering merely by opening or focusing a session", () => {
     for (const signature of [
       "private focusSession(",
-      "private focusRemoteSession(",
       "private async openSession(",
-      "private async openRemoteSession(",
     ]) {
       const start = src.indexOf(signature);
       expect(start, `${signature} exists`).toBeGreaterThan(-1);

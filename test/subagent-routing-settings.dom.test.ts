@@ -214,7 +214,7 @@ describe("The subagent roster (AP-16 §6.2)", () => {
     posted.filter((m) => m.type === "subagentRosterSave");
 
   it("turns a companion off", () => {
-    const { window, root, posted } = mount({ subagentRoster: [rosterRow()] });
+    const { root, posted } = mount({ subagentRoster: [rosterRow()] });
     const toggle = q(root, '[role="switch"][data-roster-field="enabled"]') as { click: () => void };
     toggle.click();
     expect(rosterSaves(posted).at(-1)).toMatchObject({
@@ -224,7 +224,7 @@ describe("The subagent roster (AP-16 §6.2)", () => {
   });
 
   it("sets a default model from the companion's own cache", () => {
-    const { window, root, posted } = mount({ subagentRoster: [rosterRow()] });
+    const { root, posted } = mount({ subagentRoster: [rosterRow()] });
     const select = q(root, '[data-roster-field="defaultModel"]') as {
       value: string;
       dispatchEvent: (e: unknown) => void;

@@ -18,7 +18,7 @@
 // host passes in.
 
 import { ACP_PROVIDERS, type AcpProvider } from "./acp-backend";
-import type { EffortLevel } from "./acp";
+import type { EffortLevel } from "./acp-types";
 import type { CapabilitySupport } from "./provider-capabilities";
 
 /** The triple a subagent or a stage runs on, plus the permission mode. */

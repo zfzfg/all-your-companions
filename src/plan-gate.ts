@@ -552,7 +552,6 @@ function isReadOnlyGit(tokens: ShellToken[]): boolean {
 function isReadOnlyPackageCommand(tokens: ShellToken[]): boolean {
   const values = tokens.map((token) => token.value.toLowerCase());
   const sub = values[1] || "";
-  const args = values.slice(2);
   if (!PKG_READONLY.has(sub)) return false;
   if (sub === "audit" &&
       hasDangerousToken(tokens.slice(2), ["fix", "--fix"], ["--fix="])) return false;

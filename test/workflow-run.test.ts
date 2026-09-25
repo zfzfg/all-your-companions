@@ -8,7 +8,6 @@ import {
   historySubtitle,
   makeWorkflowRun,
   markExhausted,
-  nextFromTransitions,
   observedFilesHash,
   parseGateMessage,
   parseWorkflowRun,

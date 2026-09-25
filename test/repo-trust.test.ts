@@ -20,19 +20,6 @@ import {
 } from "../src/grok-config";
 import { sessionScopedRoots } from "../src/auth-roots";
 
-// Platform-injected fs stubs so both path worlds are testable from either OS —
-// the whole reason the bug below survived is that nothing exercised POSIX.
-const stubFs = (sep: "/" | "\\") => ({
-  realpathSync: (p: string) => p,
-  existsSync: () => true,
-  statSync: () => ({ isFile: () => true, isDirectory: () => false, isSymbolicLink: () => false }) as never,
-  lstatSync: () => ({ isFile: () => true, isDirectory: () => false, isSymbolicLink: () => false }) as never,
-  readdirSync: () => [] as never,
-  sep,
-});
-const posixFs = stubFs("/") as never;
-const win32Fs = stubFs("\\") as never;
-
 const sidebarSrc = () =>
   fs.readFileSync(path.join(__dirname, "..", "src", "sidebar.ts"), "utf8");
 

@@ -55,7 +55,11 @@ export function sanitizeCheckpointSegment(value: string): string {
     .replace(/[^\w.-]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .replace(/-{2,}/g, "-")
-    .slice(0, 80);
+    .slice(0, 80)
+    // `.` and `..` survive the character filter and would climb out of the
+    // store root once joined; no real session or turn id starts with a dot
+    // (or, after the filter above, with a dash).
+    .replace(/^[.-]+/, "");
   return s || "x";
 }
 
@@ -99,12 +103,21 @@ export class CheckpointStore {
     this.maxBytes = opts.maxBytes ?? CHECKPOINT_RETENTION_BYTES;
   }
 
+  /** Every path the store touches must stay under its root; throws otherwise. */
+  private inside(target: string): string {
+    const root = nodePath.resolve(this.root) + nodePath.sep;
+    if (!nodePath.resolve(target).startsWith(root)) {
+      throw new Error(`checkpoint path escapes the store root: ${target}`);
+    }
+    return target;
+  }
+
   private sessionDir(sessionId: string): string {
-    return nodePath.join(this.root, sanitizeCheckpointSegment(sessionId));
+    return this.inside(nodePath.join(this.root, sanitizeCheckpointSegment(sessionId)));
   }
 
   private turnDir(sessionId: string, turnId: string): string {
-    return nodePath.join(this.sessionDir(sessionId), sanitizeCheckpointSegment(turnId));
+    return this.inside(nodePath.join(this.sessionDir(sessionId), sanitizeCheckpointSegment(turnId)));
   }
 
   private metaPath(sessionId: string, turnId: string): string {
@@ -112,7 +125,7 @@ export class CheckpointStore {
   }
 
   private blobPath(sessionId: string, turnId: string, sha: string): string {
-    return nodePath.join(this.turnDir(sessionId, turnId), "blobs", sha);
+    return this.inside(nodePath.join(this.turnDir(sessionId, turnId), "blobs", sha));
   }
 
   /**
@@ -127,7 +140,12 @@ export class CheckpointStore {
         !SAFE_SEGMENT.test(sanitizeCheckpointSegment(turnId))) {
       return { ok: false, reason: "unsafe checkpoint id" };
     }
-    const dir = this.turnDir(sessionId, turnId);
+    let dir: string;
+    try {
+      dir = this.turnDir(sessionId, turnId);
+    } catch {
+      return { ok: false, reason: "unsafe checkpoint id" };
+    }
     try {
       this.fs.mkdirSync(dir, { recursive: true });
       this.fs.mkdirSync(nodePath.join(dir, "blobs"), { recursive: true });
@@ -141,8 +159,8 @@ export class CheckpointStore {
       const blobSha = file.sha256;
       const blobBytes = Buffer.from(file.blob, "utf8");
       bytes += blobBytes.length;
-      const dest = this.blobPath(sessionId, turnId, blobSha);
       try {
+        const dest = this.blobPath(sessionId, turnId, blobSha);
         this.fs.writeFileSync(dest, blobBytes);
       } catch (e) {
         return this.fail(dir, "blob", e);

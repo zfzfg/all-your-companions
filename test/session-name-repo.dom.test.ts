@@ -148,13 +148,4 @@ describe("session name project label", () => {
     input.dispatchEvent(new (h.window as never as { Event: typeof Event }).Event("blur"));
     expect(pencil.classList.contains("session-name-edit-editing")).toBe(false);
   });
-
-  it("is not mounted on the remote client, which shows the project on its own line", () => {
-    const h = bootWebview({ remote: true });
-    sendRepos(h);
-    nameSession(h, "/work/relay");
-    // #session-head-sub was the remote surface for this; both it and the chip
-    // are permanently hidden since 2026-08-15 (header shows just the name).
-    expect(tag(h).hidden).toBe(true);
-  });
 });

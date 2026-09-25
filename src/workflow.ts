@@ -13,7 +13,7 @@
  * run actually executes.
  */
 
-import type { EffortLevel } from "./acp";
+import type { EffortLevel } from "./acp-types";
 import type { AcpProvider } from "./acp-backend";
 import { isAcpProvider } from "./acp-backend";
 import { isEffortLevel, isPermissionProfile, type PermissionProfile, type Target } from "./target-eligibility";

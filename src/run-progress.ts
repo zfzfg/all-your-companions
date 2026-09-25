@@ -186,9 +186,6 @@ function num(v: unknown): number | undefined {
   return typeof v === "number" && Number.isFinite(v) ? v : undefined;
 }
 
-function lower(v: unknown): string {
-  return typeof v === "string" ? v.toLowerCase() : "";
-}
 
 /**
  * True when an xAI session update is a workflow/goal progress

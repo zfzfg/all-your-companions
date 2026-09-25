@@ -30,7 +30,7 @@ const sessionStart = sidebar.slice(
 );
 const fullSessionStart = sidebar.slice(
   sidebar.indexOf("  private async startSession("),
-  sidebar.indexOf("  private remoteSessionFor(", sidebar.indexOf("  private async startSession(")),
+  sidebar.indexOf("  private async onMessage(", sidebar.indexOf("  private async startSession(")),
 );
 
 describe("CLI startup compatibility", () => {

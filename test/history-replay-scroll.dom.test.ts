@@ -165,21 +165,6 @@ describe("history replay end follows the pin", () => {
     expect(messagesOf(doc).classList.contains("stick-to-bottom")).toBe(true);
   });
 
-  it("survives a snapshot replay then a resumeSession replay", () => {
-    const { window, doc, setHeight } = bootWithScrollMeter();
-    dispatch(window, INIT);
-    doc.body.classList.add("identity-restoring");
-    replayTranscript(window, setHeight, 1200, "snapshot");
-    const messages = messagesOf(doc);
-    // Cache restore is programmatic: it establishes a place without unpinning.
-    messages.scrollTop = 90;
-
-    // resumeSession rebuilds the same conversation: clear + a second replay.
-    dispatch(window, { type: "clearMessages" });
-    replayTranscript(window, setHeight, 2000, "resume");
-    expect(messages.scrollTop).toBe(90);
-  });
-
   it("lands a fresh open with no established pin at the bottom", () => {
     const { window, doc, setHeight } = bootWithScrollMeter();
     dispatch(window, INIT);

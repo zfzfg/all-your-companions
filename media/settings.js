@@ -3,7 +3,7 @@
  * No persistence of its own. Every control posts the same message the gear
  * already posts (or applies a client-owned pref the gear already applies).
  *
- * Loaded by the chat overlay (desktop / remote) and by the VS Code settings
+ * Loaded by the chat overlay (desktop) and by the VS Code settings
  * tab. Snapshot-on-open is enough for the tab; changes still go host-ward
  * through the existing set* / open* messages so the sidebar cannot desync.
  */
@@ -87,16 +87,12 @@
   const CONNECTOR_SECTION_LOCAL = "Local Grok connectors";
   const CONNECTOR_BLURB_HERE =
     "These apps are available to Grok, Codex, and Claude. Most open a browser to sign in; GitHub uses a personal access token you paste here. Tokens stay on this machine.";
-  const CONNECTOR_BLURB_HERE_REMOTE =
-    "These apps are connected on the machine running this workspace. Sign-in happens there — it cannot be changed from this page.";
   const CONNECTOR_DISCONNECT_COPY =
     "Disconnect affects future conversations and reopened ones. Tools in already running sessions remain available. It does not revoke access at the vendor or clear saved OAuth sign-ins.";
   const CONNECTOR_BLURB_GROK =
     "These follow your Grok account, so they are shared across every Grok session on every machine.";
   const CONNECTOR_BLURB_LOCAL =
     "Declared in this machine's Grok config files. Grok only.";
-  const CONNECTOR_BLURB_LOCAL_REMOTE =
-    "Declared in this machine's Grok config files. Grok only. These are managed on the host machine only.";
   const ICON_EXTERNAL_LINK =
     '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>';
   // lucide `settings` — same path as chat.js ICON.gear. Local Open is config,
@@ -149,46 +145,6 @@
     return list.find((p) => p && p.id === id) || { id, connected: false };
   }
 
-  /**
-   * Whether a remote has nothing useful to do with this provider row.
-   *
-   * A remote may CONNECT a provider — `runGrokLogin` runs the CLI's headless
-   * device-code flow and puts the URL and code in the transcript, opening no
-   * terminal on the desk. It may NOT sign one out: `logout` is host-local
-   * because it revokes a credential every surface on that machine shares.
-   *
-   * So the actionable row appears exactly when connecting is the useful thing,
-   * and a healthy connected provider stays a status line.
-   */
-  /**
-   * Whether this host can run an agent's headless sign-in for a remote.
-   *
-   * Field presence, never a version check. The relay serves the web client, so
-   * the client is always as new as the deploy while the extension is whatever
-   * the user installed — and every host built before `remoteAgentSignIn` shipped
-   * classifies `runGrokLogin` as host-local and DROPS it silently. Offering
-   * Connect there would be a button that does nothing, which is worse than the
-   * read-only row it replaced. Same gate `chat.js` puts on the connect panel.
-   */
-  function canSignInFromRemote(env) {
-    return !!(env && env.hostCaps && env.hostCaps.remoteAgentSignIn);
-  }
-
-  function remoteProviderIsSettled(snapshot, id) {
-    const provider = providerOf(snapshot, id);
-    return provider.connected === true && provider.needsLogin !== true;
-  }
-
-  /**
-   * Whether a remote may sign an agent OUT here. Cloud environments only: the
-   * remote is that host's only surface, so a credential it can grant and never
-   * revoke is the worse answer. Everywhere else `logout` is host-local and the
-   * row stays a status line. Field presence, never a version check.
-   */
-  function canSignOutFromRemote(env) {
-    return !!(env && env.hostCaps && env.hostCaps.remoteAgentSignOut);
-  }
-
   function githubOf(snapshot) {
     const g = snapshot && snapshot.githubState;
     return g && typeof g === "object" ? g : null;
@@ -206,11 +162,6 @@
   function githubDescribe(snapshot) {
     const g = githubOf(snapshot);
     if (!g) return "";
-    const flow = g.loginFlow;
-    if (flow && flow.status === "failed" && flow.message) return flow.message;
-    if (flow && (flow.status === "starting" || flow.status === "waiting") && flow.message) {
-      return flow.message;
-    }
     if (g.message) return g.message;
     if (g.cliPresent === false) return "The GitHub CLI (gh) is not installed on this machine.";
     if (g.error && g.envTokenInForce) {
@@ -231,38 +182,7 @@
   }
 
   function githubTokenAvailable(snapshot, env) {
-    // NOT canGithubSignInFromRemote: that capability promises the device-code
-    // flow only. A host advertising it but predating `githubLoginWithToken`
-    // takes the pasted credential across the relay and drops it in silence.
-    return !!(githubKnown(snapshot) && !githubConnectedNow(snapshot)
-      && (!env || !env.isRemote || canGithubTokenFromRemote(env)));
-  }
-
-  function githubCliLive(snapshot) {
-    const flow = githubOf(snapshot) && githubOf(snapshot).loginFlow;
-    return !!(flow && (flow.status === "starting" || flow.status === "waiting"));
-  }
-
-  function canGithubSignInFromRemote(env) {
-    return !!(env && env.hostCaps && env.hostCaps.remoteGithubSignIn);
-  }
-
-  /** A pasted token AND `cancelDeviceLogin` with `provider: "github"` — the two
-   *  affordances added after `remoteGithubSignIn`, which shipped together. */
-  function canGithubTokenFromRemote(env) {
-    return !!(env && env.hostCaps && env.hostCaps.remoteGithubToken);
-  }
-
-  /** Cancelling is only safe to send where `github` is understood: an older
-   *  host maps any unrecognised provider to `grok`. */
-  function canCancelGithubLogin(env) {
-    return !env || !env.isRemote || canGithubTokenFromRemote(env);
-  }
-
-  function githubRemoteActionable(snapshot, env) {
-    return githubConnectedNow(snapshot)
-      ? canSignOutFromRemote(env)
-      : canGithubSignInFromRemote(env);
+    return !!(githubKnown(snapshot) && !githubConnectedNow(snapshot));
   }
 
   function githubConnectMessage(snapshot) {
@@ -289,53 +209,10 @@
     ));
   }
 
-  /**
-   * Does this remote row have a button, or is it just a status line?
-   *
-   * Connected and healthy, the useful action is signing OUT; anything else, it
-   * is connecting. Each is gated on its own capability, so a host that offers
-   * one and not the other renders exactly what it can actually do.
-   */
-  /** The host advertises `remoteAgentSignOut` only when it is a hosted cloud
-   *  machine (3.19.7) — capability detection doubling as environment truth,
-   *  used here only to choose words. */
-  function hostIsCloud(env) {
-    return !!(env && env.isRemote && env.hostCaps && env.hostCaps.remoteAgentSignOut);
-  }
-
-  /** A device-code sign-in in flight for this provider, mirrored from the
-   *  host's onboarding frames by the mounting page. */
-  function deviceLoginFlow(env, id) {
-    const flow = env && env.deviceLogin && env.deviceLogin[id];
-    return flow && flow.status ? flow : undefined;
-  }
-
-  /** The ordinary row's description, with a settled flow's outcome folded in. */
-  function providerRemoteDescribe(s, env, id) {
-    const flow = deviceLoginFlow(env, id);
-    if (flow && (flow.status === "failed" || flow.status === "unavailable") && flow.message) {
-      return flow.message;
-    }
-    const provider = providerOf(s, id);
-    const base = providerDescription(provider);
-    // On a cloud machine the three agents are NOT equal offers — Grok is the
-    // native one (owner, 2026-08-31).
-    if (id === "grok" && hostIsCloud(env) && !(provider && provider.connected)) {
-      return "Recommended. " + base;
-    }
-    return base;
-  }
-
   /** The same test `message` uses to choose between logout and sign-in. */
   function providerConnectedNow(snapshot, id) {
     const provider = providerOf(snapshot, id);
     return !!(provider && provider.connected && provider.needsLogin !== true);
-  }
-
-  function remoteProviderActionable(snapshot, env, id) {
-    return remoteProviderIsSettled(snapshot, id)
-      ? canSignOutFromRemote(env)
-      : canSignInFromRemote(env);
   }
 
   function providerAction(provider) {
@@ -383,10 +260,6 @@
     return legacyProviders(env) || !!grokProvider(snapshot);
   }
 
-  function remoteAbout(snapshot, env) {
-    return !!(env && env.isRemote && snapshot && snapshot.hostKind);
-  }
-
   function grokUpdateOf(snapshot) {
     return (snapshot && snapshot.grokUpdate) || {};
   }
@@ -395,11 +268,6 @@
     const u = grokUpdateOf(snapshot);
     const grok = grokProvider(snapshot);
     return (grok && grok.cliVersion) || (snapshot && snapshot.cliVersion) || u.current || "";
-  }
-
-  function hasReportedProviderVersions(snapshot) {
-    return ((snapshot && snapshot.providers) || []).some((p) =>
-      p && p.connected && (p.cliVersion || p.adapterVersion));
   }
 
   function grokUpdateBlocked(snapshot) {
@@ -411,11 +279,6 @@
     const u = grokUpdateOf(snapshot);
     if (grokUpdateBlocked(snapshot)) return false;
     return !!(u.error || u.updateAvailable);
-  }
-
-  function webAppVersion() {
-    const meta = typeof document !== "undefined" && document.querySelector('meta[name="grok-web-version"]');
-    return (meta && meta.getAttribute("content")) || "";
   }
 
   function versionLabel(value) {
@@ -455,7 +318,6 @@
         key,
         value: typeof defaultValue === "number" ? Number(value) : typeof defaultValue === "boolean" ? value === "true" : value,
       }),
-      hostLocal: true,
     };
   }
 
@@ -496,7 +358,7 @@
       description: "Chat zoom lives in VS Code settings so it can stay a user or workspace preference.",
       kind: "action",
       actionLabel: "Open VS Code settings",
-      visible: (s, env) => !!(env && !env.isRemote && !env.clientOwnsFontScale && !env.isDesktop),
+      visible: (s, env) => !!(env && !env.clientOwnsFontScale && !env.isDesktop),
       message: () => ({ type: "openSettings", section: "companions.chatFontScale" }),
     },
     {
@@ -549,9 +411,7 @@
       description: TELEMETRY_COPY,
       kind: "toggle",
       defaultValue: true,
-      // A cloud remote is the machine's only surface, so the toggle belongs
-      // there too; a desk remote still shows the read-only row below.
-      visible: (s, env) => !!(env && ((env.isDesktop && !env.isRemote) || hostIsCloud(env))),
+      visible: (s, env) => !!(env && env.isDesktop),
       get: (s) => !s || s.telemetryEnabled !== false,
       message: (value) => ({ type: "setTelemetryEnabled", value }),
     },
@@ -562,21 +422,8 @@
       description: TELEMETRY_COPY,
       kind: "action",
       actionLabel: "Open VS Code settings",
-      visible: (s, env) => !!(env && !env.isRemote && !env.isDesktop),
+      visible: (s, env) => !!(env && !env.isDesktop),
       message: () => ({ type: "openSettings", section: "companions.telemetry.enabled" }),
-    },
-    {
-      id: "telemetryRemote",
-      category: "general",
-      title: "Anonymous usage stats",
-      description: "",
-      kind: "status",
-      visible: (s, env) => !!(env && env.isRemote && !hostIsCloud(env)),
-      describe: (s) => {
-        const known = s && typeof s.telemetryEnabled === "boolean";
-        const state = known ? (s.telemetryEnabled ? "On. " : "Off. ") : "";
-        return state + TELEMETRY_COPY;
-      },
     },
     {
       id: "thumbsFeedback",
@@ -585,22 +432,9 @@
       description: THUMBS_COPY,
       kind: "toggle",
       defaultValue: false,
-      visible: (s, env) => !env || !env.isRemote || hostIsCloud(env),
+      visible: (s, env) => !env || true || false,
       get: (s) => !!(s && s.thumbsFeedback),
       message: (value) => ({ type: "setThumbsFeedback", value }),
-    },
-    {
-      id: "thumbsFeedbackRemote",
-      category: "general",
-      title: "Thumbs feedback to SpaceXAI",
-      description: "",
-      kind: "status",
-      visible: (s, env) => !!(env && env.isRemote && !hostIsCloud(env)),
-      describe: (s) => {
-        const known = s && typeof s.thumbsFeedback === "boolean";
-        const state = known ? (s.thumbsFeedback ? "On. " : "Off. ") : "";
-        return state + THUMBS_COPY;
-      },
     },
     {
       id: "voiceSendPhrase",
@@ -634,7 +468,7 @@
       describe: (s) => (s && s.voiceConfigured)
         ? "Voice is ready on this machine."
         : "Voice needs a key or a signed-in Grok account before the mic can start.",
-      visible: (s, env) => !!(env && !env.isRemote && !env.isDesktop),
+      visible: (s, env) => !!(env && !env.isDesktop),
       message: () => ({ type: "openSettings", section: "grok.voiceApiKey" }),
     },
     {
@@ -646,7 +480,7 @@
       describe: (s) => (s && s.voiceConfigured)
         ? "Voice is ready on this machine."
         : "Voice is not configured on the machine hosting this session.",
-      visible: (s, env) => !!(env && (env.isRemote || env.isDesktop)),
+      visible: (s, env) => !!(env && (env.isDesktop)),
     },
     {
       id: "readRepliesAloud",
@@ -658,7 +492,6 @@
       visible: (s, env) => !env || env.ttsAvailable !== false,
       get: (s) => !!(s && s.readRepliesAloud),
       message: (value) => ({ type: "setReadRepliesAloud", value }),
-      localOnly: (s, env) => !!(env && env.isRemote),
     },
     {
       id: "summarizeRepliesAloud",
@@ -671,7 +504,6 @@
       enabled: (s) => !!(s && s.readRepliesAloud),
       get: (s) => !!(s && s.summarizeRepliesAloud),
       message: (value) => ({ type: "setSummarizeRepliesAloud", value }),
-      localOnly: (s, env) => !!(env && env.isRemote),
     },
     {
       id: "ttsUnavailable",
@@ -710,7 +542,7 @@
       vendor: "SpaceXAI",
       description: "",
       kind: "action",
-      visible: (s, env) => !!(env && !env.isRemote && env.providersKnown),
+      visible: (s, env) => !!(env && env.providersKnown),
       describe: (s) => providerDescription(providerOf(s, "grok")),
       actionLabel: (s) => providerAction(providerOf(s, "grok")),
       keepOpen: true,
@@ -730,7 +562,7 @@
       vendor: "OpenAI",
       description: "",
       kind: "action",
-      visible: (s, env) => !!(env && !env.isRemote && env.providersKnown),
+      visible: (s, env) => !!(env && env.providersKnown),
       describe: (s) => providerDescription(providerOf(s, "codex")),
       actionLabel: (s) => providerAction(providerOf(s, "codex")),
       keepOpen: true,
@@ -750,7 +582,7 @@
       vendor: "Anthropic",
       description: "",
       kind: "action",
-      visible: (s, env) => !!(env && !env.isRemote && env.providersKnown),
+      visible: (s, env) => !!(env && env.providersKnown),
       describe: (s) => providerDescription(providerOf(s, "claude")),
       actionLabel: (s) => providerAction(providerOf(s, "claude")),
       keepOpen: true,
@@ -770,7 +602,7 @@
       vendor: "Meta",
       description: "",
       kind: "action",
-      visible: (s, env) => !!(env && !env.isRemote && env.providersKnown),
+      visible: (s, env) => !!(env && env.providersKnown),
       describe: (s) => providerDescription(providerOf(s, "muse")),
       actionLabel: (s) => providerAction(providerOf(s, "muse")),
       keepOpen: true,
@@ -790,194 +622,10 @@
       vendor: "Google",
       description: "",
       kind: "action",
-      visible: (s, env) => !!(env && !env.isRemote && env.providersKnown),
+      visible: (s, env) => !!(env && env.providersKnown),
       describe: (s) => providerDescription(providerOf(s, "gemini")),
       actionLabel: (s) => providerAction(providerOf(s, "gemini")),
       keepOpen: true,
-      message: (s) => {
-        const provider = providerOf(s, "gemini");
-        return provider.connected && provider.needsLogin !== true
-          ? { type: "logout", provider: "gemini" }
-          : { type: "runGrokLogin", provider: "gemini" };
-      },
-    },
-    // Remote provider rows come in a PAIR, and which one shows is the point.
-    // This page rendered status-only for a remote from 3.9.0, when a remote
-    // genuinely could not sign a provider in. `0fa6661` gave it the device-code
-    // flow and moved `runGrokLogin` to `full`, and this page was never told — so
-    // the onboarding card in the transcript was the only way to connect an agent
-    // from a phone or a cloud environment (owner, 2026-08-30).
-    {
-      id: "providerGrokStatus",
-      category: "providers",
-      logo: "grok",
-      provider: "grok",
-      title: "Grok Build",
-      vendor: "SpaceXAI",
-      description: "",
-      kind: "status",
-      visible: (s, env) => !!(env && env.isRemote && env.providersKnown
-        && !remoteProviderActionable(s, env, "grok")),
-      describe: (s, env) => providerRemoteDescribe(s, env, "grok"),
-    },
-    {
-      id: "providerGrokRemote",
-      category: "providers",
-      logo: "grok",
-      provider: "grok",
-      title: "Grok Build",
-      vendor: "SpaceXAI",
-      description: "",
-      kind: "action",
-      visible: (s, env) => !!(env && env.isRemote && env.providersKnown
-        && remoteProviderActionable(s, env, "grok")),
-      // The flow opens in the connect wizard — one renderer, in a dialog,
-      // which is not subject to the welcome card's refusal to paint over a
-      // conversation. This page stays put behind it, so closing the wizard
-      // returns the reader exactly where they were.
-      keepOpen: (s, env) => !!(env && env.isRemote),
-      // Only for the sign-IN message. This row sends `logout` when the
-      // account is connected, and opening a Connect wizard on a Sign out
-      // click is the opposite of what was asked (review, 2026-08-31).
-      local: (s, env) => (env && env.isRemote && !providerConnectedNow(s, "grok")
-        ? "connectWizard:grok"
-        : ""),
-      describe: (s, env) => providerRemoteDescribe(s, env, "grok"),
-      actionLabel: (s) => providerAction(providerOf(s, "grok")),
-      // Same two messages the desk row sends, reached through the same test.
-      // Which one is offered is decided by visibility above, so this cannot
-      // send `logout` to a host that did not advertise remoteAgentSignOut.
-      message: (s) => {
-        const provider = providerOf(s, "grok");
-        return provider.connected && provider.needsLogin !== true
-          ? { type: "logout", provider: "grok" }
-          : { type: "runGrokLogin", provider: "grok" };
-      },
-    },
-    {
-      id: "providerCodexStatus",
-      category: "providers",
-      logo: "codex",
-      provider: "codex",
-      title: "Codex",
-      vendor: "OpenAI",
-      description: "",
-      kind: "status",
-      visible: (s, env) => !!(env && env.isRemote && env.providersKnown
-        && !remoteProviderActionable(s, env, "codex")),
-      describe: (s, env) => providerRemoteDescribe(s, env, "codex"),
-    },
-    {
-      id: "providerCodexRemote",
-      category: "providers",
-      logo: "codex",
-      provider: "codex",
-      title: "Codex",
-      vendor: "OpenAI",
-      description: "",
-      kind: "action",
-      visible: (s, env) => !!(env && env.isRemote && env.providersKnown
-        && remoteProviderActionable(s, env, "codex")),
-      // The flow opens in the connect wizard — one renderer, in a dialog,
-      // which is not subject to the welcome card's refusal to paint over a
-      // conversation. This page stays put behind it, so closing the wizard
-      // returns the reader exactly where they were.
-      keepOpen: (s, env) => !!(env && env.isRemote),
-      // Only for the sign-IN message. This row sends `logout` when the
-      // account is connected, and opening a Connect wizard on a Sign out
-      // click is the opposite of what was asked (review, 2026-08-31).
-      local: (s, env) => (env && env.isRemote && !providerConnectedNow(s, "codex")
-        ? "connectWizard:codex"
-        : ""),
-      describe: (s, env) => providerRemoteDescribe(s, env, "codex"),
-      actionLabel: (s) => providerAction(providerOf(s, "codex")),
-      // Same two messages the desk row sends, reached through the same test.
-      // Which one is offered is decided by visibility above, so this cannot
-      // send `logout` to a host that did not advertise remoteAgentSignOut.
-      message: (s) => {
-        const provider = providerOf(s, "codex");
-        return provider.connected && provider.needsLogin !== true
-          ? { type: "logout", provider: "codex" }
-          : { type: "runGrokLogin", provider: "codex" };
-      },
-    },
-    {
-      id: "providerClaudeStatus",
-      category: "providers",
-      logo: "claude",
-      provider: "claude",
-      title: "Claude Code",
-      vendor: "Anthropic",
-      description: "",
-      kind: "status",
-      visible: (s, env) => !!(env && env.isRemote && env.providersKnown
-        && !remoteProviderActionable(s, env, "claude")),
-      describe: (s, env) => providerRemoteDescribe(s, env, "claude"),
-    },
-    {
-      id: "providerClaudeRemote",
-      category: "providers",
-      logo: "claude",
-      provider: "claude",
-      title: "Claude Code",
-      vendor: "Anthropic",
-      description: "",
-      kind: "action",
-      visible: (s, env) => !!(env && env.isRemote && env.providersKnown
-        && remoteProviderActionable(s, env, "claude")),
-      // The flow opens in the connect wizard — one renderer, in a dialog,
-      // which is not subject to the welcome card's refusal to paint over a
-      // conversation. This page stays put behind it, so closing the wizard
-      // returns the reader exactly where they were.
-      keepOpen: (s, env) => !!(env && env.isRemote),
-      // Only for the sign-IN message. This row sends `logout` when the
-      // account is connected, and opening a Connect wizard on a Sign out
-      // click is the opposite of what was asked (review, 2026-08-31).
-      local: (s, env) => (env && env.isRemote && !providerConnectedNow(s, "claude")
-        ? "connectWizard:claude"
-        : ""),
-      describe: (s, env) => providerRemoteDescribe(s, env, "claude"),
-      actionLabel: (s) => providerAction(providerOf(s, "claude")),
-      // Same two messages the desk row sends, reached through the same test.
-      // Which one is offered is decided by visibility above, so this cannot
-      // send `logout` to a host that did not advertise remoteAgentSignOut.
-      message: (s) => {
-        const provider = providerOf(s, "claude");
-        return provider.connected && provider.needsLogin !== true
-          ? { type: "logout", provider: "claude" }
-          : { type: "runGrokLogin", provider: "claude" };
-      },
-    },
-    {
-      id: "providerGeminiStatus",
-      category: "providers",
-      logo: "gemini",
-      provider: "gemini",
-      title: "Gemini CLI",
-      vendor: "Google",
-      description: "",
-      kind: "status",
-      visible: (s, env) => !!(env && env.isRemote && env.providersKnown
-        && !remoteProviderActionable(s, env, "gemini")),
-      describe: (s, env) => providerRemoteDescribe(s, env, "gemini"),
-    },
-    {
-      id: "providerGeminiRemote",
-      category: "providers",
-      logo: "gemini",
-      provider: "gemini",
-      title: "Gemini CLI",
-      vendor: "Google",
-      description: "",
-      kind: "action",
-      visible: (s, env) => !!(env && env.isRemote && env.providersKnown
-        && remoteProviderActionable(s, env, "gemini")),
-      keepOpen: (s, env) => !!(env && env.isRemote),
-      local: (s, env) => (env && env.isRemote && !providerConnectedNow(s, "gemini")
-        ? "connectWizard:gemini"
-        : ""),
-      describe: (s, env) => providerRemoteDescribe(s, env, "gemini"),
-      actionLabel: (s) => providerAction(providerOf(s, "gemini")),
       message: (s) => {
         const provider = providerOf(s, "gemini");
         return provider.connected && provider.needsLogin !== true
@@ -992,32 +640,7 @@
       title: "GitHub",
       description: "",
       kind: "action",
-      visible: (s, env) => !!(env && !env.isRemote && githubKnown(s)),
-      describe: (s) => githubDescribe(s),
-      actionLabel: (s) => githubAction(s),
-      keepOpen: true,
-      message: (s) => githubConnectMessage(s),
-    },
-    {
-      id: "githubConnectionStatus",
-      category: "providers",
-      icon: "github",
-      title: "GitHub",
-      description: "",
-      kind: "status",
-      visible: (s, env) => !!(env && env.isRemote && githubKnown(s)
-        && !githubRemoteActionable(s, env)),
-      describe: (s) => githubDescribe(s),
-    },
-    {
-      id: "githubConnectionRemote",
-      category: "providers",
-      icon: "github",
-      title: "GitHub",
-      description: "",
-      kind: "action",
-      visible: (s, env) => !!(env && env.isRemote && githubKnown(s)
-        && githubRemoteActionable(s, env)),
+      visible: (s, env) => !!(env && githubKnown(s)),
       describe: (s) => githubDescribe(s),
       actionLabel: (s) => githubAction(s),
       keepOpen: true,
@@ -1043,7 +666,6 @@
       description: "Open the user-level Grok config file on this machine.",
       kind: "action",
       actionLabel: "Open",
-      hostLocal: true,
       message: () => ({ type: "openGlobalConfig" }),
     },
     {
@@ -1053,7 +675,6 @@
       description: "Open this project's Grok config file.",
       kind: "action",
       actionLabel: "Open",
-      hostLocal: true,
       message: () => ({ type: "openProjectConfig" }),
     },
     {
@@ -1069,7 +690,6 @@
       title: "Rule files",
       description: "Instruction files each connected agent may read for this project and your home directory — AGENTS.md, CLAUDE.md, GEMINI.md, and each provider's own directory.",
       kind: "ruleFiles",
-      hostLocal: true,
     },
     {
       id: "agentRoles",
@@ -1079,7 +699,6 @@
         "Who answers when you run /agent <role>, /handoff, or /second-opinion. Each role pins its own companion, model and mode — "
         + "a reviewer on a different model from the implementer is the whole point. Crew workflows reuse these same roles.",
       kind: "agentRoles",
-      hostLocal: true,
     },
     {
       id: "subagentsEnabled",
@@ -1092,7 +711,6 @@
       defaultValue: true,
       get: (s) => s && s.subagentsEnabled !== false,
       message: (value) => ({ type: "setSubagentsEnabled", value }),
-      hostLocal: true,
     },
     {
       id: "subagentRoster",
@@ -1102,7 +720,6 @@
         "Which companions may be used as subagents, what they may do, and what the agent is told each one is good at. "
         + "The notes are what it reads when it picks one — there is no built-in table of model strengths.",
       kind: "subagentRoster",
-      hostLocal: true,
     },
     {
       id: "subagentRouting",
@@ -1112,7 +729,6 @@
         "Prefer a particular companion when a task mentions certain words — \"grep\" or \"overview\" to the fast one, "
         + "\"review\" to a different one. Advice only: what the agent asks for explicitly still wins.",
       kind: "subagentRouting",
-      hostLocal: true,
     },
     {
       id: "crewStageSubagents",
@@ -1125,7 +741,6 @@
       defaultValue: false,
       get: (s) => !!(s && s.crewStagesMayUseSubagents),
       message: (value) => ({ type: "setCrewStageSubagents", value }),
-      hostLocal: true,
     },
     // §9: the crew / subagent / context settings of the crew-subagent plan.
     companionSelect("crew.defaultAutonomy", "agents", "Crew autonomy (default)",
@@ -1164,7 +779,6 @@
         "Presets for /crew in this session: which roles may be assigned and in what order, a check to run after each writing step, "
         + "how often to stop and review, and whether independent steps may run at once.",
       kind: "crewFlows",
-      hostLocal: true,
     },
     {
       id: "workflows",
@@ -1173,7 +787,6 @@
       description:
         "Stage graphs a Crew session can run. A workflow is a crew preset with a stages block; presets without one still run as the default Plan → Implement → Review → Fix graph.",
       kind: "workflows",
-      hostLocal: true,
     },
     {
       id: "routinesList",
@@ -1205,7 +818,6 @@
       description: "Open the host log for this Grok client.",
       kind: "action",
       actionLabel: (s, env) => logsLabel(env),
-      hostLocal: true,
       message: () => ({ type: "showLogs" }),
     },
     {
@@ -1215,7 +827,6 @@
       description: "Open or close Chromium Developer Tools for this window.",
       kind: "action",
       actionLabel: "Toggle",
-      hostLocal: true,
       visible: (s, env) => !!(env && env.hostCaps && env.hostCaps.toggleDevTools === true),
       message: () => ({ type: "toggleDevTools" }),
     },
@@ -1226,7 +837,6 @@
       description: "Open the host Settings editor focused on Companions.",
       kind: "action",
       actionLabel: "Open",
-      hostLocal: true,
       visible: (s, env) => !!(env && !env.isDesktop),
       message: () => ({ type: "openSettings", section: "companions" }),
     },
@@ -1237,7 +847,6 @@
       description: "Open the editor's own picker so you can move the Grok chat to another dock.",
       kind: "action",
       actionLabel: "Move view…",
-      hostLocal: true,
       visible: (s, env) => !!(
         env &&
         env.hostCaps &&
@@ -1247,50 +856,11 @@
       message: () => ({ type: "moveView", location: "pick" }),
     },
     {
-      id: "hostConfigRemote",
-      category: "advanced",
-      title: "Host configuration",
-      description: "",
-      kind: "status",
-      // "The desk" was nonsense on a cloud machine — there is no desk.
-      describe: (s, env) => hostIsCloud(env)
-        ? "Host configuration lives on your cloud machine and is not editable from this page."
-        : "Host config is managed on the machine running this workspace.",
-      visible: (s, env) => !!(env && env.isRemote),
-    },
-    {
-      id: "aboutWebApp",
-      category: "about",
-      title: "Web app",
-      kind: "value",
-      visible: (s, env) => remoteAbout(s, env),
-      get: () => versionLabel(webAppVersion()),
-    },
-    {
-      id: "aboutConnectedTo",
-      category: "about",
-      title: "Connected to",
-      kind: "value",
-      visible: (s, env) => remoteAbout(s, env),
-      get: (s) => {
-        const gui = s && s.hostKind === "desktop" ? "Desktop app" : "Extension";
-        return s && s.hostName ? `${s.hostName} · ${gui}` : gui;
-      },
-    },
-    {
-      id: "aboutHostProduct",
-      category: "about",
-      title: (s) => (s && s.hostKind === "desktop") ? "Grok Build Desktop" : "Grok Build extension",
-      kind: "value",
-      visible: (s, env) => remoteAbout(s, env),
-      get: (s) => versionLabel(s && s.extVersion),
-    },
-    {
       id: "aboutThisExtension",
       category: "about",
       title: "This extension",
       kind: "value",
-      visible: (s, env) => !remoteAbout(s, env),
+      visible: (s, env) => true,
       get: (s) => versionLabel(s && s.extVersion),
     },
     {
@@ -1299,8 +869,6 @@
       title: "Grok Build CLI",
       kind: "value",
       visible: (s, env) => {
-        if (remoteAbout(s, env) && hasReportedProviderVersions(s)) return !!grokProvider(s);
-        if (remoteAbout(s, env)) return true;
         return showGrokAbout(s, env);
       },
       get: (s) => versionLabel(grokCliVersion(s)),
@@ -1332,7 +900,7 @@
           ? "Version " + p.latestCliVersion + " is the one this build is tested with."
           : "Runs the update in a terminal.";
       },
-      visible: (s, env) => !!(env && !env.isRemote && codexProvider(s) && codexProvider(s).connected),
+      visible: (s, env) => !!(env && codexProvider(s) && codexProvider(s).connected),
       message: () => ({ type: "updateProviderCli", provider: "codex" }),
     },
     {
@@ -1354,7 +922,7 @@
       kind: "action",
       actionLabel: "Update",
       describe: () => "Runs the update in a terminal.",
-      visible: (s, env) => !!(env && !env.isRemote && claudeProvider(s) && claudeProvider(s).connected),
+      visible: (s, env) => !!(env && claudeProvider(s) && claudeProvider(s).connected),
       message: () => ({ type: "updateProviderCli", provider: "claude" }),
     },
     {
@@ -1384,7 +952,7 @@
       category: "about",
       title: "Grok Build CLI updates",
       kind: "status",
-      visible: (s, env) => showGrokAbout(s, env) && !remoteAbout(s, env),
+      visible: (s, env) => showGrokAbout(s, env) && true,
       describe: (s) => grokUpdateStatusText(s),
     },
     {
@@ -1392,7 +960,7 @@
       category: "about",
       title: "Updates paused",
       kind: "status",
-      visible: (s, env) => showGrokAbout(s, env) && !remoteAbout(s, env) && grokUpdateBlocked(s),
+      visible: (s, env) => showGrokAbout(s, env) && grokUpdateBlocked(s),
       describe: (s) => {
         const policy = grokUpdateOf(s).policy;
         return (policy && policy.note) || "Updates are paused for compatibility.";
@@ -1405,7 +973,7 @@
       description: "Download and install the latest Grok Build CLI on this machine.",
       kind: "action",
       actionLabel: "Update Grok Build CLI",
-      visible: (s, env) => showGrokAbout(s, env) && !remoteAbout(s, env) && canUpdateGrok(s),
+      visible: (s, env) => showGrokAbout(s, env) && canUpdateGrok(s),
       message: () => ({ type: "updateGrok" }),
     },
     {
@@ -1415,20 +983,9 @@
       description: "Updates are paused for compatibility.",
       kind: "action",
       actionLabel: "Update Grok Build CLI",
-      visible: (s, env) => showGrokAbout(s, env) && !remoteAbout(s, env) && grokUpdateBlocked(s),
+      visible: (s, env) => showGrokAbout(s, env) && grokUpdateBlocked(s),
       enabled: () => false,
       message: () => ({ type: "updateGrok" }),
-    },
-    {
-      id: "aboutRemoteCliUpdate",
-      category: "about",
-      title: "CLI update",
-      kind: "status",
-      visible: (s, env) => !!(env && env.isRemote && grokUpdateOf(s).updateAvailable),
-      describe: (s) => {
-        const latest = grokUpdateOf(s).latest;
-        return `CLI update available${latest ? ` · v${latest}` : ""}. Update it at the desk — this device can’t.`;
-      },
     },
     {
       id: "reportBug",
@@ -1487,7 +1044,6 @@
   }
 
   function rowVisible(row, snapshot, env) {
-    if (row.hostLocal && env && env.isRemote) return false;
     if (typeof row.visible === "function") return !!row.visible(snapshot, env);
     return true;
   }
@@ -1682,13 +1238,11 @@
 
   function defaultEnv(partial) {
     return {
-      isRemote: false,
       isDesktop: false,
       clientOwnsFontScale: false,
       ttsAvailable: true,
       steerSupported: true,
       providersKnown: false,
-      remoteLinked: null,
       standalone: false,
       hostCaps: {},
       ...(partial || {}),
@@ -1719,7 +1273,6 @@
       extVersion: "",
       cliVersion: "",
       hostKind: "",
-      hostName: "",
       grokUpdate: null,
       mcpServers: [],
       mcpLoading: false,
@@ -2086,7 +1639,7 @@
     localTitle.className = "settings-group";
     localTitle.textContent = CONNECTOR_SECTION_LOCAL;
     localHead.appendChild(localTitle);
-    if (!(env && env.isRemote)) {
+    {
       const localOpen = document.createElement("button");
       localOpen.type = "button";
       localOpen.className = "settings-action settings-mcp-open";
@@ -2102,7 +1655,7 @@
     el.appendChild(localHead);
     const localBlurb = document.createElement("div");
     localBlurb.className = "settings-mcp-warning";
-    localBlurb.textContent = env && env.isRemote ? CONNECTOR_BLURB_LOCAL_REMOTE : CONNECTOR_BLURB_LOCAL;
+    localBlurb.textContent = CONNECTOR_BLURB_LOCAL;
     el.appendChild(localBlurb);
     if (loading) {
       el.appendChild(renderMcpSectionState("Loading Grok connectors…"));
@@ -2123,10 +1676,6 @@
     return !!(connector && connector.auth === "key");
   }
 
-  function canManageConnectors(snapshot, env) {
-    return !(env && env.isRemote) || snapshot.mcpRemoteConnect === true;
-  }
-
   function connectorDescription(connector, env, snapshot) {
     if (connector.status === "connecting") {
       return isKeyConnectorView(connector)
@@ -2134,14 +1683,6 @@
         : "Waiting for the browser sign-in to finish…";
     }
     if (connector.status === "error" && connector.error) return connector.error;
-    if (env && env.isRemote && !canManageConnectors(snapshot, env)) {
-      if (isKeyConnectorView(connector) && connector.connected && connector.keySet !== true) {
-        return connector.description + " Connected, but no key on the desk.";
-      }
-      return connector.connected
-        ? connector.description + " Connected on the desk machine."
-        : connector.description + " Sign-in happens on the desk.";
-    }
     if (isKeyConnectorView(connector) && connector.connected && connector.keySet === true) {
       return connector.description + " Key is set. Applies to new conversations and when you reopen one.";
     }
@@ -2217,12 +1758,8 @@
     el.dataset.id = "connectorsCatalog";
     const warning = document.createElement("div");
     warning.className = "settings-mcp-warning";
-    const canManage = canManageConnectors(snapshot, env);
-    warning.textContent = (env && env.isRemote
-      ? (canManage
-        ? "Connect apps on the machine running this workspace. Open the sign-in link on this device, then paste the failed callback address here. GitHub uses a token. Credentials stay on the host."
-        : CONNECTOR_BLURB_HERE_REMOTE)
-      : CONNECTOR_BLURB_HERE) + " " + CONNECTOR_DISCONNECT_COPY;
+    const canManage = true;
+    warning.textContent = (CONNECTOR_BLURB_HERE) + " " + CONNECTOR_DISCONNECT_COPY;
     el.appendChild(warning);
     const connectors = sortConnectorsForDisplay(
       Array.isArray(snapshot.mcpConnectors) ? snapshot.mcpConnectors : [],
@@ -2309,38 +1846,6 @@
       }
       if (canManage && isKeyConnectorView(connector) && formOpen && !connecting) {
         row.appendChild(renderConnectorKeyForm(connector, keyForm));
-      }
-      const authorization = snapshot.mcpConnectorAuthorization;
-      if (canManage && env.isRemote && authorization && authorization.id === connector.id) {
-        const form = document.createElement("div");
-        form.className = "settings-connector-key settings-connector-oauth";
-        if (authorization.error) form.appendChild(renderMcpSectionState(authorization.error, true));
-        if (authorization.status === "waiting" && authorization.url) {
-          const link = document.createElement("a");
-          link.className = "settings-connector-oauth-link";
-          link.href = authorization.url;
-          link.target = "_blank";
-          link.rel = "noopener noreferrer";
-          link.textContent = "Open sign-in";
-          form.appendChild(link);
-          form.appendChild(renderMcpSectionState("After approving access, the callback page may fail to load. Copy its full address from the address bar and paste it below. Keep this tab open."));
-          const input = document.createElement("input");
-          input.type = "text";
-          input.className = "settings-text settings-connector-oauth-input";
-          input.autocomplete = "off";
-          input.spellcheck = false;
-          input.setAttribute("aria-label", "Callback address for " + connector.name);
-          input.placeholder = "Paste the full callback address";
-          form.appendChild(input);
-          const submit = document.createElement("button");
-          submit.type = "button";
-          submit.className = "settings-action settings-connector-oauth-submit";
-          submit.textContent = "Complete sign-in";
-          form.appendChild(submit);
-        } else if (authorization.status === "submitted") {
-          form.appendChild(renderMcpSectionState("Completing sign-in on the host…"));
-        }
-        row.appendChild(form);
       }
       list.appendChild(row);
     }
@@ -2744,9 +2249,6 @@
    * a phone — which never runs them — it would be wrong always.
    */
   function routinesHostNote(env) {
-    if (env && env.isRemote) {
-      return "Routines run on your computer, while the desktop app or an editor window is open.";
-    }
     if (env && env.isDesktop) {
       return "Routines run while this app or an editor window is open. Nothing runs once they are all closed.";
     }
@@ -2934,14 +2436,12 @@
   }
 
   function appendGithubLoginFlow(el, snapshot, opts) {
-    const g = githubOf(snapshot);
-    const flow = g && g.loginFlow;
-    const status = (flow && flow.status) || (opts && opts.pending ? "starting" : "");
-    if (status !== "starting" && status !== "waiting") return;
+    if (!(opts && opts.pending)) return;
+    const status = "starting";
     const box = document.createElement("div");
     box.className = "settings-github-flow";
     box.dataset.status = status;
-    if (status === "starting") {
+    {
       const heading = document.createElement("div");
       heading.className = "settings-github-flow-heading";
       heading.textContent = "Connecting GitHub";
@@ -2952,51 +2452,6 @@
         : "Asking the GitHub CLI for a sign-in code…";
       box.appendChild(heading);
       box.appendChild(p);
-    } else {
-      const heading = document.createElement("div");
-      heading.className = "settings-github-flow-heading";
-      heading.textContent = "Finish signing in to GitHub";
-      const p = document.createElement("p");
-      p.className = "settings-github-flow-desc";
-      p.textContent = flow.code
-        ? "Open the link, then confirm this code:"
-        : "Open the link to finish signing in.";
-      box.appendChild(heading);
-      box.appendChild(p);
-      if (flow.code) {
-        const cmd = document.createElement("div");
-        cmd.className = "settings-github-flow-cmd";
-        const code = document.createElement("code");
-        code.textContent = flow.code;
-        const copy = document.createElement("button");
-        copy.type = "button";
-        copy.className = "settings-github-flow-copy";
-        copy.textContent = "Copy";
-        copy.addEventListener("click", function (e) {
-          e.stopPropagation();
-          if (!navigator.clipboard || typeof navigator.clipboard.writeText !== "function") return;
-          navigator.clipboard.writeText(flow.code).then(function () {
-            copy.textContent = "Copied";
-            setTimeout(function () { copy.textContent = "Copy"; }, 1500);
-          }).catch(function () { /* clipboard blocked */ });
-        });
-        cmd.appendChild(code);
-        cmd.appendChild(copy);
-        box.appendChild(cmd);
-      }
-      if (flow.url && /^https?:\/\//i.test(flow.url)) {
-        const open = document.createElement("a");
-        open.className = "onb-action settings-github-flow-open";
-        open.href = flow.url;
-        open.target = "_blank";
-        open.rel = "noopener noreferrer";
-        open.textContent = "Open the sign-in page";
-        box.appendChild(open);
-      }
-      const note = document.createElement("p");
-      note.className = "settings-github-flow-note";
-      note.textContent = "Keep this page open — it finishes on its own.";
-      box.appendChild(note);
     }
     if (opts && opts.terminal) {
       const recheck = document.createElement("button");
@@ -4300,7 +3755,6 @@
   function renderWorkflowGenerator(snapshot, env) {
     const gen = WORKFLOW_UI.generator;
     const live = snapshot.workflowGenerator || {};
-    const remote = !!(env && env.isRemote);
     const card = document.createElement("div");
     card.className = "settings-agent-card is-open settings-workflow-generator";
     card.dataset.workflow = "generator";
@@ -4377,14 +3831,13 @@
     }
     const genError = renderAgentError(snapshot, agentCardId("workflow"));
     if (genError) form.appendChild(genError);
-    if (remote) form.appendChild(remoteHint("Generating runs a companion on the computer that owns this project, so it is only available there."));
 
     form.appendChild(renderStoreChoice(gen.scope, !snapshot.agentRolesHasProject));
     const actions = agentActions();
     const refining = live.status === "preview" || live.status === "error";
     const generate = agentButton("settings-workflow-generate-run", refining ? "Regenerate" : "Generate", live.status === "preview" && live.draft ? "" : "primary");
-    generate.disabled = remote || live.status === "running" || !String(gen.description || "").trim();
-    if (!remote && !String(gen.description || "").trim()) generate.title = "Describe the workflow first";
+    generate.disabled = live.status === "running" || !String(gen.description || "").trim();
+    if (!String(gen.description || "").trim()) generate.title = "Describe the workflow first";
     actions.appendChild(generate);
     if (live.status === "running") actions.appendChild(agentButton("settings-workflow-generate-cancel", "Stop"));
     if (live.status === "preview" && live.draft) {
@@ -4397,13 +3850,6 @@
     form.appendChild(actions);
     card.appendChild(form);
     return card;
-  }
-
-  function remoteHint(text) {
-    const p = document.createElement("p");
-    p.className = "settings-agent-field-hint settings-agent-remote-hint";
-    p.textContent = text;
-    return p;
   }
 
   /** The stage graph as a row of chips, with the mermaid source one click
@@ -4449,7 +3895,6 @@
 
   function renderWorkflowEditor(view, snapshot, env) {
     const draft = WORKFLOW_UI.draft;
-    const remote = !!(env && env.isRemote);
     const form = document.createElement("div");
     form.className = "settings-agent-form";
     const grid = document.createElement("div");
@@ -4517,10 +3962,10 @@
     form.appendChild(renderStoreChoice(WORKFLOW_UI.scope, !snapshot.agentRolesHasProject));
     const actions = agentActions();
     const save = agentButton("settings-workflow-save", view ? "Save" : "Create", "primary");
-    save.disabled = remote;
+    save.disabled = false;
     actions.appendChild(save);
     const saveDefault = agentButton("settings-workflow-save-default", "Save & make default");
-    saveDefault.disabled = remote;
+    saveDefault.disabled = false;
     actions.appendChild(saveDefault);
     actions.appendChild(agentButton("settings-workflow-validate", "Validate"));
     actions.appendChild(agentButton("settings-workflow-cancel", "Cancel"));
@@ -4629,7 +4074,7 @@
       const defaultBtn = agentButton("settings-workflow-default", "Make default");
       defaultBtn.dataset.name = view.name;
       defaultBtn.title = "Use this workflow for new Crew sessions";
-      defaultBtn.disabled = !!(env && env.isRemote);
+      defaultBtn.disabled = false;
       top.appendChild(defaultBtn);
     }
     card.appendChild(top);
@@ -4651,14 +4096,12 @@
       return el;
     }
 
-    const remote = !!(env && env.isRemote);
     const heading = document.createElement("div");
     heading.className = "settings-section-actions";
     const create = agentButton("settings-workflow-new", "New workflow");
-    create.disabled = remote || WORKFLOW_UI.open === NEW_WORKFLOW;
+    create.disabled = WORKFLOW_UI.open === NEW_WORKFLOW;
     const generate = agentButton("settings-workflow-generate", "Generate workflow…", "primary");
-    generate.disabled = remote || WORKFLOW_UI.generatorOpen;
-    if (remote) generate.title = create.title = "Only on the computer that owns this project";
+    generate.disabled = WORKFLOW_UI.generatorOpen;
     heading.append(create, generate);
     el.appendChild(heading);
 
@@ -4741,7 +4184,7 @@
       copy.append(name, detail);
       row.appendChild(copy);
 
-      if (!(env && env.isRemote)) {
+      {
         const btn = document.createElement("button");
         btn.type = "button";
         btn.className = "settings-action settings-rules-open";
@@ -4787,7 +4230,7 @@
       detail.textContent = pending.path + " is listed below but not active until you adopt it. Rules from a repository are someone else's decision about your machine.";
       copy.append(lead, detail);
       banner.appendChild(copy);
-      if (!(env && env.isRemote)) {
+      {
         const actions = document.createElement("div");
         actions.className = "settings-perm-pending-actions";
         actions.append(
@@ -5042,12 +4485,11 @@
       span.textContent = String(value ?? "—");
       control.appendChild(span);
     } else if (row.kind === "action") {
-      const isGithub = row.id === "githubConnection" || row.id === "githubConnectionRemote";
+      const isGithub = row.id === "githubConnection";
       const githubStepped = isGithub && (
-        !!githubCliStarted || githubCliLive(snapshot) || !!(githubTokenForm && githubTokenForm.open)
+        !!githubCliStarted || !!(githubTokenForm && githubTokenForm.open)
       );
-      const terminalStarted = !!(row.provider && PROVIDER_TERMINAL.id === row.provider
-        && !(env && env.isRemote));
+      const terminalStarted = !!(row.provider && PROVIDER_TERMINAL.id === row.provider);
       if (terminalStarted) {
         const busy = document.createElement("button");
         busy.type = "button";
@@ -5073,11 +4515,11 @@
 
     el.appendChild(title);
     el.appendChild(control);
-    if (row.id === "githubConnection" || row.id === "githubConnectionRemote") {
-      if (githubCliLive(snapshot) || githubCliStarted) {
+    if (row.id === "githubConnection") {
+      if (githubCliStarted) {
         appendGithubLoginFlow(el, snapshot, {
-          pending: !!githubCliStarted && !githubCliLive(snapshot),
-          terminal: !(env && env.isRemote) && !!githubCliStarted && !githubCliLive(snapshot),
+          pending: !!githubCliStarted && true,
+          terminal: !!githubCliStarted && true,
         });
       } else if (githubTokenForm && githubTokenForm.open) {
         appendGithubTokenForm(el, githubTokenForm);
@@ -5085,7 +4527,7 @@
         appendGithubAdvanced(el);
       }
     }
-    if (row.provider && PROVIDER_TERMINAL.id === row.provider && !(env && env.isRemote)) {
+    if (row.provider && PROVIDER_TERMINAL.id === row.provider) {
       const bar = document.createElement("div");
       bar.className = "settings-provider-terminal";
       const recheck = document.createElement("button");
@@ -5111,7 +4553,6 @@
     let categoryId = opts.category === "rules" ? "advanced" : (opts.category || "general");
     let query = "";
     let keyForm = { id: "", value: "", readOnly: false };
-    let oauthForm = { attemptId: "", value: "" };
     let githubTokenForm = { open: false, value: "" };
     let githubCliStarted = false;
     let pendingRestore = null;
@@ -5199,29 +4640,20 @@
     }
 
     function openExternalHref(url) {
-      if (env.isRemote) {
-        window.open(url, "_blank", "noopener");
-        return;
-      }
       post({ type: "openUrl", url });
     }
 
     function maybeCheckAbout() {
-      if (aboutChecked || categoryId !== "about" || query.trim() || env.isRemote) return;
+      if (aboutChecked || categoryId !== "about" || query.trim()) return;
       if (!legacyProviders(env) && !grokProvider(snapshot)) return;
       aboutChecked = true;
       snapshot = { ...snapshot, grokUpdate: { ...(snapshot.grokUpdate || {}), checking: true } };
       post({ type: "checkGrokUpdate" });
     }
 
-    /** Whether this surface may ask the desk to re-observe its accounts. Remote
-     *  clients see the answer — `providerState` is mirrored — but must not spawn
-     *  the desk's CLIs to get it, which is why the rows there are status-only. */
+    /** Whether this surface may ask the host to re-observe its accounts. */
     function canRefreshProviders() {
-      if (env.providersKnown !== true) return false;
-      // A cloud machine has no desk to do this for it — see CLOUD_DISPOSITION
-      // in remote-policy.ts, which is what lets the frame through.
-      return !env.isRemote || hostIsCloud(env);
+      return env.providersKnown === true;
     }
 
     function requestProvidersRefresh() {
@@ -5262,7 +4694,7 @@
     }
 
     function maybeRefreshRuleFiles() {
-      if (ruleFilesChecked || env.isRemote || categoryId !== "advanced" || query.trim()) return;
+      if (ruleFilesChecked || categoryId !== "advanced" || query.trim()) return;
       ruleFilesChecked = true;
       post({ type: "listRuleFiles" });
     }
@@ -5318,7 +4750,7 @@
       // Sign-out is the one with nothing else to show for it: a sign-in opens
       // the wizard, and this page sits behind that.
       let marked = false;
-      if (message && message.type === "logout" && message.provider && env.isRemote) {
+      if (message && message.type === "logout" && message.provider && false) {
         PROVIDER_PENDING.id = message.provider;
         PROVIDER_PENDING.label = "Disconnecting…";
         PROVIDER_PENDING.wanted = false;
@@ -5725,7 +5157,7 @@
           }
           btn.onclick = (e) => {
             e.stopPropagation();
-            if ((row.id === "githubConnection" || row.id === "githubConnectionRemote")
+            if ((row.id === "githubConnection")
               && !githubConnectedNow(snapshot)) {
               githubCliStarted = true;
               githubTokenForm = { open: false, value: "" };
@@ -5733,7 +5165,7 @@
               paint();
               return;
             }
-            if (row.provider && !(env && env.isRemote)
+            if (row.provider
               && !providerConnectedNow(snapshot, row.provider)) {
               PROVIDER_TERMINAL.id = row.provider;
               runAction(row);
@@ -5757,7 +5189,7 @@
       body.querySelectorAll(".settings-connector-action").forEach((btn) => {
         btn.addEventListener("click", (e) => {
           e.stopPropagation();
-          if (!canManageConnectors(snapshot, env) || btn.disabled) return;
+          if (btn.disabled) return;
           const id = btn.dataset.id;
           if (!id) return;
           if (btn.dataset.auth === "key" && btn.dataset.connected !== "true") {
@@ -5777,7 +5209,7 @@
       body.querySelectorAll(".settings-connector-key-open").forEach((btn) => {
         btn.addEventListener("click", (e) => {
           e.stopPropagation();
-          if (!canManageConnectors(snapshot, env) || btn.disabled) return;
+          if (btn.disabled) return;
           const id = btn.dataset.id;
           if (!id) return;
           const row = snapshot.mcpConnectors.find((c) => c && c.id === id);
@@ -5793,7 +5225,7 @@
       body.querySelectorAll(".settings-connector-key-submit").forEach((btn) => {
         btn.addEventListener("click", (e) => {
           e.stopPropagation();
-          if (!canManageConnectors(snapshot, env) || btn.disabled) return;
+          if (btn.disabled) return;
           const id = btn.dataset.id;
           if (!id) return;
           const form = btn.closest(".settings-connector-key");
@@ -5810,9 +5242,6 @@
       body.querySelectorAll(".settings-github-advanced").forEach((btn) => {
         btn.addEventListener("click", (e) => {
           e.stopPropagation();
-          if ((githubCliStarted || githubCliLive(snapshot)) && canCancelGithubLogin(env)) {
-            post({ type: "cancelDeviceLogin", provider: "github" });
-          }
           githubCliStarted = false;
           githubTokenForm = { open: true, value: "" };
           paint();
@@ -5824,7 +5253,6 @@
         btn.addEventListener("click", (e) => {
           e.stopPropagation();
           githubCliStarted = false;
-          if (canCancelGithubLogin(env)) post({ type: "cancelDeviceLogin", provider: "github" });
           paint();
         });
       });
@@ -5876,28 +5304,6 @@
           if (tokenSubmit) tokenSubmit.click();
         });
       }
-      const oauthInput = body.querySelector(".settings-connector-oauth-input");
-      const oauthSubmit = body.querySelector(".settings-connector-oauth-submit");
-      const authorization = snapshot.mcpConnectorAuthorization;
-      if (!authorization || oauthForm.attemptId !== authorization.attemptId) {
-        oauthForm = { attemptId: authorization ? authorization.attemptId : "", value: "" };
-      }
-      if (oauthInput) {
-        oauthInput.value = oauthForm.value;
-        oauthInput.addEventListener("input", () => { oauthForm.value = oauthInput.value; });
-        oauthInput.addEventListener("keydown", (e) => {
-          if (e.key === "Enter" && oauthSubmit) { e.preventDefault(); oauthSubmit.click(); }
-        });
-      }
-      if (oauthSubmit) oauthSubmit.addEventListener("click", () => {
-        if (!canManageConnectors(snapshot, env) || !authorization || !oauthInput || oauthSubmit.disabled) return;
-        const redirectUrl = oauthInput.value;
-        oauthInput.value = "";
-        oauthForm.value = "";
-        snapshot = { ...snapshot, mcpConnectorAuthorization: { ...authorization, status: "submitted", error: undefined } };
-        post({ type: "completeMcpConnectorOAuth", id: authorization.id, attemptId: authorization.attemptId, redirectUrl });
-        paint();
-      });
       body.querySelectorAll(".settings-connector-key-input").forEach((input) => {
         input.addEventListener("input", () => {
           if (keyForm.id === input.dataset.id) keyForm.value = input.value;
@@ -6035,7 +5441,7 @@
       });
       body.querySelectorAll(".settings-connector-readonly-input").forEach((box) => {
         box.addEventListener("change", () => {
-          if (!canManageConnectors(snapshot, env) || box.disabled) return;
+          if (box.disabled) return;
           const id = box.dataset.id;
           if (!id) return;
           if (keyForm.id === id) keyForm.readOnly = box.checked;
@@ -6062,7 +5468,6 @@
       body.querySelectorAll(".settings-mcp-open").forEach((btn) => {
         btn.addEventListener("click", (e) => {
           e.stopPropagation();
-          if (env.isRemote) return;
           post({ type: "openGlobalConfig" });
         });
       });
@@ -6081,7 +5486,7 @@
           // caret away from the field being typed in.
           const run = body.querySelector(".settings-workflow-generate-run");
           const live = snapshot.workflowGenerator || {};
-          if (run && !env.isRemote && live.status !== "running") {
+          if (run && live.status !== "running") {
             run.disabled = !String(value).trim();
             run.title = run.disabled ? "Describe the workflow first" : "";
           }
@@ -6763,7 +6168,6 @@
       body.querySelectorAll(".settings-rules-open").forEach((btn) => {
         btn.addEventListener("click", (e) => {
           e.stopPropagation();
-          if (env.isRemote) return;
           const path = btn.dataset.path;
           if (!path) return;
           post({ type: "openRuleFile", path });
@@ -6915,7 +6319,7 @@
           // A githubState frame is not "the terminal finished". Desk sign-in
           // cannot be observed, so keep the Re-check row until the account
           // is actually connected or a live device-code card takes over.
-          if (githubConnectedNow(snapshot) || githubCliLive(snapshot)) githubCliStarted = false;
+          if (githubConnectedNow(snapshot)) githubCliStarted = false;
         }
         // Before the key: the answer this was waiting for is usually IN this
         // snapshot, and a stale "Disconnecting…" left in the key would make
@@ -6989,10 +6393,8 @@
     CONNECTOR_SECTION_GROK,
     CONNECTOR_SECTION_LOCAL,
     CONNECTOR_BLURB_HERE,
-    CONNECTOR_BLURB_HERE_REMOTE,
     CONNECTOR_BLURB_GROK,
     CONNECTOR_BLURB_LOCAL,
-    CONNECTOR_BLURB_LOCAL_REMOTE,
     GITHUB_ISSUE_BUG_URL,
     GITHUB_ISSUE_FEATURE_URL,
     SUPPORT_MAILTO,
@@ -7002,7 +6404,6 @@
     githubDescribe,
     githubAction,
     githubTokenAvailable,
-    githubCliLive,
     visibleRows,
     visibleCategories,
     filterRows,

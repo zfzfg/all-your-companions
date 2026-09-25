@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import * as path from "node:path";
 import { MuseBackend } from "../src/muse-backend";
 import { locateMuseCli } from "../src/muse-cli-locator";
-import { ACP_PROVIDERS, INTERNAL_PROVIDERS, isAcpProvider, isInternalProvider, supportsSessionDeletion, supportsModeSwitching, usesPerCallContextOccupancy } from "../src/acp-backend";
 
 describe("Muse backend boundary", () => {
   it("spawns the installed ESM entry under Node with the user's executable", () => {

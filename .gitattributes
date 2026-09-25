@@ -4,11 +4,9 @@
 # stores, so committed blobs ended up with CRLF while tooling writes LF. Git then
 # warned on every commit ("LF will be replaced by CRLF"), `git status` showed
 # phantom modifications for byte-identical files, and — the part that stopped
-# being cosmetic — a fresh `git worktree` checkout produced
-# `scripts/lifecycle-host.mjs` with CRLF. That file starts with a shebang, so
-# Node's parser hit `#!/usr/bin/env node\r` and threw
-# `SyntaxError: Invalid or unexpected token`; test/lifecycle-host.test.ts could
-# not even be collected. Diagnosed 2026-08-11, broke a real run 2026-08-19.
+# being cosmetic — a fresh `git worktree` checkout produced shebang scripts with
+# CRLF, and Node's parser hit `#!/usr/bin/env node\r` and threw
+# `SyntaxError: Invalid or unexpected token`.
 #
 # The one-time `git add --renormalize .` that accompanies this file is recorded
 # in .git-blame-ignore-revs, so `git blame` and GitHub's blame view skip it.

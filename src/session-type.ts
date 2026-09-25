@@ -12,7 +12,7 @@
 // name must not come back.
 
 import type { AcpProvider } from "./acp-backend";
-import type { EffortLevel } from "./acp";
+import type { EffortLevel } from "./acp-types";
 
 export type SessionType = "agent" | "crew";
 

@@ -760,9 +760,11 @@ describe("anyRunning — the honest answer to 'is this machine still doing somet
   it("stays true while ANY command is still going", async () => {
     // The case that matters: a quick one finishing must not make a long one
     // invisible.
+    // The slow one must outlive shell start-up of the quick one under a loaded
+    // Windows runner (PowerShell alone can take most of a second).
     const m = new TerminalManager();
     const quick = m.create({ command: nodeEval("process.exit(0)") }).terminalId;
-    const slow = m.create({ command: nodeEval("setTimeout(() => {}, 600)") }).terminalId;
+    const slow = m.create({ command: nodeEval("setTimeout(() => {}, 3000)") }).terminalId;
     await m.waitForExit(quick);
     expect(m.anyRunning()).toBe(true);
     await m.waitForExit(slow);

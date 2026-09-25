@@ -20,7 +20,6 @@ test-support/**
 # runtime dependency means adding a line here too; nothing warns you.
 node_modules/**
 !node_modules/ws/**
-!node_modules/jpeg-js/**
 # Adapter files only. `!…/codex-acp/**` would also pack its nested
 # node_modules (diff@9, open@11 — vsce: a later exclude cannot undo a negate).
 # @openai/codex's platform binaries hoist to node_modules/@openai and are kept
@@ -64,39 +63,17 @@ node_modules/**
 # would produce a .js for it under out/.
 !resources/mcp/**
 # Re-include only top-level compiled extension JS (out/*.js).
-# Do NOT use `!out/**/*.js` — that also un-ignores out/desktop/** and a later
-# `out/desktop/**` rule does not re-exclude those files under vsce's matcher.
 !out/*.js
 !out/muse-adapter/*.mjs
-# Desktop Electron app — never ship in the VS Code extension vsix.
-out/desktop/**
-# …except the two modules the EXTENSION itself requires at runtime. Not a
-# convenience: out/sidebar.js requires ./desktop/desktop-policy, which requires
-# ./file-tree, and 3.2.0-3.2.5 all shipped without them. Activation threw
-# "Cannot find module './desktop/desktop-policy'" before a single command was
-# registered, so every Grok command reported "not found" and the sidebar never
-# appeared (#101).
-#
-# This list is enforced, not maintained by hand: `npm run check:vsix` resolves
-# every runtime require in the packed JS against the packed file list, so
-# another cross-boundary import without a line here fails packaging instead of
-# shipping a dead release.
-!out/desktop/desktop-policy.js
-!out/desktop/file-tree.js
-src/desktop/**
-vitest.desktop.config.ts
-scripts/run-desktop.cjs
-scripts/lifecycle-host.mjs
-electron-builder.yml
-dist-desktop/**
 # Marketplace description is README.marketplace.md via
 # `vsce package --readme-path` (see package scripts). Exclude BOTH source
 # readme files so vsce does not also pack root README.md as extension/README.md
 # and collide with the packaged extension/readme.md on case-insensitive FS.
 README.md
 README.marketplace.md
-docs/desktop.md
-docs/desktop-update-spec.md
+# The store readme links screenshots by absolute raw.githubusercontent.com URL;
+# nothing at runtime reads them.
+docs/screenshots/**
 scripts/gen-marketplace-readme.cjs
 grok-session-preview.html
 # Private/untracked working docs (git-excluded via .gitignore / .git/info/exclude)

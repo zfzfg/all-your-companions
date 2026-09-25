@@ -3,9 +3,8 @@
  * message that form can send has to be on the rail's allowlist.
  *
  * `onProjectsRailMessage` drops anything not listed, with only a log line — so
- * an omission is silent by construction. Two were missing: pasting a GitHub
- * token cleared the field and left GitHub disconnected with no error, and
- * Cancel left the device login running for its full 15-minute timeout.
+ * an omission is silent by construction. One was missing: pasting a GitHub
+ * token cleared the field and left GitHub disconnected with no error.
  *
  * This asserts the allowlist by driving the real handler, because the set
  * itself is private and a test that restated it would just be the same list
@@ -32,10 +31,6 @@ const reaches = async (msg: Record<string, unknown>) => {
 describe("projects rail allowlist", () => {
   it("passes a pasted GitHub token through to the host", async () => {
     expect(await reaches({ type: "githubLoginWithToken", token: "github_pat_x" })).toBe(true);
-  });
-
-  it("passes a device-login cancel through to the host", async () => {
-    expect(await reaches({ type: "cancelDeviceLogin", provider: "github" })).toBe(true);
   });
 
   it("still passes the rest of the clone form", async () => {

@@ -69,8 +69,6 @@ function mount(snapshotOver: Record<string, unknown> = {}) {
 }
 
 const q = (root: unknown, sel: string) => (root as { querySelector: (s: string) => unknown }).querySelector(sel) as never;
-const qa = (root: unknown, sel: string) =>
-  Array.from((root as { querySelectorAll: (s: string) => unknown[] }).querySelectorAll(sel)) as never[];
 
 describe("Workflows settings", () => {
   it("paints the host's workflows with scope and default badges", () => {

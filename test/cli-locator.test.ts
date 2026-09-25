@@ -166,6 +166,7 @@ describe("decidePlanModeAvailability (#105 — verified-old vs unverified)", () 
       reason: `Plan mode requires Grok CLI ${GROK_REQUIRED_VERSION} or newer; installed version is 0.2.100.`,
     });
     // Distinct from the unverified copy — users must not conclude "too old" from a probe miss.
+    if (decision.available) throw new Error("expected Plan to be unavailable");
     expect(decision.reason).toContain("installed version is");
     expect(decision.reason).not.toMatch(/could not verify/i);
   });

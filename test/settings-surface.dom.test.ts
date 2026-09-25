@@ -33,14 +33,13 @@ function loadSettings() {
     CONNECTOR_BLURB_HERE: string;
     CONNECTOR_BLURB_GROK: string;
     CONNECTOR_BLURB_LOCAL: string;
-    CONNECTOR_BLURB_LOCAL_REMOTE: string;
     GITHUB_ISSUE_BUG_URL: string;
     GITHUB_ISSUE_FEATURE_URL: string;
     SUPPORT_MAILTO: string;
     defaultSnapshot: (p?: Record<string, unknown>) => Record<string, unknown>;
     defaultEnv: (p?: Record<string, unknown>) => Record<string, unknown>;
     githubTokenAvailable: (s: unknown, e: unknown) => boolean;
-    visibleRows: (s: unknown, e: unknown) => Array<{ id: string; category: string; hostLocal?: boolean }>;
+    visibleRows: (s: unknown, e: unknown) => Array<{ id: string; category: string }>;
     visibleCategories: (s: unknown, e: unknown) => Array<{ id: string }>;
     filterRows: (q: string, s: unknown, e: unknown) => Array<{ id: string; category: string }>;
     restoreTargets: (id: string, s: unknown, e: unknown) => Array<{ id: string; kind?: string }>;
@@ -54,13 +53,11 @@ function loadSettings() {
 
 function fullEnv(overrides: Record<string, unknown> = {}) {
   return {
-    isRemote: false,
     isDesktop: true,
     clientOwnsFontScale: true,
     ttsAvailable: true,
     steerSupported: true,
     providersKnown: true,
-    remoteLinked: true,
     hostCaps: { relocateView: false, showOutput: false, toggleDevTools: true },
     ...overrides,
   };
@@ -86,7 +83,7 @@ function seedChat(h: ReturnType<typeof bootWebview>, extra: Record<string, unkno
     processingSound: false,
     readRepliesAloud: false,
     appPurpose: "coding",
-    capabilities: { uploadFile: true, remoteVoice: true, ...(extra.capabilities as object || {}) },
+    capabilities: { uploadFile: true, ...(extra.capabilities as object || {}) },
     ...extra,
   });
   dispatch(h.window, {
@@ -96,7 +93,6 @@ function seedChat(h: ReturnType<typeof bootWebview>, extra: Record<string, unkno
       { id: "codex", connected: false },
     ],
   });
-  dispatch(h.window, { type: "remoteStatus", linked: true });
 }
 
 function openSettings(h: ReturnType<typeof bootWebview>) {
@@ -125,7 +121,7 @@ function gearLabels(h: ReturnType<typeof bootWebview>) {
 }
 
 describe("settings catalog", () => {
-  it("exposes every category and hides host-local rows on remote", () => {
+  it("exposes every category", () => {
     const api = loadSettings();
     const snapshot = api.defaultSnapshot({
       appPurpose: "coding",
@@ -135,21 +131,6 @@ describe("settings catalog", () => {
     expect(local.map((c) => c.id)).toEqual([
       "general", "voice", "notifications", "providers", "routines", "agents", "connectors", "advanced", "about",
     ]);
-    const remoteRows = api.visibleRows(snapshot, api.defaultEnv(withMcpSettings({ isRemote: true })));
-    expect(remoteRows.some((row) => row.hostLocal)).toBe(false);
-    expect(remoteRows.some((row) => row.id === "openGlobalConfig")).toBe(false);
-    expect(remoteRows.some((row) => row.id === "providerGrok")).toBe(false);
-    expect(remoteRows.some((row) => row.id === "providerGrokStatus")).toBe(true);
-    expect(remoteRows.some((row) => row.id === "remoteAccountStatus")).toBe(false);
-    expect(remoteRows.some((row) => row.id === "remoteDeviceManager")).toBe(false);
-    expect(remoteRows.some((row) => row.id === "showThinking")).toBe(true);
-    expect(remoteRows.some((row) => row.id === "soundNotifications")).toBe(true);
-    expect(remoteRows.some((row) => row.id === "voiceSendPhrase")).toBe(true);
-    expect(remoteRows.some((row) => row.id === "telemetryRemote")).toBe(true);
-    expect(remoteRows.some((row) => row.id === "telemetryDesktop")).toBe(false);
-    expect(remoteRows.some((row) => row.id === "connectorsCatalog")).toBe(true);
-    expect(remoteRows.some((row) => row.id === "grokConnectorsSite")).toBe(false);
-    expect(remoteRows.some((row) => row.id === "mcpCatalog")).toBe(true);
   });
 
   it("hides Connectors when mcpSettings is absent", () => {
@@ -266,8 +247,7 @@ describe("settings catalog", () => {
     expect(logoIds.every((id) => catalog.has(id))).toBe(true);
     // The registry and the directory must agree in BOTH directions. A
     // registered id with no file renders a broken image; a file with no
-    // registered id is dead weight vendored to the relay forever, and the
-    // vendor manifest hashes that directory so it would ship regardless.
+    // registered id is dead weight shipped in every package.
     for (const id of logoIds) {
       expect(existsSync(path.join(dir, `${id}.webp`)), id).toBe(true);
     }
@@ -363,28 +343,6 @@ describe("settings overlay (chat.js)", () => {
     expect(h.posted).toContainEqual({ type: "setShowThinking", value: true });
   });
 
-  it("omits host-local rows under the remote capability profile", () => {
-    const h = bootWebview({ remote: true });
-    seedChat(h);
-    openSettings(h);
-    const overlay = h.doc.getElementById("settings-overlay")!;
-    const ids = [...overlay.querySelectorAll(".settings-row")].map((el) => (el as HTMLElement).dataset.id);
-    expect(ids).not.toContain("openGlobalConfig");
-    expect(ids).not.toContain("runMcpList");
-    expect(ids).not.toContain("showLogs");
-    expect(ids).not.toContain("providerGrok");
-    expect(ids).not.toContain("continueRemotely");
-    const nav = settingsNav(h).map((el) => (el.textContent || "").trim());
-    expect(nav).toContain("Providers");
-    expect(nav).not.toContain("Connectors");
-    expect(nav).not.toContain("MCP servers");
-    expect(nav).not.toContain("Remote control");
-    clickSettingsNav(h, "Providers");
-    expect(overlay.textContent).toMatch(/This account is connected on this machine/);
-    clickSettingsNav(h, "Advanced");
-    expect(overlay.textContent).toMatch(/Host config is managed on the machine running this workspace/);
-  });
-
   it("posts openSettingsSurface when the host advertises the editor tab", () => {
     const h = bootWebview();
     seedChat(h, { capabilities: { settingsEditor: true } });
@@ -412,13 +370,11 @@ describe("settings overlay (chat.js)", () => {
       providers: [{ id: "grok", connected: true }, { id: "codex", connected: false }],
     });
     const vscodeEnv = api.defaultEnv({
-      isRemote: false,
       isDesktop: false,
       clientOwnsFontScale: false,
       ttsAvailable: true,
       steerSupported: true,
       providersKnown: true,
-      remoteLinked: true,
       hostCaps: { relocateView: true, secondarySideBar: false, showOutput: true },
     });
     const ids = api.visibleRows(snapshot, vscodeEnv).map((row: { id: string }) => row.id);
@@ -485,10 +441,9 @@ describe("settings overlay (chat.js)", () => {
   });
 
   it("shows a quota refusal on the Routines page, not only in the transcript", () => {
-    // A quota-refused save never reaches the host, so the host never answers.
-    // The relay bounces a plain `error`, which renders in the transcript —
-    // behind the settings overlay. At the paywall that made Create look like it
-    // did nothing, which is the worst possible moment to be silent.
+    // A refused save is answered with a plain `error`, which renders in the
+    // transcript — behind the settings overlay. That made Create look like it
+    // did nothing.
     const h = bootWebview();
     seedChat(h);
     openSettings(h);
@@ -829,170 +784,6 @@ describe("settings overlay (chat.js)", () => {
     expect((overlay.querySelector(".settings-connector-key-input") as HTMLInputElement).value).toBe("");
   });
 
-  it("an older host without the capability offers no remote key controls", () => {
-    const h = bootWebview({ remote: true });
-    seedChat(h, { capabilities: { mcpSettings: true } });
-    dispatch(h.window, {
-      type: "mcpConnectors",
-      connectors: [
-        {
-          id: "github",
-          name: "GitHub",
-          description: "Repos.",
-          endpoint: "https://api.githubcopilot.com/mcp/",
-          connected: true,
-          status: "idle",
-          auth: "key",
-          keySet: true,
-        },
-      ],
-    });
-    openSettings(h);
-    clickSettingsNav(h, "Connectors");
-    const overlay = h.doc.getElementById("settings-overlay")!;
-    expect(overlay.querySelector(".settings-connector-action")).toBeNull();
-    expect(overlay.querySelector(".settings-connector-key-input")).toBeNull();
-    expect(overlay.querySelector(".settings-connector-key-open")).toBeNull();
-    expect(overlay.querySelector(".settings-connector-readonly-input")).toBeNull();
-    expect(overlay.textContent).toContain("Connected");
-    expect(h.posted).not.toContainEqual(expect.objectContaining({ type: "connectMcpConnector" }));
-    expect(h.posted).not.toContainEqual(expect.objectContaining({ type: "disconnectMcpConnector" }));
-  });
-
-  it("a capable remote writes and replaces a key without ever reading one back", () => {
-    const h = bootWebview({ remote: true });
-    seedChat(h, { capabilities: { mcpSettings: true } });
-    const row = { id: "github", name: "GitHub", description: "Repos.", auth: "key", status: "idle", connected: false };
-    dispatch(h.window, { type: "mcpConnectors", remoteConnect: true, connectors: [row] });
-    openSettings(h);
-    clickSettingsNav(h, "Connectors");
-    const overlay = h.doc.getElementById("settings-overlay")!;
-    click(h.window, overlay.querySelector(".settings-connector-action")!);
-    const input = overlay.querySelector(".settings-connector-key-input") as HTMLInputElement;
-    expect(input.type).toBe("password");
-    expect(input.value).toBe("");
-    input.value = "ghp_remote_write_only";
-    click(h.window, overlay.querySelector(".settings-connector-key-submit")!);
-    expect(h.posted).toContainEqual({ type: "connectMcpConnector", id: "github", key: "ghp_remote_write_only", readOnly: false });
-    expect(input.value).toBe("");
-    dispatch(h.window, { type: "mcpConnectors", remoteConnect: true, connectors: [{ ...row, connected: true, keySet: true }] });
-    expect(overlay.textContent).toContain("Tools in already running sessions remain available");
-    click(h.window, overlay.querySelector(".settings-connector-key-open")!);
-    expect((overlay.querySelector(".settings-connector-key-input") as HTMLInputElement).value).toBe("");
-    click(h.window, overlay.querySelector(".settings-connector-key-cancel")!);
-    click(h.window, overlay.querySelector(".settings-connector-action")!);
-    expect(h.posted).toContainEqual({ type: "disconnectMcpConnector", id: "github" });
-    expect(overlay.innerHTML).not.toContain("ghp_remote_write_only");
-  });
-
-  it("a capable remote opens its consent link and posts the failed address for manual completion", () => {
-    const h = bootWebview({ remote: true });
-    seedChat(h, { capabilities: { mcpSettings: true } });
-    const row = { id: "notion", name: "Notion", description: "Pages.", auth: "oauth", status: "idle", connected: false };
-    dispatch(h.window, { type: "mcpConnectors", remoteConnect: true, connectors: [row] });
-    openSettings(h);
-    clickSettingsNav(h, "Connectors");
-    const overlay = h.doc.getElementById("settings-overlay")!;
-    click(h.window, overlay.querySelector(".settings-connector-action")!);
-    expect(h.posted).toContainEqual({ type: "connectMcpConnector", id: "notion" });
-    const consent = { type: "mcpConnectorAuthorization", id: "notion", attemptId: "attempt-1", status: "waiting", url: "https://vendor.example/authorize?state=test" };
-    dispatch(h.window, consent);
-    const link = overlay.querySelector(".settings-connector-oauth-link") as HTMLAnchorElement;
-    expect(link.href).toBe(consent.url);
-    expect(link.target).toBe("_blank");
-    expect(link.rel).toContain("noopener");
-    expect(overlay.textContent).toMatch(/page may fail to load/);
-    const input = overlay.querySelector(".settings-connector-oauth-input") as HTMLInputElement;
-    input.value = "http://localhost:22227/oauth/callback?code=abc&state=test";
-    click(h.window, overlay.querySelector(".settings-connector-oauth-submit")!);
-    expect(h.posted).toContainEqual({ type: "completeMcpConnectorOAuth", id: "notion", attemptId: "attempt-1", redirectUrl: "http://localhost:22227/oauth/callback?code=abc&state=test" });
-    expect(input.value).toBe("");
-    expect(overlay.textContent).toMatch(/Completing sign-in/);
-    dispatch(h.window, { ...consent, error: "Use the current sign-in link (state does not match)." });
-    expect(overlay.textContent).toMatch(/state does not match/);
-    expect(overlay.querySelector(".settings-connector-oauth-input")).toBeTruthy();
-    dispatch(h.window, { ...consent, status: "finished", url: undefined });
-    expect(overlay.querySelector(".settings-connector-oauth")).toBeNull();
-    // Switching back to a host that lacks the field must drop the capability.
-    dispatch(h.window, { type: "mcpConnectors", connectors: [row] });
-    expect(overlay.querySelector(".settings-connector-action")).toBeNull();
-  });
-
-  it("a remote sees a connected GitHub row without a desk key as connected, with no paste", () => {
-    const h = bootWebview({ remote: true });
-    seedChat(h, { capabilities: { mcpSettings: true } });
-    const planted = "ghp_TESTSECRET_do_not_store";
-    dispatch(h.window, {
-      type: "mcpConnectors",
-      connectors: [
-        {
-          id: "github",
-          name: "GitHub",
-          description: "Repos.",
-          endpoint: "https://api.githubcopilot.com/mcp/",
-          connected: true,
-          status: "idle",
-          auth: "key",
-          keySet: false,
-        },
-      ],
-    });
-    openSettings(h);
-    clickSettingsNav(h, "Connectors");
-    const overlay = h.doc.getElementById("settings-overlay")!;
-    expect(overlay.querySelector('[data-id="connector-github"]')!.classList.contains("is-connected")).toBe(true);
-    expect(overlay.textContent).toContain("Connected");
-    expect(overlay.textContent).toMatch(/no key on the desk/i);
-    expect(overlay.textContent).not.toContain(planted);
-    expect(overlay.querySelector(".settings-connector-action")).toBeNull();
-    expect(overlay.querySelector(".settings-connector-key-input")).toBeNull();
-    expect(overlay.querySelector(".settings-connector-key-open")).toBeNull();
-    expect(overlay.querySelector(".settings-connector-readonly-input")).toBeNull();
-    expect(h.posted).not.toContainEqual(expect.objectContaining({ type: "connectMcpConnector" }));
-    expect(h.posted).not.toContainEqual(expect.objectContaining({ type: "disconnectMcpConnector" }));
-  });
-
-  it("shows connectors read-only on a remote and never posts connect", () => {
-    const h = bootWebview({ remote: true });
-    seedChat(h, { capabilities: { mcpSettings: true } });
-    dispatch(h.window, {
-      type: "mcpConnectors",
-      connectors: [
-        { id: "linear", name: "Linear", description: "Issues.", endpoint: "https://mcp.linear.app/mcp", connected: true, status: "idle" },
-      ],
-    });
-    openSettings(h);
-    const nav = settingsNav(h).map((el) => (el.textContent || "").trim());
-    expect(nav).toContain("Connectors");
-    expect(nav).not.toContain("MCP servers");
-    clickSettingsNav(h, "Connectors");
-    dispatch(h.window, {
-      type: "mcpServers",
-      servers: [
-        { name: "notes", displayName: "Notes", source: "local", configFile: "config.toml", enabled: true, status: "ready" },
-      ],
-      warning: "This list is read-only.",
-    });
-    const overlay = h.doc.getElementById("settings-overlay")!;
-    expect(overlay.textContent).toContain("Linear");
-    expect(overlay.textContent).toContain("Notes");
-    expect(overlay.textContent).toMatch(/machine running this workspace/);
-    expect(overlay.querySelector(".settings-connector-action")).toBeNull();
-    expect(overlay.textContent).toContain("Connected");
-    expect(overlay.textContent).toContain("On this computer");
-    expect(overlay.textContent).toContain("Grok.com connectors");
-    expect(overlay.textContent).toContain("Local Grok connectors");
-    expect(overlay.textContent).toMatch(/managed on the host machine only/);
-    expect(overlay.querySelector(".settings-mcp-open")).toBeNull();
-    expect(overlay.querySelector('[data-id="mcpCatalog"]')).toBeTruthy();
-    expect(overlay.querySelector(".settings-mcp-web")).toBeTruthy();
-    expect(overlay.querySelector(".settings-refresh")).toBeTruthy();
-    expect(h.posted).toContainEqual({ type: "listMcpServers" });
-    expect(h.posted).not.toContainEqual(expect.objectContaining({ type: "connectMcpConnector" }));
-    expect(h.posted).not.toContainEqual(expect.objectContaining({ type: "disconnectMcpConnector" }));
-    expect(h.posted).not.toContainEqual(expect.objectContaining({ type: "openGlobalConfig" }));
-  });
-
   it("renders On this computer connected first, each group alphabetical", () => {
     const h = bootWebview();
     seedChat(h, { capabilities: { mcpSettings: true } });
@@ -1230,17 +1021,15 @@ describe("settings overlay (chat.js)", () => {
     });
   });
 
-  it("shows a desktop telemetry toggle and a remote read-only row with the privacy copy", () => {
+  it("shows a desktop or VS Code telemetry row with the privacy copy", () => {
     const api = loadSettings();
     const snapshot = api.defaultSnapshot({ telemetryEnabled: true });
     const desk = api.visibleRows(snapshot, api.defaultEnv(fullEnv({ isDesktop: true }))).map((r) => r.id);
     expect(desk).toContain("telemetryDesktop");
     expect(desk).not.toContain("telemetryVsCode");
-    expect(desk).not.toContain("telemetryRemote");
     const vscode = api.visibleRows(snapshot, api.defaultEnv(fullEnv({ isDesktop: false }))).map((r) => r.id);
     expect(vscode).toContain("telemetryVsCode");
-    const remote = api.visibleRows(snapshot, api.defaultEnv(fullEnv({ isRemote: true }))).map((r) => r.id);
-    expect(remote).toContain("telemetryRemote");
+    expect(vscode).not.toContain("telemetryDesktop");
     expect(api.TELEMETRY_COPY).toContain("never prompts, code, file paths or names");
     expect(api.TELEMETRY_COPY).toContain("The IP address is discarded, never stored.");
   });
@@ -1252,17 +1041,13 @@ describe("settings overlay (chat.js)", () => {
       api.visibleRows(coding, api.defaultEnv(env))
         .filter((row) => row.category === "general")
         .map((row) => row.id);
-    expect(generalIds(fullEnv({ isDesktop: true, isRemote: false }))).toEqual([
+    expect(generalIds(fullEnv({ isDesktop: true }))).toEqual([
       "appPurpose", "chatFontScale", "showThinking", "expandCommandOutputs", "steerByDefault", "promptNav",
       "telemetryDesktop", "thumbsFeedback",
     ]);
-    expect(generalIds(fullEnv({ isDesktop: false, isRemote: false, clientOwnsFontScale: false }))).toEqual([
+    expect(generalIds(fullEnv({ isDesktop: false, clientOwnsFontScale: false }))).toEqual([
       "appPurpose", "openChatFontScale", "showThinking", "expandCommandOutputs", "steerByDefault", "promptNav",
       "telemetryVsCode", "thumbsFeedback",
-    ]);
-    expect(generalIds(fullEnv({ isDesktop: true, isRemote: true }))).toEqual([
-      "appPurpose", "chatFontScale", "showThinking", "expandCommandOutputs", "steerByDefault", "promptNav",
-      "telemetryRemote", "thumbsFeedbackRemote",
     ]);
   });
 
@@ -1282,58 +1067,19 @@ describe("settings overlay (chat.js)", () => {
       kind: "toggle",
     });
     const ids = api.ROWS.filter((r: { category: string }) => r.category === "general").map((r: { id: string }) => r.id);
-    expect(ids.indexOf("thumbsFeedback")).toBeGreaterThan(ids.indexOf("telemetryRemote"));
+    expect(ids.indexOf("thumbsFeedback")).toBeGreaterThan(ids.indexOf("telemetryVsCode"));
     const snapshot = api.defaultSnapshot();
     expect(snapshot.thumbsFeedback).toBe(false);
     expect(api.THUMBS_COPY).toContain("send a rating to SpaceXAI");
     for (const env of [
-      api.defaultEnv(fullEnv({ isDesktop: true, isRemote: false })),
-      api.defaultEnv(fullEnv({ isDesktop: false, isRemote: false })),
+      api.defaultEnv(fullEnv({ isDesktop: true })),
+      api.defaultEnv(fullEnv({ isDesktop: false })),
     ]) {
       const visible = api.visibleRows(snapshot, env).map((r) => r.id);
       expect(visible).toContain("thumbsFeedback");
-      expect(visible).not.toContain("thumbsFeedbackRemote");
     }
   });
 
-  it("shows thumbs as a read-only status on remote so a tap cannot lie about the host setting", () => {
-    const api = loadSettings();
-    const remoteRow = api.ROWS.find((r: { id: string }) => r.id === "thumbsFeedbackRemote") as {
-      id: string;
-      kind: string;
-      message?: unknown;
-      describe: (s: unknown) => string;
-    };
-    expect(remoteRow).toMatchObject({ kind: "status" });
-    expect(remoteRow.message).toBeUndefined();
-    const snapshot = api.defaultSnapshot({ thumbsFeedback: true });
-    const env = api.defaultEnv(fullEnv({ isRemote: true }));
-    const visible = api.visibleRows(snapshot, env).map((r) => r.id);
-    expect(visible).toContain("thumbsFeedbackRemote");
-    expect(visible).not.toContain("thumbsFeedback");
-    expect(remoteRow.describe(snapshot)).toMatch(/^On\. /);
-    expect(remoteRow.describe(snapshot)).toContain(api.THUMBS_COPY);
-    expect(remoteRow.describe(api.defaultSnapshot({ thumbsFeedback: false }))).toMatch(/^Off\. /);
-
-    const posted: unknown[] = [];
-    const window = new Window({ url: "https://localhost/" });
-    (window as unknown as { eval: (src: string) => void }).eval(settingsSrc);
-    const grok = (window as unknown as { GrokSettings: ReturnType<typeof loadSettings> }).GrokSettings;
-    const doc = window.document as unknown as Document;
-    const root = doc.createElement("div");
-    doc.body.appendChild(root);
-    grok.mount(root, {
-      snapshot,
-      env,
-      post: (msg: unknown) => posted.push(msg),
-    });
-    expect(root.querySelector('[data-id="thumbsFeedback"]')).toBeNull();
-    const status = root.querySelector('[data-id="thumbsFeedbackRemote"]') as HTMLElement;
-    expect(status).toBeTruthy();
-    expect(status.querySelector(".settings-switch")).toBeNull();
-    status.click();
-    expect(posted).not.toContainEqual(expect.objectContaining({ type: "setThumbsFeedback" }));
-  });
 });
 
 function keydown(window: Window, init: Record<string, unknown>) {
@@ -1640,50 +1386,6 @@ describe("settings restore skips disabled rows", () => {
 });
 
 describe("review lows (settings / telemetry / voice write scope)", () => {
-  it.skip("closes Settings before opening How it works so the explainer owns focus (remote control tab removed)", () => {
-    const h = bootWebview();
-    seedChat(h);
-    dispatch(h.window, { type: "remoteStatus", linked: false });
-    openSettings(h);
-    clickSettingsNav(h, "Remote control");
-    const btn = h.doc.querySelector('[data-id="remoteHowItWorks"] .settings-action') as HTMLElement;
-    expect(btn).toBeTruthy();
-    click(h.window, btn);
-    expect(h.doc.getElementById("settings-overlay")).toBeNull();
-    expect(h.doc.querySelector(".remote-explainer-panel")).toBeTruthy();
-  });
-
-  it("hides How it works on the VS Code settings tab", () => {
-    const window = new Window({ url: "https://localhost/" });
-    (window as unknown as { eval: (src: string) => void }).eval(settingsSrc);
-    const api = (window as unknown as { GrokSettings: ReturnType<typeof loadSettings> }).GrokSettings;
-    const doc = window.document as unknown as Document;
-    const root = doc.createElement("div");
-    doc.body.appendChild(root);
-    api.mount(root, {
-      snapshot: api.defaultSnapshot(),
-      env: api.defaultEnv(fullEnv({ isDesktop: false, remoteLinked: false })),
-      standalone: true,
-    });
-    expect(root.querySelector('[data-id="remoteHowItWorks"]')).toBeNull();
-  });
-
-  it("broadcasts telemetryEnabled to every remote tab", () => {
-    const src = readFileSync(
-      path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "sidebar.ts"),
-      "utf8",
-    );
-    const start = src.indexOf("private static readonly DEVICE_GLOBAL_REMOTE_TYPES");
-    const end = src.indexOf("]);", start);
-    expect(start).toBeGreaterThan(-1);
-    expect(end).toBeGreaterThan(start);
-    const body = src.slice(start, end);
-    expect(body).toContain("telemetryEnabled");
-    expect(body).toContain("thumbsFeedback");
-    expect(body).toContain("mcpConnectors");
-    expect(body).toContain("mcpServers");
-  });
-
   it("posts the stored global MCP view device-wide", () => {
     const src = readFileSync(
       path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "sidebar.ts"),
@@ -1696,7 +1398,6 @@ describe("review lows (settings / telemetry / voice write scope)", () => {
     const body = src.slice(start, end);
     expect(body).toContain("this.post(view)");
     expect(body).toContain("this.mcpServersView");
-    expect(body).not.toContain("this.sendRemoteRepo");
     expect(body).not.toContain("this.postLocal");
   });
 
@@ -1762,26 +1463,6 @@ describe("settings About section", () => {
       standalone: true,
     });
     expect(general.querySelector(".settings-about-disclaimer")).toBeNull();
-  });
-});
-
-describe("settings editor tab dispose (sidebar.ts)", () => {
-  it("installs the dispose listener before awaiting the device token", () => {
-    const src = readFileSync(
-      path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "sidebar.ts"),
-      "utf8",
-    );
-    const start = src.indexOf("async openSettingsEditor(");
-    const end = src.indexOf("private async onSettingsPanelMessage", start);
-    expect(start).toBeGreaterThan(-1);
-    expect(end).toBeGreaterThan(start);
-    const body = src.slice(start, end);
-    const disposeAt = body.indexOf("onDidDispose");
-    const awaitAt = body.indexOf("await this.readDeviceToken()");
-    expect(disposeAt).toBeGreaterThan(-1);
-    expect(awaitAt).toBeGreaterThan(-1);
-    expect(disposeAt).toBeLessThan(awaitAt);
-    expect(body.indexOf("if (this.settingsEditor !== panel)", awaitAt)).toBeGreaterThan(awaitAt);
   });
 });
 
@@ -1861,91 +1542,6 @@ describe("Providers refresh", () => {
     expect(types()).toEqual(["refreshProviders"]);
   });
 
-  it("stays off the remote, where provider probing is the desk's business", () => {
-    const { root, types } = mountAt("providers", { env: { isRemote: true } });
-    expect(root.querySelector(".settings-refresh")).toBeNull();
-    expect(types()).toEqual([]);
-    // The rows themselves still render — a phone reads provider state, it just
-    // cannot make the desk go looking. This host does not advertise
-    // remoteAgentSignIn, so it is the read-only half of the pair.
-    expect(root.querySelector('[data-id="providerGrokStatus"]')).toBeTruthy();
-  });
-
-  const signInCaps = { hostCaps: { relocateView: false, showOutput: false, toggleDevTools: true, remoteAgentSignIn: true } };
-
-  it("offers Connect on a remote, and never Sign out", () => {
-    // `runGrokLogin` from a remote is the headless device-code flow, so a phone
-    // or a cloud environment can connect an agent from the page that lists them
-    // — not only from the onboarding card. Signing OUT stays desk-only.
-    const disconnected = mountAt("providers", {
-      env: { isRemote: true, ...signInCaps },
-      snapshot: { providers: [{ id: "grok", connected: false }] },
-    });
-    const action = disconnected.root.querySelector('[data-id="providerGrokRemote"] button');
-    expect(action?.textContent).toBe("Connect");
-    (action as HTMLButtonElement).click();
-    expect(disconnected.types()).toContain("runGrokLogin");
-
-    const connected = mountAt("providers", {
-      env: { isRemote: true, ...signInCaps },
-      snapshot: { providers: [{ id: "grok", connected: true }] },
-    });
-    expect(connected.root.querySelector('[data-id="providerGrokRemote"]')).toBeNull();
-    expect(connected.root.querySelector('[data-id="providerGrokStatus"]')).toBeTruthy();
-    expect(connected.root.querySelector('[data-id="providerGrokStatus"] button')).toBeNull();
-  });
-
-  it("offers Sign out on a cloud environment, where the remote is the only surface", () => {
-    // `logout` is host-local everywhere else: it revokes a credential every
-    // surface on that machine shares, and a phone must not do that to a desk.
-    // A cloud box has no other surface, so a credential you can grant and never
-    // revoke is the worse answer (owner, 2026-08-30).
-    const cloudCaps = {
-      hostCaps: {
-        relocateView: false, showOutput: false, toggleDevTools: true,
-        remoteAgentSignIn: true, remoteAgentSignOut: true,
-      },
-    };
-    const h = mountAt("providers", {
-      env: { isRemote: true, ...cloudCaps },
-      snapshot: { providers: [{ id: "grok", connected: true }] },
-    });
-    const action = h.root.querySelector('[data-id="providerGrokRemote"] button');
-    expect(action?.textContent).toBe("Sign out");
-    (action as HTMLButtonElement).click();
-    expect(h.types()).toContain("logout");
-  });
-
-  it("still refuses Sign out on a remote attached to a DESK", () => {
-    // The desk keeps its read-only row: same page, same provider, no button.
-    const h = mountAt("providers", {
-      env: {
-        isRemote: true,
-        hostCaps: {
-          relocateView: false, showOutput: false, toggleDevTools: true,
-          remoteAgentSignIn: true,
-        },
-      },
-      snapshot: { providers: [{ id: "grok", connected: true }] },
-    });
-    expect(h.root.querySelector('[data-id="providerGrokRemote"]')).toBeNull();
-    expect(h.root.querySelector('[data-id="providerGrokStatus"] button')).toBeNull();
-  });
-
-  it("keeps the read-only row against a host that cannot sign in for a remote", () => {
-    // The relay serves the client, so the client is always as new as the deploy
-    // while the extension is whatever the user installed. A host from before
-    // `remoteAgentSignIn` DROPS runGrokLogin silently — a Connect button there
-    // would do nothing at all, which is worse than the row it replaced.
-    const old = mountAt("providers", {
-      env: { isRemote: true },
-      snapshot: { providers: [{ id: "grok", connected: false }] },
-    });
-    expect(old.root.querySelector('[data-id="providerGrokRemote"]')).toBeNull();
-    expect(old.root.querySelector('[data-id="providerGrokStatus"]')).toBeTruthy();
-    expect(old.root.querySelector('[data-id="providerGrokStatus"] button')).toBeNull();
-  });
-
   it("stays off a host that never reported its providers", () => {
     const { root, types } = mountAt("providers", { env: { providersKnown: false } });
     expect(root.querySelector(".settings-refresh")).toBeNull();
@@ -1960,13 +1556,6 @@ describe("Providers refresh", () => {
 });
 
 describe("GitHub connection row", () => {
-  const githubCaps = {
-    hostCaps: {
-      relocateView: false, showOutput: false, toggleDevTools: true,
-      remoteGithubSignIn: true, remoteGithubToken: true,
-    },
-  };
-
   it("stays hidden until the githubState frame arrives", () => {
     const { root } = mountAt("providers");
     expect(root.querySelector('[data-id="githubConnection"]')).toBeNull();
@@ -2007,45 +1596,6 @@ describe("GitHub connection row", () => {
       .toBe("Connect with GitHub CLI");
   });
 
-  it("lets a remote connect when the host advertised remoteGithubSignIn, and signs out only on a cloud host", () => {
-    const disconnected = mountAt("providers", {
-      env: { isRemote: true, ...githubCaps },
-      snapshot: { githubState: { connected: false, cliPresent: true } },
-    });
-    const connect = disconnected.root.querySelector('[data-id="githubConnectionRemote"] .settings-github-connect');
-    expect(connect?.textContent).toBe("Connect with GitHub CLI");
-    (connect as HTMLButtonElement).click();
-    expect(disconnected.posted).toContainEqual({
-      type: "setupGithubCli", action: "auth", surface: "settings",
-    });
-    expect(disconnected.root.querySelector(".settings-github-flow")).toBeTruthy();
-    expect(disconnected.root.querySelector(".settings-github-connect")).toBeNull();
-    const open = disconnected.root.querySelector(".settings-github-flow-open");
-    expect(open).toBeNull();
-
-    const deskRemote = mountAt("providers", {
-      env: { isRemote: true, ...githubCaps },
-      snapshot: {
-        githubState: { connected: true, login: "phuryn", cliPresent: true },
-      },
-    });
-    expect(deskRemote.root.querySelector('[data-id="githubConnectionRemote"]')).toBeNull();
-    expect(deskRemote.root.querySelector('[data-id="githubConnectionStatus"]')).toBeTruthy();
-
-    const cloud = mountAt("providers", {
-      env: {
-        isRemote: true,
-        hostCaps: { ...githubCaps.hostCaps, remoteAgentSignOut: true },
-      },
-      snapshot: {
-        githubState: { connected: true, login: "phuryn", cliPresent: true },
-      },
-    });
-    const signOut = cloud.root.querySelector('[data-id="githubConnectionRemote"] button');
-    expect(signOut?.textContent).toBe("Sign out");
-    (signOut as HTMLButtonElement).click();
-    expect(cloud.posted).toContainEqual({ type: "githubSignOut" });
-  });
 });
 
 describe("settings update() skips an unchanged snapshot", () => {
@@ -2119,19 +1669,9 @@ describe("settings switch knob theme", () => {
 });
 
 /**
- * The GitHub token row follows the same gate as the Connect row beside it:
- * can this host sign in to GitHub for a remote at all?
- *
- * It was briefly cloud-only, to match a host policy that was itself briefly
- * cloud-only. Both came back out — a remote that could inject a token can
- * already drive the agent and approve its tool calls on that machine, so the
- * gate protected nothing while removing the narrowest credential we can offer
- * from a phone driving a desk.
- *
- * What these pin is that the CLIENT gate matches the HOST's. Whichever way that
- * decision goes, offering a row the host will refuse is the one shape that is
- * always wrong: it takes the paste and sends a credential across the relay for
- * nothing.
+ * The GitHub token row is offered exactly when the host would accept a token:
+ * GitHub state is known and not yet connected. Offering a row the host will
+ * refuse takes the paste and sends a credential for nothing.
  */
 describe("settings: the GitHub token path matches what the host will accept", () => {
   const S = loadSettings();
@@ -2142,52 +1682,12 @@ describe("settings: the GitHub token path matches what the host will accept", ()
     );
 
   it("offers it locally, where there is also a terminal", () => {
-    expect(tokenOffered({ isRemote: false }, { connected: false, cliPresent: true })).toBe(true);
+    expect(tokenOffered({}, { connected: false, cliPresent: true })).toBe(true);
   });
 
-  it("offers it to a remote on a cloud machine — its only way in", () => {
-    expect(tokenOffered({
-      isRemote: true,
-      hostCaps: { remoteGithubSignIn: true, remoteGithubToken: true, remoteAgentSignOut: true },
-    }, { connected: false, cliPresent: true })).toBe(true);
-  });
-
-  it("offers it to a phone driving a desk too — the host accepts it there", () => {
-    expect(tokenOffered({
-      isRemote: true,
-      hostCaps: { remoteGithubSignIn: true, remoteGithubToken: true, remoteAgentSignOut: false },
-    }, { connected: false, cliPresent: true })).toBe(true);
-  });
-
-  it("withholds it from a remote whose host cannot sign in to GitHub at all", () => {
-    // The honest case: an older host drops `setupGithubCli` and would drop this
-    // too, so the row would be a paste that goes nowhere.
-    expect(tokenOffered({
-      isRemote: true,
-      hostCaps: { remoteGithubSignIn: false },
-    }, { connected: false, cliPresent: true })).toBe(false);
-  });
-
-  it("withholds it from a host that can do the DEVICE flow but not a token", () => {
-    // The gap `remoteGithubSignIn` cannot cover. Every host between 4.1.0 and
-    // the release that added `githubLoginWithToken` advertises the first and
-    // knows nothing of the second, and the relay always serves a client newer
-    // than the extension — so this is the ordinary case for anyone who has not
-    // updated, not an exotic one. Offering the row there sends a credential
-    // across the relay to be dropped in silence.
-    expect(tokenOffered({
-      isRemote: true,
-      hostCaps: { remoteGithubSignIn: true },
-    }, { connected: false, cliPresent: true })).toBe(false);
-  });
-
-  it("withholds it once GitHub is connected, on every surface", () => {
-    expect(tokenOffered({ isRemote: false }, { connected: true, login: "octocat", cliPresent: true }))
+  it("withholds it once GitHub is connected", () => {
+    expect(tokenOffered({}, { connected: true, login: "octocat", cliPresent: true }))
       .toBe(false);
-    expect(tokenOffered({
-      isRemote: true,
-      hostCaps: { remoteGithubSignIn: true, remoteAgentSignOut: true },
-    }, { connected: true, login: "octocat", cliPresent: true })).toBe(false);
   });
 
   it("is an advanced second step on the GitHub row, not a sibling row", () => {
@@ -2206,18 +1706,11 @@ describe("settings: the GitHub token path matches what the host will accept", ()
     expect(root.querySelector(".settings-github-token-input")).toBeTruthy();
   });
 
-  it("the CLI path is two steps: a choice, then a card with a real open link", () => {
+  it("the CLI path is two steps: a choice, then the terminal sign-in card", () => {
     const { root, posted } = mountAt("providers", {
-      env: {
-        isRemote: true,
-        hostCaps: {
-          relocateView: false, showOutput: false, toggleDevTools: true,
-          remoteGithubSignIn: true,
-        },
-      },
       snapshot: { githubState: { connected: false, cliPresent: true } },
     });
-    const row = root.querySelector('[data-id="githubConnectionRemote"]') as HTMLElement;
+    const row = root.querySelector('[data-id="githubConnection"]') as HTMLElement;
     expect(row.querySelector(".settings-github-flow")).toBeNull();
     (row.querySelector(".settings-github-connect") as HTMLButtonElement).click();
     expect(posted).toContainEqual({
@@ -2225,35 +1718,6 @@ describe("settings: the GitHub token path matches what the host will accept", ()
     });
     expect(root.querySelector(".settings-github-flow")).toBeTruthy();
     expect(root.querySelector(".settings-github-connect")).toBeNull();
-
-    const { root: waiting, surface } = mountAt("providers", {
-      env: {
-        isRemote: true,
-        hostCaps: {
-          relocateView: false, showOutput: false, toggleDevTools: true,
-          remoteGithubSignIn: true,
-        },
-      },
-      snapshot: { githubState: { connected: false, cliPresent: true } },
-    });
-    surface.update({
-      githubState: {
-        connected: false,
-        cliPresent: true,
-        loginFlow: {
-          status: "waiting",
-          url: "https://github.com/login/device",
-          code: "0D15-6BD9",
-        },
-      },
-    });
-    const open = waiting.querySelector(".settings-github-flow-open") as HTMLAnchorElement;
-    expect(open).toBeTruthy();
-    expect(open.tagName).toBe("A");
-    expect(open.getAttribute("href")).toBe("https://github.com/login/device");
-    expect(open.target).toBe("_blank");
-    expect(waiting.textContent).toContain("0D15-6BD9");
-    expect(waiting.querySelector(".settings-github-connect")).toBeNull();
   });
 
   it("makes 'fine-grained token' a new-tab link in the token step", () => {
@@ -2312,19 +1776,4 @@ describe("settings: the GitHub token path matches what the host will accept", ()
     expect(posted).toContainEqual({ type: "recheckConnection", provider: "grok" });
   });
 
-  it("does not offer Re-check on a remote GitHub device-code wait", () => {
-    const { root } = mountAt("providers", {
-      env: {
-        isRemote: true,
-        hostCaps: {
-          relocateView: false, showOutput: false, toggleDevTools: true,
-          remoteGithubSignIn: true,
-        },
-      },
-      snapshot: { githubState: { connected: false, cliPresent: true } },
-    });
-    (root.querySelector(".settings-github-connect") as HTMLButtonElement).click();
-    expect(root.querySelector(".settings-github-flow-recheck")).toBeNull();
-    expect(root.querySelector(".settings-github-flow-cancel")).toBeTruthy();
-  });
 });

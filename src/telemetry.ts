@@ -12,7 +12,6 @@
 // is the only path into the event props object — unknown keys and path-like /
 // free-text values are dropped.
 import type { AcpProvider } from "./acp-backend";
-import * as https from "node:https";
 
 // Aptabase ingestion app keys (region-prefixed write-only keys meant to ship in
 // the client, not secrets). Two projects keep test traffic out of the real
@@ -40,8 +39,10 @@ export type TelemetryHostKind = "desktop" | "vscode";
 export type TelemetryAppPurpose = "knowledge" | "coding";
 export type TelemetryMode = "agent" | "plan" | "yolo";
 export type TelemetryEffort = "" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
-export type TelemetrySessionOrigin = "local" | "remote";
-export type TelemetryClientDevice = "desktop" | "mobile";
+/** Every session starts in the local editor. Kept as a field so the event
+ *  schema stays comparable with earlier data. */
+export type TelemetrySessionOrigin = "local";
+export type TelemetryClientDevice = "desktop";
 export type TelemetryProvider = AcpProvider;
 
 export interface SessionStartProps {
@@ -86,9 +87,6 @@ export interface SessionStartProps {
   /** Whether this machine already had an anonymous install id stored — a
    *  returning install versus this session also creating the id. */
   returningInstall?: boolean;
-  /** Browser-owned AFK Pilot preferences. Omitted until a remote reports them. */
-  remoteFontScale?: number;
-  remoteReadRepliesAloud?: boolean;
   /** Host application name (`vscode.env.appName`). Shape-validated product
    *  names only — omitted when the host doesn't report one or the string
    *  fails the length / character / path checks. Vocabulary is not allowlisted. */
@@ -119,8 +117,6 @@ export const SESSION_START_ALLOWED_KEYS = [
   "soundNotifications",
   "sessionOrigin",
   "clientDevice",
-  "remoteFontScale",
-  "remoteReadRepliesAloud",
   "host",
   "hostKind",
   "appPurpose",
@@ -139,8 +135,8 @@ export const SESSION_START_ALLOWED_KEYS = [
 
 const ALLOWED_MODES = new Set<string>(["agent", "plan", "yolo"]);
 const ALLOWED_EFFORTS = new Set<string>(["", "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]);
-const ALLOWED_ORIGINS = new Set<string>(["local", "remote"]);
-const ALLOWED_DEVICES = new Set<string>(["desktop", "mobile"]);
+const ALLOWED_ORIGINS = new Set<string>(["local"]);
+const ALLOWED_DEVICES = new Set<string>(["desktop"]);
 const ALLOWED_HOST_KINDS = new Set<string>(["desktop", "vscode"]);
 const ALLOWED_PURPOSES = new Set<string>(["knowledge", "coding"]);
 const ALLOWED_PROVIDERS = new Set<string>(["grok", "codex", "claude", "gemini", "muse"]);
@@ -240,11 +236,6 @@ export function sanitizeSessionStartProps(raw: unknown): Record<string, string |
   const clientDevice = pickEnum(src.clientDevice, ALLOWED_DEVICES);
   if (clientDevice !== undefined) picked.clientDevice = clientDevice;
 
-  const remoteFontScale = pickBoundedInt(src.remoteFontScale, 80, 160);
-  if (remoteFontScale !== undefined) picked.remoteFontScale = remoteFontScale;
-  const remoteReadRepliesAloud = pickBoolean(src.remoteReadRepliesAloud);
-  if (remoteReadRepliesAloud !== undefined) picked.remoteReadRepliesAloud = remoteReadRepliesAloud;
-
   if (typeof src.host === "string" && isSafeHost(src.host)) picked.host = src.host;
 
   const hostKind = pickEnum(src.hostKind, ALLOWED_HOST_KINDS);
@@ -320,16 +311,9 @@ export function shouldSendTelemetry(
   return Boolean(globalEnabled && settingEnabled && isOfficialBuild);
 }
 
-/** Classify the surface that sent a session's first message. Local VS Code is
- * always desktop; AFK Pilot uses its coarse-pointer/hover touch signal. */
-export function sessionStartSurface(
-  origin: TelemetrySessionOrigin,
-  remoteUsesTouch?: boolean,
-): Pick<SessionStartProps, "sessionOrigin" | "clientDevice"> {
-  return {
-    sessionOrigin: origin,
-    clientDevice: origin === "remote" && remoteUsesTouch ? "mobile" : "desktop",
-  };
+/** The surface that sent a session's first message: always the local editor. */
+export function sessionStartSurface(): Pick<SessionStartProps, "sessionOrigin" | "clientDevice"> {
+  return { sessionOrigin: "local", clientDevice: "desktop" };
 }
 
 /** Desktop app vs every VS Code-compatible host (VS Code, Cursor, Antigravity). */

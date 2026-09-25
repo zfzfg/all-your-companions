@@ -27,7 +27,7 @@
 import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import type { AcpMcpStdioServer } from "./mcp-connectors";
 import { HostPipeMux, type PipeProtocol } from "./host-pipe-mux";
 import {
@@ -37,7 +37,6 @@ import {
   COMPANIONS_SERVER_NAME,
   COMPANIONS_TOOLS,
   COMPANIONS_TOKEN_ENV,
-  checkHello,
   encodeFrame,
   parseClientFrame,
 } from "./companions-protocol";

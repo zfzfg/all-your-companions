@@ -13,7 +13,6 @@ import {
   shouldOfferWorktrees,
 } from "../src/app-purpose";
 import { DISK_KEYS, PersistedState, type MementoLike, type StateFs } from "../src/persisted-state";
-import { INBOUND_DISPOSITION, OUTBOUND_DISPOSITION } from "../src/remote-policy";
 
 describe("parseAppPurpose", () => {
   it("defaults absent/invalid to knowledge work", () => {
@@ -151,30 +150,3 @@ describe("PersistedState app purpose", () => {
   });
 });
 
-describe("remote-policy app purpose + worktree", () => {
-  it("keeps worktree create/apply/remove host-local — widening is a separate decision", () => {
-    // apply/remove now take the dispatch session and refuse a mismatched
-    // sessionId, but newWorktreeSession is still untargeted (repo, not
-    // conversation). Disposition stays host-local until that product call.
-    expect(INBOUND_DISPOSITION.newWorktreeSession).toBe("host-local");
-    expect(INBOUND_DISPOSITION.applyWorktree).toBe("host-local");
-    expect(INBOUND_DISPOSITION.removeWorktree).toBe("host-local");
-  });
-
-  it("admits rewind, edit and the confirm that gates them from a remote", () => {
-    // Widened 2026-09-01. A remote can already ask the agent to rewrite or
-    // delete files, so refusing to roll those edits back guarded nothing; and
-    // the confirmation has been in-chat since 2.0.0, so `host-local` bought a
-    // different asker rather than a different check.
-    expect(INBOUND_DISPOSITION.rewindSession).toBe("propose");
-    expect(INBOUND_DISPOSITION.editLastMessage).toBe("propose");
-    // Must match the two above: confirmInChat resolves only on an answer, so a
-    // client that can be shown the dialog and cannot answer hangs the rewind.
-    expect(INBOUND_DISPOSITION.uiConfirmAnswer).toBe("propose");
-  });
-
-  it("mirrors appPurpose and accepts setAppPurpose from remote", () => {
-    expect(OUTBOUND_DISPOSITION.appPurpose).toBe("mirror");
-    expect(INBOUND_DISPOSITION.setAppPurpose).toBe("propose");
-  });
-});

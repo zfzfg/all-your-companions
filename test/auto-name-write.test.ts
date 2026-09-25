@@ -46,7 +46,6 @@ vi.mock("../src/acp", async (importOriginal) => {
 });
 
 import { GrokSidebar } from "../src/sidebar";
-import { RemoteClientState } from "../src/remote-client-state";
 import { Session } from "../src/session";
 import { AUTO_NAME_MAX_CHARS, capAutoName } from "../src/sessions";
 import type { HostMsg } from "../src/protocol";
@@ -64,7 +63,6 @@ function makeSidebar(cwd: string): any {
   sidebar.connectedProviders = vi.fn(() => ["grok", "codex"]);
   sidebar.providerNeedsLogin = {};
   sidebar.providerCliVersions = {};
-  sidebar.remoteClients = new RemoteClientState<Session>(cwd);
   sidebar.pool = new Set<Session>();
   sidebar.focused = new Session();
   sidebar.focused.provider = "grok";
@@ -130,9 +128,6 @@ function makeSidebar(cwd: string): any {
   sidebar.emitContextUsage = vi.fn();
   sidebar.restoreUsage = vi.fn();
   sidebar.restorePersistedDraft = vi.fn();
-  sidebar.sendRemoteSession = vi.fn();
-  sidebar.sendRemoteClient = vi.fn();
-  sidebar.sendRemoteHistorySnapshot = vi.fn();
   sidebar.mirrorToProjectsRail = vi.fn();
   sidebar.localizeHistoryMessage = (message: HostMsg) => message;
   sidebar.maybeUpdateCliOnUpgrade = vi.fn(async () => {});

@@ -311,5 +311,5 @@ one cosmetic notice.
 (reject→revise flow, raw), and `research/plan-gated-probe.cjs` (reject→revise flow
 with the shipped policy enforced) are all kept as runnable reproductions
 (`node research/<file>`, need a local `grok` binary; log to stderr). All ACK writes
-without touching disk, so they're non-destructive. `research/plan-probe.log` is a
-captured run of the original.
+without touching disk, so they're non-destructive. Running `research/plan-probe.cjs`
+writes a local, untracked `research/plan-probe.log`.

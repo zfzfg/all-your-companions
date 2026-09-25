@@ -15,11 +15,12 @@ import {
   APTABASE_APP_KEY_PROD,
   APTABASE_APP_KEY_DEV,
   OFFICIAL_EXTENSION_ID,
+  type SessionStartProps,
+  type SessionStartPropKey,
 } from "../src/telemetry";
 const DESKTOP_APP_SHORT_NAME = "Grok Build Desktop";
 import { GrokSidebar } from "../src/sidebar";
 import { Session } from "../src/session";
-import { RemoteClientState } from "../src/remote-client-state";
 import { normalizeRepoPath } from "../src/sessions";
 
 const REQUIRED: SessionStartProps = {
@@ -105,18 +106,10 @@ describe("shouldSendTelemetry — all gates must allow", () => {
 });
 
 describe("sessionStartSurface", () => {
-  it("classifies local as desktop and splits remote touch from desktop browsers", () => {
-    expect(sessionStartSurface("local", true)).toEqual({
+  it("classifies every session as a local desktop session", () => {
+    expect(sessionStartSurface()).toEqual({
       sessionOrigin: "local",
       clientDevice: "desktop",
-    });
-    expect(sessionStartSurface("remote", false)).toEqual({
-      sessionOrigin: "remote",
-      clientDevice: "desktop",
-    });
-    expect(sessionStartSurface("remote", true)).toEqual({
-      sessionOrigin: "remote",
-      clientDevice: "mobile",
     });
   });
 });
@@ -219,31 +212,6 @@ describe("session_start — feature flags + host (analytics)", () => {
     });
   });
 
-  it("includes reported AFK Pilot preferences without replacing the local values", () => {
-    const ev = buildSessionStartEvent(
-      {
-        ...base,
-        showThinking: false,
-        expandToolDetails: true,
-        steerByDefault: false,
-        remoteFontScale: 140,
-        remoteReadRepliesAloud: false,
-        sessionOrigin: "remote",
-        clientDevice: "mobile",
-      },
-      sys, "s", "2026-07-17T00:00:00.000Z",
-    );
-    expect(ev.props).toMatchObject({
-      chatFontScale: 125,
-      readRepliesAloud: true,
-      remoteFontScale: 140,
-      remoteReadRepliesAloud: false,
-      sessionOrigin: "remote",
-      clientDevice: "mobile",
-      expandToolDetails: true,
-    });
-  });
-
   it("omits host entirely when the app doesn't report one — never sends a blank", () => {
     const ev = buildSessionStartEvent(
       { ...base, showThinking: false, expandToolDetails: false, steerByDefault: false },
@@ -259,16 +227,12 @@ describe("session_start — feature flags + host (analytics)", () => {
         showThinking: false,
         expandToolDetails: false,
         steerByDefault: false,
-        remoteFontScale: 140,
-        remoteReadRepliesAloud: false,
         host: "Visual Studio Code",
       },
       sys, "s", "2026-07-17T00:00:00.000Z",
     );
     expect(ev.props.showThinking).toBe(false);
     expect(ev.props.steerByDefault).toBe(false);
-    expect(ev.props.remoteFontScale).toBe(140);
-    expect(ev.props.remoteReadRepliesAloud).toBe(false);
     // Still no content, ever — only the anonymous install id and config values.
     // Optional fields ride the same closed set when they are present.
     const withAll: SessionStartProps = {
@@ -276,8 +240,6 @@ describe("session_start — feature flags + host (analytics)", () => {
       showThinking: false,
       expandToolDetails: false,
       steerByDefault: false,
-      remoteFontScale: 140,
-      remoteReadRepliesAloud: false,
       host: "Visual Studio Code",
       provider: "grok",
       connectorCount: 0,
@@ -304,8 +266,6 @@ describe("session_start — feature flags + host (analytics)", () => {
       "soundNotifications",
       "sessionOrigin",
       "clientDevice",
-      "remoteFontScale",
-      "remoteReadRepliesAloud",
       "host",
       "hostKind",
       "appPurpose",
@@ -521,8 +481,6 @@ describe("sanitizeSessionStartProps — allowlist, no paths, no free text", () =
   it("keeps only finite numbers inside the documented zoom ranges", () => {
     expect(sanitizeSessionStartProps({ ...REQUIRED, chatFontScale: 125 }).chatFontScale).toBe(125);
     expect(sanitizeSessionStartProps({ ...REQUIRED, chatFontScale: 10 }).chatFontScale).toBeUndefined();
-    expect(sanitizeSessionStartProps({ ...REQUIRED, remoteFontScale: 140 }).remoteFontScale).toBe(140);
-    expect(sanitizeSessionStartProps({ ...REQUIRED, remoteFontScale: 400 }).remoteFontScale).toBeUndefined();
     expect(sanitizeSessionStartProps({ ...REQUIRED, chatFontScale: Number.NaN }).chatFontScale).toBeUndefined();
   });
 
@@ -552,10 +510,8 @@ describe("sanitizeSessionStartProps — allowlist, no paths, no free text", () =
       chatFontScale: 110,
       readRepliesAloud: true,
       soundNotifications: false,
-      sessionOrigin: "remote",
-      clientDevice: "mobile",
-      remoteFontScale: 140,
-      remoteReadRepliesAloud: false,
+      sessionOrigin: "local",
+      clientDevice: "desktop",
       host: "Cursor",
       hostKind: "desktop",
       appPurpose: "coding",
@@ -613,7 +569,6 @@ function makeTelemetrySidebar(cwd = "/repo"): any {
   instance.state = {
     get: vi.fn((key: string) => (key === "grok.installId" ? "already-installed" : undefined)),
   };
-  instance.remoteClients = new RemoteClientState<Session>(cwd);
   instance.focused = new Session();
   instance.focused.provider = "grok";
   instance.focused.cwd = cwd;
@@ -687,7 +642,7 @@ describe("sidebar session_start wiring", () => {
         currentModelId: "grok-4.5",
         currentReasoningEffort: "ultra",
       } as any;
-      sidebar.reportSessionStart(session, "local");
+      sidebar.reportSessionStart(session);
       expect(spy).toHaveBeenCalledTimes(1);
       expect(spy.mock.calls[0][0]).toMatchObject({
         hostKind: "vscode",
@@ -736,9 +691,9 @@ describe("sidebar session_start wiring", () => {
       const sidebar = makeTelemetrySidebar("/repo");
       sidebar.lastProviderConnected = null;
       sidebar.lastVoiceConfiguredByCwd = new Map();
-      sidebar.reportSessionStart(sidebar.focused, "local");
+      sidebar.reportSessionStart(sidebar.focused);
       expect(spy).toHaveBeenCalledTimes(1);
-      const input = spy.mock.calls[0][0] as Record<string, unknown>;
+      const input = spy.mock.calls[0][0] as unknown as Record<string, unknown>;
       expect(input.voiceConfigured).toBeUndefined();
       expect(input.grokConnected).toBeUndefined();
       expect(input.codexConnected).toBeUndefined();
@@ -746,7 +701,9 @@ describe("sidebar session_start wiring", () => {
       const props = telemetry.sanitizeSessionStartProps(
         telemetry.buildSessionStartEvent(
           input as any,
-          { appVersion: "1.0.0", osName: "Windows" },
+          { appVersion: "1.0.0", osName: "Windows" } as any,
+          "sess-1",
+          "2026-06-29T00:00:00.000Z",
         ).props,
       );
       expect(props).not.toHaveProperty("voiceConfigured");
@@ -764,7 +721,7 @@ describe("sidebar session_start wiring", () => {
       const sidebar = makeTelemetrySidebar("/repo");
       sidebar.focused.provider = "codex";
       sidebar.lastProviderConnected = { grok: true, codex: false, claude: false };
-      sidebar.reportSessionStart(sidebar.focused, "local");
+      sidebar.reportSessionStart(sidebar.focused);
       expect(spy.mock.calls[0][0]).toMatchObject({
         provider: "codex",
         grokConnected: true,
@@ -782,7 +739,7 @@ describe("sidebar session_start wiring", () => {
       const sidebar = makeTelemetrySidebar("/repo");
       sidebar.connectedConnectorStore = vi.fn(() => ({ linear: { endpoint: "https://mcp.linear.app/mcp" }, github: { endpoint: "https://api.githubcopilot.com/mcp/" } }));
       sidebar.focused.worktree = { path: "/tmp/wt", label: "wt", sourceGitRoot: "/repo" };
-      sidebar.reportSessionStart(sidebar.focused, "local");
+      sidebar.reportSessionStart(sidebar.focused);
       expect(spy.mock.calls[0][0]).toMatchObject({
         connectorCount: 2,
         worktree: true,
@@ -794,7 +751,7 @@ describe("sidebar session_start wiring", () => {
       sidebar.state.get = vi.fn(() => undefined);
       sidebar.connectedConnectorStore = vi.fn(() => ({}));
       sidebar.focused.worktree = undefined;
-      sidebar.reportSessionStart(sidebar.focused, "local");
+      sidebar.reportSessionStart(sidebar.focused);
       expect(spy.mock.calls[0][0]).toMatchObject({
         connectorCount: 0,
         worktree: false,
@@ -810,7 +767,7 @@ describe("sidebar session_start wiring", () => {
     try {
       const sidebar = makeTelemetrySidebar("/repo");
       sidebar.host.appName = "Antigravity IDE";
-      sidebar.reportSessionStart(sidebar.focused, "local");
+      sidebar.reportSessionStart(sidebar.focused);
       const input = spy.mock.calls[0][0] as SessionStartProps;
       expect(input.host).toBe("Antigravity IDE");
       expect(telemetry.sanitizeSessionStartProps(input).host).toBe("Antigravity IDE");
@@ -824,8 +781,8 @@ describe("sidebar session_start wiring", () => {
     try {
       const sidebar = makeTelemetrySidebar("/repo");
       sidebar.lastVoiceConfiguredByCwd = new Map([[normalizeRepoPath("/other"), true]]);
-      sidebar.reportSessionStart(sidebar.focused, "local");
-      expect((spy.mock.calls[0][0] as Record<string, unknown>).voiceConfigured).toBeUndefined();
+      sidebar.reportSessionStart(sidebar.focused);
+      expect((spy.mock.calls[0][0] as unknown as Record<string, unknown>).voiceConfigured).toBeUndefined();
     } finally {
       spy.mockRestore();
     }
@@ -841,45 +798,10 @@ describe("sidebar session_start wiring", () => {
     sidebar.readDotEnv = () => ({});
     sidebar.voiceSetting = vi.fn((_c: string, _k: string, fb: unknown) => fb);
     sidebar.postLocal = vi.fn();
-    sidebar.remoteClients = new RemoteClientState<Session>("/repo");
     sidebar.lastVoiceConfiguredByCwd = new Map([[normalizeRepoPath("/gone"), true]]);
     sidebar.lastPostedVoiceConfigured = new Map();
     sidebar.postVoiceConfigured();
     expect(sidebar.lastVoiceConfiguredByCwd.has(normalizeRepoPath("/gone"))).toBe(false);
     expect(sidebar.lastVoiceConfiguredByCwd.get(normalizeRepoPath("/repo"))).toBe(true);
   });
-
-  it("postVoiceConfigured skips a connected client that has no project yet", () => {
-    const sidebar = Object.create(GrokSidebar.prototype) as any;
-    sidebar.focused = new Session();
-    sidebar.focused.cwd = "/desk";
-    sidebar.sessionCwd = vi.fn((session: Session) => session.cwd || "/desk");
-    sidebar.resolveVoiceApiKey = vi.fn(() => "key");
-    sidebar.defaultProviderForProject = () => "grok";
-    sidebar.readDotEnv = () => ({});
-    sidebar.voiceSetting = vi.fn((_c: string, _k: string, fb: unknown) => fb);
-    sidebar.postLocal = vi.fn();
-    sidebar.sendRemoteClient = vi.fn();
-    sidebar.remoteClients = new RemoteClientState<Session>("");
-    sidebar.lastVoiceConfiguredByCwd = new Map();
-    sidebar.lastPostedVoiceConfigured = new Map();
-    sidebar.remoteClients.ready("c49");
-    sidebar.remoteClients.ready("ok");
-    sidebar.remoteClients.select("ok", "/repo");
-
-    expect(() => sidebar.remoteClients.cwd("c49")).toThrow(/not ready/);
-    expect(() => sidebar.remoteSessionFor("c49")).toThrow(/not ready/);
-    expect(() => sidebar.postVoiceConfigured()).not.toThrow();
-
-    expect(sidebar.sendRemoteClient).toHaveBeenCalledTimes(1);
-    expect(sidebar.sendRemoteClient).toHaveBeenCalledWith(
-      "ok",
-      expect.objectContaining({ type: "voiceConfigured", value: true }),
-      "/repo",
-    );
-    expect(sidebar.remoteClients.active("c49")).toBeUndefined();
-    expect(sidebar.remoteClients.active("ok")).toBeUndefined();
-    expect(sidebar.lastVoiceConfiguredByCwd.get(normalizeRepoPath("/repo"))).toBe(true);
-  });
-
 });

@@ -721,7 +721,7 @@ Aggregates usage logs (`[usage] ...` and `[agy] turn complete ...`) from the "Gr
   ```
 - **Install in VS Code:**
   ```powershell
-  code --install-extension grok-vscode-phuryn-4.1.7.vsix --force
+  code --install-extension all-your-companions-4.1.7.vsix --force
   ```
 
 ---

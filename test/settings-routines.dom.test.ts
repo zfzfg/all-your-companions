@@ -70,7 +70,7 @@ function boot(snapshotOver: Record<string, unknown> = {}) {
   const root = doc.createElement("div");
   doc.body.appendChild(root);
   const posted: Array<Record<string, unknown>> = [];
-  const env = api.defaultEnv({ isRemote: false, isDesktop: true, providersKnown: true });
+  const env = api.defaultEnv({ isDesktop: true, providersKnown: true });
   const baseSnapshot = (over: Record<string, unknown>) => api.defaultSnapshot({
     routineProjects: [
       { cwd: "C:/repo", label: "grok-remote" },
@@ -94,7 +94,7 @@ function boot(snapshotOver: Record<string, unknown> = {}) {
       ],
       ...snapshotOver,
     }),
-    env: api.defaultEnv({ isRemote: false, isDesktop: true, providersKnown: true }),
+    env: api.defaultEnv({ isDesktop: true, providersKnown: true }),
     standalone: true,
     category: "routines",
     post: (msg: Record<string, unknown>) => posted.push(msg),
@@ -324,7 +324,7 @@ describe("the page as a whole", () => {
     const doc = window.document as unknown as Document;
     const root = doc.createElement("div");
     doc.body.appendChild(root);
-    const env = api.defaultEnv({ isRemote: true, isDesktop: false, providersKnown: true });
+    const env = api.defaultEnv({ isDesktop: false, providersKnown: true });
     const surface = api.mount(root, {
       snapshot: api.defaultSnapshot({}),
       env, standalone: true, category: "routines", post: () => {},
@@ -380,18 +380,12 @@ describe("the page as a whole", () => {
   });
 
   it("names the host the reader is actually looking at", () => {
-    // "a window is open" named nothing the reader controls, and on a phone —
-    // which never runs routines — it was simply wrong.
+    // "a window is open" named nothing the reader controls.
     const { root, api } = boot({ routines: [routine()] });
     expect(root.querySelector(".settings-routines-note")?.textContent).toContain("this app");
 
     expect(api.routinesHostNote({ isDesktop: true })).toContain("this app or an editor window");
     expect(api.routinesHostNote({ isDesktop: false })).toContain("this IDE or the desktop app");
-    // A phone runs nothing itself, so it must not be told to keep a window open.
-    const remote = api.routinesHostNote({ isRemote: true });
-    expect(remote).toContain("on your computer");
-    expect(remote).not.toContain("this app");
-    expect(remote).not.toContain("this IDE");
   });
 });
 
@@ -422,11 +416,11 @@ describe("the countdown", () => {
   });
 });
 
-describe("the three surfaces this page has to reach", () => {
-  // The Routines page renders in the chat overlay, in the standalone VS Code
-  // Settings tab, and on a phone. The render was copied from the connectors
-  // catalog; the ROUTING registration was not, and each of these three is a
-  // separate list that has to name the message or the surface goes dark.
+describe("the surfaces this page has to reach", () => {
+  // The Routines page renders in the chat overlay and in the standalone VS Code
+  // Settings tab. The render was copied from the connectors catalog; the
+  // ROUTING registration was not, and each surface has a separate list that has
+  // to name the message or the surface goes dark.
   const sidebarSrc = readFileSync(
     fileURLToPath(new URL("../src/sidebar.ts", import.meta.url)),
     "utf8",
@@ -439,13 +433,6 @@ describe("the three surfaces this page has to reach", () => {
     expect(end, marker).toBeGreaterThan(start);
     return sidebarSrc.slice(start, end);
   }
-
-  it("broadcasts routines device-wide, not down the focused conversation", () => {
-    // Without this the desk's focused conversation decides who gets the page:
-    // a phone reading a DIFFERENT conversation asks for routines and the answer
-    // is routed to tabs holding the focused one, so it never arrives.
-    expect(block("private static readonly DEVICE_GLOBAL_REMOTE_TYPES")).toContain('"routines"');
-  });
 
   it("the standalone Settings tab LISTENS for the routines frame", () => {
     // Fifth hand-written registry the same message type has to be named in, and
@@ -503,13 +490,10 @@ describe("the three surfaces this page has to reach", () => {
     expect(body).not.toContain("if (!cache");
   });
 
-  it("posts the page to the settings tab and a trimmed copy to remotes", () => {
+  it("posts the page to the chat webview and the settings tab", () => {
     const body = block("private postRoutines(): void", "\n  }");
+    expect(body).toContain("this.postLocal(message)");
     expect(body).toContain("this.settingsEditor?.webview.postMessage");
-    expect(body).toContain("routinesMessageForRemote");
-    // Not the blanket post(): the desk frame carries archived projects that a
-    // remote may not see, so the two audiences get different frames.
-    expect(body).not.toContain("this.post(message)");
   });
 });
 

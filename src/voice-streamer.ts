@@ -16,13 +16,8 @@ import {
 import { resolveWindowsAudioDevice } from "./voice-recorder";
 import { OpenAiPcmVoiceStreamer } from "./openai-voice";
 
-export interface PcmStreamStartOpts {
-  apiKey: string;
-  language?: string;
-  keyterms?: string[];
-  model?: string;
-  log?: (msg: string) => void;
-}
+import type { PcmStreamStartOpts, PcmSttStream, PartialEvent } from "./voice-common";
+export type { PcmStreamStartOpts, PcmSttStream, PartialEvent } from "./voice-common";
 
 export interface StreamStartOpts extends PcmStreamStartOpts {
   backend?: SttBackend;
@@ -39,22 +34,6 @@ export function redactVoiceStreamUrl(url: string): string {
   } catch {
     return String(url).split("?")[0];
   }
-}
-
-export interface PartialEvent {
-  text: string;
-  /** True only if ALL text in this cumulative partial is finalized. */
-  speechFinal: boolean;
-}
-
-export interface PcmSttStream extends EventEmitter {
-  readonly active: boolean;
-  readonly transcript: string;
-  readonly finalizedTranscript: string;
-  start(opts: PcmStreamStartOpts): Promise<void>;
-  writePcm(bytes: Uint8Array): boolean;
-  stop(): Promise<string>;
-  cancel(): void;
 }
 
 export function createPcmVoiceStreamer(backend: SttBackend): PcmSttStream {

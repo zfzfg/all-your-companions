@@ -283,17 +283,6 @@ export function capSessionMetaAutoNames<T extends Record<string, { autoName?: un
   return { value: next ?? meta, changed };
 }
 
-/** Pick the newest user-visible session from an already-scoped history list. */
-export function mostRecentSession(entries: readonly SessionListEntry[]): SessionListEntry | undefined {
-  return entries
-    // Hidden by kind (grok stamps it) or by our own metadata (§6.6 point 2).
-    .filter((entry) => entry.kind !== "subagent" && !entry.hiddenReason)
-    .reduce<SessionListEntry | undefined>(
-      (recent, entry) => !recent || entry.updatedAt > recent.updatedAt ? entry : recent,
-      undefined,
-    );
-}
-
 /**
  * The row a person would see next after `deletedId` disappears from the list
  * they are looking at. Uses that list's own order, not an internal sort.
@@ -664,7 +653,16 @@ export function sessionDirFor(
   return isSessionDirChild(base, candidate, platform) ? candidate : undefined;
 }
 
-/** Stable repo identity for globalState and remote-policy comparisons. */
+/** Does a session's cwd belong to any of a repo's cwds (the checkout and its worktrees)? */
+export function sessionCwdBelongsToRepo(
+  actualCwd: string,
+  repoCwds: readonly string[],
+  sameCwd: (a: string, b: string) => boolean,
+): boolean {
+  return repoCwds.some((cwd) => sameCwd(actualCwd, cwd));
+}
+
+/** Stable repo identity for globalState comparisons. */
 export function normalizeRepoPath(cwd: string, platform = process.platform): string {
   let normalized = path.normalize((cwd || "").trim());
   if (normalized !== path.parse(normalized).root) normalized = normalized.replace(/[\\/]+$/, "");

@@ -18,14 +18,13 @@ import { bootWebview, click, dispatch, type Harness } from "./webview-harness";
 
 const CAPS = {
   uploadFile: true,
-  remoteVoice: true,
   addProjectFolder: true,
   createProject: true,
   cloneProject: true,
 };
 
-function boot(opts: { remote?: boolean; caps?: Record<string, unknown>; coding?: boolean } = {}) {
-  const h = bootWebview({ remote: opts.remote });
+function boot(opts: { caps?: Record<string, unknown>; coding?: boolean } = {}) {
+  const h = bootWebview();
   dispatch(h.window, {
     type: "initialState",
     effort: "", cwd: "/w", useCtrlEnter: false, extVersion: "3.17.2",
@@ -99,7 +98,7 @@ describe("add project", () => {
   it("stays a plain picker on a host that offers nothing else", () => {
     // An older host advertises `addProjectFolder` alone. One way in is a click,
     // not a menu that asks permission to be a click.
-    const h = boot({ caps: { uploadFile: true, remoteVoice: true, addProjectFolder: true } });
+    const h = boot({ caps: { uploadFile: true, addProjectFolder: true } });
     installOpener(h);
     openMenu(h);
     expect(h.doc.querySelector(".rail-menu")).toBeNull();
@@ -113,15 +112,6 @@ describe("add project", () => {
     installOpener(h);
     openMenu(h);
     expect(h.posted).toContainEqual({ type: "addProjectFolder" });
-  });
-
-  it("hides importing from a phone but keeps the other two", () => {
-    // Opening a native picker is host-local — there is no dialog for a remote to
-    // see. Naming and cloning send a name and a URL, so the host decides where.
-    const h = boot({ remote: true, coding: true });
-    installOpener(h);
-    openMenu(h);
-    expect(menuItems(h)).toEqual(["Clone from GitHub", "New project"]);
   });
 
   it("shows the destination as you type, and posts a NAME", () => {
@@ -139,7 +129,7 @@ describe("add project", () => {
     expect(dest(h)).toBe("~/Grok Build/Q3 Positioning");
     click(h.window, submit(h));
     expect(h.posted).toContainEqual({ type: "createProject", name: "Q3 Positioning" });
-    // A name, never a path. That is what lets this reach the host from a phone.
+    // A name, never a path: the host decides where the folder goes.
     expect(JSON.stringify(h.posted)).not.toContain("/Grok Build/");
   });
 
@@ -219,46 +209,9 @@ describe("add project", () => {
     expect(form(h)).toBeTruthy();
   });
 
-  it("posts setupGithubCli from a remote when the host can run headless GitHub sign-in", () => {
-    const h = boot({
-      remote: true,
-      coding: true,
-      caps: { ...CAPS, remoteGithubSignIn: true, remoteGithubToken: true },
-    });
-    installOpener(h);
-    openMenu(h);
-    click(h.window, [...h.doc.querySelectorAll(".rail-menu-item")][0]);
-    dispatch(h.window, {
-      type: "projectSetup",
-      root: "~/Grok Build",
-      error: "Git couldn't authenticate.",
-      fix: "auth-gh",
-    });
-    click(h.window, fix(h)!);
-    expect(h.posted).toContainEqual({ type: "setupGithubCli", action: "auth" });
-  });
-
-  it("does not post setupGithubCli from a remote at a host that would drop it", () => {
-    const h = boot({ remote: true, coding: true });
-    installOpener(h);
-    openMenu(h);
-    click(h.window, [...h.doc.querySelectorAll(".rail-menu-item")][0]);
-    dispatch(h.window, {
-      type: "projectSetup",
-      root: "~/Grok Build",
-      error: "Git couldn't authenticate.",
-      fix: "auth-gh",
-    });
-    click(h.window, fix(h)!);
-    expect(h.posted.some((m) => m.type === "setupGithubCli")).toBe(false);
-    expect(problem(h)?.textContent).toMatch(/Sign in to GitHub on the computer/);
-  });
-
   const githubBox = (h: Harness) => h.doc.querySelector(".add-project-github") as HTMLElement | null;
   const githubConnect = (h: Harness) =>
     h.doc.querySelector(".add-project-github-connect") as HTMLButtonElement | null;
-  const githubOpen = (h: Harness) =>
-    h.doc.querySelector(".add-project-github-open") as HTMLAnchorElement | null;
 
   it("step 1 is a choice, with no code, until they press connect", () => {
     const h = boot({ coding: true });
@@ -275,17 +228,12 @@ describe("add project", () => {
     expect(githubConnect(h)?.textContent).toBe("Connect with GitHub CLI");
     expect(h.doc.querySelector(".add-project-github-advanced")?.textContent)
       .toBe("Use a token instead");
-    expect(box?.textContent).not.toContain("0D15-6BD9");
     expect(h.doc.querySelector(".add-project-github-token")?.hidden).toBe(true);
     expect(h.doc.querySelector(".add-project-github-card")?.hidden).toBe(true);
   });
 
-  it("pressing connect replaces the choice with the device card", () => {
-    const h = boot({
-      remote: true,
-      coding: true,
-      caps: { ...CAPS, remoteGithubSignIn: true, remoteGithubToken: true },
-    });
+  it("pressing connect replaces the choice with the sign-in card", () => {
+    const h = boot({ coding: true });
     installOpener(h);
     openMenu(h);
     click(h.window, [...h.doc.querySelectorAll(".rail-menu-item")][0]);
@@ -300,66 +248,10 @@ describe("add project", () => {
     expect(githubConnect(h)?.closest(".add-project-github-choice")?.hidden).toBe(true);
     expect(h.doc.querySelector(".add-project-github-card")?.hidden).toBe(false);
     expect(input(h).hidden).toBe(true);
-    dispatch(h.window, {
-      type: "projectSetup",
-      root: "~/Grok Build",
-      github: {
-        status: "waiting",
-        url: "https://github.com/login/device",
-        code: "0D15-6BD9",
-      },
-    });
-    expect(githubBox(h)?.textContent).toContain("0D15-6BD9");
-    expect(githubBox(h)?.textContent).toContain("Open the link, then confirm this code");
-    expect(githubBox(h)?.textContent).toContain("Keep this page open");
-    const link = githubOpen(h);
-    expect(link?.hidden).toBe(false);
-    expect(link?.tagName).toBe("A");
-    expect(link?.getAttribute("href")).toBe("https://github.com/login/device");
-    expect(link?.textContent).toBe("Open the sign-in page");
-    expect(link?.target).toBe("_blank");
-    expect(link?.classList.contains("onb-action")).toBe(true);
-    expect(h.doc.querySelector(".add-project-github-copy")).toBeTruthy();
-    expect(fix(h)?.hidden).toBe(true);
   });
 
-  it("stays open on success and tells them to clone again", () => {
+  it("reopening the form returns to step 1", () => {
     const h = boot({ coding: true });
-    installOpener(h);
-    openMenu(h);
-    click(h.window, [...h.doc.querySelectorAll(".rail-menu-item")][0]);
-    click(h.window, githubConnect(h)!);
-    dispatch(h.window, {
-      type: "projectSetup",
-      root: "~/Grok Build",
-      github: { status: "done", message: "Signed in to GitHub. Clone again." },
-    });
-    expect(form(h)).toBeTruthy();
-    expect(h.doc.querySelector(".add-project-github")?.textContent).toContain("Clone again");
-  });
-
-  it("a waiting GitHub login with no form open leaves the DOM alone", () => {
-    const h = boot({ remote: true, coding: true, caps: { ...CAPS, remoteGithubSignIn: true, remoteGithubToken: true } });
-    dispatch(h.window, {
-      type: "projectSetup",
-      root: "~/Grok Build",
-      github: {
-        status: "waiting",
-        url: "https://github.com/login/device",
-        code: "0D15-6BD9",
-      },
-    });
-    expect(form(h)).toBeNull();
-    expect(h.doc.querySelector(".add-project-scrim")).toBeNull();
-    expect(githubBox(h)).toBeNull();
-  });
-
-  it("reopening the form returns to step 1 and cancels the in-flight login", () => {
-    const h = boot({
-      remote: true,
-      coding: true,
-      caps: { ...CAPS, remoteGithubSignIn: true, remoteGithubToken: true },
-    });
     installOpener(h);
     openMenu(h);
     click(h.window, [...h.doc.querySelectorAll(".rail-menu-item")][0]);
@@ -368,25 +260,13 @@ describe("add project", () => {
       github: { connected: false, cliPresent: true },
     });
     click(h.window, githubConnect(h)!);
-    dispatch(h.window, {
-      type: "projectSetup",
-      root: "~/Grok Build",
-      github: {
-        status: "waiting",
-        url: "https://github.com/login/device",
-        code: "0D15-6BD9",
-      },
-    });
-    expect(githubBox(h)?.textContent).toContain("0D15-6BD9");
-    h.posted.length = 0;
+    expect(githubBox(h)?.dataset.phase).toBe("cli");
     click(h.window, h.doc.querySelector(".add-project-btn:not(.add-project-primary)") as HTMLElement);
     expect(form(h)).toBeNull();
-    expect(h.posted).toContainEqual({ type: "cancelDeviceLogin", provider: "github" });
     openMenu(h);
     click(h.window, [...h.doc.querySelectorAll(".rail-menu-item")][0]);
     expect(form(h)).toBeTruthy();
     expect(githubBox(h)?.dataset.phase).toBe("choice");
-    expect(githubBox(h)?.textContent).not.toContain("0D15-6BD9");
     expect(githubConnect(h)).toBeTruthy();
   });
 
@@ -422,37 +302,6 @@ describe("add project", () => {
     expect(fix(h)?.textContent).toContain("winget install --id GitHub.cli -e");
     click(h.window, fix(h)!);
     expect(h.posted).toContainEqual({ type: "setupGithubCli", action: "install" });
-  });
-
-  /**
-   * Installing has no headless path and is not getting one — a package manager
-   * asks for elevation, so the host opens a terminal. On a cloud machine that
-   * terminal is an Xvfb screen nobody is at, and pressing again just opens
-   * another. The sign-in capability says the host can SIGN IN headlessly; it
-   * says nothing about installing, and admitting every fix behind it put the
-   * inaccessible-terminal dead end straight back on this branch.
-   *
-   * Found by review before release.
-   */
-  it("never posts an install from a remote, however capable the host says it is", () => {
-    // Merge, don't replace: the form needs the project capabilities to render
-    // at all, and a bare override silently produces a page with no menu.
-    const h = boot({ coding: true, remote: true, caps: { ...CAPS, remoteGithubSignIn: true, remoteGithubToken: true } });
-    installOpener(h);
-    openMenu(h);
-    click(h.window, [...h.doc.querySelectorAll(".rail-menu-item")][0]);
-    dispatch(h.window, {
-      type: "projectSetup",
-      root: "~/Grok Build",
-      error: "Git couldn't authenticate.",
-      fix: "install-gh",
-      fixCommand: "sudo apt install gh",
-    });
-    click(h.window, fix(h)!);
-    expect(h.posted.some((m: { type?: string }) => m.type === "setupGithubCli")).toBe(false);
-    // And it says something a person can act on instead of going quiet.
-    expect(h.doc.querySelector(".add-project-error")?.textContent || "")
-      .toMatch(/GitHub CLI/i);
   });
 
   it("clears a stale fix when the next failure does not earn one", () => {
@@ -578,41 +427,8 @@ describe("add project", () => {
     expect(h.posted).toContainEqual({ type: "setupGithubCli", action: "auth" });
   });
 
-  // The relay serves this client, so it is always as new as the last deploy
-  // while the extension is whatever the person installed — "older host" is the
-  // ordinary case here, not an edge one. A host predating `remoteGithubSignIn`
-  // DROPS `setupGithubCli`, so posting it anyway leaves a button that does
-  // nothing at all. The post-clone fix row has always checked this; the
-  // picker's own Connect control is a second entry point to the same action.
-  const openConnectChoice = (h: Harness) => {
-    installOpener(h);
-    openMenu(h);
-    click(h.window, [...h.doc.querySelectorAll(".rail-menu-item")][0]);
-    dispatch(h.window, { type: "githubState", github: { connected: false, cliPresent: true } });
-    return githubConnect(h)!;
-  };
-
-  it("explains instead of posting a message an older host would drop", () => {
-    const h = boot({ remote: true, caps: { ...CAPS, remoteGithubSignIn: false } });
-    click(h.window, openConnectChoice(h));
-    expect(h.posted.some((m) => m.type === "setupGithubCli")).toBe(false);
-    expect(h.doc.querySelector(".add-project-form")!.textContent).toMatch(/terminal|too old/i);
-    expect(githubBox(h)?.dataset.phase).toBe("choice");
-  });
-
-  it("still connects when the host advertises that it can", () => {
-    const h = boot({ remote: true, caps: { ...CAPS, remoteGithubSignIn: true, remoteGithubToken: true } });
-    h.posted.length = 0;
-    click(h.window, openConnectChoice(h));
-    expect(h.posted).toContainEqual({ type: "setupGithubCli", action: "auth" });
-  });
-
   it("the token path is a second step, not a field that is simply present", () => {
-    const h = boot({
-      remote: true,
-      coding: true,
-      caps: { ...CAPS, remoteGithubSignIn: true, remoteGithubToken: true },
-    });
+    const h = boot({ coding: true });
     installOpener(h);
     openMenu(h);
     click(h.window, [...h.doc.querySelectorAll(".rail-menu-item")][0]);
@@ -713,72 +529,6 @@ describe("add project", () => {
     expect(css).toMatch(/\.add-project-scrim\s*\{[^}]*align-items:\s*flex-start/);
   });
 
-  it("paints a waiting GitHub code from githubState.loginFlow, not only projectSetup.github", () => {
-    const h = boot({
-      remote: true,
-      coding: true,
-      caps: { ...CAPS, remoteGithubSignIn: true, remoteGithubToken: true },
-    });
-    installOpener(h);
-    openMenu(h);
-    click(h.window, [...h.doc.querySelectorAll(".rail-menu-item")][0]);
-    dispatch(h.window, {
-      type: "githubState",
-      github: { connected: false, cliPresent: true },
-    });
-    click(h.window, githubConnect(h)!);
-    dispatch(h.window, {
-      type: "githubState",
-      github: {
-        connected: false,
-        cliPresent: true,
-        loginFlow: {
-          status: "waiting",
-          url: "https://github.com/login/device",
-          code: "0D15-6BD9",
-        },
-      },
-    });
-    expect(githubBox(h)?.textContent).toContain("0D15-6BD9");
-    expect(githubOpen(h)?.getAttribute("href")).toBe("https://github.com/login/device");
-  });
-
-  it("does not wipe a waiting GitHub card when a later githubState frame omits github", () => {
-    const h = boot({
-      remote: true,
-      coding: true,
-      caps: { ...CAPS, remoteGithubSignIn: true, remoteGithubToken: true },
-    });
-    installOpener(h);
-    openMenu(h);
-    click(h.window, [...h.doc.querySelectorAll(".rail-menu-item")][0]);
-    click(h.window, githubConnect(h)!);
-    dispatch(h.window, {
-      type: "projectSetup",
-      root: "~/Grok Build",
-      github: {
-        status: "waiting",
-        url: "https://github.com/login/device",
-        code: "0D15-6BD9",
-      },
-    });
-    expect(githubBox(h)?.textContent).toContain("0D15-6BD9");
-    dispatch(h.window, {
-      type: "githubState",
-      github: {
-        connected: false,
-        cliPresent: true,
-        loginFlow: {
-          status: "waiting",
-          url: "https://github.com/login/device",
-          code: "0D15-6BD9",
-        },
-      },
-    });
-    expect(githubBox(h)?.textContent).toContain("0D15-6BD9");
-    expect(githubBox(h)?.dataset.status).not.toBe("starting");
-  });
-
   it("offers Re-check connection after a desk GitHub CLI sign-in from the clone form", () => {
     const h = boot({ coding: true });
     installOpener(h);
@@ -797,20 +547,6 @@ describe("add project", () => {
     h.posted.length = 0;
     click(h.window, recheck);
     expect(h.posted).toContainEqual({ type: "refreshProviders" });
-  });
-
-  it("does not offer Re-check on a remote clone-form device-code wait", () => {
-    const h = boot({
-      remote: true,
-      coding: true,
-      caps: { ...CAPS, remoteGithubSignIn: true, remoteGithubToken: true },
-    });
-    installOpener(h);
-    openMenu(h);
-    click(h.window, [...h.doc.querySelectorAll(".rail-menu-item")][0]);
-    click(h.window, githubConnect(h)!);
-    const recheck = h.doc.querySelector(".add-project-github-recheck") as HTMLButtonElement;
-    expect(recheck.hidden).toBe(true);
   });
 
   it("makes 'fine-grained token' a new-tab link in the token step", () => {

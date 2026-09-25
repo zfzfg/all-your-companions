@@ -25,5 +25,5 @@ it("shows Muse's JSON command in the tool row and the actual Allow/Deny card", (
       permission: h.doc.querySelector(".card.permission .command-card-title")?.textContent,
       choices: [...h.doc.querySelectorAll(".card.permission .card-actions button")].map(el => el.textContent),
     }).toEqual({ tool: command, permission: command, choices: ["Allow (once)", "Deny (once)"] });
-  } finally { h.window.happyDOM.abort(); }
+  } finally { void h.window.happyDOM.abort(); }
 });

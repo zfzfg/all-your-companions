@@ -10,7 +10,7 @@
 //   4. a spawn_subagent tool call renders a "Subagent: <type>" card and is
 //      diverted away from the generic tool group
 //   5. openInEditor capability routes image click: editor host → openFile,
-//      desktop/remote → in-app lightbox (no openFile)
+//      desktop → in-app lightbox (no openFile)
 import { describe, it, expect } from "vitest";
 import { bootWebview, dispatch, click, type Harness } from "./webview-harness";
 
@@ -22,8 +22,8 @@ const IMG_PATH = "/sessions/abc/images/cat.jpg";
 
 type Caps = Record<string, boolean>;
 
-function bootWithCaps(capabilities: Caps, opts: { remote?: boolean } = {}): Harness {
-  const h = bootWebview({ ready: true, remote: opts.remote });
+function bootWithCaps(capabilities: Caps): Harness {
+  const h = bootWebview({ ready: true });
   dispatch(h.window, {
     type: "initialState",
     effort: "",
@@ -36,7 +36,7 @@ function bootWithCaps(capabilities: Caps, opts: { remote?: boolean } = {}): Harn
     soundNotifications: false,
     processingSound: false,
     readRepliesAloud: false,
-    capabilities: { uploadFile: true, remoteVoice: true, ...capabilities },
+    capabilities: { uploadFile: true, ...capabilities },
   });
   return h;
 }
@@ -117,31 +117,12 @@ describe("addGeneratedMedia image click by surface (openInEditor)", () => {
     expect(h.posted.filter((m) => m.type === "requestImageFull")).toEqual([]);
   });
 
-  it("remote → click opens lightbox even when desk caps say the host has an editor", () => {
-    // Phone receives the desk machine's capabilities. A tap must never open
-    // an editor on that desk, so remote forces the lightbox.
-    const h = bootWithCaps({ openInEditor: true }, { remote: true });
-    postGeneratedImage(h);
-    const img = messages(h.doc).querySelector(".generated-image img") as HTMLImageElement;
-    expect(img).not.toBeNull();
-
-    click(h.window, img);
-
-    expect(openFilePosts(h.posted)).toEqual([]);
-    const overlay = imagePreviewOverlay(h.doc);
-    expect(overlay).not.toBeNull();
-    expect(overlay!.hidden).toBe(false);
-    expect((overlay!.querySelector("img") as HTMLImageElement).getAttribute("src")).toBe(IMG_DATA);
-    expect(h.posted.filter((m) => m.type === "requestImageFull")).toEqual([]);
-  });
-
   it("video stays a non-clickable <video> under every surface", () => {
-    for (const opts of [
-      { caps: { openInEditor: true } as Caps, remote: false },
-      { caps: { openInEditor: false } as Caps, remote: false },
-      { caps: { openInEditor: true } as Caps, remote: true },
+    for (const caps of [
+      { openInEditor: true } as Caps,
+      { openInEditor: false } as Caps,
     ]) {
-      const h = bootWithCaps(opts.caps, { remote: opts.remote });
+      const h = bootWithCaps(caps);
       dispatch(h.window, {
         type: "media",
         media: "video",
@@ -166,7 +147,7 @@ describe("addGeneratedMedia image click by surface (openInEditor)", () => {
     // openImagePreview attaches to document.body; resetForNewSession only
     // cleared the transcript — a session swap with the lightbox open left the
     // previous session's image over the next one. Routing generated-media
-    // clicks to the lightbox (desktop + remote) makes that reachable for
+    // clicks to the lightbox (desktop) makes that reachable for
     // transcript content.
     // Mutation: drop closeImagePreview() from resetForNewSession and this
     // test fails (overlay stays visible with the prior src after clearMessages).
@@ -190,21 +171,6 @@ describe("addGeneratedMedia image click by surface (openInEditor)", () => {
     expect(messages(h.doc).querySelector(".generated-image")).toBeNull();
   });
 
-  it("clearMessages closes a remote lightbox opened from generated media", () => {
-    // Same body-attached overlay path as desktop; remote forces the lightbox
-    // even when desk caps claim an editor.
-    const h = bootWithCaps({ openInEditor: true }, { remote: true });
-    postGeneratedImage(h);
-    click(h.window, messages(h.doc).querySelector(".generated-image img") as HTMLImageElement);
-
-    const overlay = imagePreviewOverlay(h.doc)!;
-    expect(overlay.hidden).toBe(false);
-
-    dispatch(h.window, { type: "clearMessages" });
-
-    expect(overlay.hidden).toBe(true);
-    expect((overlay.querySelector("img") as HTMLImageElement).getAttribute("src")).toBeNull();
-  });
 });
 
 describe("addGeneratedMedia (/imagine-video video)", () => {
@@ -402,13 +368,6 @@ describe("captured Codex image-generation parity by surface", () => {
     expect(wrap.querySelector('[title="Show in folder"]')).toBeTruthy();
   });
 
-  it("remote renders only the served-image download action", () => {
-    const h = bootWithCaps({}, { remote: true });
-    const wrap = render(h);
-    expect(wrap.querySelector('[title="Download image"]')).toBeTruthy();
-    expect(wrap.querySelector('[title="Copy path"]')).toBeNull();
-    expect(wrap.querySelector('[title="Open in VS Code"]')).toBeNull();
-  });
 });
 
 describe("addGeneratedMedia (remote link fallback)", () => {

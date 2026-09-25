@@ -5,7 +5,6 @@
 // the thin spawn/fetch shell, smoke-tested manually via research/voice-stt-probe.cjs.
 import { spawn, ChildProcess } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { Blob } from "node:buffer";
 import {
   buildFfmpegArgs,
   buildListDevicesArgs,

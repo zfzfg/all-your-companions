@@ -40,7 +40,7 @@ function makeSidebar(host: Partial<FakeHost> = {}) {
   const sidebar = Object.create(GrokSidebar.prototype) as any;
   const session = { chips: [] as ContextChip[] };
   sidebar.postChips = vi.fn();
-  sidebar.reportRequester = vi.fn();
+  sidebar.notifyUser = vi.fn();
   sidebar.host = {
     getDiagnostics: () => [],
     getTerminalCapture: () => undefined,
@@ -76,8 +76,7 @@ describe("attaching @problems", () => {
 
     expect(session.chips).toEqual([]);
     expect(sidebar.postChips).not.toHaveBeenCalled();
-    expect(sidebar.reportRequester).toHaveBeenCalledWith(
-      undefined,
+    expect(sidebar.notifyUser).toHaveBeenCalledWith(
       "info",
       expect.stringContaining("No problems reported"),
     );
@@ -90,8 +89,7 @@ describe("attaching @problems", () => {
     expect(() => sidebar.addContextSourceChip("problems", () => session)).not.toThrow();
 
     expect(session.chips).toEqual([]);
-    expect(sidebar.reportRequester).toHaveBeenCalledWith(
-      undefined,
+    expect(sidebar.notifyUser).toHaveBeenCalledWith(
       "warning",
       expect.stringContaining("Could not read the editor's problems"),
     );
@@ -130,8 +128,7 @@ describe("attaching @terminal", () => {
     sidebar.addContextSourceChip("terminal", () => session);
 
     expect(session.chips).toEqual([]);
-    expect(sidebar.reportRequester).toHaveBeenCalledWith(
-      undefined,
+    expect(sidebar.notifyUser).toHaveBeenCalledWith(
       "info",
       expect.stringContaining("shell integration"),
     );
@@ -151,8 +148,7 @@ describe("attaching @terminal", () => {
     });
     expect(() => sidebar.addContextSourceChip("terminal", () => session)).not.toThrow();
     expect(session.chips).toEqual([]);
-    expect(sidebar.reportRequester).toHaveBeenCalledWith(
-      undefined,
+    expect(sidebar.notifyUser).toHaveBeenCalledWith(
       "warning",
       expect.stringContaining("Could not read the terminal"),
     );

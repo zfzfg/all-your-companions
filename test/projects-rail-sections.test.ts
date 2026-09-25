@@ -28,15 +28,12 @@ function bootRail(seed: WebviewShape = {}) {
   windows.push(window);
   const posted: Posted[] = [];
   let stored = seed;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (window as any).matchMedia = () => ({ matches: true });
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (window as any).acquireVsCodeApi = () => ({
     postMessage: (message: Posted) => posted.push(message),
     getState: () => stored,
     setState: (next: WebviewShape) => { stored = next; },
   });
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (window as any).confirm = () => true;
   window.document.body.innerHTML = `
     <aside id="projects-rail">
@@ -50,7 +47,6 @@ function bootRail(seed: WebviewShape = {}) {
     doc: window.document,
     posted,
     getStored: () => stored,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     api: (window as any).__grokProjectsRail as {
       onMessage: (message: unknown) => void;
       RAIL_PREVIEW: number;

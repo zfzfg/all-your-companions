@@ -1,18 +1,11 @@
 // A clean (code 0) process exit on an empty transcript is not an error — the
 // composer's own send affordance already says what to do. Non-zero exits, and
 // clean exits on a session that already has content, keep today's banner.
-// Queued-text "Not sent" recovery must still run when the banner is suppressed.
 import { describe, expect, it } from "vitest";
 import { bootWebview, dispatch } from "./webview-harness";
 
 const exitBanner = (doc: Document) =>
   [...doc.querySelectorAll(".msg.error")].map((el) => (el.textContent || "").trim());
-
-const queuedBlocks = (doc: Document) =>
-  [...doc.querySelectorAll(".msg.queued .queued-text")].map((el) => el.textContent);
-
-const queuedTags = (doc: Document) =>
-  [...doc.querySelectorAll(".msg.queued .queued-tag")].map((el) => (el.textContent || "").trim());
 
 describe("clean exit on an empty session is not an error", () => {
   it("renders nothing for code 0 when the transcript is empty", () => {
@@ -36,17 +29,5 @@ describe("clean exit on an empty session is not an error", () => {
     expect(exitBanner(doc)).toEqual([
       "Grok exited (code 1). Send a message to restart this session, or start a new one.",
     ]);
-  });
-
-  it("still hands queued text back as Not sent when the empty-session banner is suppressed", () => {
-    const { window, doc } = bootWebview({ remote: true });
-    dispatch(window, { type: "queuedSends", items: ["Hey"] });
-    expect(queuedBlocks(doc)).toEqual(["Hey"]);
-
-    dispatch(window, { type: "exit", code: 0 });
-
-    expect(exitBanner(doc)).toEqual([]);
-    expect(queuedBlocks(doc)).toEqual(["Hey"]);
-    expect(queuedTags(doc).some((tag) => tag.includes("Not sent"))).toBe(true);
   });
 });

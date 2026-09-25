@@ -67,17 +67,18 @@ describe("a confirmation outranks everything that can launch one", () => {
   });
 
   it("lets no class composed onto the overlay re-declare a z-index", () => {
-    // The trap that made the wizard's 200 override necessary: it mounts as
-    // `class="confirm-overlay connect-wizard-overlay"`, two single-class
-    // selectors of equal specificity, so a z-index on the second silently wins
-    // on source order and drags the dialog back under the panel. Read the
-    // compositions out of the renderer rather than listing them here, so a new
-    // one is covered the day it is written.
+    // The trap: an overlay mounted as `class="confirm-overlay other-overlay"`
+    // has two single-class selectors of equal specificity, so a z-index on the
+    // second silently wins on source order and drags the dialog back under the
+    // panel. Read the compositions out of the renderer rather than listing them
+    // here, so a new one is covered the day it is written. (Today every overlay
+    // mounts with the bare class; the renderer must still mount some.)
     const composed = new Set<string>();
-    for (const [, list] of chatJs.matchAll(/className\s*=\s*"(confirm-overlay[^"]*)"/g)) {
+    const mounts = [...chatJs.matchAll(/className\s*=\s*"(confirm-overlay[^"]*)"/g)];
+    expect(mounts.length).toBeGreaterThan(0);
+    for (const [, list] of mounts) {
       for (const cls of list.split(/\s+/)) if (cls && cls !== "confirm-overlay") composed.add(cls);
     }
-    expect(composed.size).toBeGreaterThan(0);
 
     for (const cls of composed) {
       for (const { name, css } of sheets) {

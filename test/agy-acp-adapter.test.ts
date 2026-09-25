@@ -11,11 +11,12 @@ import {
   cleanPromptTitle,
   normalizeBaselineKey,
   findTranscriptPath,
-  findRecentTranscriptToolCall,
   unwrapTranscriptStrings,
   synthesizeAgyToolDiff,
   ensureAntigravityToolRules,
   sanitizeAgyToolErrorMessage,
+  sweepStaleStagedImages,
+  STAGED_IMAGE_MAX_AGE_MS,
 } from "../src/agy-acp-adapter";
 import { turnStatusFromPromptResult } from "../src/acp-dispatch";
 
@@ -187,8 +188,8 @@ describe("AgyAcpAdapterServer", () => {
     expect(fakeProc).toBeDefined();
 
     // Verify agy stdin received NDJSON prompt
-    let stdinData = "";
-    fakeProc!.stdin.on("data", (d) => { stdinData += d.toString(); });
+    let _stdinData = "";
+    fakeProc!.stdin.on("data", (d) => { _stdinData += d.toString(); });
     await new Promise((r) => setTimeout(r, 10));
 
     // Simulate agy events
@@ -2834,4 +2835,53 @@ describe("AgyAcpAdapterServer", () => {
   });
 });
 
+describe("staged prompt images", () => {
+  const png = Buffer.from("fake-png").toString("base64");
 
+  it("deletes the images a session staged when that session is deleted, and nothing else", async () => {
+    const geminiHome = fs.mkdtempSync(path.join(scratchDir, "gemini-home-"));
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const server = new AgyAcpAdapterServer({ conversationStorePath: nextStore(), geminiHome, inputStream: input, outputStream: output });
+    server.start();
+    const staged = server.stagePromptImage(png, "image/png");
+    const bystander = path.join(geminiHome, "staging", "notes.txt");
+    fs.writeFileSync(bystander, "keep");
+    expect(fs.existsSync(staged)).toBe(true);
+
+    input.write(JSON.stringify({ jsonrpc: "2.0", id: 7, method: "session/delete", params: {} }) + "\n");
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(fs.existsSync(staged)).toBe(false);
+    expect(fs.existsSync(bystander)).toBe(true);
+    server.dispose();
+  });
+
+  it("keeps a staged image across turns — a later turn may view it again", () => {
+    const geminiHome = fs.mkdtempSync(path.join(scratchDir, "gemini-home-"));
+    const server = new AgyAcpAdapterServer({ conversationStorePath: nextStore(), geminiHome, inputStream: new PassThrough(), outputStream: new PassThrough() });
+    const staged = server.stagePromptImage(png, "image/png");
+    server.processPromptBlocks([{ type: "text", text: "second turn" }]);
+    expect(fs.existsSync(staged)).toBe(true);
+    server.dispose();
+  });
+
+  it("sweeps staged images older than a day at start-up and leaves fresh ones and other files", () => {
+    const dir = fs.mkdtempSync(path.join(scratchDir, "staging-"));
+    const now = Date.now();
+    const old = path.join(dir, "image-11111111-2222-3333-4444-555555555555.png");
+    const fresh = path.join(dir, "image-66666666-7777-8888-9999-000000000000.jpg");
+    const other = path.join(dir, "screenshot.png");
+    for (const f of [old, fresh, other]) fs.writeFileSync(f, "x");
+    const past = new Date(now - STAGED_IMAGE_MAX_AGE_MS - 60_000);
+    fs.utimesSync(old, past, past);
+    fs.utimesSync(other, past, past);
+
+    const removed = sweepStaleStagedImages([dir, path.join(dir, "missing")], now);
+
+    expect(removed).toEqual([old]);
+    expect(fs.existsSync(old)).toBe(false);
+    expect(fs.existsSync(fresh)).toBe(true);
+    expect(fs.existsSync(other)).toBe(true);
+  });
+});

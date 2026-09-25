@@ -12,13 +12,12 @@ function makeSidebar(session: Session): any {
   const sidebar = Object.create(GrokSidebar.prototype) as any;
   sidebar.focused = session;
   sidebar.view = undefined;
-  sidebar.sendRemoteSession = vi.fn();
   sidebar.emit = vi.fn();
   sidebar.setStatus = vi.fn();
   sidebar.state = { get: () => ({}), update: vi.fn(async () => {}) };
   sidebar.openDiffsByRequest = { take: () => undefined };
   sidebar.host = {
-    getConfiguration: () => ({ update: vi.fn(async () => {}) }),
+    getConfiguration: () => ({ update: vi.fn(async () => {}), inspect: () => undefined }),
     workspaceRoot: () => "/workspace",
     showErrorMessage: vi.fn(async () => undefined),
     showWarningMessage: vi.fn(async () => undefined),
@@ -159,7 +158,7 @@ describe("Plan transition outcome", () => {
     await sidebar.setMode("plan", session);
 
     expect(session.planActive).toBe(false);
-    expect(session.client.planActive).toBe(false);
+    expect(session.client!.planActive).toBe(false);
     expect(session.autoApprove).toBe(true);
     expect(sidebar.displayMode(session)).toBe("yolo");
     expect(sidebar.host.showErrorMessage).toHaveBeenCalledWith("Couldn't switch mode: mode refused");
@@ -185,7 +184,7 @@ describe("Plan transition outcome", () => {
     expect(session.planActive).toBe(true);
     expect(session.autoApprove).toBe(false);
     expect(sidebar.displayMode(session)).toBe("plan");
-    expect(session.client.setMode).toHaveBeenCalledWith("plan");
+    expect(session.client!.setMode).toHaveBeenCalledWith("plan");
   });
 });
 
@@ -299,7 +298,7 @@ describe("Auto accept does not implement a pending plan review", () => {
     expect(permissionReply(written, 99)?.result?.outcome?.optionId).not.toBe("implement_plan");
     expect(session.pendingPermissions.has(99)).toBe(true);
 
-    await sidebar.onMessage({ type: "permissionAnswer", requestId: 99, optionId: "implement_plan" }, "local");
+    await sidebar.onMessage({ type: "permissionAnswer", requestId: 99, optionId: "implement_plan" });
     expect(permissionReply(written, 99)?.result?.outcome?.optionId).toBe("implement_plan");
   });
 
@@ -318,7 +317,7 @@ describe("Auto accept does not implement a pending plan review", () => {
     expect(optionId).not.toBe("default");
     expect(session.pendingPermissions.has(77)).toBe(true);
 
-    await sidebar.onMessage({ type: "permissionAnswer", requestId: 77, optionId: "acceptEdits" }, "local");
+    await sidebar.onMessage({ type: "permissionAnswer", requestId: 77, optionId: "acceptEdits" });
     expect(permissionReply(written, 77)?.result?.outcome?.optionId).toBe("acceptEdits");
   });
 
@@ -336,7 +335,7 @@ describe("Auto accept does not implement a pending plan review", () => {
     expect(permissionReply(written, 99)?.result?.outcome?.optionId).not.toBe("implement_plan");
     expect(session.pendingPermissions.has(99)).toBe(true);
 
-    await sidebar.onMessage({ type: "permissionAnswer", requestId: 99, optionId: "revise_plan" }, "local");
+    await sidebar.onMessage({ type: "permissionAnswer", requestId: 99, optionId: "revise_plan" });
     expect(permissionReply(written, 99)?.result?.outcome?.optionId).toBe("revise_plan");
   });
 
@@ -356,7 +355,7 @@ describe("Auto accept does not implement a pending plan review", () => {
     expect(optionId).not.toBe("default");
     expect(session.pendingPermissions.has(77)).toBe(true);
 
-    await sidebar.onMessage({ type: "permissionAnswer", requestId: 77, optionId: "plan" }, "local");
+    await sidebar.onMessage({ type: "permissionAnswer", requestId: 77, optionId: "plan" });
     expect(permissionReply(written, 77)?.result?.outcome?.optionId).toBe("plan");
   });
 

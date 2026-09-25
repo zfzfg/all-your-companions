@@ -30,7 +30,7 @@
 
 import { ACP_PROVIDERS } from "./acp-backend";
 import type { AcpProvider } from "./acp-backend";
-import type { EffortLevel } from "./acp";
+import type { EffortLevel } from "./acp-types";
 import { EFFORT_ORDER, PERMISSION_PROFILES } from "./target-eligibility";
 import type { PermissionProfile, RefusalCode } from "./target-eligibility";
 

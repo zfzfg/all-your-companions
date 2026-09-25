@@ -5,9 +5,7 @@ import * as path from "node:path";
 import { AcpClient } from "../src/acp";
 import { GrokSidebar } from "../src/sidebar";
 import { Session } from "../src/session";
-import { RemoteClientState } from "../src/remote-client-state";
 import { defaultFs, sessionsDirFor } from "../src/sessions";
-import { mayDeliverRemoteHostMsg, OUTBOUND_DISPOSITION, OUTBOUND_PROJECT_AUTH } from "../src/remote-policy";
 
 vi.mock("../src/acp", async (importOriginal) => ({
   ...await importOriginal<typeof import("../src/acp")>(),
@@ -23,7 +21,7 @@ afterEach(() => {
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
 });
 
-function setup(origin: "local" | "remote", provider: "grok" | "codex" | "claude" = "grok") {
+function setup(provider: "grok" | "codex" | "claude" = "grok") {
   vi.mocked(AcpClient).mockClear();
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "session-removal-"));
   roots.push(root);
@@ -36,18 +34,10 @@ function setup(origin: "local" | "remote", provider: "grok" | "codex" | "claude"
   session.cwd = cwd;
   session.provider = provider;
   session.activeSessionId = id;
-  sidebar.focused = origin === "local" ? session : new Session();
+  sidebar.focused = session;
   sidebar.pool = new Set([session]);
-  sidebar.remoteClients = new RemoteClientState<Session>(cwd);
-  for (const client of ["phone", "other-tab"]) {
-    sidebar.remoteClients.ready(client);
-    sidebar.remoteClients.select(client, cwd);
-  }
-  if (origin === "remote") sidebar.remoteClients.setActive("phone", session);
   sidebar.view = { webview: { postMessage: vi.fn() } };
   sidebar.projectsRail = { webview: { postMessage: vi.fn() } };
-  sidebar.uplink = { broadcastTo: vi.fn() };
-  sidebar.authorizedSessionCwds = () => [cwd];
   sidebar.state = { get: (_key: string, fallback: unknown) => fallback };
   sidebar.sessionCache = new Map();
   sidebar.host = { appendLine: vi.fn() };
@@ -55,14 +45,14 @@ function setup(origin: "local" | "remote", provider: "grok" | "codex" | "claude"
   sidebar.disposeSession = vi.fn((s: Session) => { s.activeSessionId = undefined; });
   sidebar.postSessionsList = vi.fn();
   sidebar.buildSessionsList = vi.fn();
-  const park = () => origin === "local" ? sidebar.parkFocused() : sidebar.parkRemoteSession("phone");
+  const park = () => sidebar.parkFocused();
   const delivered = () => sidebar.view.webview.postMessage.mock.calls.map(([m]: any[]) => m);
   return { sidebar, session, dir, park, delivered };
 }
 
-describe.each(["local"] as const)("abandoning an empty %s session", (origin) => {
-  it("deletes the known directory and delivers removal to both local views and all tabs without rebuilding", () => {
-    const { sidebar, session, dir, park, delivered } = setup(origin);
+describe("abandoning an empty local session", () => {
+  it("deletes the known directory and delivers removal to both local views without rebuilding", () => {
+    const { sidebar, session, dir, park, delivered } = setup();
     park();
     const frame = { type: "sessionRemoved", id, cwd };
     expect(fs.existsSync(dir)).toBe(false);
@@ -74,7 +64,7 @@ describe.each(["local"] as const)("abandoning an empty %s session", (origin) => 
   });
 
   it("does not announce a failed disk deletion", () => {
-    const { sidebar, dir, park, delivered } = setup(origin);
+    const { sidebar, dir, park, delivered } = setup();
     vi.spyOn(defaultFs, "rmSync").mockImplementation(() => { throw new Error("locked"); });
     park();
     expect(fs.existsSync(dir)).toBe(true);
@@ -83,7 +73,7 @@ describe.each(["local"] as const)("abandoning an empty %s session", (origin) => 
   });
 
   it.each(["hasHistory", "priming"] as const)("keeps a session with %s", (flag) => {
-    const { sidebar, session, dir, park, delivered } = setup(origin);
+    const { sidebar, session, dir, park, delivered } = setup();
     session[flag] = true;
     park();
     expect(fs.existsSync(dir)).toBe(true);
@@ -93,7 +83,7 @@ describe.each(["local"] as const)("abandoning an empty %s session", (origin) => 
   });
 
   it.each(["codex", "claude"] as const)("waits for %s deletion before announcing removal", async (provider) => {
-    const { sidebar, park, delivered } = setup(origin, provider);
+    const { sidebar, park, delivered } = setup(provider);
     let complete!: (removed: boolean) => void;
     sidebar.discardAdapterEmptySession = vi.fn(() => new Promise<boolean>((resolve) => { complete = resolve; }));
     park();
@@ -106,7 +96,7 @@ describe.each(["local"] as const)("abandoning an empty %s session", (origin) => 
   });
 
   it.each(["codex", "claude"] as const)("does not announce a failed %s deletion", async (provider) => {
-    const { sidebar, park, delivered } = setup(origin, provider);
+    const { sidebar, park, delivered } = setup(provider);
     sidebar.discardAdapterEmptySession = vi.fn(async () => false);
     park();
     await new Promise<void>((resolve) => setImmediate(resolve));
@@ -116,7 +106,7 @@ describe.each(["local"] as const)("abandoning an empty %s session", (origin) => 
 
   describe.each(["codex", "claude"] as const)("reusing the live %s client", (provider) => {
     function liveSetup() {
-      const h = setup(origin, provider);
+      const h = setup(provider);
       const { sidebar, session } = h;
       let resolveDelete!: () => void;
       let rejectDelete!: (error: Error) => void;
@@ -134,7 +124,6 @@ describe.each(["local"] as const)("abandoning an empty %s session", (origin) => 
       sidebar.terminalManager = { releaseOwnedBy: vi.fn(() => 0) };
       sidebar.post = vi.fn();
       sidebar.dotForId = vi.fn(() => "cold");
-      sidebar.refreshKeepAwake = vi.fn();
       sidebar.adapterHistory = vi.fn();
       sidebar.locateProvider = vi.fn(() => "fake-adapter");
       sidebar.createProviderBackend = vi.fn(() => ({ provider }));
@@ -149,11 +138,9 @@ describe.each(["local"] as const)("abandoning an empty %s session", (origin) => 
       expect(session.turnToken).toBeUndefined();
       expect(session.gen).toBeGreaterThan(generation);
       expect(sidebar.pool.has(session)).toBe(false);
-      expect(sidebar.remoteClients.clientsForActiveValue(session)).toEqual([]);
       expect(sidebar.terminalManager.releaseOwnedBy).toHaveBeenCalledOnce();
       expect(sidebar.terminalManager.releaseOwnedBy).toHaveBeenCalledWith(client);
       expect(sidebar.post).toHaveBeenCalledWith({ type: "sessionDot", id, dot: "cold" });
-      expect(sidebar.refreshKeepAwake).toHaveBeenCalledOnce();
       expect(client.deleteSession).toHaveBeenCalledOnce();
       expect(client.deleteSession).toHaveBeenCalledWith(id);
       expect(client.dispose).not.toHaveBeenCalled();
@@ -189,12 +176,3 @@ describe.each(["local"] as const)("abandoning an empty %s session", (origin) => 
     });
   });
 });
-
-it("keeps removal local after its project loses remote authorization", () => {
-  const { sidebar, park, delivered } = setup("local");
-  sidebar.authorizedSessionCwds = () => [];
-  park();
-  expect(delivered()).toEqual([{ type: "sessionRemoved", id, cwd }]);
-  expect(sidebar.uplink.broadcastTo).not.toHaveBeenCalled();
-});
-

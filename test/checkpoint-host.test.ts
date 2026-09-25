@@ -61,6 +61,7 @@ function harness(provider: AcpProvider) {
   sidebar.sessionCwd = () => workspace;
   sidebar.state = { get: () => ({}), update: async () => {} };
   sidebar.host = { appendLine: () => {} };
+  sidebar.notifyUser = () => {};
 
   const session = new Session();
   session.provider = provider;
@@ -158,7 +159,7 @@ describe("snapshot before grant — one path per provider", () => {
 
     expect(order).toEqual(["snapshot", "write"]);
     expect(readFileSync(target, "utf8")).toBe("after\n");
-    const file = h.session.checkpointTurn.files.find((f: { relPath: string }) => f.relPath === "src/a.ts");
+    const file = h.session.checkpointTurn!.files.find((f: { relPath: string }) => f.relPath === "src/a.ts")!;
     expect(file.blob).toBe("before\n");
     expect(file.afterSha256).toBe(sha256Text("after\n"));
   });
@@ -170,7 +171,7 @@ describe("snapshot before grant — one path per provider", () => {
       status: "in_progress",
       rawInput: { file_path: join(h.workspace, "src", "a.ts") },
     });
-    expect(h.session.checkpointTurn.files[0].blob).toBe("before\n");
+    expect(h.session.checkpointTurn!.files[0].blob).toBe("before\n");
   });
 
   it("a completed toolCall is too late and is not snapshotted", () => {
@@ -181,7 +182,7 @@ describe("snapshot before grant — one path per provider", () => {
       status: "completed",
       rawInput: { path: "src/a.ts" },
     });
-    expect(h.session.checkpointTurn.files).toEqual([]);
+    expect(h.session.checkpointTurn!.files).toEqual([]);
   });
 });
 
@@ -209,7 +210,7 @@ describe("fault injection does not abort the turn", () => {
     const h = harness("gemini");
     h.sidebar.checkpointStore.disable = () => { throw new Error("disk died"); };
     expect(() => h.sidebar.disableCheckpointTurn(h.session, "ENOSPC")).not.toThrow();
-    expect(h.session.checkpointTurn.disabled).toBe(true);
+    expect(h.session.checkpointTurn!.disabled).toBe(true);
     const notice = h.posted.find((m: any) => m.type === "hostNotice") as any;
     expect(notice.text).toMatch(/Checkpoint for this turn is off/);
     expect(notice.text).toMatch(/ENOSPC/);
@@ -232,7 +233,7 @@ describe("fault injection does not abort the turn", () => {
     h.session.autoApprove = true;
     h.sidebar.handlePermissionRequest(h.session, h.client, editReq("path", "src/a.ts"), h.workspace);
     expect(h.replies).toEqual([{ id: 1, optionId: "once" }]);
-    expect(h.session.checkpointTurn.disabled).toBe(true);
+    expect(h.session.checkpointTurn!.disabled).toBe(true);
     void origStat;
   });
 });
@@ -241,7 +242,6 @@ describe("client rewind restores files and refuses foreign overwrites until aske
   function restoreHarness(provider: AcpProvider) {
     const h = harness(provider);
     h.sidebar.confirmInChat = async () => true;
-    h.sidebar.reportRequester = () => {};
     h.sidebar.applyRewindToView = () => {};
     h.sidebar.truncateSessionCardsAfterRewind = async () => {};
     h.sidebar.restoreComposerFor = () => {};
@@ -332,7 +332,6 @@ describe("Grok native-first, snapshots as fallback", () => {
     h.sidebar.noteCheckpointAfterContent(h.session, abs, "after\n");
     h.sidebar.finishCheckpointTurn(h.session);
     h.sidebar.confirmInChat = async () => true;
-    h.sidebar.reportRequester = () => {};
     h.sidebar.applyRewindToView = () => {};
     h.sidebar.truncateSessionCardsAfterRewind = async () => {};
     h.sidebar.restoreComposerFor = () => {};
@@ -349,7 +348,7 @@ describe("CRLF bytes survive the host snapshot", () => {
     const rel = "src/win.ts";
     writeFileSync(join(h.workspace, rel), "a\r\nb\r\n");
     h.sidebar.snapshotRelOrAbsPaths(h.session, [rel], h.workspace);
-    const file = h.session.checkpointTurn.files.find((f: { relPath: string }) => f.relPath === rel);
+    const file = h.session.checkpointTurn!.files.find((f: { relPath: string }) => f.relPath === rel)!;
     expect(file.blob).toBe("a\r\nb\r\n");
     expect(file.sha256).toBe(sha256Text("a\r\nb\r\n"));
     expect(file.sha256).not.toBe(sha256Text("a\nb\n"));

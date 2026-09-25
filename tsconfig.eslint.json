@@ -1,0 +1,8 @@
+{
+  // Parser project for ESLint's type-aware rules. Unlike tsconfig.test.json it
+  // also lists the happy-dom suites, so every linted TypeScript file has a
+  // program; type errors here are the typecheck's business, not the linter's.
+  "extends": "./tsconfig.test.json",
+  "include": ["src/**/*", "test/**/*"],
+  "exclude": ["node_modules", "out"]
+}

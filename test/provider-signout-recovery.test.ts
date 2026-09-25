@@ -12,7 +12,6 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { GrokSidebar } from "../src/sidebar";
-import { RemoteClientState } from "../src/remote-client-state";
 import { Session } from "../src/session";
 import type { HostMsg } from "../src/protocol";
 
@@ -47,7 +46,6 @@ function makeSidebar(options: {
   }));
   sidebar.connectedProviders = vi.fn(() => connected);
   sidebar.defaultProviderForProject = vi.fn(() => connected[0] ?? "grok");
-  sidebar.remoteClients = new RemoteClientState<Session>(cwd);
   // A real instance has this from its field initialiser; signing out clears the
   // provider's preflight latch so the next sign-in starts at step 1 again.
   sidebar.deviceLoginPreflightShown = new Set<string>();
@@ -90,7 +88,6 @@ function makeSidebar(options: {
   sidebar.postProviderState = vi.fn();
   sidebar.postSessionName = vi.fn();
   sidebar.dotForId = vi.fn(() => "none");
-  sidebar.dropRemoteVoice = vi.fn();
   sidebar.stopVoiceInput = vi.fn();
   sidebar.workspaceRoot = vi.fn(() => cwd);
   sidebar.authorizedSessionCwds = vi.fn(() => [cwd]);
@@ -98,10 +95,6 @@ function makeSidebar(options: {
   sidebar.setSessionCwd = vi.fn((session: Session, target: string) => { session.cwd = target; });
   sidebar.persistWorktreeBinding = vi.fn(async () => {});
   sidebar.sweepEmptySessions = vi.fn();
-  sidebar.sendRemoteSessionList = vi.fn();
-  sidebar.sendRemoteClient = vi.fn();
-  sidebar.sendRemoteSession = vi.fn();
-  sidebar.sendRemoteHistorySnapshot = vi.fn();
   sidebar.buildSessionsList = vi.fn(() => ({
     type: "sessions", entries: [], activeId: null, dots: {}, offset: 0,
     total: 0, hasMore: false, nextOffset: 0, query: "",
@@ -112,20 +105,17 @@ function makeSidebar(options: {
 }
 
 function logout(sidebar: any, provider: "grok" | "codex" = "grok"): Promise<void> {
-  return sidebar.onMessage({ type: "logout", provider }, "local");
+  return sidebar.onMessage({ type: "logout", provider });
 }
 
 describe("a background conversation's draft when its provider signs out", () => {
-  it("real logout parks the draft on that conversation and tells no remote tab", async () => {
+  it("real logout parks the draft on that conversation", async () => {
     const sidebar = makeSidebar({ connected: ["codex"] });
-    // The desk is reading a Codex conversation; a phone is attached to it. The
-    // draft belongs to a Grok conversation neither of them is looking at.
+    // The desk is reading a Codex conversation. The draft belongs to a Grok
+    // conversation it is not looking at.
     const desk = sidebar.focused as Session;
     desk.provider = "codex";
     desk.activeSessionId = "codex-desk";
-    sidebar.remoteClients.identify("phone", "stable-phone-tab");
-    sidebar.remoteClients.ready("phone");
-    sidebar.remoteClients.setActive("phone", desk);
     const background = new Session();
     background.provider = "grok";
     background.cwd = "/repo";
@@ -137,16 +127,11 @@ describe("a background conversation's draft when its provider signs out", () => 
     sidebar.sessionDisplayName = vi.fn((session: Session) =>
       session === background ? "Background investigation" : "Codex desk");
     const local: HostMsg[] = [];
-    const remote: HostMsg[] = [];
     sidebar.view = { webview: { postMessage: (message: HostMsg) => local.push(message) } };
-    sidebar.sendRemoteSession = vi.fn((_session: Session, message: HostMsg) => remote.push(message));
-    sidebar.sendRemoteClient = vi.fn((_clientId: string, message: HostMsg) => remote.push(message));
     delete sidebar.post; // the real fan-out is the thing under test
 
     await logout(sidebar);
 
-    expect(JSON.stringify(remote)).not.toContain("the secret draft");
-    expect(JSON.stringify(remote)).not.toContain("Background investigation");
     const notice = local.find((message) =>
       message.type === "error" && message.text.includes("Background investigation"));
     expect(notice).toBeDefined();
@@ -195,7 +180,7 @@ describe("a background conversation's draft when its provider signs out", () => 
     await logout(sidebar);
 
     // The draft is durable in META; the notice is deliberately transient so a
-    // remote snapshot can never replay a desk-only account event.
+    // replay can never repeat a one-off account event.
     expect(desk.buffer.some((message) =>
       message.type === "error" && message.text.includes("Background investigation"))).toBe(false);
     expect((sidebar.state.get("grok.sessionMeta", {}) as any)["background-grok"].queuedDraft)
@@ -249,7 +234,7 @@ describe("reopening a conversation whose draft was parked", () => {
   async function reopen(sidebar: any, id: string): Promise<HostMsg[]> {
     const seen: HostMsg[] = [];
     sidebar.view = { webview: { postMessage: (message: HostMsg) => seen.push(message) } };
-    await sidebar.onMessage({ type: "resumeSession", id, cwd: workspace }, "local");
+    await sidebar.onMessage({ type: "resumeSession", id, cwd: workspace });
     await sidebar.focused.client?.dispose();
     return seen;
   }
@@ -345,7 +330,7 @@ describe("startup refusal cleanup", () => {
     sidebar.emit = vi.fn((_session: Session, message: HostMsg) => emitted.push(message));
     delete sidebar.startSession;
 
-    await sidebar.onMessage({ type: "recheckConnection", provider: "codex" }, "local");
+    await sidebar.onMessage({ type: "recheckConnection", provider: "codex" });
 
     expect(session.priming).toBe(false);
     expect(emitted).toContainEqual({ type: "setBusy", value: false });
@@ -362,32 +347,14 @@ describe("signing back in after the last provider signed out", () => {
     const desk = sidebar.focused as Session;
     desk.provider = "grok";
     desk.client = { dispose: vi.fn() } as any;
-    const phone = new Session();
-    phone.provider = "grok";
-    phone.cwd = "/repo";
-    phone.client = { dispose: vi.fn() } as any;
-    phone.queuedSends = [{ text: "ask about the migration", chips: [] }];
-    sidebar.remoteClients.identify("phone", "stable-phone-tab-after-logout");
-    sidebar.remoteClients.ready("phone");
-    sidebar.remoteClients.setActive("phone", phone);
-    sidebar.pool = new Set([desk, phone]);
+    sidebar.pool = new Set([desk]);
 
     await logout(sidebar);
 
-    const replacement = sidebar.remoteClients.active("phone") as Session;
-    expect(replacement).not.toBe(phone);
-    expect(replacement.provider).not.toBe("codex");
-    expect(replacement.needsProvider).toBe(true);
-    expect(replacement.client).toBeUndefined();
+    expect(sidebar.focused.provider).not.toBe("codex");
     expect(sidebar.focused.needsProvider).toBe(true);
+    expect(sidebar.focused.client).toBeUndefined();
     expect(sidebar.startSession).not.toHaveBeenCalled();
-    expect(sidebar.sendRemoteClient).toHaveBeenCalledWith("phone", expect.objectContaining({
-      type: "onboarding",
-      state: "connect-agent",
-    }));
-
-    sidebar.installTestHooks().remoteClientLeft("phone");
-    expect(sidebar.remoteClients.detachedActiveValues()).toContain(replacement);
   });
 
   it("deletes the empty shells it signed out, and keeps a conversation", async () => {
@@ -454,101 +421,12 @@ describe("signing back in after the last provider signed out", () => {
     sidebar.resolveLocalRepoTarget = vi.fn(() => undefined);
     sidebar.historyCwdFor = vi.fn(() => "/repo");
 
-    await sidebar.onMessage({ type: "newSession" }, "local");
+    await sidebar.onMessage({ type: "newSession" });
 
     expect(sidebar.focused).not.toBe(stranded);
     expect(sidebar.pool.has(stranded)).toBe(true);
     expect(stranded.needsProvider).toBe(true);
     expect(stranded.strandedDraft).toBe("park me");
-  });
-
-  it("desk-first sign-in leaves a detached draft in META until that phone reconnects", async () => {
-    const sidebar = makeSidebar({ connected: ["grok"] });
-    sidebar.connectedProviders = vi.fn(() => []);
-    sidebar.defaultProviderForProject = vi.fn(() => "grok");
-    const desk = sidebar.focused as Session;
-    desk.provider = "grok";
-    desk.client = { dispose: vi.fn() } as any;
-    const phone = new Session();
-    phone.provider = "grok";
-    phone.cwd = "/repo";
-    phone.client = { dispose: vi.fn() } as any;
-    phone.queuedSends = [{ text: "ask about the migration", chips: [] }];
-    const detached = new Session();
-    detached.provider = "grok";
-    detached.cwd = "/repo";
-    detached.activeSessionId = "detached-grok";
-    detached.hasHistory = true;
-    detached.client = { dispose: vi.fn() } as any;
-    detached.queuedSends = [{ text: "draft from the disconnected phone", chips: [] }];
-    sidebar.remoteClients.ready("phone");
-    sidebar.remoteClients.setActive("phone", phone);
-    sidebar.remoteClients.identify("old-socket", "stable-tab");
-    sidebar.remoteClients.ready("old-socket");
-    sidebar.remoteClients.setActive("old-socket", detached);
-    sidebar.pool = new Set([desk, phone, detached]);
-    sidebar.installTestHooks().remoteClientLeft("old-socket");
-
-    await logout(sidebar);
-
-    const replacement = sidebar.remoteClients.active("phone") as Session;
-    const detachedBeforeReconnect = sidebar.remoteClients.detachedActiveValues()[0] as Session;
-    // Prove adoption scans the detached store itself, not the pool side effect.
-    sidebar.pool.delete(detachedBeforeReconnect);
-    const restored: Array<{ session: Session; text: string }> = [];
-    sidebar.emit = vi.fn((session: Session, message: HostMsg) => {
-      if (message.type === "restoreComposer") restored.push({ session, text: message.text });
-    });
-    // Signing back in at the desk, exactly as the onboarding button does it.
-    sidebar.connectedProviders = vi.fn(() => ["grok"]);
-    sidebar.locateProvider = vi.fn(() => "grok");
-    sidebar.setProviderConnected = vi.fn(async () => {});
-    sidebar.warmConnectedCodexModels = vi.fn(async () => {});
-    // Connect restores the saved consent; a re-check only re-reads an
-    // account the person already said to use (#171).
-    sidebar.providerConnectionState = { ...sidebar.providerConnectionState, grok: true };
-    sidebar.reprobeProviderCredentials = vi.fn(async () => true);
-    sidebar.startSession = vi.fn(async (_resumeId: undefined, session: Session) => {
-      session.needsProvider = false;
-      session.activeSessionId = "fresh-grok";
-      session.client = { dispose: vi.fn() } as any;
-      return session.client;
-    });
-
-    await sidebar.onMessage({ type: "recheckConnection", provider: "grok" }, "local");
-
-    const started: Session[] = sidebar.startSession.mock.calls.map((call: any[]) => call[1]);
-    expect(started).toContain(sidebar.focused);
-    expect(started).toContain(replacement);
-    // The tab that was gone when its provider signed out is adopted too — its
-    // replacement is a pool member with no client of its own.
-    const detachedReplacement = started.find((session) =>
-      session !== sidebar.focused && session !== replacement);
-    expect(detachedReplacement).toBeDefined();
-    expect(detachedReplacement!.provider).toBe("grok");
-    expect(replacement.provider).toBe("grok");
-    expect(restored).toContainEqual({ session: replacement, text: "ask about the migration" });
-    expect(restored).not.toContainEqual({
-      session: detachedReplacement,
-      text: "draft from the disconnected phone",
-    });
-    await sidebar.sessionMetaWrites;
-    expect((sidebar.state.get("grok.sessionMeta", {}) as any)["detached-grok"].queuedDraft)
-      .toBe("draft from the disconnected phone");
-    expect(detachedReplacement!.strandedDraft).toBe("draft from the disconnected phone");
-
-    sidebar.startingForRemote = new WeakSet();
-    sidebar.handleRemoteClientReady("new-socket", "stable-tab");
-    await sidebar.sessionMetaWrites;
-    expect(restored).toContainEqual({
-      session: detachedReplacement,
-      text: "draft from the disconnected phone",
-    });
-    expect((sidebar.state.get("grok.sessionMeta", {}) as any)["detached-grok"].queuedDraft)
-      .toBeUndefined();
-    expect(detachedReplacement!.strandedDraft).toBeUndefined();
-    expect(replacement.strandedDraft).toBeUndefined();
-    expect(sidebar.sendRemoteSessionList).toHaveBeenCalled();
   });
 
   it("keeps the META draft through a refused adoption and clears it only after a successful retry", async () => {
@@ -573,7 +451,7 @@ describe("signing back in after the last provider signed out", () => {
     const restored: HostMsg[] = [];
     sidebar.emit = vi.fn((_session: Session, message: HostMsg) => restored.push(message));
 
-    await sidebar.onMessage({ type: "recheckConnection", provider: "grok" }, "local");
+    await sidebar.onMessage({ type: "recheckConnection", provider: "grok" });
     expect(sidebar.focused.needsProvider).toBe(true);
     expect(sidebar.focused.strandedDraft).toBe("survive failed retry");
     expect((memento["grok.sessionMeta"] as any)["draft-origin"].queuedDraft).toBe("survive failed retry");
@@ -584,7 +462,7 @@ describe("signing back in after the last provider signed out", () => {
       session.activeSessionId = "fresh-after-login";
       return {};
     });
-    await sidebar.onMessage({ type: "recheckConnection", provider: "grok" }, "local");
+    await sidebar.onMessage({ type: "recheckConnection", provider: "grok" });
     await sidebar.sessionMetaWrites;
     expect(restored).toContainEqual({ type: "restoreComposer", text: "survive failed retry" });
     expect((memento["grok.sessionMeta"] as any)["draft-origin"].queuedDraft).toBeUndefined();

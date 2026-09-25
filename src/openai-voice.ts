@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import WebSocket from "ws";
-import type { PcmStreamStartOpts, PcmSttStream, PartialEvent } from "./voice-streamer";
+import type { PcmStreamStartOpts, PcmSttStream, PartialEvent } from "./voice-common";
 
 export const OPENAI_STT_MODEL = "gpt-live-transcribe";
 export const OPENAI_STT_ENDPOINT = "wss://api.openai.com/v1/realtime?intent=transcription";

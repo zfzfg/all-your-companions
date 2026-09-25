@@ -20,7 +20,7 @@
  */
 
 import { ACP_PROVIDERS, type AcpProvider } from "./acp-backend";
-import type { EffortLevel } from "./acp";
+import type { EffortLevel } from "./acp-types";
 import { EFFORT_ORDER, isPermissionProfile, type PermissionProfile } from "./target-eligibility";
 
 /** How hard a directive binds. `forbid` is the composer's "no subagents". */

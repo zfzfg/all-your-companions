@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-// @ts-expect-error -- plain .mjs, loaded by vitest as a reporter at runtime
 import { incompleteRunReport, unaccountedFiles } from "../test-support/complete-accounting.mjs";
 
 /**

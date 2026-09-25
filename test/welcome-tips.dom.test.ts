@@ -44,13 +44,12 @@ function connect(h: Harness) {
   dispatch(h.window, { type: "setBusy", value: false });
 }
 
-/** A settled empty screen: agents known, device answered, counts delivered. */
-function settle(h: Harness, over: TipFacts & { providers?: unknown[]; linked?: boolean } = {}) {
+/** A settled empty screen: agents known, counts delivered. */
+function settle(h: Harness, over: TipFacts & { providers?: unknown[] } = {}) {
   dispatch(h.window, {
     type: "providerState",
     providers: over.providers ?? [{ id: "grok", connected: true }],
   });
-  dispatch(h.window, { type: "remoteStatus", linked: over.linked ?? false });
   tips(h, over);
   connect(h);
 }
@@ -87,7 +86,6 @@ describe("empty-state advice", () => {
     // A tip under a spinner competes with the one line the reader is waiting for.
     const h = bootWebview({ ready: false });
     dispatch(h.window, { type: "providerState", providers: [{ id: "grok", connected: true }] });
-    dispatch(h.window, { type: "remoteStatus", linked: false });
     tips(h);
     dispatch(h.window, { type: "initialized", info: { provider: "grok", version: "1.0.5" } });
     expect(h.doc.getElementById("welcome-version")!.classList.contains("welcome-status-busy")).toBe(true);
@@ -112,10 +110,9 @@ describe("empty-state advice", () => {
     // status line, which re-renders this slot — and only THEN writes the card's
     // HTML. Checking the node alone left a gap where a tip rendered over an
     // empty state about to have a call to action in it, and spent its
-    // once-a-day turn doing so. A remote no-project card caught it: that card
-    // has no buttons, and the tip posted a frame from a screen that should have
-    // been silent.
-    const h = bootWebview({ ready: false, remote: true });
+    // once-a-day turn doing so: the tip posted a frame from a screen that
+    // should have been silent.
+    const h = bootWebview({ ready: false });
     settle(h);
     expect(tipEl(h)).toBeTruthy();
     h.posted.length = 0;
@@ -128,7 +125,7 @@ describe("empty-state advice", () => {
     const h = bootWebview({ ready: false, vscode: true });
     dispatch(h.window, {
       ...INITIAL_STATE,
-      capabilities: { uploadFile: true, remoteVoice: true, moveViewHint: true },
+      capabilities: { uploadFile: true, moveViewHint: true },
     });
     settle(h);
     expect(tipId(h)).toBe("moveView");
@@ -142,10 +139,10 @@ describe("empty-state advice", () => {
     const h = bootWebview({ ready: false, vscode: true });
     // VS Code hosts the settings surface as an editor tab, so the client posts
     // rather than mounting an overlay — which is what makes the target visible
-    // to this test. Desktop and remote open the same category in an overlay.
+    // to this test. Desktop opens the same category in an overlay.
     dispatch(h.window, {
       ...INITIAL_STATE,
-      capabilities: { uploadFile: true, remoteVoice: true, settingsEditor: true },
+      capabilities: { uploadFile: true, settingsEditor: true },
     });
     settle(h);
     expect(tipId(h)).toBe("providers");
@@ -159,11 +156,11 @@ describe("empty-state advice", () => {
 
   it("routes every settings-backed tip to its own category", () => {
     const seen: Record<string, string | undefined> = {};
-    for (const start of [[], ["providers"], ["providers", "routines"], ["providers", "routines", "connectors"]]) {
+    for (const start of [[], ["providers"], ["providers", "routines"]]) {
       const h = bootWebview({ ready: false, vscode: true });
       dispatch(h.window, {
         ...INITIAL_STATE,
-        capabilities: { uploadFile: true, remoteVoice: true, settingsEditor: true },
+        capabilities: { uploadFile: true, settingsEditor: true },
       });
       settle(h, { dismissed: start });
       const id = tipId(h)!;
@@ -174,7 +171,6 @@ describe("empty-state advice", () => {
       providers: "providers",
       routines: "routines",
       connectors: "connectors",
-      remote: "account",
     });
   });
 
@@ -200,7 +196,7 @@ describe("empty-state advice", () => {
     const h = bootWebview({ ready: false, vscode: true });
     dispatch(h.window, {
       ...INITIAL_STATE,
-      capabilities: { uploadFile: true, remoteVoice: true, settingsEditor: true },
+      capabilities: { uploadFile: true, settingsEditor: true },
     });
     settle(h);
     const first = tipId(h)!;
@@ -213,7 +209,6 @@ describe("empty-state advice", () => {
     settle(h, {
       routineCount: 4,
       connectorCount: 2,
-      linked: true,
       dismissed: ["providers", "readAloud", "voice", "mentions"],
     });
     expect(tipEl(h)).toBeNull();
@@ -224,7 +219,6 @@ describe("empty-state advice", () => {
     // never advice that would be wrong for someone already running routines.
     const h = bootWebview({ ready: false });
     dispatch(h.window, { type: "providerState", providers: [{ id: "grok", connected: true }] });
-    dispatch(h.window, { type: "remoteStatus", linked: false });
     connect(h);
     const offered = offeredTips(h);
     expect(offered).toContain("providers");
@@ -236,18 +230,6 @@ describe("empty-state advice", () => {
     const h = bootWebview({ ready: false });
     settle(h, { providers: [{ id: "grok", connected: true }, { id: "codex", connected: true }] });
     expect(offeredTips(h)).not.toContain("providers");
-  });
-
-  it("never offers desk-only advice to a phone", () => {
-    const h = bootWebview({ ready: false, remote: true });
-    settle(h);
-    const offered = offeredTips(h);
-    for (const deskOnly of ["providers", "connectors", "remote", "worktrees", "moveView"]) {
-      expect(offered, deskOnly).not.toContain(deskOnly);
-    }
-    // `voiceConfigured` starts optimistically true and only the host says
-    // otherwise, so a phone whose desk has a voice key is not told to set one up.
-    expect(offered).toEqual(["routines", "readAloud", "mentions"]);
   });
 
   it("offers voice setup only once the host says voice is unconfigured", () => {
@@ -263,7 +245,7 @@ describe("empty-state advice", () => {
   it("puts an @ in the composer and opens the mention popover", () => {
     const h = bootWebview({ ready: false });
     settle(h, {
-      dismissed: ["providers", "routines", "connectors", "remote", "readAloud", "voice"],
+      dismissed: ["providers", "routines", "connectors", "readAloud", "voice"],
     });
     expect(tipId(h)).toBe("mentions");
     click(h.window, action(h)!);
@@ -333,7 +315,7 @@ describe("empty-state advice", () => {
     // put the same tip straight back. Against a host too old to answer it was
     // inert for ever — and the owner hit exactly that, on the last tip left,
     // where there was nothing else for the slot to move on to.
-    const h = bootWebview({ ready: false, remote: true });
+    const h = bootWebview({ ready: false });
     dispatch(h.window, { type: "providerState", providers: [{ id: "grok", connected: true }] });
     connect(h);
     const offered: string[] = [];
@@ -353,7 +335,7 @@ describe("empty-state advice", () => {
   it("goes quiet once every tip has had its turn today", () => {
     const h = bootWebview({ ready: false });
     settle(h, {
-      shownToday: ["providers", "routines", "connectors", "remote", "readAloud", "voice", "mentions"],
+      shownToday: ["providers", "routines", "connectors", "readAloud", "voice", "mentions"],
     });
     expect(tipEl(h)).toBeNull();
   });
@@ -361,7 +343,7 @@ describe("empty-state advice", () => {
   it("starts a worktree session, and only in Coding", () => {
     const h = bootWebview({ ready: false });
     const allButWorktrees = [
-      "providers", "routines", "connectors", "remote", "readAloud", "voice", "mentions",
+      "providers", "routines", "connectors", "readAloud", "voice", "mentions",
     ];
     settle(h, { dismissed: allButWorktrees });
     // Knowledge work is the default — nothing left to say.
@@ -414,7 +396,7 @@ describe("empty-state advice", () => {
     const h = bootWebview({ ready: false, vscode: true });
     dispatch(h.window, {
       ...INITIAL_STATE,
-      capabilities: { uploadFile: true, remoteVoice: true, moveViewHint: true },
+      capabilities: { uploadFile: true, moveViewHint: true },
     });
     settle(h);
     expect(tipId(h)).toBe("moveView");

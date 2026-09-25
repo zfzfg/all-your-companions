@@ -23,7 +23,6 @@ import {
   planRestoreSource,
   truncateResolvedAfter,
 } from "../src/plan-restore";
-// @ts-expect-error — plain JS module, no types
 import {
   isInterjectionText as isWebviewInterjectionText,
   stripInterjectionEnvelope,

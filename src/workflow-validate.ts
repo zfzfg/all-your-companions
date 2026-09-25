@@ -166,7 +166,7 @@ export function validateWorkflowDefinition(
   }
 
   // 7. input paths available on every path to the stage
-  for (const [i, stage] of def.stages.entries()) {
+  for (const stage of def.stages) {
     if (!stage.enabled) continue;
     const contract = def.contracts[stage.contract];
     if (!contract) continue;

@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import { allocateImageIndex, consumeChips, makeExplicitChip, makeImageChip, makeImplicitChip, removeChip } from "../src/chips";
 import {
   chipsForQueueSend,
-  claimQueuedSendDispatch,
   dequeueQueuedSends,
   enqueueQueuedSend,
   queuedFlushText,
@@ -55,8 +54,8 @@ describe("enqueueQueuedSend keeps per-item chips", () => {
     const once = enqueueQueuedSend([], "look at A", [a]);
     const twice = enqueueQueuedSend(once, "and B", [b]);
     expect(queuedSendsText(twice)).toBe("look at A\n\nand B");
-    expect(twice[0].chips.map((c) => c.path)).toEqual(["/s/a.png"]);
-    expect(twice[1].chips.map((c) => c.path)).toEqual(["/s/b.png"]);
+    expect(twice[0].chips.map((c: any) => c.path)).toEqual(["/s/a.png"]);
+    expect(twice[1].chips.map((c: any) => c.path)).toEqual(["/s/b.png"]);
   });
 
   it("does not let a later composer removeChip drop a snapshotted queued chip", () => {
@@ -158,10 +157,6 @@ describe("live host keeps the entry-store invariants", () => {
     expect(sidebarSrc).toContain("dequeueQueuedSends(s.queuedSends, msg.index, false)");
   });
 
-  it("reconnect minting uses claimQueuedSendDispatch so image-only text is not dropped", () => {
-    expect(sidebarSrc).toContain("session.queuedSendDispatch = claimQueuedSendDispatch(");
-  });
-
   it("assigns image numbers at attach and never reindexes them", () => {
     expect(sidebarSrc).toContain("allocateImageIndex(session.imageIndexHighWater");
     expect(sidebarSrc).not.toContain("composerImageIndexStart");
@@ -170,19 +165,14 @@ describe("live host keeps the entry-store invariants", () => {
   });
 });
 
-describe("claimQueuedSendDispatch treats empty text as a real image-only payload", () => {
-  it("mints a reconnect dispatch when the ready queue is image-only", () => {
+describe("queuedFlushText treats empty text as a real image-only payload", () => {
+  it("returns empty text for a ready image-only queue", () => {
     const image = img("shot");
-    const ready = queuedFlushText([{ text: "", chips: [image] }]);
-    expect(ready).toBe("");
-    const dispatch = claimQueuedSendDispatch(undefined, ready, () => "dispatch-id");
-    expect(dispatch).toEqual({ id: "dispatch-id", text: "" });
-    expect(claimQueuedSendDispatch(dispatch, ready, () => "other")).toEqual(dispatch);
+    expect(queuedFlushText([{ text: "", chips: [image] }])).toBe("");
   });
 
-  it("does not mint when the queue is not ready", () => {
+  it("returns nothing when the queue is empty", () => {
     expect(queuedFlushText([])).toBeUndefined();
-    expect(claimQueuedSendDispatch(undefined, undefined, () => "id")).toBeUndefined();
   });
 });
 
@@ -199,15 +189,15 @@ describe("restoreQueuedChips", () => {
     const queued = makeImageChip("/s/q.png", 1, "image/png");
     const composing = makeImageChip("/s/c.png", 2, "image/png");
     const restored = restoreQueuedChips([composing], [{ text: "see [Image #1]", chips: [queued] }]);
-    const images = restored.filter((c) => c.imageIndex != null);
-    expect(images.map((c) => c.path)).toEqual(["/s/q.png", "/s/c.png"]);
-    expect(images.map((c) => c.imageIndex)).toEqual([1, 2]);
+    const images = restored.filter((c: any) => c.imageIndex != null);
+    expect(images.map((c: any) => c.path)).toEqual(["/s/q.png", "/s/c.png"]);
+    expect(images.map((c: any) => c.imageIndex)).toEqual([1, 2]);
   });
 
   it("does not compact a restored chip that was shown as #2", () => {
     const queued = makeImageChip("/s/q.png", 2, "image/png");
     const restored = restoreQueuedChips([], [{ text: "edit [Image #2]", chips: [queued] }]);
-    expect(restored[0].imageIndex).toBe(2);
+    expect((restored[0] as any).imageIndex).toBe(2);
     expect(restored[0].relPath).toBe("Image #2");
   });
 });
@@ -221,7 +211,7 @@ describe("queued image numbers stay at the attach-time index", () => {
       { text: "see [Image #2]", chips: [b] },
     ];
     const rest = dequeueQueuedSends(items, 0, true)!.rest;
-    expect(rest[0].chips[0].imageIndex).toBe(2);
+    expect((rest[0].chips[0] as any).imageIndex).toBe(2);
     expect(rest[0].chips[0].relPath).toBe("Image #2");
     expect(rest[0].text).toBe("see [Image #2]");
     expect(allocateImageIndex(2, rest.flatMap((item) => item.chips))).toEqual({ index: 3, highWater: 3 });
@@ -235,7 +225,7 @@ describe("queued image numbers stay at the attach-time index", () => {
       { text: "edit [Image #2]", chips: [b] },
     ];
     const split = takeQueuedSendsPrefix(items, "look at A")!;
-    expect(split.rest[0].chips[0].imageIndex).toBe(2);
+    expect((split.rest[0].chips[0] as any).imageIndex).toBe(2);
     expect(split.rest[0].text).toBe("edit [Image #2]");
   });
 });

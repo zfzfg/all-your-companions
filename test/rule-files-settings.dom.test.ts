@@ -13,8 +13,6 @@
  *   4. A missing candidate renders greyed (is-missing) with a "Create" button
  *      posting the same message shape
  *   5. An empty provider list renders "may be read", never a guessed provider
- *   6. The whole row (list, buttons) is absent in remote mode — host-local,
- *      same as openGlobalConfig/openProjectConfig
  */
 import { describe, expect, it } from "vitest";
 import { Window } from "happy-dom";
@@ -28,7 +26,6 @@ const settingsSrc = readFileSync(
 
 function boot(opts: {
   ruleFiles?: unknown;
-  isRemote?: boolean;
   category?: string;
 } = {}) {
   const window = new Window({ url: "https://localhost/" });
@@ -38,7 +35,7 @@ function boot(opts: {
   const root = doc.createElement("div");
   doc.body.appendChild(root);
   const posted: Array<Record<string, unknown>> = [];
-  const env = api.defaultEnv({ isRemote: !!opts.isRemote, isDesktop: true, providersKnown: true });
+  const env = api.defaultEnv({ isDesktop: true, providersKnown: true });
   const snapshot = api.defaultSnapshot({
     ruleFiles: opts.ruleFiles === undefined ? null : opts.ruleFiles,
   });
@@ -94,7 +91,7 @@ describe("Rule files panel", () => {
   it("does not ask again on an unrelated repaint", () => {
     const { posted, surface, window } = boot({ ruleFiles: [AGENTS_MD] });
     const env = (window as unknown as { GrokSettings: Record<string, any> }).GrokSettings.defaultEnv({
-      isRemote: false, isDesktop: true, providersKnown: true,
+      isDesktop: true, providersKnown: true,
     });
     surface.update((window as unknown as { GrokSettings: Record<string, any> }).GrokSettings.defaultSnapshot({
       ruleFiles: [AGENTS_MD],
@@ -148,12 +145,5 @@ describe("Rule files panel", () => {
     const badge = root.querySelector(".settings-rules-badge.is-uncertain");
     expect(badge).toBeTruthy();
     expect(badge!.textContent).toBe("may be read");
-  });
-
-  it("hides the whole panel in remote mode (host-local, req 6)", () => {
-    const { root, posted } = boot({ ruleFiles: [AGENTS_MD], isRemote: true });
-    expect(root.querySelector(".settings-rules-list")).toBeNull();
-    expect(root.querySelector('[data-id="ruleFiles"]')).toBeNull();
-    expect(posted.filter((m) => m.type === "listRuleFiles")).toHaveLength(0);
   });
 });

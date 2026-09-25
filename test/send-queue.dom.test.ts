@@ -172,7 +172,7 @@ describe("Enter while busy queues instead of cancelling (#37)", () => {
       type: "initialState",
       effort: "", cwd: "/w", useCtrlEnter: false, extVersion: "9.9.9",
       showThinking: false, expandCommandOutputs: false, steerByDefault: false,
-      capabilities: { uploadFile: true, remoteVoice: true, queueSendChips: true },
+      capabilities: { uploadFile: true, queueSendChips: true },
     });
     dispatch(window, { type: "setBusy", value: true });
     dispatch(window, {
@@ -207,7 +207,7 @@ describe("Enter while busy queues instead of cancelling (#37)", () => {
       type: "initialState",
       effort: "", cwd: "/w", useCtrlEnter: false, extVersion: "9.9.9",
       showThinking: false, expandCommandOutputs: false, steerByDefault: false,
-      capabilities: { uploadFile: true, remoteVoice: true, queueSendChips: true },
+      capabilities: { uploadFile: true, queueSendChips: true },
     });
     dispatch(window, { type: "setBusy", value: true });
     dispatch(window, {
@@ -688,7 +688,7 @@ describe("Steer by default — skip the queue (#52)", () => {
       type: "initialState",
       effort: "", cwd: "/w", useCtrlEnter: false, extVersion: "9.9.9",
       showThinking: false, expandCommandOutputs: false, steerByDefault: true,
-      capabilities: { uploadFile: true, remoteVoice: true, queueSendChips: true },
+      capabilities: { uploadFile: true, queueSendChips: true },
     });
     dispatch(window, { type: "agentStart" });
     dispatch(window, {

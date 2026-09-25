@@ -30,7 +30,7 @@ describe("generator tools", () => {
     expect(isGeneratorOnlyTool("companions_workflow_schema")).toBe(true);
     expect(isGeneratorOnlyTool("companions_spawn_subagent")).toBe(false);
     expect(GENERATOR_TOOLS.map((t) => t.name)).toEqual([...GENERATOR_TOOL_NAMES]);
-    expect(GENERATOR_TOOLS.some((t) => t.name === COMPANIONS_SPAWN_TOOL)).toBe(false);
+    expect(GENERATOR_TOOLS.some((t) => (t.name as string) === COMPANIONS_SPAWN_TOOL)).toBe(false);
   });
 });
 

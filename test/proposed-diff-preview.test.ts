@@ -14,7 +14,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { GrokSidebar } from "../src/sidebar";
 
-function makeSidebar(openDiff: ReturnType<typeof vi.fn>): any {
+function makeSidebar(openDiff: (...args: any[]) => unknown): any {
   const sidebar = Object.create(GrokSidebar.prototype) as any;
   sidebar.diffSeq = 0;
   sidebar.diffProvider = { set: vi.fn() };
@@ -25,7 +25,7 @@ function makeSidebar(openDiff: ReturnType<typeof vi.fn>): any {
 
 describe("the proposed-change diff never takes the editor's preview slot", () => {
   it("opens with preview:false", async () => {
-    const openDiff = vi.fn(async () => {});
+    const openDiff = vi.fn(async (..._args: any[]) => {});
     const sidebar = makeSidebar(openDiff);
     await sidebar.openDiffEditor({} as never, "/workspace/src/a.ts", "before", "after", 7);
     expect(openDiff).toHaveBeenCalledTimes(1);
@@ -37,7 +37,7 @@ describe("the proposed-change diff never takes the editor's preview slot", () =>
     // whole-file diff on the edit rather than at line 1 (#66). Both are load
     // bearing and unrelated, so a later reader does not read the whole options
     // bag as suspect.
-    const openDiff = vi.fn(async () => {});
+    const openDiff = vi.fn(async (..._args: any[]) => {});
     const sidebar = makeSidebar(openDiff);
     await sidebar.openDiffEditor({} as never, "/workspace/src/a.ts", "before", "after", 7);
     const options = openDiff.mock.calls[0][3] as any;
@@ -49,7 +49,7 @@ describe("the proposed-change diff never takes the editor's preview slot", () =>
     // The old preview slot was also what made one tab per edit unthinkable.
     // With preview:false the keys have to stay unique or two edits to one file
     // would now overwrite each other's content in the provider.
-    const openDiff = vi.fn(async () => {});
+    const openDiff = vi.fn(async (..._args: any[]) => {});
     const sidebar = makeSidebar(openDiff);
     await sidebar.openDiffEditor({} as never, "/workspace/src/a.ts", "one", "two", 1);
     await sidebar.openDiffEditor({} as never, "/workspace/src/a.ts", "two", "three", 2);

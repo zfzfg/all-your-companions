@@ -5,7 +5,7 @@ import {
   type ContextChip,
   type ContextChipPayload,
 } from "./context-chips";
-import type { PromptContentBlock } from "./acp";
+import type { PromptContentBlock } from "./acp-types";
 import { STAGED_IMAGE_TAG_HINT, WORKSPACE_IMAGE_TAG_HINT } from "./image-history";
 
 export interface PromptBuilderDeps {

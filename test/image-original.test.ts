@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { encode } from "jpeg-js";
 import { GrokSidebar } from "../src/sidebar";
 import { Session } from "../src/session";
 
@@ -30,19 +29,16 @@ function host() {
   h.isImagePathAuthorizedNow = vi.fn(() => true);
   h.host = { appendLine: vi.fn() };
   h.postLocal = vi.fn();
-  h.sendRemoteRequester = vi.fn();
-  h.captureRemoteRequester = () => ({ clientId: "phone" });
-  h.remoteClients = { active: () => h.focused, cwd: h.workspaceRoot };
   return h;
 }
 
 describe("original image delivery", () => {
-  it.each(["requestImageFull", "requestImageOriginal"])("keeps unknown and revoked handles silent for %s", async (type) => {
+  it.each(["requestImageOriginal"])("keeps unknown and revoked handles silent for %s", async (type) => {
     const h = host();
     const read = vi.spyOn(fs.promises, "readFile");
-    await h.onMessage({ type, fullId: "unknown", requestId: 1 }, "local");
+    await h.onMessage({ type, fullId: "unknown", requestId: 1 });
     h.isImagePathAuthorizedNow.mockReturnValue(false);
-    await h.onMessage({ type, fullId: "handle-1", requestId: 1 }, "local");
+    await h.onMessage({ type, fullId: "handle-1", requestId: 1 });
     expect(read).not.toHaveBeenCalled();
     expect(h.postLocal).not.toHaveBeenCalled();
   });
@@ -52,7 +48,7 @@ describe("original image delivery", () => {
     vi.spyOn(fs.promises, "stat").mockResolvedValue({ size: 100 } as any);
     vi.spyOn(fs.promises, "readFile").mockResolvedValue(Buffer.from("bytes"));
     vi.mocked(fs.promises[method]).mockRejectedValueOnce(new Error("unreadable"));
-    await h.onMessage({ type: "requestImageOriginal", fullId: "handle-1", requestId: 1 }, "local");
+    await h.onMessage({ type: "requestImageOriginal", fullId: "handle-1", requestId: 1 });
     expect(h.postLocal).toHaveBeenCalledWith({ type: "imageOriginal", fullId: "handle-1", requestId: 1, src: undefined });
   });
 
@@ -70,7 +66,7 @@ describe("original image delivery", () => {
       h.isImagePathAuthorizedNow.mockReturnValue(false);
       return "data:image/png;base64,cGl4ZWxz";
     });
-    await h.onMessage({ type: "requestImageOriginal", fullId: "handle-1", requestId: 1 }, "local");
+    await h.onMessage({ type: "requestImageOriginal", fullId: "handle-1", requestId: 1 });
     expect(h.postLocal).not.toHaveBeenCalled();
   });
 

@@ -1,4 +1,4 @@
-import type { EffortLevel, PromptContentBlock } from "./acp";
+import type { EffortLevel, PromptContentBlock } from "./acp-types";
 import { providerCapability, type ProviderCapability } from "./provider-capabilities";
 
 export const ACP_PROVIDERS = ["grok", "codex", "claude", "gemini", "muse"] as const;

@@ -16,8 +16,8 @@ const popoverText = (doc: Document) => doc.getElementById("gear-popover")!.textC
 const items = (doc: Document) => [...doc.querySelectorAll("#gear-popover .toolbar-popover-item")];
 const types = (posted: Posted[]) => posted.map((p) => p.type);
 
-function bootSignedOutCodex(opts: { remote?: boolean } = {}) {
-  const h = bootWebview({ remote: opts.remote });
+function bootSignedOutCodex() {
+  const h = bootWebview();
   dispatch(h.window, {
     type: "providerState",
     providers: [{ id: "codex", connected: true, needsLogin: true }],
@@ -42,9 +42,8 @@ function bootSignedOutCodex(opts: { remote?: boolean } = {}) {
 // "Not connected => Not visible" (owner, 2026-08-17). A provider that cannot
 // answer is absent from the picker entirely — no models, no heading, no
 // sign-in row. It used to put an agent you cannot choose in the middle of the
-// menu for choosing one, and on a phone that row could not even be actioned,
-// because the host refuses `runGrokLogin` from a remote. Manage providers at the
-// bottom is the single way back, for every provider and every surface.
+// menu for choosing one. Manage providers at the bottom is the single way back,
+// for every provider.
 describe("model picker for an agent that needs a sign-in", () => {
   it("locks the selector when nothing can answer, rather than opening an unusable list", () => {
     // Signed-out Codex is the only provider here, so there is nothing to choose
@@ -89,17 +88,6 @@ describe("model picker for an agent that needs a sign-in", () => {
       .toEqual(["Grok"]);
     expect(popoverText(h.doc)).not.toContain("Sign in to load models");
   });
-
-  it("shows a remote the same absence, never a button the host would refuse", () => {
-    const h = bootSignedOutCodex({ remote: true });
-    click(h.window, $(h.doc, "gear-btn"));
-    click(h.window, modelBtn(h.doc));
-
-    expect(popoverText(h.doc)).not.toContain("Sign in at the desk to load models");
-    // `runGrokLogin` is host-local; the host would refuse it, so the phone must
-    // not send it in the first place.
-    expect(types(h.posted)).not.toContain("runGrokLogin");
-  });
 });
 
 describe("the Accounts cluster for an agent that needs a sign-in", () => {
@@ -138,22 +126,5 @@ describe("the Accounts cluster for an agent that needs a sign-in", () => {
     click(h.window, providers);
     expect(h.doc.querySelector('[data-id="providerCodex"]')!.textContent).toContain("Sign out");
     expect(h.doc.querySelector('[data-id="providerCodex"]')!.textContent).not.toContain("Connect");
-  });
-});
-
-describe("remote missing-provider guidance", () => {
-  it.each([
-    ["missing-cli", "grok"],
-    ["missing-codex", "codex"],
-  ] as const)("keeps the remote %s screen guidance-only", (state, provider) => {
-    const h = bootWebview({ remote: true });
-    dispatch(h.window, { type: "onboarding", state, platform: "linux", provider });
-    const onboarding = $(h.doc, "welcome-onboarding");
-    expect(onboarding.textContent).toContain("missing at the desk");
-    expect(onboarding.textContent).toContain("refresh this remote view");
-    expect(onboarding.querySelector('[data-act="installCodex"]')).toBeNull();
-    expect(onboarding.querySelector('[data-act="runInstall"]')).toBeNull();
-    expect(onboarding.querySelector('[data-act="retryProvider"]')).toBeNull();
-    expect(types(h.posted)).not.toContain("retryProviderSession");
   });
 });

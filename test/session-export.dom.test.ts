@@ -1,7 +1,6 @@
 // DOM regression for session Markdown export + dimmed message actions.
 // Drives the real media/chat.js path: the ⋯ menu records the same host events
-// the renderer consumes, then posts openText (desk) or triggers an <a download>
-// (remote).
+// the renderer consumes, then posts openText.
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { bootWebview, click, dispatch } from "./webview-harness";
@@ -38,40 +37,6 @@ function exportViaOverflow(window: Window, doc: Document): void {
   click(window, item!);
 }
 
-function stubRemoteDownload(window: Window): {
-  blobs: Blob[];
-  downloads: { href: string; name: string }[];
-  restore: () => void;
-} {
-  const blobs: Blob[] = [];
-  const urlApi = window.URL as unknown as {
-    createObjectURL: (blob: Blob) => string;
-    revokeObjectURL: (url: string) => void;
-  };
-  const origCreate = urlApi.createObjectURL;
-  const origRevoke = urlApi.revokeObjectURL;
-  urlApi.createObjectURL = (blob: Blob) => {
-    blobs.push(blob);
-    return "blob:export-session";
-  };
-  urlApi.revokeObjectURL = () => {};
-  const downloads: { href: string; name: string }[] = [];
-  const proto = (window as unknown as { HTMLAnchorElement: { prototype: HTMLAnchorElement } }).HTMLAnchorElement.prototype;
-  const origClick = proto.click;
-  proto.click = function (this: HTMLAnchorElement) {
-    if (this.download) downloads.push({ href: this.href, name: this.download });
-  };
-  return {
-    blobs,
-    downloads,
-    restore: () => {
-      urlApi.createObjectURL = origCreate;
-      urlApi.revokeObjectURL = origRevoke;
-      proto.click = origClick;
-    },
-  };
-}
-
 describe("export conversation lives in the session overflow", () => {
   it("has no standalone toolbar button", () => {
     const { doc } = bootWebview();
@@ -99,47 +64,6 @@ describe("export conversation lives in the session overflow", () => {
     expect(content).toContain("## Assistant");
     expect(content).toContain("It waits for agentEnd.");
     expect(content).not.toContain("hidden reasoning");
-  });
-
-  it("downloads a named markdown file on the remote client", async () => {
-    const { window, doc, posted } = bootWebview({ remote: true });
-    dispatch(window, { type: "sessionName", sessionId: "s1", name: "Phone chat", cwd: "/work/repo" });
-    playTurn(window, "hello from the phone", "hi there");
-
-    const stub = stubRemoteDownload(window);
-    try {
-      exportViaOverflow(window, doc);
-      expect(posted.filter((m) => m.type === "openText")).toHaveLength(0);
-      expect(stub.downloads).toEqual([{ href: "blob:export-session", name: "Phone chat.md" }]);
-      expect(stub.blobs).toHaveLength(1);
-      const text = await stub.blobs[0].text();
-      expect(text).toContain("# Phone chat");
-      expect(text).toContain("hello from the phone");
-      expect(text).toContain("hi there");
-    } finally {
-      stub.restore();
-    }
-  });
-
-  it("says last N turns after a remote historyReplay window", async () => {
-    const { window, doc, posted } = bootWebview({ remote: true });
-    dispatch(window, { type: "sessionName", sessionId: "s1", name: "Windowed", cwd: "/work/repo" });
-    dispatch(window, { type: "historyReplay", active: true });
-    dispatch(window, { type: "userMessageChunk", text: "older kept turn" });
-    dispatch(window, { type: "messageChunk", text: "kept answer" });
-    dispatch(window, { type: "agentEnd" });
-    dispatch(window, { type: "historyReplay", active: false });
-
-    const stub = stubRemoteDownload(window);
-    try {
-      exportViaOverflow(window, doc);
-      expect(posted.filter((m) => m.type === "openText")).toHaveLength(0);
-      const text = await stub.blobs[0].text();
-      expect(text).toMatch(/Last 1 turn\./);
-      expect(text).toContain("older kept turn");
-    } finally {
-      stub.restore();
-    }
   });
 
   it("clears the export log when the session is wiped", () => {
@@ -226,8 +150,8 @@ describe("export conversation lives in the session overflow", () => {
     expect(content).not.toContain("reply-bravo");
   });
 
-  it("omits hidden user turns from the export and the windowed turn count", async () => {
-    const { window, doc } = bootWebview({ remote: true });
+  it("omits hidden user turns from the export", () => {
+    const { window, doc, posted } = bootWebview();
     dispatch(window, { type: "sessionName", sessionId: "s1", name: "Windowed hide", cwd: "/work/repo" });
     dispatch(window, { type: "historyReplay", active: true });
     dispatch(window, { type: "userMessageChunk", text: "visible one" });
@@ -244,11 +168,8 @@ describe("export conversation lives in the session overflow", () => {
     dispatch(window, { type: "agentEnd" });
     dispatch(window, { type: "historyReplay", active: false });
 
-    const stub = stubRemoteDownload(window);
-    try {
-      exportViaOverflow(window, doc);
-      const text = await stub.blobs[0].text();
-      expect(text).toMatch(/Last 2 turns\./);
+    {
+      const text = lastExportedMarkdown(window, doc, posted);
       expect(text).toContain("visible one");
       expect(text).toContain("visible two");
       expect(text).toContain("ack reminder");
@@ -257,8 +178,6 @@ describe("export conversation lives in the session overflow", () => {
       expect(text).not.toContain("background task finished");
       expect(text).not.toContain("[Plan cancelled]");
       expect(text).not.toMatch(/## User[\s\S]*background task/);
-    } finally {
-      stub.restore();
     }
   });
 

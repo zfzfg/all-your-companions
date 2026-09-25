@@ -32,12 +32,9 @@ export const BODY = `
       <button id="session-type-crew" class="cx-seg-opt session-type-opt" type="button" role="radio" aria-checked="false" tabindex="-1" data-session-type="crew">Crew</button>
     </div>
     <span id="session-type-badge" class="cx-pill cx-pill--outline cx-session-badge" hidden></span>
-    <button id="repo-btn" type="button"></button>
-    <button id="remote-btn" hidden></button>
     <button id="history-btn"></button>
     <button id="new-btn"></button>
     <div id="session-head-actions"></div>
-    <div id="repo-popover" hidden></div>
     <div id="history-popover" hidden></div>
   </header>
   <div id="session-head">
@@ -133,7 +130,6 @@ export interface Harness {
 
 export function bootWebview(opts: {
   ready?: boolean;
-  remote?: boolean;
   vscode?: boolean;
   postMessage?: (message: Posted) => unknown;
   beforeScripts?: (window: Window) => void;
@@ -157,14 +153,11 @@ export function bootWebview(opts: {
     const newBtn = doc.getElementById("new-btn");
     newBtn?.parentElement?.insertBefore(slot, newBtn.nextSibling);
   }
-  // What the relay's chat.html sets before loading chat.js. Gates the remote-only
-  // affordances (repo switcher) and suppresses the host-only ones.
-  if (opts.remote) (window as any).grokRemoteClient = true;
   if (opts.beforeScripts) opts.beforeScripts(window);
   (window as any).eval(helperSrc);
   (window as any).eval(settingsSrc);
-  // Relay chat.html loads this before chat.js; VS Code does not load it at all,
-  // but evaluating an inert component global here lets one harness cover both.
+  // Only the desktop host (host.canPreviewInApp) loads this before chat.js; VS Code
+  // does not, but evaluating an inert component global here lets one harness cover both.
   (window as any).eval(filePanelSrc);
   (window as any).eval(chatSrc);
   // The webview now boots busy+locked (startup spinner) and only goes idle once

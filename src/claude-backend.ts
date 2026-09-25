@@ -302,7 +302,7 @@ export function claudeProjectSlug(targetCwd: string): string {
 export function readNativeClaudeProjectsSessions(
   cwd: string,
   home = os.homedir(),
-  platform: NodeJS.Platform = process.platform,
+  _platform: NodeJS.Platform = process.platform,
 ): BackendSessionListEntry[] {
   const projectsDir = path.join(home, ".claude", "projects");
   if (!fs.existsSync(projectsDir)) return [];
@@ -426,7 +426,7 @@ export class ClaudeBackend implements AcpBackend {
 
   constructor(private readonly options: ClaudeBackendOptions = {}) {}
 
-  sessionNewMeta?(cwd: string): Record<string, unknown> | undefined {
+  sessionNewMeta?(_cwd: string): Record<string, unknown> | undefined {
     const options: Record<string, unknown> = {};
     if (this.options.allowedTools && this.options.allowedTools.length > 0) {
       // Whitelist of tools: replaces the default tool preset in claudeCode completely

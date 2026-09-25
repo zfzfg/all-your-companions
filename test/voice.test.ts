@@ -456,7 +456,7 @@ describe("voiceSettingForRepo", () => {
   });
 
   it("an unbound repo (no desktop project yet) does not inherit the desk workspace value", () => {
-    expect(voiceSettingForRepo(
+    expect(voiceSettingForRepo<unknown>(
       ["desk-term"],
       undefined,
       false,

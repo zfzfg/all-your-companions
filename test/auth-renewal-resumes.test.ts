@@ -17,7 +17,6 @@ function sidebarWith(sessions: Session[], needsLogin: Record<string, boolean>) {
   sidebar.providerNeedsLogin = needsLogin;
   sidebar.focused = sessions[0];
   sidebar.pool = new Set(sessions);
-  sidebar.remoteClients = { detachedActiveValues: () => [] };
   sidebar.postProviderState = vi.fn();
   sidebar.invalidateSubscriptionUsage = vi.fn();
   sidebar.adapterHistory = vi.fn(() => undefined);
@@ -83,7 +82,6 @@ function loginSidebar(needsLogin: Record<string, boolean>) {
   sidebar.providerNeedsLogin = needsLogin;
   sidebar.focused = session;
   sidebar.pool = new Set([session]);
-  sidebar.remoteClients = { detachedActiveValues: () => [], clients: () => [] };
   sidebar.locateProvider = vi.fn(() => "/usr/bin/claude");
   sidebar.workspaceRoot = vi.fn(() => "/repo");
   sidebar.host = { appendLine: vi.fn(), createTerminal: vi.fn(() => ({ show: vi.fn() })) };
@@ -98,6 +96,7 @@ function loginSidebar(needsLogin: Record<string, boolean>) {
   sidebar.post = vi.fn();
   sidebar.startDeviceLogin = vi.fn(async () => {});
   sidebar.loginReprobeTimers = new Map();
+  sidebar.providerCliVersions = {};
   sidebar.watchProviderLogin = vi.fn();
   return { sidebar, session };
 }
@@ -105,7 +104,7 @@ function loginSidebar(needsLogin: Record<string, boolean>) {
 describe("signing in from a conversation that is being refused", () => {
   it.each(["grok", "codex", "claude", "gemini"])("keeps %s desk sign-in in its CLI terminal", async provider => {
     const { sidebar } = loginSidebar({});
-    await sidebar.onMessage({ type: "runGrokLogin", provider }, "local");
+    await sidebar.onMessage({ type: "runGrokLogin", provider });
     expect(sidebar.host.createTerminal).toHaveBeenCalledWith(expect.objectContaining({
       shellArgs: provider === "claude" || provider === "gemini" ? ["auth", "login"] : ["login"],
     }));
@@ -113,9 +112,9 @@ describe("signing in from a conversation that is being refused", () => {
   });
 
   it("keeps that conversation instead of parking it for a panel", async () => {
-    const { sidebar, session } = loginSidebar({ claude: true });
+    const { sidebar } = loginSidebar({ claude: true });
 
-    await sidebar.onMessage({ type: "runGrokLogin", provider: "claude" }, session, "local");
+    await sidebar.onMessage({ type: "runGrokLogin", provider: "claude" });
 
     expect(sidebar.newFocusedSession).not.toHaveBeenCalled();
     expect(sidebar.host.createTerminal).toHaveBeenCalled(); // the flow still runs
@@ -124,9 +123,9 @@ describe("signing in from a conversation that is being refused", () => {
   // Unchanged for the errand it was written for: connecting a second account
   // must not drop its sign-in panel over a transcript.
   it("still starts a fresh session when the account is merely being connected", async () => {
-    const { sidebar, session } = loginSidebar({});
+    const { sidebar } = loginSidebar({});
 
-    await sidebar.onMessage({ type: "runGrokLogin", provider: "claude" }, session, "local");
+    await sidebar.onMessage({ type: "runGrokLogin", provider: "claude" });
 
     expect(sidebar.newFocusedSession).toHaveBeenCalled();
   });

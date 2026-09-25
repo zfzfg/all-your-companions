@@ -71,6 +71,9 @@ describe("fair clocks (X-04)", () => {
 
 function harness(provider: Session["provider"] = "codex", reason: "companion-subagent" | "crew-stage" = "companion-subagent") {
   const sidebar = Object.create(GrokSidebar.prototype) as any;
+  // The debounced overview frame fires after the test has ended, against a
+  // half-built sidebar; nothing here asserts on it.
+  sidebar.postRunningChildren = () => {};
   const parent = new Session();
   parent.provider = "grok";
   parent.activeSessionId = "parent-1";

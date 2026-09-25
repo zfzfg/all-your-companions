@@ -3,18 +3,14 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { GrokSidebar } from "../src/sidebar";
-import { RemoteClientState } from "../src/remote-client-state";
 import { Session } from "../src/session";
 import { normalizeRepoPath, sessionsDirFor } from "../src/sessions";
-import { routinesMessageForRemote } from "../src/remote-policy";
-import type { HostMsg } from "../src/protocol";
 
 describe("project archive presentation", () => {
   let root: string;
   beforeEach(() => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), "grok-project-archive-"));
     vi.stubEnv("GROK_HOME", path.join(root, "grok"));
-    vi.stubEnv("GROK_CLOUD_ENVIRONMENT", "");
   });
   afterEach(() => {
     vi.unstubAllEnvs();
@@ -54,13 +50,9 @@ describe("project archive presentation", () => {
     sidebar.focused.cwd = repo;
     sidebar.pool = new Set();
     sidebar.worktreeCache = [];
-    sidebar.remoteClients = new RemoteClientState<Session>(app);
-    sidebar.remoteClients.ready("phone");
     sidebar.defaultProviderForProject = () => provider;
     sidebar.connectedProviders = () => [provider];
     sidebar.postLocal = vi.fn();
-    sidebar.uplink = { broadcastTo: vi.fn() };
-    sidebar.remoteMediaDeps = {};
     sidebar.refreshWorktreeCache = vi.fn();
     sidebar.scheduleAdapterHistoryRefresh = vi.fn();
     sidebar.annotateWorktreeLabels = vi.fn();
@@ -81,41 +73,25 @@ describe("project archive presentation", () => {
   }
 
   it.each(["grok", "codex", "claude"] as const)(
-    "remote archive and unarchive keep %s projects, history and pins reachable",
+    "archive and unarchive keep %s projects, history and pins reachable",
     async (provider) => {
-      const { sidebar, stored, app, worktree, row } = setup(true, provider);
-      // No active session: project curation needs only the catalog capability.
-      expect(sidebar.remoteClients.active("phone")).toBeUndefined();
+      const { sidebar, stored, app, row } = setup(true, provider);
       const trusted = sidebar.authorizedSessionCwds();
       const epoch = sidebar.authEpoch;
-      sidebar.handleRemoteMessage("phone", { type: "setRepoArchived", cwd: app, archived: true });
-      await vi.waitFor(() => expect(sidebar.uplink.broadcastTo).toHaveBeenCalled());
+      await sidebar.setRepoArchived(app, true);
       expect(stored["grok.repoArchives"][normalizeRepoPath(app)].archived).toBe(true);
       expect(sidebar.authorizedSessionCwds()).toEqual(trusted);
       expect(sidebar.authEpoch).toBe(epoch);
-      expect(sidebar.remoteTargetableCwd(app)).toBe(true);
-      expect(sidebar.remoteTargetableCwd(worktree)).toBe(true);
       const image = path.join(app, "result.png");
       fs.writeFileSync(image, "image fixture");
       expect(sidebar.isImagePathAuthorizedNow(image)).toBe(true);
-      expect(sidebar.buildRemoteReposMsg("phone")).toMatchObject({
-        selectedCwd: app, entries: expect.arrayContaining([expect.objectContaining({ cwd: app, archived: true })]),
-      });
-      sidebar.uplink.broadcastTo.mockClear();
-      sidebar.handleRemoteMessage("phone", { type: "listRepoSessions", cwd: app });
-      expect(sidebar.uplink.broadcastTo).toHaveBeenCalledWith(["phone"], expect.objectContaining({
-        type: "repoSessions", cwd: app, entries: [expect.objectContaining({ id: row.id })],
-      }), app);
+      expect(sidebar.localRepoCatalogEntries()).toContainEqual(expect.objectContaining({ cwd: app, archived: true }));
       expect(sidebar.buildPinnedSessions().entries).toContainEqual(expect.objectContaining({ id: row.id }));
-      sidebar.sendRemoteClient("phone", { type: "messageChunk", text: "still working" }, app);
-      expect(sidebar.uplink.broadcastTo).toHaveBeenCalledWith(["phone"], {
-        type: "messageChunk", text: "still working",
-      }, app);
 
-      sidebar.handleRemoteMessage("phone", { type: "setRepoArchived", cwd: app, archived: false });
-      await vi.waitFor(() => expect(sidebar.buildRemoteReposMsg("phone").entries).toContainEqual(
+      await sidebar.setRepoArchived(app, false);
+      expect(sidebar.localRepoCatalogEntries()).toContainEqual(
         expect.objectContaining({ cwd: app, archived: false, archivedAt: expect.any(Number) }),
-      ));
+      );
       expect(sidebar.authorizedSessionCwds()).toEqual(trusted);
       expect(sidebar.host.appendLine.mock.calls.flat().join("\n")).not.toMatch(/dropped|failed/);
     },
@@ -128,8 +104,6 @@ describe("project archive presentation", () => {
     expect(sidebar.sessionCwdsForRepo(app, overrides)).toContain(worktree);
     for (const cwd of [repo, app]) await sidebar.setRepoArchived(cwd, true);
     expect(sidebar.authorizedSessionCwds().filter((cwd: string) => cwd === worktree)).toEqual([worktree]);
-    expect(sidebar.buildRemoteReposMsg("phone").entries).toHaveLength(2);
-    expect(sidebar.remoteTargetableCwd(worktree)).toBe(true);
   });
 
   it("advertises archive choices on desktop fallback rows without session catalogs", async () => {
@@ -140,25 +114,10 @@ describe("project archive presentation", () => {
     expect(sidebar.localRepoCatalogEntries()).toContainEqual(expect.objectContaining({ cwd: app, archived: true }));
   });
 
-  it("keeps archived routines and retained runs while omitting absent projects", async () => {
-    const { sidebar, repo, app } = setup();
-    await sidebar.setRepoArchived(app, true);
-    const message = {
-      type: "routines", models: [],
-      projects: [{ cwd: app, label: "app", archived: true }, { cwd: "/absent", label: "absent" }],
-      entries: [{ cwd: repo, runs: [{ cwd: app, sessionId: "conversation", detail: "kept" }] }],
-    } as unknown as Extract<HostMsg, { type: "routines" }>;
-    expect(routinesMessageForRemote(message, sidebar.authorizedSessionCwds(), (a, b) => a === b)).toMatchObject({
-      projects: [{ cwd: app, archived: true }],
-      entries: [{ runs: [{ cwd: app, sessionId: "conversation", detail: "kept" }] }],
-    });
-  });
 
-  it("offers Hide only on a local desktop, independently of archive support", () => {
+  it("offers Hide independently of archive support", () => {
     const { sidebar } = setup();
     expect(sidebar.buildInitialStateMsg().capabilities.removeProjectFolder).toBe(true);
-    vi.stubEnv("GROK_CLOUD_ENVIRONMENT", "1");
-    expect(sidebar.buildInitialStateMsg().capabilities.removeProjectFolder).toBe(false);
     expect(sidebar.localRepoCatalogEntries().every((r: { archived?: boolean }) => typeof r.archived === "boolean")).toBe(true);
   });
 });

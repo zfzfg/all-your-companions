@@ -18,7 +18,6 @@ import {
   type HandoffPacket,
   type HandoffStatus,
   highestFindingSeverity,
-  lastWritingPacket,
   verdictUnreadable,
   verifyForTransitions,
   verifyStatus,

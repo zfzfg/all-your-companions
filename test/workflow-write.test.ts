@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { IDEA_TO_DONE } from "../src/workflow";
 import { parseCrewPreset } from "../src/crew-preset";
-import { serializeWorkflowPreset, validateWorkflowDraft, workflowToDraft } from "../src/workflow-write";
+import { validateWorkflowDraft, workflowToDraft } from "../src/workflow-write";
 import { extractCompanionsWorkflow, acceptSubmission } from "../src/workflow-generator";
 
 const ROLES = ["planner", "implementer", "reviewer", "fixer", "clarifier", "inspector", "researcher"];

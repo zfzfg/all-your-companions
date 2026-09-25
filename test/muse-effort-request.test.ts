@@ -34,7 +34,7 @@ beforeAll(async () => {
   try { await import("../adapters/muse/main.mts"); }
   finally { for (const spy of spies) spy.mockRestore(); }
 });
-afterAll(() => vi.restoreAllMocks());
+afterAll(() => { vi.restoreAllMocks(); });
 
 describe("Muse effort ACP registration", () => {
   it("registers the backend method and forwards its validated params to the session", async () => {

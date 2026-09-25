@@ -203,7 +203,7 @@ describe("manual remote OAuth", () => {
     const proc = new FakeProc();
     const onAuthorization = vi.fn();
     const callbackFetch = vi.fn().mockImplementation(async () => new Response("ok"));
-    const spawn = vi.fn(() => proc as never);
+    const spawn = vi.fn((..._args: any[]) => proc as never);
     const result = authorizeMcpRemote({ command: "npx", args: mcpRemoteArgs("https://vendor.example/mcp"),
       spawn, timeoutMs, onAuthorization, callbackFetch, env: { PATH: "npx-path", NODE_OPTIONS: "--no-warnings" } });
     return { proc, onAuthorization, callbackFetch, spawn, result };
@@ -402,7 +402,6 @@ describe("authorizeMcpRemote", () => {
       command: "npx",
       args: ["-y", MCP_REMOTE_PACKAGE, "https://mcp.linear.app/mcp"],
       timeoutMs: 1_000,
-      pickFreeListenPort: async () => 0,
       spawn: () => {
         calls += 1;
         return proc as never;
@@ -421,7 +420,6 @@ describe("authorizeMcpRemote", () => {
       command: "npx",
       args: ["-y", MCP_REMOTE_PACKAGE, "https://mcp.linear.app/mcp"],
       timeoutMs: 1_000,
-      pickFreeListenPort: async () => { throw new Error("no port"); },
       spawn: () => {
         calls += 1;
         return proc as never;
@@ -614,8 +612,8 @@ function makeKeyHost(secrets: Map<string, string>, state: PersistedState): Sideb
   // These tests are about the connector key cache. The AP-05/AP-16 host
   // servers (ask_user, companions) need a live pipe and a real session, so
   // they are out of scope here and answer "not offered".
-  host.askUserMcpServer = async () => undefined;
-  host.companionsMcpServer = async () => undefined;
+  (host as any).askUserMcpServer = async () => undefined;
+  (host as any).companionsMcpServer = async () => undefined;
   return host;
 }
 

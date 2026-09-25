@@ -18,5 +18,4 @@ Documentation for **All your Companions** (*All your Companions — in one place
 - [Projects](projects.md) — managing multi-workspace projects and git worktrees.
 - [Tips on the empty screen](empty-state-tips.md) — welcome suggestions and companion selection.
 - [Slash commands](SLASH-COMMANDS.md) — slash commands and tool dispatches across companions.
-- [Desktop app](desktop.md) — standalone Electron application configuration.
 - [Changelog archive](CHANGELOG-ARCHIVE.md) — historical changelog entries.

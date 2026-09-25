@@ -525,36 +525,3 @@ export function describeCadence(cadence: RoutineCadence): string {
   const noun = cadence.unit === "hours" ? "hour" : "minute";
   return every === 1 ? `Every ${noun}` : `Every ${every} ${noun}s`;
 }
-
-/* ------------------------------------------------------- cloud environments */
-
-/**
- * When this host next needs to be awake, or null when nothing is scheduled.
- *
- * A routine on a laptop fires because the laptop is on and somebody opened it.
- * A cloud environment has nobody to open it, so it has to ask the relay to wake
- * it — and the relay must not be told WHAT is due, only WHEN. Teaching the relay
- * about cadences would put schedules, names and eventually prompts in a database
- * that deliberately holds no payloads. One timestamp holds the line.
- *
- * Paused routines are excluded, which is the same rule {@link routineWindow}
- * applies: a paused routine that wakes a machine has not fired, but it has
- * still cost the user money and made a promise the UI says is suspended.
- *
- * Returns the EARLIEST `nextAt`, because the host must be up for the first one
- * due. Everything after it is re-computed once it is awake.
- */
-export function nextWakeAt(
-  routines: readonly Routine[],
-  now: number,
-  clock: LocalClock = systemLocalClock,
-): number | null {
-  let earliest: number | null = null;
-  for (const routine of routines) {
-    if (routine.paused) continue;
-    const { nextAt } = routineWindow(routine, now, clock);
-    if (!Number.isFinite(nextAt)) continue;
-    if (earliest === null || nextAt < earliest) earliest = nextAt;
-  }
-  return earliest;
-}

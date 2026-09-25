@@ -16,7 +16,7 @@ instead of shipping.
 
 | Probe | Result |
 |---|---|
-| `initialize` → `promptCapabilities` | `{"image":false,"audio":false,"embeddedContext":true}` — unchanged from the 0.2.x capture in [plan-probe.log](plan-probe.log) |
+| `initialize` → `promptCapabilities` | `{"image":false,"audio":false,"embeddedContext":true}` — unchanged from the 0.2.x capture (the log `research/plan-probe.cjs` writes when run) |
 | 256×256 solid-red PNG (`image/png`) | **ACCEPTED**, `stopReason:"end_turn"`, model replies `"red"` — it decoded the pixels |
 | 1×1 PNG | Turn succeeds but the pipeline drops the attachment: *"The attached image was dropped as too small"* — and the model then went hunting the workspace for an image file. A dangling `[Image #N]` tag with no delivered image actively misleads the model; this is why the extension **blocks the send** when an attachment can't be read, rather than skipping it silently. |
 | Same red square as `image/svg+xml` (`PROBE_SVG=1`) | **ACCEPTED**, model replies `"red"` (CLI appears to rasterize). The extension still routes SVG as a plain **path chip**, not vision — an attached SVG is an editable text source the user usually wants grok to *read/edit*, and vision-izing it would destroy the file identity. xAI's docs only commit to jpg/jpeg/png (20 MiB/image): <https://docs.x.ai/developers/model-capabilities/images/understanding> |

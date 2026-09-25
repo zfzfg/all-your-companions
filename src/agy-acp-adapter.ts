@@ -4,7 +4,6 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { createInterface, type Interface } from "node:readline";
-import { Readable, Writable } from "node:stream";
 import { DEFAULT_GEMINI_MODELS, contextWindowForModel } from "./gemini-backend";
 import { MAX_DIFF_EXPAND_BYTES } from "./diff-view";
 import { mergeDiffIntoContent, synthesizeEditDiff, type AcpDiffBlock } from "./diff-synthesize";
@@ -493,6 +492,39 @@ export interface AgyAdapterOptions {
   diskPollDelayMs?: number;
 }
 
+/** Staged prompt images older than this are removed when an adapter starts. */
+export const STAGED_IMAGE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const STAGED_IMAGE_NAME = /^image-[0-9a-f-]{36}\.(png|jpe?g|webp|gif)$/i;
+
+/**
+ * Remove images this adapter staged (`image-<uuid>.<ext>`) that are older than
+ * `maxAgeMs`. A later turn may still ask agy to view an image from earlier in
+ * the conversation, so a live session's files are never swept by turn; age is
+ * the only safe signal across adapter lifetimes. Other files are left alone.
+ */
+export function sweepStaleStagedImages(dirs: readonly string[], now = Date.now(), maxAgeMs = STAGED_IMAGE_MAX_AGE_MS): string[] {
+  const removed: string[] = [];
+  for (const dir of dirs) {
+    let names: string[];
+    try {
+      names = fs.readdirSync(dir);
+    } catch {
+      continue;
+    }
+    for (const name of names) {
+      if (!STAGED_IMAGE_NAME.test(name)) continue;
+      const file = path.join(dir, name);
+      try {
+        const st = fs.statSync(file);
+        if (!st.isFile() || now - st.mtimeMs < maxAgeMs) continue;
+        fs.rmSync(file, { force: true });
+        removed.push(file);
+      } catch {}
+    }
+  }
+  return removed;
+}
+
 export interface PromptUsage {
   inputTokens: number;
   outputTokens: number;
@@ -555,6 +587,9 @@ export class AgyAcpAdapterServer {
    * that race.
    */
   private pendingDiffPromises: Promise<unknown>[] = [];
+
+  /** Images this adapter wrote into a staging directory for the current session. */
+  private readonly stagedImages = new Set<string>();
 
   private rl?: Interface;
   private agyProc?: ChildProcessWithoutNullStreams;
@@ -685,7 +720,7 @@ export class AgyAcpAdapterServer {
 
   start(): void {
     this.rl = createInterface({ input: this.input });
-    this.rl.on("line", (line) => this.handleClientLine(line));
+    this.rl.on("line", (line) => { void this.handleClientLine(line); });
     this.input.on("end", () => this.dispose());
   }
 
@@ -1159,19 +1194,40 @@ export class AgyAcpAdapterServer {
         : mimeType.includes("gif")
           ? ".gif"
           : ".png";
-    const stagingDir = path.join(this.geminiHome, "staging");
+    const [stagingDir, fallbackDir] = this.stagingDirs();
     try {
       fs.mkdirSync(stagingDir, { recursive: true });
       const filePath = path.join(stagingDir, `image-${randomUUID()}${ext}`);
       fs.writeFileSync(filePath, Buffer.from(data, "base64"));
+      this.stagedImages.add(filePath);
       return filePath;
     } catch {
-      const fallbackDir = path.join(os.tmpdir(), "gemini-staging");
       fs.mkdirSync(fallbackDir, { recursive: true });
       const filePath = path.join(fallbackDir, `image-${randomUUID()}${ext}`);
       fs.writeFileSync(filePath, Buffer.from(data, "base64"));
+      this.stagedImages.add(filePath);
       return filePath;
     }
+  }
+
+  /** Where prompt images are staged: under the Gemini home, else the temp dir. */
+  stagingDirs(): [string, string] {
+    return [path.join(this.geminiHome, "staging"), path.join(os.tmpdir(), "gemini-staging")];
+  }
+
+  /** Delete the images this session staged; used when the session is deleted. */
+  discardStagedImages(): void {
+    for (const file of this.stagedImages) {
+      try {
+        fs.rmSync(file, { force: true });
+      } catch {}
+    }
+    this.stagedImages.clear();
+  }
+
+  /** Remove staged images left behind by earlier adapter runs. */
+  sweepStagedImages(now = Date.now()): string[] {
+    return sweepStaleStagedImages(this.stagingDirs(), now);
   }
 
   processPromptBlocks(promptBlocks: any[], fallbackText?: string): string {
@@ -1433,6 +1489,7 @@ export class AgyAcpAdapterServer {
         if (!target || target === this.sessionId) {
           this.cancelActiveTurn();
           this.activeConversationId = undefined;
+          this.discardStagedImages();
         }
         this.sendResponse(id, {});
         break;
@@ -2057,6 +2114,7 @@ export class AgyAcpAdapterServer {
 // When invoked directly as a standalone Node script
 if (require.main === module) {
   const server = new AgyAcpAdapterServer();
+  server.sweepStagedImages();
   server.start();
 
   process.on("SIGINT", () => {

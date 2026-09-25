@@ -3,25 +3,19 @@ import { afterEach, describe, expect, it } from "vitest";
 import { bootWebview, dispatch, type Harness } from "./webview-harness";
 
 const opened: Harness[] = [];
-afterEach(() => { for (const h of opened.splice(0)) h.window.happyDOM.abort(); });
+afterEach(() => { for (const h of opened.splice(0)) void h.window.happyDOM.abort(); });
 
 /**
- * The preference reaches the two surfaces by different routes, and `on` has to
- * use whichever one is real: a remote holds it in its own storage, while a desk
- * is TOLD by the host, because VS Code renders Settings in a separate webview
- * from the chat and nothing client-local there can reach this page.
+ * The preference is TOLD by the host, because VS Code renders Settings in a
+ * separate webview from the chat and nothing client-local there can reach
+ * this page.
  */
-function transcript(opts: { remote?: boolean; count?: number; height?: number; on?: boolean } = {}) {
-  const { remote = false, count = 3, on = true } = opts;
+function transcript(opts: { count?: number; height?: number; on?: boolean } = {}) {
+  const { count = 3, on = true } = opts;
   const height = opts.height ?? count * 1000;
-  const h = bootWebview({
-    remote,
-    beforeScripts: (w) => {
-      if (on && remote) (w as any).localStorage.setItem("grok.remote.promptNav", "true");
-    },
-  });
+  const h = bootWebview();
   opened.push(h);
-  if (!remote) dispatch(h.window, { type: "promptNav", value: on });
+  dispatch(h.window, { type: "promptNav", value: on });
   const { doc, window } = h;
   const messages = doc.getElementById("messages")!;
   for (let i = 0; i < count; i++) {
@@ -50,24 +44,6 @@ function transcript(opts: { remote?: boolean; count?: number; height?: number; o
 }
 
 describe("prompt navigation (#150)", () => {
-  it("is on for a remote that has never had an opinion, and stays off for one that said no", () => {
-    // The upgrade question, and the reason `storedBool` falls back only on a
-    // MISSING key: flipping the default must reach a device that never chose,
-    // and must not reach one that chose. Absence stays absence -- nothing
-    // writes the new default into anybody's storage on the way past.
-    const fresh = transcript({ remote: true, on: false });
-    fresh.scroll(1700);
-    expect(fresh.shown("prompt-prev-btn")).toBe(true);
-    expect(fresh.window.localStorage.getItem("grok.remote.promptNav")).toBeNull();
-
-    const refused = bootWebview({
-      remote: true,
-      beforeScripts: (w) => { (w as any).localStorage.setItem("grok.remote.promptNav", "false"); },
-    });
-    opened.push(refused);
-    expect(refused.doc.getElementById("prompt-prev-btn")!.classList.contains("visible")).toBe(false);
-  });
-
   it("turned off means the plain scroll-to-bottom button and nothing else", () => {
     // The preference is ON by default now, so this is the opt-OUT state: a
     // person who went and turned it off gets exactly the control they had
@@ -93,10 +69,10 @@ describe("prompt navigation (#150)", () => {
     expect(h.messages.scrollTop).toBe(2000);
   });
 
-  it("hides only when there is no earlier prompt, and counts only the remote's rendered ones", () => {
-    // A remote snapshot carries just the tail, so "earlier prompt" has to mean
+  it("hides only when there is no earlier prompt, and counts only the rendered ones", () => {
+    // A windowed history carries just the tail, so "earlier prompt" has to mean
     // earlier in the DOM, never a history ordinal the client cannot see.
-    const h = transcript({ remote: true, count: 2 });
+    const h = transcript({ count: 2 });
     h.scroll(0);
     expect(h.shown("prompt-prev-btn")).toBe(false);
     expect(h.button("prompt-prev-btn").disabled).toBe(true);

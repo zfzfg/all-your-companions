@@ -160,7 +160,7 @@ describe("ACP integration (real subprocess, fake CLI)", () => {
     };
     let terminalCalls = 0;
     (client as any).terminal = {
-      create: (params: { command: string }) => { terminalCalls += 1; return { terminalId: `t-${terminalCalls}` }; },
+      create: (_params: { command: string }) => { terminalCalls += 1; return { terminalId: `t-${terminalCalls}` }; },
       output: () => ({ output: "", exitStatus: { exitCode: 0 }, truncated: false }),
       waitForExit: async () => ({ exitCode: 0 }),
       kill: () => {},
@@ -337,7 +337,7 @@ describe("ACP integration (real subprocess, fake CLI)", () => {
       expect(logs.join("\n")).toContain("--reasoning-effort high");
       expect(logs.join("\n")).toContain("agent --reasoning-effort high stdio");
     } finally {
-      effortClient.dispose();
+      void effortClient.dispose();
     }
   });
 
@@ -529,7 +529,7 @@ describe("ACP integration (real subprocess, fake CLI)", () => {
       expect(users.join("")).toContain("stored question");
       expect(agents.join("")).toContain("stored answer");
     } finally {
-      resumeClient.dispose();
+      void resumeClient.dispose();
     }
   });
 
@@ -552,7 +552,7 @@ describe("ACP integration (real subprocess, fake CLI)", () => {
         const created = await extra.newSession();
         ids.push(created.sessionId);
       } finally {
-        extra.dispose();
+        void extra.dispose();
       }
     }
     expect(ids).toHaveLength(2);
@@ -589,7 +589,7 @@ describe("ACP integration (real subprocess, fake CLI)", () => {
       // one — a pid-derived constant after restart would make this silent.
       expect(echoes).toContain("hello after load");
     } finally {
-      resumeClient.dispose();
+      void resumeClient.dispose();
     }
   });
 

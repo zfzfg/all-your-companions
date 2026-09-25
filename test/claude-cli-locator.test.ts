@@ -185,11 +185,11 @@ describe("Windows .cmd spawn vs resolved exe", () => {
       shell: false,
       encoding: "utf8",
     });
-    expect(shimLaunch.error?.code).toBe("EINVAL");
+    expect((shimLaunch.error as NodeJS.ErrnoException | undefined)?.code).toBe("EINVAL");
 
     const resolved = resolveClaudeSpawnTarget(cmd, { platform: "win32" });
     expect(resolved).toBe(exe);
-    const nativeLaunch = spawnSync(resolved, ["-e", "process.stdout.write('ok')"], {
+    const nativeLaunch = spawnSync(resolved!, ["-e", "process.stdout.write('ok')"], {
       shell: false,
       encoding: "utf8",
     });

@@ -11,7 +11,6 @@ import { Session } from "../src/session";
 import { IDEA_TO_DONE, findStage, type WorkflowDefinition } from "../src/workflow";
 import { WorkflowRunStore, makeWorkflowRun, startStage, type WorkflowRun } from "../src/workflow-run";
 import { AgentRunStore } from "../src/agent-run";
-import { ACP_PROVIDERS } from "../src/acp-backend";
 import type { EligibilityInput } from "../src/target-eligibility";
 
 const dirs: string[] = [];
@@ -67,7 +66,7 @@ function harness(settings: Record<string, unknown> = {}, usable = ["codex", "cla
   sidebar.crewEligibilityInput = () => ({ ...eligibility, exhausted: new Set() });
   const calls: Array<{ role: any; brief: any; coords: any }> = [];
   const replies: Reply[] = [];
-  sidebar.runAgentRole = vi.fn(async (role: any, brief: any, _t: string, _c: Session, _o: string, coords: any) => {
+  sidebar.runAgentRole = vi.fn(async (role: any, brief: any, _t: string, _c: Session, coords: any) => {
     calls.push({ role, brief, coords });
     const r = replies.shift() ?? {};
     return {
@@ -104,7 +103,7 @@ describe("a stage run in the host", () => {
     const h = harness();
     let run = begin(h);
     h.replies.push({ raw: block({ planSteps: [{ id: "S1", title: "route", files: ["src/auth.ts"] }] }) });
-    await h.sidebar.executeWorkflowStage(h.session, "local", IDEA_TO_DONE, run);
+    await h.sidebar.executeWorkflowStage(h.session, IDEA_TO_DONE, run);
     expect(h.calls[0]!.role.mode).toBe("plan");
     expect(h.calls[0]!.role.permissions).toContainEqual({ kind: "edit", action: "deny" });
     run = h.session.workflowRun!;
@@ -113,7 +112,7 @@ describe("a stage run in the host", () => {
     expect(run.gate?.preselectedTarget?.provider).toBeTruthy();
 
     // Implement: scoped to the plan's files; review then prefers another companion.
-    await h.sidebar.handleWorkflowGateAction(h.session, "local", { type: "start", target: { provider: "codex" } });
+    await h.sidebar.handleWorkflowGateAction(h.session, { type: "start", target: { provider: "codex" } });
     const impl = h.calls[1]!;
     expect(impl.role.permissions).toContainEqual({ kind: "edit", action: "allow", pathGlob: "src/auth.ts" });
     expect(impl.coords.stage.scope).toEqual(["src/auth.ts"]);
@@ -122,10 +121,10 @@ describe("a stage run in the host", () => {
 
     // Review on the preselection (no explicit target); read-only runs in agent mode.
     h.replies.push({ raw: block({ verdict: "pass", findings: [] }) });
-    await h.sidebar.handleWorkflowGateAction(h.session, "local", { type: "start" });
+    await h.sidebar.handleWorkflowGateAction(h.session, { type: "start" });
     expect(h.calls[2]!.role.provider).toBe("claude");
     expect(h.calls[2]!.role.mode).toBe("agent");
-    await h.sidebar.handleWorkflowGateAction(h.session, "local", { type: "start" });
+    await h.sidebar.handleWorkflowGateAction(h.session, { type: "start" });
     expect(h.session.workflowRun!.status).toBe("done");
     const report = path.join(h.root, "run-t", "run-report.md");
     expect(existsSync(report)).toBe(true);
@@ -136,14 +135,14 @@ describe("a stage run in the host", () => {
     const ask = harness();
     begin(ask);
     ask.replies.push({ outcome: "failed", detail: "usage limit reached: quota exhausted (429)" });
-    await ask.sidebar.executeWorkflowStage(ask.session, "local", IDEA_TO_DONE, ask.session.workflowRun, { provider: "codex" });
+    await ask.sidebar.executeWorkflowStage(ask.session, IDEA_TO_DONE, ask.session.workflowRun, { provider: "codex" });
     expect(ask.session.workflowRun!.gate).toMatchObject({ kind: "limit", limitProvider: "codex" });
     expect(ask.calls).toHaveLength(1);
 
     const sw = harness({ "crew.onLimit": "switch" });
     begin(sw);
     sw.replies.push({ outcome: "failed", detail: "usage limit reached: quota exhausted (429)" }, { raw: block({ planSteps: [{ id: "S1", title: "x" }] }) });
-    await sw.sidebar.executeWorkflowStage(sw.session, "local", IDEA_TO_DONE, sw.session.workflowRun, { provider: "codex" });
+    await sw.sidebar.executeWorkflowStage(sw.session, IDEA_TO_DONE, sw.session.workflowRun, { provider: "codex" });
     expect(sw.calls[1]!.role.provider).toBe("claude");
     expect(sw.emitted.some((m) => m.type === "hostNotice" && /after Codex hit its usage limit/.test(m.text))).toBe(true);
     expect(sw.session.workflowRun!.gate?.forcedManual).toContain("provider-switched");
@@ -158,10 +157,10 @@ describe("a stage run in the host", () => {
     begin(h, def);
     h.session.workflowRun = { ...h.session.workflowRun!, verify: "npm test" };
     h.replies.push({ raw: block({ planSteps: [{ id: "S1", title: "a", files: ["a.ts"] }, { id: "S2", title: "b", files: ["b.ts"] }] }) });
-    await h.sidebar.executeWorkflowStage(h.session, "local", def, h.session.workflowRun);
+    await h.sidebar.executeWorkflowStage(h.session, def, h.session.workflowRun);
     h.replies.push({ files: ["a.ts"], tokens: 10 }, { files: ["b.ts"], tokens: 20 });
     h.sidebar.createCrewWorktree = vi.fn();
-    await h.sidebar.handleWorkflowGateAction(h.session, "local", { type: "start", target: { provider: "codex" } });
+    await h.sidebar.handleWorkflowGateAction(h.session, { type: "start", target: { provider: "codex" } });
     const steps = h.calls.slice(1);
     expect(steps).toHaveLength(2);
     expect(steps.map((c) => c.coords.stage.scope)).toEqual([["a.ts"], ["b.ts"]]);
@@ -183,7 +182,7 @@ describe("a stage run in the host", () => {
       { raw: block({ verdict: "pass", findings: [] }) },
       { raw: block({ verdict: "changes_requested", findings: [{ id: "F1", severity: "major", text: "bug" }] }) },
     );
-    await h.sidebar.executeWorkflowStage(h.session, "local", def, h.session.workflowRun, { provider: "codex" });
+    await h.sidebar.executeWorkflowStage(h.session, def, h.session.workflowRun, { provider: "codex" });
     expect(new Set(h.calls.map((c) => c.role.provider))).toEqual(new Set(["codex", "claude"]));
     const packet = [...h.sidebar.workflowState.packets.values()][0] as any;
     expect(packet.verdict).toBe("changes_requested");
@@ -194,13 +193,13 @@ describe("a stage run in the host", () => {
     const h = harness();
     begin(h);
     h.replies.push({ raw: block({ planSteps: [{ id: "S1", title: "x" }] }) });
-    await h.sidebar.executeWorkflowStage(h.session, "local", IDEA_TO_DONE, h.session.workflowRun);
+    await h.sidebar.executeWorkflowStage(h.session, IDEA_TO_DONE, h.session.workflowRun);
     const child = new Session();
     child.activeSessionId = "child-1";
     child.client = {} as never;
     h.sidebar.pool.add(child);
     h.replies.push({ raw: block({ planSteps: [{ id: "S1", title: "x" }, { id: "S2", title: "y" }] }) });
-    const handled = await h.sidebar.handleHostGateAction(h.session, "local", { type: "workflowGateAction", runId: "run-t", action: "revise", message: "add a step for tests" });
+    const handled = await h.sidebar.handleHostGateAction(h.session, { type: "workflowGateAction", runId: "run-t", action: "revise", message: "add a step for tests" });
     expect(handled).toBe(true);
     const revise = h.calls[1]!;
     expect(revise.coords.continueSession).toBe(child);

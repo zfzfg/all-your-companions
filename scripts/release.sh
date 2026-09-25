@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 # Extension release for grok-build-vscode on macOS/Linux/WSL.
-# Publishes the VSIX and Open VSX; desktop installers require the manual
-# dispatch and verification commands printed below. scripts/release.ps1
-# automates that installer step as well.
+# Publishes the VSIX and Open VSX.
 #
 # Bump package.json + write the changelog section FIRST (those stay
 # user-initiated), then run:
@@ -10,14 +8,13 @@
 #   ./scripts/release.sh --no-test       # skip ALL gating (tsc + npm test + test:live)
 #   ./scripts/release.sh --skip-live     # keep tsc + npm test, skip only real-grok test:live
 #   ./scripts/release.sh --skip-integration  # skip only the real-VS-Code Extension Host smoke
-#   ./scripts/release.sh --skip-screens  # skip only the real-Electron desktop gate
 #   ./scripts/release.sh --skip-ci-wait  # tag without waiting for CI on the pushed SHA
 #   ./scripts/release.sh --ci-timeout 30 # minutes to wait for CI (default 20)
 #   ./scripts/release.sh --no-install    # do not install the released vsix locally
 #   ./scripts/release.sh --dry-run       # print what it would do
 #   ./scripts/release.sh -F .git/MSG     # commit with a message file
 #
-# Steps: assert main -> tsc+test+integration+screens+live -> assert tag free ->
+# Steps: assert main -> tsc+test+integration+live -> assert tag free ->
 #        npm run package -> commit -> push main -> WAIT FOR CI GREEN ->
 #        annotated tag -> push tag -> gh release create (changelog section as
 #        notes, .vsix attached) -> npm run publish:ovsx -> install locally.
@@ -28,14 +25,13 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-NO_TEST=0; SKIP_LIVE=0; SKIP_INTEGRATION=0; SKIP_SCREENS=0; SKIP_CI_WAIT=0
+NO_TEST=0; SKIP_LIVE=0; SKIP_INTEGRATION=0; SKIP_CI_WAIT=0
 CI_TIMEOUT_MINUTES=20; NO_INSTALL=0; DRY_RUN=0; MSG=""; MSG_FILE=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --no-test) NO_TEST=1 ;;
     --skip-live) SKIP_LIVE=1 ;;
     --skip-integration) SKIP_INTEGRATION=1 ;;
-    --skip-screens) SKIP_SCREENS=1 ;;
     --skip-ci-wait) SKIP_CI_WAIT=1 ;;
     --ci-timeout) CI_TIMEOUT_MINUTES="$2"; shift ;;
     --no-install) NO_INSTALL=1 ;;
@@ -49,15 +45,9 @@ done
 
 step() { printf '\033[36m==> %s\033[0m\n' "$1"; }
 
-installer_handoff() {
-  echo "This script does not dispatch or wait for desktop installers. The release is incomplete until .exe, .dmg and .AppImage artifacts are attached."
-  echo "  gh workflow run desktop-release.yml --ref $tag -f release_tag=$tag"
-  echo "  gh release view $tag --json assets"
-}
-
 version="$(node -p "require('./package.json').version")"
 tag="v$version"
-vsix="grok-vscode-phuryn-$version.vsix"
+vsix="all-your-companions-$version.vsix"
 [ -n "$MSG" ] || MSG="Release $tag"
 printf '\033[32mReleasing %s\033[0m\n' "$tag"
 
@@ -77,14 +67,6 @@ if [ "$NO_TEST" -eq 0 ]; then
   else
     step "SKIPPING the Extension Host smoke (--skip-integration) - CI still runs it, but only AFTER the release is public"
   fi
-  # The desktop app ships the same compiled src/ as the extension, so a change can
-  # reach it without src/desktop/ being touched — 3.10.1 shipped an ACP capability
-  # change that way. This is the only gate that boots real Electron.
-  if [ "$SKIP_SCREENS" -eq 0 ]; then
-    step "npm run e2e:screens (real Electron desktop)"; npm run e2e:screens
-  else
-    step "SKIPPING the Electron desktop gate (--skip-screens) - nothing else exercises the packaged app"
-  fi
   # The real-grok suite is a mandatory part of the release gate (CLAUDE.md § Publishing).
   # It spawns the actual CLI, so it only runs where grok is logged in — hence --skip-live,
   # but the DEFAULT runs it so it can't be silently forgotten under release pressure. A live
@@ -100,9 +82,6 @@ if git tag --list "$tag" | grep -q .; then
   echo "Tag $tag already exists - bump package.json/changelog first." >&2; exit 1
 fi
 
-# install.ps1 sets this so a local staging vsix can build. A release must not
-# inherit it from the shell — that is how a staging artifact could ship.
-unset GROK_ALLOW_STAGING_RELAY_VSIX
 step "npm run package"; npm run package
 [ -f "$vsix" ] || { echo "Expected $vsix but it wasn't produced." >&2; exit 1; }
 
@@ -118,7 +97,6 @@ if [ "$DRY_RUN" -eq 1 ]; then
   printf '\033[33m[dry-run] would commit, tag %s, push main + tag, then:\033[0m\n' "$tag"
   echo "  gh release create $tag --title \"Release $tag\" --notes-file <notes> $vsix"
   echo "  npm run publish:ovsx"
-  installer_handoff
   [ "$NO_INSTALL" -eq 1 ] || echo "  ./scripts/install.sh $vsix --all"
   echo "--- release notes ---"; cat "$notes_file"
   exit 0
@@ -187,9 +165,9 @@ gh release create "$tag" --title "Release $tag" --notes-file "$notes_file" "$vsi
 step "npm run publish:ovsx"; npm run publish:ovsx
 
 # 10. Install what was just released into this machine's editors. The released
-# .vsix is passed BY PATH on purpose, so install.sh skips its own build AND its
-# staging-relay swap — the editors end up running the exact artifact users get,
-# production relay included, rather than a look-alike rebuilt afterwards.
+# .vsix is passed BY PATH on purpose, so install.sh skips its own build — the
+# editors end up running the exact artifact users get, rather than a look-alike
+# rebuilt afterwards.
 #
 # Never fatal. Everything above this line is published and irreversible, so a
 # missing editor CLI must read as "install it yourself", not as a failed release.
@@ -201,6 +179,5 @@ else
     echo "  (local install failed - the release itself is already published)" >&2
 fi
 
-printf '\033[33mPublished %s with %s attached, and published to Open VSX.\033[0m\n' "$tag" "$vsix"
-installer_handoff
+printf '\033[32mReleased %s with %s attached, and published to Open VSX.\033[0m\n' "$tag" "$vsix"
 echo "Marketplace publish is separate: npm run publish"

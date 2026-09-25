@@ -13,9 +13,8 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import { GrokSidebar } from "../src/sidebar";
-import { INBOUND_DISPOSITION, allowFromRemote } from "../src/remote-policy";
 
-type AnySidebar = any; // eslint-disable-line @typescript-eslint/no-explicit-any
+type AnySidebar = any;
 
 function makeSidebar(connections: Record<string, boolean>): AnySidebar {
   const sidebar = Object.create(GrokSidebar.prototype) as AnySidebar;
@@ -169,12 +168,6 @@ describe("Settings → Providers refresh", () => {
     expect((tabPosts[0] as { type: string }).type).toBe("providerState");
   });
 
-  it("is host-local: a remote must not spawn the desk's CLIs", () => {
-    expect(INBOUND_DISPOSITION.refreshProviders).toBe("host-local");
-    for (const tier of ["read-only", "propose", "full"] as const) {
-      expect(allowFromRemote("refreshProviders", tier)).toBe(false);
-    }
-  });
 });
 
 /**

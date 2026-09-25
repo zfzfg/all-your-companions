@@ -42,7 +42,7 @@ describe("D8 /crew in an Agent session", () => {
     const { sidebar, emitted } = makeSidebar(false);
     const session = new Session();
     session.sessionType = "agent";
-    const handled = await sidebar.handleCrewCommand("/crew idea-to-done ship the parser", session, "local");
+    const handled = await sidebar.handleCrewCommand("/crew idea-to-done ship the parser", session);
     expect(handled).toBe(true);
     const notice = emitted.find((m) => m.type === "hostNotice") as Extract<HostMsg, { type: "hostNotice" }>;
     expect(notice.text).toBe("Crew runs live in their own session.");
@@ -65,7 +65,7 @@ describe("D8 /crew in an Agent session", () => {
     sidebar.lastUserMessageText = () => "";
     sidebar.sessionCwd = () => "/repo";
     try {
-      await sidebar.handleCrewCommand("/crew", session, "local");
+      await sidebar.handleCrewCommand("/crew", session);
     } catch {
       // The legacy path may throw in this harness; that still means it ran.
     }
@@ -77,7 +77,7 @@ describe("D8 /crew in an Agent session", () => {
     const { sidebar, emitted } = makeSidebar(false);
     const session = new Session();
     session.sessionType = "crew";
-    await sidebar.handleCrewCommand("/crew", session, "local");
+    await sidebar.handleCrewCommand("/crew", session);
     expect(emitted.some((m) => m.type === "hostNotice" && /already a Crew session/.test(m.text))).toBe(true);
   });
 });
@@ -90,7 +90,7 @@ describe("Start workflow", () => {
     sidebar.lockSessionTypeNow = GrokSidebar.prototype["lockSessionTypeNow" as never];
     sidebar.persistSessionType = vi.fn();
     sidebar.postSessionType = vi.fn();
-    await sidebar.startWorkflowRun(session, "local", "   ", "idea-to-done");
+    await sidebar.startWorkflowRun(session, "   ", "idea-to-done");
     expect(session.sessionTypeLockedAt).toEqual(expect.any(Number));
     expect(emitted.some((m) => m.type === "hostNotice" && m.text === "Idea required.")).toBe(true);
     expect(session.workflowRun).toBeUndefined();

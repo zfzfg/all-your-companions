@@ -332,7 +332,7 @@ describe("question card — resume restore (replayed tool_call)", () => {
   // questions in rawInput) + a completed tool_call_update (carrying the answer
   // text). We rebuild a read-only "You answered" card from that — no separate
   // persistence — and never show the generic tool chip for it.
-  const replayQuestion = (window: Window, posted?: unknown[]) => {
+  const replayQuestion = (window: Window, _posted?: unknown[]) => {
     dispatch(window, { type: "historyReplay", active: true });
     dispatch(window, {
       type: "toolCall",

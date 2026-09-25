@@ -60,7 +60,7 @@ describe("stored connection consent at the host boundary (#171)", () => {
       sidebar.providerConnectionState[provider] = connected;
     });
     sidebar.host.createTerminal = vi.fn(() => { order.push("terminal"); return { show: vi.fn() }; });
-    await sidebar.onMessage({ type: "runGrokLogin", provider: "claude" }, session, "local");
+    await sidebar.onMessage({ type: "runGrokLogin", provider: "claude" });
     expect(order.slice(0, 2)).toEqual(["connected:claude:true", "terminal"]);
   });
 });

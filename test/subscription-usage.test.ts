@@ -8,8 +8,6 @@ import {
 } from "../src/subscription-usage";
 import { GrokSidebar } from "../src/sidebar";
 import { Session, sessionUiSnapshot } from "../src/session";
-import { RemoteClientState } from "../src/remote-client-state";
-import { OUTBOUND_DISPOSITION, OUTBOUND_PROJECT_AUTH, transformHostMsgForRemote, mayDeliverRemoteHostMsg } from "../src/remote-policy";
 
 const start = "2026-09-12T00:00:00.000Z";
 const end = "2026-09-19T00:00:00.000Z";
@@ -24,24 +22,6 @@ const windows = () => grokSubscriptionWindows(billing(), now);
 const rateUpdate = (rate: object) => ({ sessionUpdate: "usage_update", _meta: { "_claude/rateLimit": rate } });
 
 describe("subscription usage normalization and wire", () => {
-  it("mirrors only the minimized account window within project authorization", async () => {
-    const message = { type: "subscriptionUsage" as const, windows: windows() };
-    expect(OUTBOUND_DISPOSITION.subscriptionUsage).toBe("mirror");
-    expect(OUTBOUND_PROJECT_AUTH.subscriptionUsage).toBe("scope");
-    expect(mayDeliverRemoteHostMsg(message, ["/proj"], "/proj", (a, b) => a === b)).toBe(true);
-    expect(mayDeliverRemoteHostMsg(message, [], "/proj", (a, b) => a === b)).toBe(false);
-    const remote = await transformHostMsgForRemote(message, {} as any);
-    expect(remote).toEqual({ type: "subscriptionUsage", windows: [{
-      usedPercent: 3, label: "Weekly", periodType: "USAGE_PERIOD_TYPE_WEEKLY",
-      periodStart: start, periodEnd: end, observedAt: new Date(now).toISOString(),
-    }] });
-    for (const field of ["prepaidBalance", "onDemandCap", "onDemandUsed", "isUnifiedBillingUser",
-      "billingPeriodStart", "billingPeriodEnd", "subscription_tier", "config"]) {
-      expect(JSON.stringify(remote)).not.toContain(field);
-    }
-    expect(JSON.stringify(remote)).not.toContain("2026-10-01");
-  });
-
   it.each([undefined, null, "3", NaN, Infinity, -1])("rejects missing/malformed percentage %s", (percent) => {
     const raw = billing();
     raw.config.creditUsagePercent = percent;
@@ -88,7 +68,7 @@ describe("subscription usage normalization and wire", () => {
 });
 
 describe("subscription cache and credential boundaries", () => {
-  afterEach(() => vi.useRealTimers());
+  afterEach(() => { vi.useRealTimers(); });
   it("coalesces opens, rate-limits failures too, and never refreshes on a timer", async () => {
     vi.useFakeTimers();
     const cache = new SubscriptionUsageCache();
@@ -157,16 +137,13 @@ function hostHarness(provider: Session["provider"] = "grok") {
   session.client = { sessionId: "session", getSubscriptionUsage: read } as any;
   sidebar.focused = session;
   sidebar.pool = new Set([session]);
-  sidebar.remoteClients = new RemoteClientState<Session>("/proj");
-  sidebar.remoteClients.ready("phone");
-  sidebar.remoteClients.setActive("phone", session);
   sidebar.mirrorToProjectsRail = vi.fn();
-  sidebar.sendRemoteSession = vi.fn();
-  sidebar.sendRemoteClient = vi.fn();
   sidebar.isAuthorizedCwd = () => true;
-  sidebar.captureRemoteRequester = vi.fn();
+  sidebar.workspaceRoot = () => "/proj";
+  const posted: any[] = [];
+  sidebar.postTap = (message: any) => posted.push(message);
   sidebar.refreshContextFromSessionInfo = vi.fn();
-  return { sidebar, session, read };
+  return { sidebar, session, read, posted };
 }
 
 describe("host subscription lifecycle", () => {
@@ -196,12 +173,12 @@ describe("host subscription lifecycle", () => {
   });
 
   it.each(["grok", "claude", "codex"] as const)("popover open refreshes only Grok (%s), without accumulating history", async (provider) => {
-    const { sidebar, session, read } = hostHarness(provider);
-    await sidebar.onMessage({ type: "refreshSubscriptionUsage" }, "remote", "phone");
+    const { sidebar, session, read, posted } = hostHarness(provider);
+    await sidebar.onMessage({ type: "refreshSubscriptionUsage" });
     await sidebar.refreshSubscriptionUsage(session);
     expect(read).toHaveBeenCalledTimes(provider === "grok" ? 1 : 0);
     expect(session.buffer).toEqual([]);
-    if (provider === "grok") expect(sidebar.sendRemoteSession).toHaveBeenLastCalledWith(session, {
+    if (provider === "grok") expect(posted.at(-1)).toEqual({
       type: "subscriptionUsage", windows: windows(),
     });
   });
@@ -219,19 +196,19 @@ describe("host subscription lifecycle", () => {
   });
 
   it("account sign-out invalidates cached and displayed usage on every bound surface", () => {
-    const { sidebar, session } = hostHarness();
+    const { sidebar, session, posted } = hostHarness();
     session.subscriptionUsage!.observe(windows());
     sidebar.providerConnections = () => ({ grok: true });
     sidebar.postProviderState = vi.fn();
     sidebar.setProviderConnectedInMemory("grok", false);
     expect(session.subscriptionUsage!.snapshot()).toEqual([]);
-    expect(sidebar.sendRemoteSession).toHaveBeenLastCalledWith(session, { type: "subscriptionUsage", windows: [] });
+    expect(posted.at(-1)).toEqual({ type: "subscriptionUsage", windows: [] });
     expect(session.buffer).toEqual([]);
   });
 
   it("context occupancy refreshes do not perform a subscription read", async () => {
     const { sidebar, read } = hostHarness();
-    await sidebar.onMessage({ type: "refreshContextDetails" }, "remote", "phone");
+    await sidebar.onMessage({ type: "refreshContextDetails" });
     expect(sidebar.refreshContextFromSessionInfo).toHaveBeenCalledOnce();
     expect(read).not.toHaveBeenCalled();
   });

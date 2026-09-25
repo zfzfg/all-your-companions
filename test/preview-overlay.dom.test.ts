@@ -243,28 +243,6 @@ const readDone = (id: string, text: string, extra?: Record<string, unknown>) => 
 });
 const closeTurn = (window: Window) => dispatch(window, { type: "messageChunk", text: "done" });
 
-async function answerProjectFile(
-  h: { window: Window; posted: Array<{ type: string; [k: string]: unknown }> },
-  text: string,
-  opts: { ok?: boolean; reason?: string; pretty?: boolean; reformatted?: boolean; kind?: string } = {},
-) {
-  const req = h.posted.find((m) => m.type === "readProjectFile") as
-    | { type: string; requestId?: string; cwd: string; relPath: string }
-    | undefined;
-  expect(req).toBeTruthy();
-  dispatch(h.window, {
-    type: "projectFileContent",
-    requestId: req!.requestId,
-    cwd: req!.cwd,
-    relPath: req!.relPath,
-    ...(opts.ok === false
-      ? { ok: false, reason: opts.reason || "path escapes workspace" }
-      : { ok: true, kind: opts.kind || "text", text, ...(opts.pretty ? { pretty: true } : {}), ...(opts.reformatted ? { reformatted: true } : {}) }),
-  });
-  await Promise.resolve();
-  await Promise.resolve();
-}
-
 function stubFilePanel(window: Window): string[] {
   const opened: string[] = [];
   (window as unknown as { __grokDeskFilePanel: { openPath: (p: string) => void } }).__grokDeskFilePanel = {
@@ -277,7 +255,7 @@ function lines(n: number, start = 1): string {
   return Array.from({ length: n }, (_, i) => `line ${i + start}`).join("\n");
 }
 
-describe("preview overlay — file reads (#122 desktop)", () => {
+describe("preview overlay — file reads (desktop)", () => {
   function seedRead(
     window: Window,
     file: string,
@@ -292,69 +270,16 @@ describe("preview overlay — file reads (#122 desktop)", () => {
     closeTurn(window);
   }
 
-  it("renders the whole file, not the excerpt, with the read range marked and scrolled to", async () => {
+  it("shows the excerpt the agent read and never fetches the whole file", () => {
     const h = bootPreview();
     const excerpt = lines(12);
-    const whole = lines(40);
     seedRead(h.window, "src/a.ts", excerpt);
-    const scrolled: Element[] = [];
-    (h.window as unknown as { HTMLElement: { prototype: { scrollIntoView: (opts?: unknown) => void } } })
-      .HTMLElement.prototype.scrollIntoView = function scrollIntoView() {
-        scrolled.push(this as unknown as Element);
-      };
-
     click(h.window, h.doc.querySelector(".tool-label-ref") as HTMLElement);
-    expect(h.posted.filter((m) => m.type === "readProjectFile")).toEqual([
-      expect.objectContaining({ type: "readProjectFile", cwd: "/w", relPath: "src/a.ts" }),
-    ]);
-    await answerProjectFile(h, whole);
-
+    expect(h.posted.filter((m) => m.type === "readProjectFile")).toHaveLength(0);
     const overlay = h.doc.getElementById("preview-overlay")!;
     expect(overlay.querySelector(".preview-title")!.textContent).toBe("a.ts");
-    expect(overlay.querySelectorAll(".tdl").length).toBe(40);
-    expect(overlay.textContent).toContain("line 40");
-    const marked = [...overlay.querySelectorAll(".tdl-read")] as HTMLElement[];
-    expect(marked.map((el) => el.dataset.line)).toEqual(
-      Array.from({ length: 12 }, (_, i) => String(i + 1)),
-    );
-    const start = overlay.querySelector("#preview-read-start") as HTMLElement;
-    expect(start).toBe(marked[0]);
-    expect(scrolled).toContain(start);
-    expect(overlay.querySelector(".preview-code")).toBeNull();
-    expect(overlay.querySelector(".preview-notice")).toBeNull();
-  });
-
-  it("numbers a long file with the same gutter rule as a diff (4ch until 1000)", async () => {
-    const h = bootPreview();
-    const excerpt = lines(12, 980);
-    const whole = lines(1000);
-    seedRead(h.window, "src/deep.ts", excerpt, { offset: 980, limit: 12 });
-    click(h.window, h.doc.querySelector(".tool-label-ref") as HTMLElement);
-    await answerProjectFile(h, whole);
-    const overlay = h.doc.getElementById("preview-overlay")!;
-    const region = overlay.querySelector(".preview-file-region") as HTMLElement;
-    expect(region.style.getPropertyValue("--tdl-num-w")).toBe("5ch");
-    const last = overlay.querySelector('.tdl[data-line="1000"]') as HTMLElement;
-    expect(last.querySelector(".tdl-num")!.textContent).toBe("1000");
-    expect(last.querySelector(".tdl-sign")!.textContent).toBe("");
-    expect(last.children.length).toBe(3);
-    const marked = [...overlay.querySelectorAll(".tdl-read")] as HTMLElement[];
-    expect(marked[0].dataset.line).toBe("980");
-    expect(marked[marked.length - 1].dataset.line).toBe("991");
-  });
-
-  it("keeps the excerpt and hides Open in file panel when the fetch fails", async () => {
-    const h = bootPreview();
-    stubFilePanel(h.window);
-    const excerpt = lines(12);
-    seedRead(h.window, "src/a.ts", excerpt);
-    click(h.window, h.doc.querySelector(".tool-label-ref") as HTMLElement);
-    await answerProjectFile(h, "", { ok: false, reason: "path escapes workspace" });
-    const overlay = h.doc.getElementById("preview-overlay")!;
-    expect(overlay.querySelector(".preview-notice")!.textContent).toMatch(/Couldn't load the full file/);
+    expect(overlay.querySelector(".preview-notice")!.textContent).toMatch(/excerpt the agent read/);
     expect(overlay.querySelector(".preview-code")!.textContent).toBe(excerpt);
-    expect(overlay.querySelector(".tdl")).toBeNull();
-    expect(overlay.querySelector(".preview-open-panel")).toBeNull();
   });
 
   it("keeps the excerpt and hides Open in file panel for a path outside the workspace", () => {
@@ -371,12 +296,11 @@ describe("preview overlay — file reads (#122 desktop)", () => {
     expect(overlay.querySelector(".tdl")).toBeNull();
   });
 
-  it("Open in file panel calls openPath with the file's relPath and closes the overlay", async () => {
+  it("Open in file panel calls openPath with the file's relPath and closes the overlay", () => {
     const h = bootPreview();
     const opened = stubFilePanel(h.window);
     seedRead(h.window, "src/a.ts", lines(12));
     click(h.window, h.doc.querySelector(".tool-label-ref") as HTMLElement);
-    await answerProjectFile(h, lines(40));
     const overlay = h.doc.getElementById("preview-overlay")!;
     const panelBtn = overlay.querySelector(".preview-open-panel") as HTMLButtonElement;
     expect(panelBtn.textContent).toBe("Open in file panel");
@@ -385,84 +309,10 @@ describe("preview overlay — file reads (#122 desktop)", () => {
     expect(opened).toEqual(["src/a.ts"]);
   });
 
-  it("does not show Open in file panel when the host has no file panel", async () => {
+  it("does not show Open in file panel when the host has no file panel", () => {
     const h = bootPreview();
     seedRead(h.window, "src/a.ts", lines(12));
     click(h.window, h.doc.querySelector(".tool-label-ref") as HTMLElement);
-    await answerProjectFile(h, lines(40));
     expect(h.doc.querySelector(".preview-open-panel")).toBeNull();
   });
-
-  // readProjectFile pretty-prints JSON for the file panel's benefit, so its
-  // text is NOT the bytes on disk. Numbering it would put a gutter beside lines
-  // the file does not have and mark the wrong ones as the agent's read.
-  it("does not number a JSON file the host reformatted — it says so and keeps the excerpt", async () => {
-    const h = bootPreview();
-    const excerpt = '{"n":1e3}';
-    seedRead(h.window, "a.json", excerpt);
-    click(h.window, h.doc.querySelector(".tool-label-ref") as HTMLElement);
-    await answerProjectFile(h, ["{", '  "n": 1000', "}"].join("\n"), { kind: "json", pretty: true, reformatted: true });
-
-    const overlay = h.doc.getElementById("preview-overlay")!;
-    expect(overlay.querySelector(".preview-notice")!.textContent).toMatch(/reformatted/i);
-    expect(overlay.querySelector(".preview-code")!.textContent).toBe(excerpt);
-    // No gutter, and no panel button: the numbers would be a lie either way.
-    expect(overlay.querySelector(".tdl")).toBeNull();
-    expect(overlay.querySelector(".preview-open-panel")).toBeNull();
-  });
-
-  // The host serves text up to 2 MiB; a file of one-character lines is a
-  // million rows at four DOM nodes each, built synchronously. Render a window
-  // around the read instead, and SAY what was left out.
-  it("windows a very long file around the read range and reports the clipping", async () => {
-    const h = bootPreview();
-    const excerpt = lines(4, 9000);
-    const whole = lines(20000);
-    seedRead(h.window, "big.log", excerpt, { offset: 9000, limit: 4 });
-    click(h.window, h.doc.querySelector(".tool-label-ref") as HTMLElement);
-    await answerProjectFile(h, whole);
-
-    const overlay = h.doc.getElementById("preview-overlay")!;
-    const rows = overlay.querySelectorAll(".tdl");
-    expect(rows.length).toBeGreaterThan(0);
-    expect(rows.length).toBeLessThanOrEqual(4000);
-    // The lines the agent read must be inside the window — that is the point.
-    const marked = [...overlay.querySelectorAll(".tdl-read")] as HTMLElement[];
-    expect(marked.length).toBeGreaterThan(0);
-    expect(marked[0]!.dataset.line).toBe("9000");
-    const notice = overlay.querySelector(".preview-notice")!;
-    expect(notice.textContent).toMatch(/Showing lines .* of 20000/);
-  });
-
-  // Most JSON in a repo is ALREADY formatted the way the pretty-printer would
-  // write it, so `pretty` alone would have withdrawn the whole-file view from
-  // nearly every JSON file — and told the user it was reformatted when it was
-  // byte-for-byte the file on disk.
-  it("still numbers a JSON file the pretty-printer left unchanged", async () => {
-    const h = bootPreview();
-    seedRead(h.window, "b.json", lines(3), { offset: 1, limit: 3 });
-    click(h.window, h.doc.querySelector(".tool-label-ref") as HTMLElement);
-    await answerProjectFile(h, lines(30), { kind: "json", pretty: true });
-
-    const overlay = h.doc.getElementById("preview-overlay")!;
-    expect(overlay.querySelectorAll(".tdl").length).toBe(30);
-    expect(overlay.querySelector(".preview-notice")).toBeNull();
-    expect(overlay.querySelector(".preview-code")).toBeNull();
-  });
-
-  // A range larger than the context budget must still be shown in full — the
-  // context is what gives way, never the lines the user asked to see.
-  it("never drops requested lines to make room for context", async () => {
-    const h = bootPreview();
-    seedRead(h.window, "big.log", lines(4, 5000), { offset: 5000, limit: 3900 });
-    click(h.window, h.doc.querySelector(".tool-label-ref") as HTMLElement);
-    await answerProjectFile(h, lines(10000));
-
-    const overlay = h.doc.getElementById("preview-overlay")!;
-    const marked = [...overlay.querySelectorAll(".tdl-read")] as HTMLElement[];
-    expect(marked[0]!.dataset.line).toBe("5000");
-    expect(marked[marked.length - 1]!.dataset.line).toBe("8899");
-    expect(marked.length).toBe(3900);
-  });
-
 });

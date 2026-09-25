@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   isSafePlanReviewFileName,
   isSafeRelativePlanReviewLink,
@@ -64,7 +61,7 @@ describe("plan-review path fence", () => {
     expect(
       isTrustedPlanReviewPath(candidate, root, {
         exists: (p) => existing.has(p),
-        realpath: (p) => path.join(path.dirname(root), "canonical-missing.md"),
+        realpath: () => path.join(path.dirname(root), "canonical-missing.md"),
       }),
     ).toBe(false);
   });

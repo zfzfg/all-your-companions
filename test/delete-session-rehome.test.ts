@@ -6,7 +6,6 @@ import { readFileSync } from "node:fs";
  */
 import { describe, expect, it, vi } from "vitest";
 import { GrokSidebar } from "../src/sidebar";
-import { RemoteClientState } from "../src/remote-client-state";
 import { Session } from "../src/session";
 import type { HostMsg } from "../src/protocol";
 import type { SessionListEntry } from "../src/sessions";
@@ -43,7 +42,6 @@ function sessionsMessage(entries: SessionListEntry[], activeId: string | null = 
 function makeSidebar(): any {
   const sidebar = Object.create(GrokSidebar.prototype) as any;
   const memento: Record<string, unknown> = {};
-  sidebar.remoteClients = new RemoteClientState<Session>(cwd);
   sidebar.pool = new Set<Session>();
   sidebar.focused = new Session();
   sidebar.focused.cwd = cwd;
@@ -75,28 +73,20 @@ function makeSidebar(): any {
   sidebar.authorizedSessionCwds = vi.fn(() => [cwd]);
   sidebar.sessionCwdsForRepo = vi.fn(() => [cwd]);
   sidebar.resolveLocalRepoTarget = vi.fn(() => ({ cwd, available: true }));
-  sidebar.remoteSessionTarget = vi.fn(() => ({ cwd }));
   sidebar.modelsForSession = vi.fn(() => []);
   sidebar.postSessionsList = vi.fn();
   sidebar.postRepoCatalog = vi.fn();
   sidebar.postSessionName = vi.fn();
   sidebar.postMode = vi.fn();
   sidebar.sendLocalRepoSessionsPreview = vi.fn();
-  sidebar.refreshRemoteRepoPreview = vi.fn();
   sidebar.removePlanReviews = vi.fn();
   sidebar.removeUploadsForSessions = vi.fn(async () => {});
   sidebar.removeSessionFromDisk = vi.fn();
   sidebar.discardAdapterEmptySession = vi.fn(async () => {});
   sidebar.persistWorktreeBinding = vi.fn(async () => {});
   sidebar.sweepEmptySessions = vi.fn();
-  sidebar.dropRemoteVoice = vi.fn();
   sidebar.emit = vi.fn();
   sidebar.post = vi.fn();
-  sidebar.sendRemoteSession = vi.fn();
-  const sent: Array<{ clientId: string; msg: HostMsg }> = [];
-  sidebar.sent = sent;
-  sidebar.sendRemoteClient = vi.fn((clientId: string, msg: HostMsg) => { sent.push({ clientId, msg }); });
-  sidebar.sendRemoteSessionList = vi.fn();
   sidebar.listEntries = [] as SessionListEntry[];
   sidebar.buildSessionsList = vi.fn(() => sessionsMessage(sidebar.listEntries));
   sidebar.startSession = vi.fn(async (_id?: string, session?: Session) => {
@@ -109,7 +99,6 @@ function makeSidebar(): any {
   sidebar.mintCount = 0;
   sidebar.disposeSession = vi.fn((session: Session) => {
     sidebar.pool.delete(session);
-    sidebar.remoteClients.deleteActiveValue(session);
     session.client = undefined;
     return Promise.resolve();
   });
@@ -123,13 +112,6 @@ function liveSession(id: string, opts: { hasHistory?: boolean; cwd?: string } = 
   session.hasHistory = opts.hasHistory ?? true;
   session.client = { dispose() {}, sessionId: id } as Session["client"];
   return session;
-}
-
-function seedRemote(sidebar: any, clientId: string, session: Session): void {
-  sidebar.remoteClients.ready(clientId);
-  sidebar.remoteClients.select(clientId, session.cwd || cwd);
-  sidebar.remoteClients.setActive(clientId, session);
-  sidebar.pool.add(session);
 }
 
 describe("deleting a conversation re-homes to a neighbour", () => {
@@ -150,7 +132,7 @@ describe("deleting a conversation re-homes to a neighbour", () => {
       return session;
     };
 
-    await sidebar.deleteSession("empty-a", undefined, "local");
+    await sidebar.deleteSession("empty-a", undefined);
 
     expect(sidebar.focused).toBe(sibling);
     expect(created).toEqual([]);
@@ -166,7 +148,7 @@ describe("deleting a conversation re-homes to a neighbour", () => {
     sidebar.pool.add(focused);
     sidebar.listEntries = [listEntry("only", { displayName: "New session", numMessages: 0 })];
 
-    await sidebar.deleteSession("only", undefined, "local");
+    await sidebar.deleteSession("only", undefined);
 
     expect(sidebar.focused).not.toBe(focused);
     expect(sidebar.focused.activeSessionId).toBe("minted-1");
@@ -175,72 +157,6 @@ describe("deleting a conversation re-homes to a neighbour", () => {
     expect(sidebar.pool.has(sidebar.focused)).toBe(true);
   });
 
-  it("lands a watcher of the deleted conversation on the same neighbour and does not move anyone else", async () => {
-    const sidebar = makeSidebar();
-    const deleted = liveSession("empty-a", { hasHistory: false });
-    const neighbour = liveSession("kept-b");
-    const other = liveSession("other-c");
-    sidebar.focused = deleted;
-    sidebar.pool.add(deleted);
-    sidebar.pool.add(neighbour);
-    sidebar.pool.add(other);
-    sidebar.listEntries = [
-      listEntry("empty-a", { displayName: "New session", numMessages: 0 }),
-      listEntry("kept-b"),
-      listEntry("other-c"),
-    ];
-    seedRemote(sidebar, "watcher", deleted);
-    seedRemote(sidebar, "bystander", other);
-
-    await sidebar.deleteSession("empty-a", undefined, "local");
-
-    expect(sidebar.focused).toBe(neighbour);
-    expect(sidebar.remoteClients.active("watcher")).toBe(neighbour);
-    expect(sidebar.remoteClients.active("bystander")).toBe(other);
-    expect(sidebar.startSession).not.toHaveBeenCalled();
-  });
-
-  it("does not yank the desk when a remote tab deletes a conversation the desk is not reading", async () => {
-    const sidebar = makeSidebar();
-    const desk = liveSession("desk-keep");
-    const deleted = liveSession("phone-gone");
-    const neighbour = liveSession("kept-b");
-    sidebar.focused = desk;
-    sidebar.pool.add(desk);
-    sidebar.pool.add(deleted);
-    sidebar.pool.add(neighbour);
-    sidebar.listEntries = [listEntry("phone-gone"), listEntry("kept-b"), listEntry("desk-keep")];
-    seedRemote(sidebar, "phone", deleted);
-
-    await sidebar.deleteSession("phone-gone", undefined, "remote", "phone");
-
-    expect(sidebar.focused).toBe(desk);
-    expect(sidebar.remoteClients.active("phone")).toBe(neighbour);
-    expect(sidebar.startSession).not.toHaveBeenCalled();
-  });
-
-  it("gives a watcher of the last conversation its own blank, not the desk’s", async () => {
-    const sidebar = makeSidebar();
-    const deleted = liveSession("only", { hasHistory: false });
-    sidebar.focused = deleted;
-    sidebar.pool.add(deleted);
-    sidebar.listEntries = [listEntry("only", { displayName: "New session", numMessages: 0 })];
-    seedRemote(sidebar, "watcher", deleted);
-
-    await sidebar.deleteSession("only", undefined, "local");
-
-    // Sharing the desk’s replacement with ONE watcher would be fine — desk and
-    // remote may share. With two watchers it is the remote-plus-remote
-    // collision this loop now refuses, and making it safe for one but not two
-    // is a special case nobody would remember. So everybody gets their own,
-    // which is what v4.1.4 did. The cost is two EMPTY conversations instead of
-    // one, which is a price worth paying for a rule that fits in a sentence.
-    expect(sidebar.focused.activeSessionId).toBe("minted-1");
-    const watcherSession = sidebar.remoteClients.active("watcher");
-    expect(watcherSession).toBeTruthy();
-    expect(watcherSession).not.toBe(sidebar.focused);
-    expect(watcherSession.activeSessionId).not.toBe("only");
-  });
 });
 
 describe("minting a blank session reuses an unused empty one", () => {
@@ -264,7 +180,7 @@ describe("minting a blank session reuses an unused empty one", () => {
       return session;
     };
 
-    await sidebar.newFocusedSession("local");
+    await sidebar.newFocusedSession();
 
     expect(sidebar.focused).toBe(unused);
     expect(created).toEqual([]);
@@ -272,29 +188,6 @@ describe("minting a blank session reuses an unused empty one", () => {
     expect(sidebar.pool.has(used)).toBe(true);
   });
 
-  it("a remote new session adopts the same unused empty instead of minting another", async () => {
-    const sidebar = makeSidebar();
-    const used = liveSession("used");
-    const unused = liveSession("empty-wait", { hasHistory: false });
-    sidebar.focused = used;
-    sidebar.pool.add(used);
-    sidebar.pool.add(unused);
-    sidebar.listEntries = [
-      listEntry("empty-wait", { displayName: "New session", numMessages: 0 }),
-      listEntry("used"),
-    ];
-    sidebar.remoteClients.ready("phone");
-    sidebar.remoteClients.select("phone", cwd);
-    const phoneSession = liveSession("phone-used");
-    sidebar.remoteClients.setActive("phone", phoneSession);
-    sidebar.pool.add(phoneSession);
-
-    await sidebar.newRemoteSession("phone", false);
-
-    expect(sidebar.remoteClients.active("phone")).toBe(unused);
-    expect(sidebar.focused).toBe(used);
-    expect(sidebar.startSession).not.toHaveBeenCalled();
-  });
 });
 
 describe("the cold-neighbour cases the first tests missed", () => {
@@ -320,20 +213,6 @@ describe("the cold-neighbour cases the first tests missed", () => {
     expect(src).toContain("if (live) live.deleted = true;");
   });
 
-  it("never hands a watcher a conversation another remote holds", () => {
-    // `focusRemoteSession` attaches without the exclusivity check that
-    // `openRemoteSession` performs. Two browser tabs then shared one
-    // conversation: the deleter’s next message went into the other tab’s
-    // conversation, and refreshing hit the conflicting-owner refusal and left
-    // them unbound. Desk-plus-remote sharing is fine; remote-plus-remote is not.
-    const at = src.indexOf("Every watcher goes through");
-    expect(at).toBeGreaterThan(-1);
-    const loop = src.slice(at, at + 1400);
-    expect(loop).toContain("await this.openRemoteSession(watcher");
-    expect(loop).not.toContain("focusRemoteSession(watcher");
-    // Refused or no neighbour: their own blank conversation, as v4.1.4 did.
-    expect(loop).toContain("await this.newRemoteSession(watcher, false);");
-  });
 });
 
 describe("what the reuse and neighbour rules refuse to assume", () => {

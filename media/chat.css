@@ -1226,39 +1226,6 @@ a:hover {
   .session-name-edit,
   .session-name-edit-remote { opacity: 1; }
 }
-.repo-chip {
-  min-width: 0;
-  /* Cap the growth: the chip is a label, not a field. Left to `flex: 1 1 auto`
-     alone it stretched the full width of a wide window, which read as an input
-     box and put the repo name miles from the icons it belongs beside. */
-  max-width: 200px;
-  flex: 0 1 auto;
-  margin-right: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 3px 7px;
-  color: var(--vscode-descriptionForeground);
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 5px;
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-}
-/* `display: inline-flex` above is an author rule, so it would beat the UA
-   [hidden]{display:none} and the chip could never hide ÔÇö the same trap
-   documented on .history-popover below. The chip hides inside VS Code (the
-   window already IS the repo) and, remotely, until the host advertises `repos`.
-   .top-bar is justify-content:flex-end, so the icons keep their position. */
-.repo-chip[hidden] { display: none; }
-.repo-chip:hover { background: var(--vscode-toolbar-hoverBackground, rgba(255,255,255,0.08)); color: var(--vscode-foreground); }
-.repo-chip.disabled { cursor: wait; opacity: 0.7; }
-.repo-chip.disabled:hover { background: transparent; }
-.repo-chip.browsing { border-color: var(--vscode-focusBorder); color: var(--vscode-foreground); }
-.repo-chip-icon, .repo-chip > svg { display: inline-flex; flex: none; }
-.repo-chip-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
 /* ---- toolbar popovers ---- */
 
 .toolbar-popover {
@@ -2833,7 +2800,7 @@ body.vscode-light {
    [hidden]{display:none} on specificity and beats it on source order ÔÇö so an
    overflow row the 12-line collapse marks `hidden` (buildInlineDiffRegion)
    could never hide, and the diff rendered fully expanded. Same guard as
-   .welcome / .msg-actions / .repo-chip above. */
+   .welcome / .msg-actions above. */
 .tdl[hidden] { display: none; }
 .tdl-sign {
   text-align: center;
@@ -3587,17 +3554,11 @@ textarea#input {
    the 20px bar scale — but it still uses the color-hover / no-box rules. */
 .session-name-edit svg,
 #session-head-edit svg { width: 16px; height: 16px; }
-/* "Continue remotely" (local client, linked machines only). Deliberately the
-   one tinted glyph in the top bar: it's an invitation to move to another
-   device, not a peer of the neutral session controls. Uses the theme's own
-   link accent so it stays legible in every VS Code theme. */
-.remote-btn { color: var(--vscode-textLink-foreground, #3794ff); }
 .icon-btn:hover {
   color: var(--vscode-foreground);
   background: transparent;
 }
 .icon-btn:active { opacity: 0.82; }
-.remote-btn:hover { color: var(--vscode-textLink-activeForeground, var(--vscode-textLink-foreground, #3794ff)); }
 .icon-btn:focus-visible {
   color: var(--vscode-foreground);
   outline: 2px solid var(--vscode-focusBorder);
@@ -4662,73 +4623,6 @@ body.session-superseded .msg-edit-btn {
 .plan-verdict-label.plan-verdict-abandoned { color: var(--vscode-descriptionForeground); }
 
 /* ---- history popover ---- */
-.repo-popover {
-  min-width: 280px;
-  max-width: 360px;
-  max-height: 400px;
-  padding: 4px;
-}
-.repo-row {
-  display: flex;
-  align-items: center;
-  border-radius: 4px;
-}
-.repo-row:hover { background: var(--vscode-list-hoverBackground); }
-.repo-row.selected { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground, var(--vscode-foreground)); }
-.repo-row.unavailable { opacity: 0.62; }
-.repo-row-main {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 7px 8px;
-  color: inherit;
-  background: transparent;
-  border: 0;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-.repo-row-main:disabled { cursor: default; }
-.repo-row-icon { display: inline-flex; flex: none; color: var(--vscode-descriptionForeground); }
-.repo-row-copy { min-width: 0; display: flex; flex-direction: column; }
-.repo-row-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
-.repo-row-meta { color: var(--vscode-descriptionForeground); font-size: 11px; margin-top: 2px; }
-/* A pin is STATE, not just an action. Which repos are pinned is what explains
-   the list's ordering, so it has to be readable without hovering every row ÔÇö
-   otherwise the order looks arbitrary. The CONTAINER is therefore always
-   visible and each button carries its own: a pinned row shows its pin always,
-   an unpinned row reveals the affordance on hover. (Opacity on the container
-   cannot express this ÔÇö it creates a stacking context, so a child can never be
-   more opaque than its parent.) */
-.repo-row-actions { padding-right: 4px; }
-/* (0,2,0) on purpose: the row also carries .history-row-actions, whose
-   `opacity: 0` is declared LATER in this file, so an equal-specificity rule
-   here would lose on source order and re-trap the buttons behind a transparent
-   parent. */
-.repo-row .repo-row-actions { opacity: 1; }
-.repo-row-actions .history-action-btn { opacity: 0; transition: opacity 0.1s; }
-.repo-row-actions .history-action-btn.active,
-.repo-row:hover .repo-row-actions .history-action-btn,
-.repo-row-actions .history-action-btn:focus-visible { opacity: 1; }
-/* Pinned reads as emphasis, not as an accent link. --vscode-button-background
-   made a pin look like a control you press rather than a state it is already
-   in, and it is the one colour here that does NOT invert with the theme the way
-   a foreground does. Full foreground for pinned, muted for unpinned: near-white
-   on dark, near-black on light, and the pair stays legible on touch where both
-   pins are always present. */
-.repo-row-actions .history-action-btn { color: var(--vscode-descriptionForeground); }
-.repo-row-actions .history-action-btn.active { color: var(--vscode-foreground); }
-/* Touch: every pin stays visible. Tap-to-reveal is wrong HERE specifically ÔÇö
-   the row's primary action is selecting the repo, and iOS treats a tap on an
-   element whose :hover reveals content as "apply hover" and swallows the
-   click. That exact bug already bit the session rows (see the hover:none rule
-   for .history-row-actions); a repo row would reproduce it. Pinned vs unpinned
-   stays legible through colour, not presence. */
-@media (hover: none), (pointer: coarse) {
-  .repo-row-actions .history-action-btn { opacity: 1; }
-}
 .history-popover {
   min-width: 280px;
   max-width: 360px;

@@ -71,7 +71,6 @@ const problems = checkEsmPackageGraph(root, packed, ["out/muse-adapter/main.mjs"
 // them when the host sets CODEX_PATH, and packing them balloons the file.
 const ALLOWED_PACKED_DEPS = new Set([
   "ws",
-  "jpeg-js",
   "@agentclientprotocol/codex-acp",
   "@agentclientprotocol/claude-agent-acp",
   "@agentclientprotocol/sdk",

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { bootWebview, dispatch, click, type Harness } from "./webview-harness";
 
 const opened: Harness[] = [];
-afterEach(() => { vi.useRealTimers(); for (const h of opened.splice(0)) h.window.happyDOM.abort(); });
+afterEach(() => { vi.useRealTimers(); for (const h of opened.splice(0)) void h.window.happyDOM.abort(); });
 const original = "data:image/png;base64,b3JpZ2luYWwtcGl4ZWxz";
 
 function preview(remote: boolean, fullId: string | undefined = "handle-1") {

@@ -81,18 +81,15 @@ export function resolveMentionFallback(
     : undefined;
 }
 
-/** Select an attachment candidate without letting a remote fall through to a
- * workspace join. `catalogMatch` is the host's current merged index result for
- * remote calls; local calls may also use an open-tab match and the #69 fallback. */
+/** Select an attachment candidate: the host's current merged index result,
+ * then an open-tab match, then the #69 workspace-join fallback. */
 export function resolveMentionAttachmentPath(
-  origin: "local" | "remote",
   workspaceRoot: string,
   relPath: string,
   catalogMatch: string | undefined,
   openTabMatch: string | undefined,
   platform: NodeJS.Platform = process.platform,
 ): string | undefined {
-  if (origin === "remote") return catalogMatch;
   return catalogMatch
     ?? openTabMatch
     ?? resolveMentionFallback(workspaceRoot, relPath, platform);

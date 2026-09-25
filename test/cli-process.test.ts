@@ -18,12 +18,9 @@ describe("grok CLI process invocation", () => {
     expect(sidebar).not.toMatch(/execGrokCli\([^\n]*\["mcp"/);
     expect(sidebar).toContain('client.listMcpServers()');
     // Pinned so a NEW one-shot invocation has to be noticed rather than slipped
-    // in — which is what this count is for, and it worked: the ninth is the
-    // remote grok sign-out. A cloud environment has no one to watch the terminal
-    // the desk path opens, so that path runs the CLI through the wrapper and
-    // waits for it instead.
-    // The eleventh is `muse --version` (the Muse provider port).
-    expect(sidebar.match(/execGrokCli\s*\(/g)).toHaveLength(11);
+    // in — which is what this count is for.
+    // The tenth is `muse --version` (the Muse provider port).
+    expect(sidebar.match(/execGrokCli\s*\(/g)).toHaveLength(10);
     expect(sidebar).toMatch(/execGrokCli\(cliPath, \["--version"\],[\s\S]*parseCodexVersionOutput/);
     expect(sidebar).toMatch(/execGrokCli\(cliPath, \["--version"\],[\s\S]*parseClaudeVersionOutput/);
     expect(sidebar).toMatch(/execGrokCli\(cliPath, \["--version"\],[\s\S]*parseGeminiVersionOutput/);

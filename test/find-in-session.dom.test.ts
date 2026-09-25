@@ -142,7 +142,7 @@ describe("find in conversation (#99)", () => {
     expect((window as unknown as { CSS?: { highlights?: unknown } }).CSS?.highlights).toBeUndefined();
   });
 
-  it("offers Find in conversation in the desktop/remote ⋯ menu beside Export", () => {
+  it("offers Find in conversation in the desktop ⋯ menu beside Export", () => {
     const h = bootWebview();
     dispatch(h.window, { type: "sessionName", sessionId: "s1", name: "Live", cwd: "/w" });
     const labels = openOverflow(h.window, h.doc, "session-head-actions");
@@ -289,16 +289,6 @@ describe("find in conversation (#99)", () => {
     expect(api(window).isOpen()).toBe(false);
     expect(doc.getElementById("find-bar")!.hidden).toBe(true);
     expect(doc.activeElement).toBe(history);
-  });
-
-  it("IS_REMOTE does not bind Ctrl/Cmd+F", async () => {
-    const { window, doc } = bootWebview({ remote: true });
-    await playTurn(window, "hello", "world");
-    doc.dispatchEvent(key(window, { key: "f", ctrlKey: true }));
-    expect(api(window).isOpen()).toBe(false);
-    doc.dispatchEvent(key(window, { key: "f", metaKey: true }));
-    expect(api(window).isOpen()).toBe(false);
-    expect(doc.getElementById("find-bar")).toBeNull();
   });
 
   it("desk/VS Code Cmd+F and the host message open find", async () => {

@@ -41,7 +41,7 @@ function makeSidebar(): any {
   sidebar.refreshImplicitChip = vi.fn();
   sidebar.postChips = vi.fn();
   sidebar.retainUploadedFilesForSession = vi.fn(async () => {});
-  sidebar.reportRequester = vi.fn();
+  sidebar.notifyUser = vi.fn();
   return sidebar;
 }
 
@@ -60,7 +60,7 @@ function attachClient(sidebar: any, opts?: { honorContent?: boolean; result?: "o
       calls.push({ text, content });
       return opts?.result ?? "ok";
     },
-  };
+  } as unknown as NonNullable<Session["client"]>;
   return { session, calls };
 }
 
@@ -101,7 +101,7 @@ describe("steerSend carries attachments", () => {
     const { session, request } = attachBackend(sidebar, backend);
     const chip = makeImageChip(stagingPng(), 1, "image/png");
     session.chips = [chip];
-    await sidebar.steerSend("look at this", session, undefined, [chip]);
+    await sidebar.steerSend("look at this", session, [chip]);
     expect(request).toHaveBeenCalledTimes(1);
     const [method, params] = request.mock.calls[0];
     expect(method).toBe(backend.provider === "grok" ? "_x.ai/interject" : "_session/steering");
@@ -125,7 +125,7 @@ describe("steerSend carries attachments", () => {
       const { session, request } = attachBackend(sidebar, backend, false, false);
       const chip = makeImageChip(stagingPng(), 1, "image/png");
       session.queuedSends = enqueueQueuedSend([], "keep text and pixels", [chip]);
-      await sidebar.steerSend("keep text and pixels", session, undefined, [chip], true);
+      await sidebar.steerSend("keep text and pixels", session, [chip], true);
       expect(request).not.toHaveBeenCalled();
       expect(session.queuedSends).toEqual([{ text: "keep text and pixels", chips: [expect.objectContaining({ id: chip.id })] }]);
       expect(session.interjectionCount).toBe(0);
@@ -148,15 +148,14 @@ describe("steerSend carries attachments", () => {
     request.mockRejectedValueOnce({ code: -32601, message: "Method not found" });
     const chip = makeImageChip(stagingPng(), 1, "image/png");
     session.queuedSends = enqueueQueuedSend([], "keep both", [chip]);
-    await sidebar.steerSend("keep both", session, undefined, [chip], true);
+    await sidebar.steerSend("keep both", session, [chip], true);
     expect(session.queuedSends).toEqual([{ text: "keep both", chips: [expect.objectContaining({ id: chip.id })] }]);
     expect(session.interjectionCount).toBe(0);
     expect(sidebar.posted.some((m: HostMsg) => m.type === "steerUnavailable")).toBe(true);
     // Grok’s method is unadvertised, so -32601 means an old CLI and the warning
     // owes the user the thing that fixes it. Codex advertises its capability, so
     // a gap there is the adapter’s and no update of ours changes it.
-    expect(sidebar.reportRequester).toHaveBeenCalledWith(
-      undefined,
+    expect(sidebar.notifyUser).toHaveBeenCalledWith(
       "warning",
       backend.provider === "grok"
         ? expect.stringContaining("Update via Settings")
@@ -168,7 +167,7 @@ describe("steerSend carries attachments", () => {
     "queues an idle steer instead of starting a turn nobody is watching (%s)", async (backend) => {
       const sidebar = makeSidebar();
       const { session, request } = attachBackend(sidebar, backend);
-      // The turn finished while the tap was crossing the relay.
+      // The turn finished between the tap and the host handling it.
       session.turnToken = undefined;
       const flushed: string[] = [];
       sidebar.maybeFlushQueuedSends = vi.fn(async (s: Session) => {
@@ -209,8 +208,8 @@ describe("steerSend carries attachments", () => {
       expect(errors).toEqual([]);
     } else {
       expect(session.queuedSends).toEqual([{ text: "use tabs, not spaces", chips: [] }]);
-      expect(sidebar.reportRequester).toHaveBeenCalledWith(
-        undefined, "warning", expect.stringContaining("queued instead"),
+      expect(sidebar.notifyUser).toHaveBeenCalledWith(
+        "warning", expect.stringContaining("queued instead"),
       );
       // The turn is still streaming. `agentReset` drops the in-flight agent
       // bubble to suppress the rest of a turn, so emitting it here would delete
@@ -222,19 +221,13 @@ describe("steerSend carries attachments", () => {
     }
   });
 
-  it("does not re-meter a from-queue steer the adapter refused in-band", async () => {
+  it("keeps a from-queue steer the adapter refused in-band, exactly once", async () => {
     const sidebar = makeSidebar();
     const { session, request } = attachBackend(sidebar, new CodexBackend(), true, true, { outcome: "failed" });
-    // The shape that bills twice: text queued from the phone (so the relay has
-    // already metered it), then steered, then refused by the adapter.
     session.queuedSends = enqueueQueuedSend([], "use tabs, not spaces", []);
-    session.queuedSendRequiresRelay = true;
-    await sidebar.steerSend("use tabs, not spaces", session, undefined, undefined, true);
+    await sidebar.steerSend("use tabs, not spaces", session, undefined, true);
     expect(request).toHaveBeenCalledTimes(1);
     expect(session.queuedSends).toEqual([{ text: "use tabs, not spaces", chips: [] }]);
-    // Left set, the eventual flush asks the phone to submit it again as a fresh
-    // `send`, which the relay meters a second time for one failed correction.
-    expect(session.queuedSendRequiresRelay).toBe(false);
   });
 
   it("reads that verdict per backend, never off the wire alone", async () => {
@@ -249,21 +242,15 @@ describe("steerSend carries attachments", () => {
   });
 
   it.each([grokBackend, new CodexBackend()])(
-    "does not re-meter a queued steer the relay already charged (%s)", async (backend) => {
+    "flushes an idle from-queue steer once without duplicating it (%s)", async (backend) => {
       const sidebar = makeSidebar();
       const { session, request } = attachBackend(sidebar, backend);
       session.turnToken = undefined;
       session.queuedSends = enqueueQueuedSend([], "one correction", []);
-      // `queueSend` set this when the phone queued the block. The relay then
-      // metered the `steerSend` that followed, so the text is paid for once.
-      session.queuedSendRequiresRelay = true;
       sidebar.maybeFlushQueuedSends = vi.fn(async () => {});
-      await sidebar.steerSend("one correction", session, undefined, undefined, true);
+      await sidebar.steerSend("one correction", session, undefined, true);
       expect(request).not.toHaveBeenCalled();
       expect(session.queuedSends).toEqual([{ text: "one correction", chips: [] }]);
-      // The flag is the whole defect: a flush with it standing goes back out as
-      // `submitQueuedSend`, which the phone re-sends and the relay bills again.
-      expect(session.queuedSendRequiresRelay).toBe(false);
       expect(sidebar.maybeFlushQueuedSends).toHaveBeenCalledTimes(1);
     },
   );
@@ -274,7 +261,7 @@ describe("steerSend carries attachments", () => {
     const chip = makeImageChip(stagingPng(), 1, "image/png");
     session.queuedSends = enqueueQueuedSend([], "look at this", [chip]);
 
-    await sidebar.steerSend("look at this", session, undefined, [chip], true);
+    await sidebar.steerSend("look at this", session, [chip], true);
 
     expect(calls).toHaveLength(1);
     expect(calls[0].text).toBe("look at this");
@@ -298,7 +285,7 @@ describe("steerSend carries attachments", () => {
     const { session, calls } = attachClient(sidebar);
     session.queuedSends = enqueueQueuedSend([], "just text", []);
 
-    await sidebar.steerSend("just text", session, undefined, undefined, true);
+    await sidebar.steerSend("just text", session, undefined, true);
 
     expect(calls).toEqual([{ text: "just text", content: undefined }]);
   });
@@ -314,7 +301,7 @@ describe("steerSend carries attachments", () => {
       session.queuedSends = enqueueQueuedSend(session.queuedSends, "second", []);
     }
 
-    await sidebar.steerSend("first", session, undefined, [explicit], queued);
+    await sidebar.steerSend("first", session, [explicit], queued);
 
     expect(calls).toHaveLength(1);
     expect(calls[0].text).toContain("Attached file: attached.ts");
@@ -330,13 +317,12 @@ describe("steerSend carries attachments", () => {
     const chip = makeImageChip(stagingPng(), 1, "image/png");
     session.queuedSends = enqueueQueuedSend([], "look at this", [chip]);
 
-    await sidebar.steerSend("look at this", session, undefined, [chip], true);
+    await sidebar.steerSend("look at this", session, [chip], true);
 
     expect(calls).toEqual([]);
     expect(session.queuedSends).toHaveLength(1);
     expect(session.queuedSends[0].chips.map((c) => c.id)).toEqual([chip.id]);
-    expect(sidebar.reportRequester).toHaveBeenCalledWith(
-      undefined,
+    expect(sidebar.notifyUser).toHaveBeenCalledWith(
       "warning",
       expect.stringMatching(/cannot steer attachments/),
     );
@@ -350,7 +336,7 @@ describe("steerSend carries attachments", () => {
     const chip = makeImageChip(stagingPng(), 1, "image/png");
     session.queuedSends = enqueueQueuedSend([], "look at this", [chip]);
 
-    await sidebar.steerSend("look at this", session, undefined, [chip], true);
+    await sidebar.steerSend("look at this", session, [chip], true);
 
     expect(calls).toHaveLength(1);
     expect(session.queuedSends[0].chips.map((c) => c.id)).toEqual([chip.id]);

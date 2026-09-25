@@ -43,7 +43,6 @@ import {
   type Routine,
   type RoutineCadence,
   type RoutineRun,
-  nextWakeAt,
 } from "../src/routines";
 
 const HOUR = 3_600_000;
@@ -427,42 +426,5 @@ describe("display", () => {
     expect(parseTimeOfDay("")).toBeUndefined();
     expect(parseTimeOfDay(undefined)).toBeUndefined();
     expect(formatTimeOfDay(485)).toBe("08:05");
-  });
-});
-
-describe("when a cloud environment must be awake", () => {
-  // A routine on a laptop fires because somebody opened the laptop. A hosted
-  // machine has nobody to open it, so it asks the relay to wake it — and the
-  // relay is told WHEN, never what. One timestamp is the whole contract.
-  const created = Date.UTC(2026, 7, 24, 14, 0);
-
-  it("is null when there are no routines at all", () => {
-    expect(nextWakeAt([], created, UTC)).toBeNull();
-  });
-
-  it("is the earliest next run across routines", () => {
-    const soon = routine({ id: "a", cadence: { every: 1, unit: "hours" }, createdAt: created });
-    const later = routine({ id: "b", cadence: { every: 6, unit: "hours" }, createdAt: created });
-    expect(nextWakeAt([later, soon], created, UTC)).toBe(created + HOUR);
-  });
-
-  it("ignores paused routines", () => {
-    // A paused routine that wakes a machine has not fired, but it has still
-    // cost money and broken a promise the UI makes.
-    const paused = routine({ id: "a", cadence: { every: 1, unit: "hours" }, createdAt: created, paused: true });
-    const live = routine({ id: "b", cadence: { every: 6, unit: "hours" }, createdAt: created });
-    expect(nextWakeAt([paused, live], created, UTC)).toBe(created + 6 * HOUR);
-  });
-
-  it("is null when every routine is paused", () => {
-    // The host must be able to tell the relay "nothing scheduled", or a stale
-    // wake outlives the routine that asked for it.
-    const paused = routine({ cadence: { every: 1, unit: "hours" }, createdAt: created, paused: true });
-    expect(nextWakeAt([paused], created, UTC)).toBeNull();
-  });
-
-  it("tracks the schedule forward as windows elapse", () => {
-    const hourly = routine({ cadence: { every: 1, unit: "hours" }, createdAt: created });
-    expect(nextWakeAt([hourly], created + 90 * MIN, UTC)).toBe(created + 2 * HOUR);
   });
 });

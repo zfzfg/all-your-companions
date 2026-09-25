@@ -73,7 +73,6 @@ describe("voice control mic button", () => {
   it("auto-submits when the host flags a 'grok send' command", () => {
     const { window, posted, doc } = bootWebview();
     const mic = $(doc, "mic-btn");
-    const input = $(doc, "input") as HTMLTextAreaElement;
     click(window, mic);
     click(window, mic);
 
@@ -86,7 +85,7 @@ describe("voice control mic button", () => {
   });
 
   it("does not auto-submit when send is false", () => {
-    const { window, posted, doc } = bootWebview();
+    const { window, posted } = bootWebview();
     dispatch(window, { type: "voiceTranscript", text: "fix the bug", send: false });
     expect(posted.some((p) => p.type === "send")).toBe(false);
   });
@@ -505,7 +504,6 @@ describe("composer marks provisional dictation apart from the send command", () 
 
   it("marks nothing once dictation has finished", () => {
     const { window, doc } = bootWebview();
-    const input = $(doc, "input") as HTMLTextAreaElement;
     dispatch(window, { type: "voiceConfigured", value: true });
     click(window, $(doc, "mic-btn"));
     dispatch(window, { type: "voicePartial", text: "hello" });

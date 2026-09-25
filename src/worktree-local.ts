@@ -30,7 +30,6 @@ import * as nodePath from "node:path";
 import * as nodeFs from "node:fs";
 import {
   parseGitWorktreeList,
-  pathsEqual,
   sanitizeWorktreeLabel,
   type WorktreeApplyFile,
   type WorktreeApplyResult,

@@ -150,62 +150,6 @@ describe("command details (#41)", () => {
     expect(details.querySelector(".tool-cmd-output")!.textContent).toBe("orphan output");
   });
 
-  it("clips a long single-line command but keeps the full text reachable remotely", () => {
-    const { window, doc } = bootWebview({
-      remote: true,
-      beforeScripts: (win) => {
-        Object.defineProperty(win.HTMLElement.prototype, "clientWidth", {
-          configurable: true,
-          get() { return this.classList?.contains("tool-cmd") ? 120 : 0; },
-        });
-        Object.defineProperty(win.HTMLElement.prototype, "scrollWidth", {
-          configurable: true,
-          get() { return this.classList?.contains("tool-cmd") ? 480 : 0; },
-        });
-      },
-    });
-    const longCmd = `node -e "${"console.log('x');".repeat(12)}"`;
-    dispatch(window, exec("long", longCmd));
-    close(window);
-    const row = doc.querySelector(".tool-flat.has-details")!;
-    click(window, row);
-    const pre = row.querySelector(".tool-cmd") as HTMLElement;
-    const viewAll = row.querySelector(".command-view-all")!;
-    expect(pre.textContent).toBe(longCmd);
-    expect(pre.classList.contains("command-full")).toBe(false);
-    click(window, viewAll);
-    expect(pre.classList.contains("command-full")).toBe(true);
-    expect(pre.textContent).toBe(longCmd);
-  });
-
-  it("offers a touch reveal when a short command actually overflows a narrow container", () => {
-    const { window, doc } = bootWebview({
-      remote: true,
-      beforeScripts: (win) => {
-        Object.defineProperty(win.HTMLElement.prototype, "clientWidth", {
-          configurable: true,
-          get() { return this.classList?.contains("tool-cmd") ? 72 : 0; },
-        });
-        Object.defineProperty(win.HTMLElement.prototype, "scrollWidth", {
-          configurable: true,
-          get() { return this.classList?.contains("tool-cmd") ? 240 : 0; },
-        });
-      },
-    });
-    const command = "git status --short src media test";
-    expect(command.length).toBeLessThan(80);
-    dispatch(window, exec("narrow", command));
-    close(window);
-    const row = doc.querySelector(".tool-flat.has-details")!;
-    click(window, row);
-
-    const reveal = row.querySelector(".command-view-all") as HTMLButtonElement;
-    expect(reveal).not.toBeNull();
-    expect(reveal.tagName).toBe("BUTTON");
-    click(window, reveal);
-    expect((row.querySelector(".tool-cmd") as HTMLElement).classList.contains("command-full")).toBe(true);
-  });
-
   it("caps long IN/OUT previews at six lines and opens the full text in untitled editors", () => {
     const { window, doc, posted } = bootWebview();
     const command = Array.from({ length: 8 }, (_, i) => `command ${i + 1}`).join("\n");
@@ -333,36 +277,6 @@ describe("command details (#41)", () => {
     const viewAll = row.querySelector(".command-view-all") as HTMLButtonElement;
     expect(pre.classList.contains("command-preview-capped")).toBe(true);
     expect(viewAll.textContent).toBe("View all (3 lines) →");
-  });
-
-  it("expands long IN/OUT inline on remote clients without posting a host-local message", () => {
-    const { window, doc, posted } = bootWebview({ remote: true });
-    const command = Array.from({ length: 8 }, (_, i) => `command ${i + 1}`).join("\n");
-    const output = Array.from({ length: 9 }, (_, i) => `output ${i + 1}`).join("\n");
-    dispatch(window, exec("remote-long", command));
-    close(window);
-    dispatch(window, out(command, output, 0));
-
-    const details = doc.querySelector(".tool-item-details") as HTMLElement;
-    const commandPre = details.querySelector(".tool-cmd") as HTMLElement;
-    const outputPre = details.querySelector(".tool-cmd-output") as HTMLElement;
-    const viewAll = [...details.querySelectorAll(".command-view-all")] as HTMLButtonElement[];
-    expect(viewAll.map((b) => b.textContent)).toEqual([
-      "View all (8 lines) →",
-      "View all (9 lines) →",
-    ]);
-
-    click(window, viewAll[0]);
-    expect(commandPre.textContent).toBe(command);
-    expect(outputPre.textContent).toBe(output); // each preview expands independently
-    expect(viewAll[0].textContent).toBe("Show less");
-    click(window, viewAll[1]);
-    expect(outputPre.textContent).toBe(output);
-    expect(posted.filter((m: any) => m.type === "openText")).toHaveLength(0);
-
-    click(window, viewAll[0]);
-    expect(commandPre.textContent).toBe(command);
-    expect(viewAll[0].textContent).toBe("View all (8 lines) →");
   });
 
   it("renders six-line IN/OUT text in full with no View all control", () => {
@@ -919,34 +833,7 @@ describe("command details (#41)", () => {
     expect((doc.querySelector(".tool-label") as HTMLElement).textContent).toBe("Read");
   });
 
-  it("REMOTE shows the SAME row; the link reveals the text in place (#122)", () => {
-    const { window, doc, posted } = bootWebview({ remote: true });
-    const body = Array.from({ length: 12 }, (_, i) => `line ${i + 1}`).join("\n");
-    dispatch(window, readCall("rr", { target_file: "src/a.ts", offset: 1, limit: 12 }));
-    dispatch(window, readDone("rr", body, {
-      type: "ReadFile",
-      FileContent: { content: body, offset: 1, limit: 12 },
-    }));
-    close(window);
-
-    // Identical shape to the IDE — one line, path + range as the link.
-    const link = doc.querySelector(".tool-label-ref") as HTMLElement;
-    expect(link.textContent).toBe("a.ts lines 1-12");
-    const details = doc.querySelector(".tool-item-details") as HTMLElement;
-    expect(details.classList.contains("tool-read-carrier")).toBe(true);
-    expect(details.hidden).toBe(true); // costs no space until asked for
-
-    // A phone cannot send openFile (host-local in remote-policy), so the link
-    // reveals what is already on the wire instead — and toggles back.
-    click(window, link);
-    expect(details.hidden).toBe(false);
-    expect(details.querySelector(".tool-cmd-output")!.textContent).toBe(body);
-    expect(posted.filter((m: any) => m.type === "openFile")).toEqual([]);
-    click(window, link);
-    expect(details.hidden).toBe(true);
-  });
-
-  it("the DESKTOP app shows the SAME row; the link opens its preview window (#122)", async () => {
+  it("the DESKTOP app shows the SAME row; the link opens its preview window (#122)", () => {
     const { window, doc, posted } = bootWebview();
     dispatch(window, {
       type: "initialState",
@@ -955,7 +842,6 @@ describe("command details (#41)", () => {
       capabilities: { previewInApp: true },
     });
     const excerpt = Array.from({ length: 12 }, (_, i) => `line ${i + 1}`).join("\n");
-    const whole = Array.from({ length: 40 }, (_, i) => `line ${i + 1}`).join("\n");
     dispatch(window, readCall("dd", { target_file: "src/a.ts", offset: 1, limit: 12 }));
     dispatch(window, readDone("dd", excerpt, {
       type: "ReadFile",
@@ -970,32 +856,25 @@ describe("command details (#41)", () => {
     expect(doc.getElementById("preview-overlay")).toBeNull();
 
     // openTextFile cannot honour a line selection there, so the in-app preview
-    // fetches the file and marks the agent's lines — never posts openFile.
+    // shows the excerpt the agent read — never posts openFile.
     click(window, link);
-    const req = posted.find((m: any) => m.type === "readProjectFile");
-    expect(req).toMatchObject({ type: "readProjectFile", cwd: "/w", relPath: "src/a.ts" });
-    dispatch(window, {
-      type: "projectFileContent",
-      requestId: (req as any).requestId,
-      cwd: "/w",
-      relPath: "src/a.ts",
-      ok: true,
-      kind: "text",
-      text: whole,
-    });
-    await Promise.resolve();
-    await Promise.resolve();
     const overlay = doc.getElementById("preview-overlay");
     expect(overlay).not.toBeNull();
-    expect(overlay!.textContent).toContain("line 40");
-    expect(overlay!.querySelectorAll(".tdl-read").length).toBe(12);
+    expect(overlay!.querySelector(".preview-code")!.textContent).toBe(excerpt);
     expect(details.hidden).toBe(true); // the carrier stays out of the transcript
     expect(posted.filter((m: any) => m.type === "openFile")).toEqual([]);
     expect(posted.filter((m: any) => m.type === "openText")).toEqual([]);
+    expect(posted.filter((m: any) => m.type === "readProjectFile")).toEqual([]);
   });
 
   it("a carrier is never an affordance — no chevron, no row toggle (#122)", () => {
-    const { window, doc } = bootWebview({ remote: true });
+    const { window, doc } = bootWebview();
+    dispatch(window, {
+      type: "initialState",
+      effort: "", cwd: "/w", useCtrlEnter: false, extVersion: "0",
+      showThinking: false, expandCommandOutputs: true, appPurpose: "coding",
+      capabilities: { previewInApp: true },
+    });
     dispatch(window, readCall("c1", { target_file: "src/a.ts", offset: 1, limit: 12 }));
     dispatch(window, readDone("c1", "one\ntwo\nthree"));
     close(window);
@@ -1047,16 +926,6 @@ describe("command details (#41)", () => {
     expect(posted.filter((m: any) => m.type === "openFile")).toEqual([
       { type: "openFile", path: "src/a.ts#L1-L12" },
     ]);
-  });
-
-  it("a SUBAGENT read row stays plain on a remote — a link there would be dead (#122)", () => {
-    const { window, doc } = bootWebview({ remote: true });
-    spawnSubagentReadingA(window);
-
-    const row = doc.querySelector(".subagent-tool") as HTMLElement;
-    expect(row).not.toBeNull(); // same sequence, so the absence below means something
-    expect(row.textContent).toBe("Read a.ts lines 1-12");
-    expect(row.querySelector(".tool-label-ref")).toBeNull();
   });
 
   it("a read batch expands WHILE it runs, not only when it finishes (#122)", () => {

@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
 import { GrokSidebar } from "../src/sidebar";
-import { RemoteClientState } from "../src/remote-client-state";
 import { Session } from "../src/session";
 import {
   parseRewindPoint,
@@ -21,7 +20,6 @@ import {
   editRewindConfirmMessage,
   REWIND_MODES,
   checkWorkspaceGitStatus,
-  gitStatusWarning,
 } from "../src/rewind";
 
 function deferred<T>() {
@@ -50,9 +48,6 @@ function makeRewindSidebar(hasFiles = true) {
   session.client = original as any;
   sidebar.focused = session;
   sidebar.workspaceRoot = () => "/repo";
-  sidebar.remoteClients = new RemoteClientState<Session>("/repo");
-  sidebar.remoteClients.ready("browser-view");
-  sidebar.remoteClients.setActive("browser-view", session);
   sidebar.pendingConfirms = new Map();
   sidebar.confirmSeq = 0;
   const confirmation = deferred<string>();
@@ -63,8 +58,7 @@ function makeRewindSidebar(hasFiles = true) {
     appendLine: vi.fn(), showWarningMessage: vi.fn(),
     showInformationMessage: vi.fn(), showErrorMessage: vi.fn(),
   };
-  sidebar.sendRemoteClient = vi.fn();
-  vi.spyOn(sidebar, "reportRequester");
+  vi.spyOn(sidebar, "notifyUser");
   sidebar.applyRewindToView = vi.fn();
   sidebar.restoreComposerFor = vi.fn();
   sidebar.truncateSessionCardsAfterRewind = vi.fn();
@@ -75,19 +69,19 @@ describe.each(["editLastMessage", "rewindSession"] as const)("%s lifecycle", (ty
   const request = { type, userBubbleIndex: 0, text: "original draft", totalUserBubbles: 2 };
 
   describe.each(["confirmation", "listing"] as const)("delayed %s", (delay) => {
-    it.each(["new-turn", "started-and-finished-turn", "replaced-client"])("refuses a stale browser request after %s", async (change) => {
-      // Both views hold the same Session object. Listing-only cases have no
-      // file changes, so they must be guarded even without a confirmation.
+    it.each(["new-turn", "started-and-finished-turn", "replaced-client"])("refuses a stale request after %s", async (change) => {
+      // Listing-only cases have no file changes, so they must be guarded even
+      // without a confirmation.
       const { sidebar, session, original, replacement, points, confirmation } = makeRewindSidebar(delay === "confirmation");
       const listing = deferred<typeof points>();
       if (delay === "listing") original.listRewindPoints.mockReturnValueOnce(listing.promise);
-      const pending = sidebar.onMessage(request, "remote", "browser-view");
+      const pending = sidebar.onMessage(request);
       const id = delay === "confirmation" ? await confirmation.promise : undefined;
       expect(original.listRewindPoints).toHaveBeenCalledOnce();
       expect(original.executeRewind).not.toHaveBeenCalled();
 
       if (change !== "replaced-client") {
-        // The desk starts another turn while the browser is waiting.
+        // Another turn starts while the request is waiting.
         session.status = "working";
         session.userMessageCount++;
         // Finishing leaves client, generation and session id unchanged.
@@ -98,21 +92,18 @@ describe.each(["editLastMessage", "rewindSession"] as const)("%s lifecycle", (ty
         session.client = replacement as any;
       }
 
-      if (id) await sidebar.onMessage({ type: "uiConfirmAnswer", id, ok: true }, "remote", "browser-view");
+      if (id) await sidebar.onMessage({ type: "uiConfirmAnswer", id, ok: true });
       else listing.resolve(points);
       await pending;
 
       expect(original.executeRewind).not.toHaveBeenCalled();
       expect(replacement.executeRewind).not.toHaveBeenCalled();
-      expect(sidebar.reportRequester).toHaveBeenCalledOnce();
-      expect(sidebar.reportRequester).toHaveBeenCalledWith(
-        expect.objectContaining({ clientId: "browser-view" }), "warning",
+      expect(sidebar.notifyUser).toHaveBeenCalledOnce();
+      expect(sidebar.notifyUser).toHaveBeenCalledWith(
+        "warning",
         expect.stringMatching(/(?:Edit|Rewind) cancelled because the conversation changed or another turn started/),
       );
-      expect(sidebar.sendRemoteClient).toHaveBeenCalledWith("browser-view", expect.objectContaining({
-        type: "hostNotice", level: "warning", text: expect.stringContaining("Nothing was rewound."),
-      }));
-      expect(sidebar.host.showWarningMessage).not.toHaveBeenCalled();
+      expect(sidebar.host.showWarningMessage).toHaveBeenCalledWith(expect.stringContaining("Nothing was rewound."));
       expect(sidebar.applyRewindToView).not.toHaveBeenCalled();
       expect(sidebar.restoreComposerFor).not.toHaveBeenCalled();
       expect(sidebar.truncateSessionCardsAfterRewind).not.toHaveBeenCalled();
@@ -121,30 +112,29 @@ describe.each(["editLastMessage", "rewindSession"] as const)("%s lifecycle", (ty
 
   it.each(["client", "generation", "session-id", "needs-you"])("independently rechecks %s for a desk confirmation", async (change) => {
     const { sidebar, session, original, replacement, confirmation } = makeRewindSidebar();
-    const pending = sidebar.onMessage(request, "local");
+    const pending = sidebar.onMessage(request);
     const id = await confirmation.promise;
     if (change === "client") session.client = replacement as any;
     if (change === "generation") session.gen++;
     if (change === "session-id") session.activeSessionId = "replacement-session";
     if (change === "needs-you") session.status = "needs-you";
-    await sidebar.onMessage({ type: "uiConfirmAnswer", id, ok: true }, "local");
+    await sidebar.onMessage({ type: "uiConfirmAnswer", id, ok: true });
     await pending;
     expect(original.executeRewind).not.toHaveBeenCalled();
     expect(replacement.executeRewind).not.toHaveBeenCalled();
-    expect(sidebar.reportRequester).toHaveBeenCalledOnce();
-    expect(sidebar.reportRequester).toHaveBeenCalledWith(
-      undefined, "warning", expect.stringContaining("Nothing was rewound."),
+    expect(sidebar.notifyUser).toHaveBeenCalledOnce();
+    expect(sidebar.notifyUser).toHaveBeenCalledWith(
+      "warning", expect.stringContaining("Nothing was rewound."),
     );
     expect(sidebar.host.showWarningMessage).toHaveBeenCalledOnce();
-    expect(sidebar.sendRemoteClient).not.toHaveBeenCalled();
   });
 
   it.each([true, false])("still executes an unchanged, finished conversation (file changes: %s)", async (hasFiles) => {
     const { sidebar, original, confirmation } = makeRewindSidebar(hasFiles);
-    const pending = sidebar.onMessage(request, "remote", "browser-view");
+    const pending = sidebar.onMessage(request);
     if (hasFiles) {
       const id = await confirmation.promise;
-      await sidebar.onMessage({ type: "uiConfirmAnswer", id, ok: true }, "remote", "browser-view");
+      await sidebar.onMessage({ type: "uiConfirmAnswer", id, ok: true });
     }
     await pending;
     expect(original.executeRewind).toHaveBeenCalledOnce();
@@ -153,12 +143,12 @@ describe.each(["editLastMessage", "rewindSession"] as const)("%s lifecycle", (ty
 
   it("still cancels when the confirmation is declined", async () => {
     const { sidebar, original, confirmation } = makeRewindSidebar();
-    const pending = sidebar.onMessage(request, "remote", "browser-view");
+    const pending = sidebar.onMessage(request);
     const id = await confirmation.promise;
-    await sidebar.onMessage({ type: "uiConfirmAnswer", id, ok: false }, "remote", "browser-view");
+    await sidebar.onMessage({ type: "uiConfirmAnswer", id, ok: false });
     await pending;
     expect(original.executeRewind).not.toHaveBeenCalled();
-    expect(sidebar.reportRequester).not.toHaveBeenCalled();
+    expect(sidebar.notifyUser).not.toHaveBeenCalled();
   });
 });
 

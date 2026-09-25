@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { normalizeCodexPermissionParams, normalizeCodexUpdate } from "../src/codex-backend";
 // The entry guard makes this import pure: npm test never starts a real CLI.
-// @ts-expect-error Standalone release script intentionally has no declaration file.
 import { approvalOption, bounded, checkPermission, checkTools, timeoutMs } from "../scripts/acp-smoke.mjs";
 
 describe("ACP smoke evidence checks (no adapter or model)", () => {

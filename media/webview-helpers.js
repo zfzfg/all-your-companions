@@ -20,8 +20,8 @@
           + ". Codex / ChatGPT sign-in does not include transcription API access. OpenAI API usage is billed separately.",
       }, {
         id: "configureOpenAiVoice", category: "voice", title: "OpenAI voice API key", kind: "action",
-        description: "Set the key on this host, or use OPENAI_API_KEY in its environment. The key is never sent to the chat or remote clients.",
-        actionLabel: "Set API key", hostLocal: true, visible: known,
+        description: "Set the key on this host, or use OPENAI_API_KEY in its environment. The key is never sent to the chat.",
+        actionLabel: "Set API key", visible: known,
         message: () => ({ type: "configureOpenAiVoice" }),
       });
     },
@@ -51,35 +51,34 @@
   // copy and test/protocol.test.ts asserts the two are set-equal in both
   // directions (and that chat.js actually handles every host type).
   const HOST_MESSAGE_TYPES = [
-    "initialState", "moveViewHint", "welcomeTips", "projectSetup", "githubState", "githubRepos", "providerState", "providerCapabilities", "mcpServers", "mcpConnectors", "mcpConnectorAuthorization", "routines", "codexInstallProgress", "planModeAvailability", "showThinking", "appPurpose", "fontScale", "grokUpdateStatus", "updateAvailable", "updateReady", "telemetryEnabled", "thumbsFeedback", "initialized",
+    "initialState", "moveViewHint", "welcomeTips", "projectSetup", "githubState", "githubRepos", "providerState", "providerCapabilities", "mcpServers", "mcpConnectors", "routines", "codexInstallProgress", "planModeAvailability", "showThinking", "appPurpose", "fontScale", "grokUpdateStatus", "updateAvailable", "updateReady", "telemetryEnabled", "thumbsFeedback", "initialized",
     "cliUpdating", "session", "sessionName", "sessionRemoved", "modelChanged", "modeChanged", "sessionType", "companionSubagent", "subagentTray", "workflowRun", "workflowList", "openModePopover",
     "voiceState", "voiceConfigured", "voicePartial", "voiceSubmit", "voiceTranscript",
-    "voiceError", "chips", "commandsUpdate", "mentionResults", "projectDirListing", "projectFileContent", "projectFileWriteResult", "userMessage", "agentStart", "thoughtChunk",
-    "messageChunk", "media", "userMessageChunk", "historyReplay", "historyBatch", "permissionHistoryQueue",
+    "voiceError", "chips", "commandsUpdate", "mentionResults", "userMessage", "agentStart", "thoughtChunk",
+    "messageChunk", "media", "userMessageChunk", "historyReplay", "permissionHistoryQueue",
     "planHistoryQueue", "toolCall", "toolCallUpdate", "permissionRequest", "permissionOptions",
     "permissionResolved", "toolEditReverted", "exitPlanRequest", "planResolved", "questionRequest", "questionResolved", "planNotice", "autoCompactNotice", "planBlocked",
     "promptComplete", "contextUsage", "commandOutput", "expandCommandOutputs", "setAllToolDetails", "focusInput", "findInSession", "restoreComposer", "truncateMessages", "uiConfirmRequest", "uiConfirmResolved", "subscriptionUsage", "agentReset", "agentError", "limitOffer", "limitOfferResolved", "agentResult", "agentEnd", "exit", "setBusy", "summarizing",
     "sessionContext", "clearMessages", "onboarding", "error", "hostNotice", "xaiNotification", "subagentUpdate", "childStream", "runProgress", "sessions", "repoSessions", "pinnedSessions", "repos",
-    "sessionDot", "queuedSends", "submitQueuedSend", "steerUnavailable", "feedbackAvailability", "turnFeedbackAck", "usage", "planEntries", "reviewCenter", "crewRun", "steerByDefault", "promptNav", "soundNotifications", "processingSound", "readRepliesAloud", "summarizeRepliesAloud", "speechSummary", "imageFull", "imageOriginal", "moveComposerCaret",
-    "remoteStatus", "ruleFiles", "permissionRules", "agentRoles", "workflowGenerator", "scrollToWaiting", "runningChildren", "sessionDelegation", "subagentApprovalResolved", "subagentApproval", "childContext", "childActivity", "contextOverflow", "nearFullPrompt", "compactSummary",
+    "sessionDot", "queuedSends", "steerUnavailable", "feedbackAvailability", "turnFeedbackAck", "usage", "planEntries", "reviewCenter", "crewRun", "steerByDefault", "promptNav", "soundNotifications", "processingSound", "readRepliesAloud", "summarizeRepliesAloud", "speechSummary", "imageOriginal", "moveComposerCaret",
+    "ruleFiles", "permissionRules", "agentRoles", "workflowGenerator", "scrollToWaiting", "runningChildren", "sessionDelegation", "subagentApprovalResolved", "subagentApproval", "childContext", "childActivity", "contextOverflow", "nearFullPrompt", "compactSummary",
   ];
   const WEBVIEW_MESSAGE_TYPES = [
-    "ready", "remotePreferences", "send", "newSession", "cancel", "pickModel", "setMode", "setSessionType", "setSubagentsEnabled", "subagentRosterSave", "subagentRoutingSave", "setCrewStageSubagents", "companionSubagentAction", "workflowStart", "workflowGateAction", "openCrewWithGoal", "setConfigOption", "removeChip",
+    "ready", "send", "newSession", "cancel", "pickModel", "setMode", "setSessionType", "setSubagentsEnabled", "subagentRosterSave", "subagentRoutingSave", "setCrewStageSubagents", "companionSubagentAction", "workflowStart", "workflowGateAction", "openCrewWithGoal", "setConfigOption", "removeChip",
     "toggleChip", "openFile", "showInFolder", "openUrl", "openText", "openDiff", "revertToolEdit", "reviewRevertFile", "reviewRevertAll", "exportExpr", "setEffort",
     "addProjectFolder", "removeProjectFolder", "createProject", "cloneProject", "setupGithubCli", "listGithubRepos", "githubSignOut", "githubLoginWithToken",
-    "openGlobalConfig", "openProjectConfig", "listRuleFiles", "openRuleFile", "appendRuleFile", "listAgentRoles", "saveAgentRole", "deleteAgentRole", "saveCrewFlow", "deleteCrewFlow", "saveWorkflow", "validateWorkflow", "generateWorkflow", "cancelWorkflowGenerate", "setDefaultWorkflow", "addWorkflowStagesBlock", "runWorkflow", "listPermissionRules", "deletePermissionRule", "adoptPermissionRules", "listMcpServers", "connectMcpConnector", "disconnectMcpConnector", "completeMcpConnectorOAuth", "showLogs", "toggleDevTools", "openSettings", "openSettingsSurface", "closeSettingsSurface", "dismissWelcomeTip", "welcomeTipShown", "moveView",
+    "openGlobalConfig", "openProjectConfig", "listRuleFiles", "openRuleFile", "appendRuleFile", "listAgentRoles", "saveAgentRole", "deleteAgentRole", "saveCrewFlow", "deleteCrewFlow", "saveWorkflow", "validateWorkflow", "generateWorkflow", "cancelWorkflowGenerate", "setDefaultWorkflow", "addWorkflowStagesBlock", "runWorkflow", "listPermissionRules", "deletePermissionRule", "adoptPermissionRules", "listMcpServers", "connectMcpConnector", "disconnectMcpConnector", "showLogs", "toggleDevTools", "openSettings", "openSettingsSurface", "closeSettingsSurface", "dismissWelcomeTip", "welcomeTipShown", "moveView",
     "listRoutines", "saveRoutine", "deleteRoutine", "setRoutinePaused", "runRoutineNow",
     "setShowThinking", "setAppPurpose", "setExpandCommandOutputs",
     "dropFile", "permissionAnswer", "exitPlanAnswer", "questionAnswer", "limitOfferAnswer", "questionCancel", "questionDraft",
-    "setModel", "installCodex", "updateProviderCli", "cancelCodexInstall", "runInstallCmd", "runGrokLogin", "cancelDeviceLogin", "submitDeviceLoginCode", "logout", "checkGrokUpdate", "updateGrok",
+    "setModel", "installCodex", "updateProviderCli", "cancelCodexInstall", "runInstallCmd", "runGrokLogin", "logout", "checkGrokUpdate", "updateGrok",
     "recheckConnection", "refreshProviders", "retryProviderSession", "listSessions", "listRepoSessions", "selectRepo", "toggleRepoPin", "setRepoArchived", "setRepoColor", "toggleSessionPin", "openAgentArtifact", "openCrewSession", "stopCrew", "requestHandoff", "resumeSession", "renameSession", "deleteSession",
-      "clearAllSessions", "pickFile", "mentionQuery", "addMentionFile", "addContextChip", "openContextChipSource", "listProjectDir", "readProjectFile", "writeProjectFile", "pasteImage", "uploadFile", "voiceStart", "voiceStop",
-      "remoteVoiceStart", "remoteVoiceChunk", "remoteVoiceStop", "setVoiceBackend", "configureOpenAiVoice",
+      "clearAllSessions", "pickFile", "mentionQuery", "addMentionFile", "addContextChip", "openContextChipSource", "pasteImage", "voiceStart", "voiceStop",
+      "setVoiceBackend", "configureOpenAiVoice",
     "queueSend", "dequeueSend", "clearQueuedSends", "steerSend", "turnFeedback", "forkSession", "setSteerByDefault", "setPromptNav",
-    "setSoundNotifications", "setProcessingSound", "setReadRepliesAloud", "setSummarizeRepliesAloud", "setVoiceSendPhrase", "setVoiceKeyterms", "setTelemetryEnabled", "setThumbsFeedback", "summarizeSpeech", "requestImageFull", "requestImageOriginal", "composerFocus",
+    "setSoundNotifications", "setProcessingSound", "setReadRepliesAloud", "setSummarizeRepliesAloud", "setVoiceSendPhrase", "setVoiceKeyterms", "setTelemetryEnabled", "setThumbsFeedback", "summarizeSpeech", "requestImageOriginal", "composerFocus",
     "newWorktreeSession", "applyWorktree", "removeWorktree", "rewindSession", "editLastMessage", "uiConfirmAnswer", "workflowControl", "refreshContextDetails", "refreshSubscriptionUsage",
-    "remoteSignIn", "remoteSignOut", "unlinkRemoteDevice", "openRemotePortal",
-    "openUpdateRelease", "restartToUpdate", "setCompanionsSetting", "childOverviewAction", "setSessionDelegation", "subagentApprovalAnswer", "workflowPlanEdit", "childMessage", "contextOverflowAnswer", "continueInFreshSession",
+        "openUpdateRelease", "restartToUpdate", "setCompanionsSetting", "childOverviewAction", "setSessionDelegation", "subagentApprovalAnswer", "workflowPlanEdit", "childMessage", "contextOverflowAnswer", "continueInFreshSession",
   ];
   const EXTENSION_HOST_SLASH_COMMANDS = [
     {
@@ -1290,21 +1289,6 @@
       .trim();
   }
 
-  // The relay currently returns plain HostMsg-shaped errors without a request
-  // id. Only these canonical texts are attributable to a refused browser send.
-  //
-  // The quota tail is deliberately loose. It used to require the whole
-  // sentence, which made the relay's exact wording a wire contract with this
-  // regex. The relay later shortened that sentence; this stopped matching, the
-  // refused send never became the editable "Not sent" block, and the user's
-  // text was lost on the next reload. Match the stable identifying prefix and
-  // let the tail vary \u2014 the anchors plus the message-count shape are what make
-  // the text attributable, not the wording that follows.
-  function isRelaySendRejection(text) {
-    return /^(?:Slow down \u2014 at most \d+ messages per minute\.|Free plan limit reached \(\d+ messages this week\)\. Resets in .+)$/
-      .test(String(text || ""));
-  }
-
   /**
    * Side-panel re-clamp on window resize: skip while any element is full-screen.
    * Entering full-screen fires resize mid-transition; measuring then captures a
@@ -1807,7 +1791,6 @@
   function exportSessionMarkdown(events, opts) {
     const options = opts || {};
     const title = String(options.title || "Conversation").trim() || "Conversation";
-    const windowed = !!options.windowed;
     const sections = [];
     let userText = "";
     let userChips = [];
@@ -1956,11 +1939,7 @@
     flushUser();
     flushAgent();
 
-    const userTurns = sections.reduce((n, block) => n + (block.indexOf("## User") === 0 ? 1 : 0), 0);
     const header = ["# " + title, ""];
-    if (windowed) {
-      header.push(userTurns === 1 ? "Last 1 turn." : `Last ${userTurns} turns.`, "");
-    }
     const body = sections.join("\n\n");
     return header.join("\n") + (body ? body + "\n" : "");
   }
@@ -1980,11 +1959,6 @@
    * chooses among those — which is why this needs no randomness and stays a
    * pure function.
    *
-   * `deskOnly` is the same rule that keeps the move-view hint off phones: a
-   * remote may not sign an agent in or link a connector (both `host-local`),
-   * so suggesting it there is advice the reader cannot take from where they
-   * are standing.
-   *
    * Copy carries ONE `{braced}` span — the actionable phrase. The renderer
    * splits on it and builds text nodes plus a single control, so tip text
    * never reaches innerHTML.
@@ -1994,11 +1968,6 @@
       id: "providers",
       copy: "Grok isn’t your only agent. {Connect Codex or Claude Code} and pick one per conversation.",
       target: "settings:providers",
-      // Was deskOnly, on the rule that a remote may not sign an agent in. It
-      // can since 3.19.x, and on a cloud machine this is the only surface
-      // there is (owner asked why it never appears, 2026-08-31).
-      deskOnly: false,
-      remoteNeedsSignIn: true,
       // Not "fewer than all three": the moment a SECOND agent exists the user
       // has discovered that agents are interchangeable here, which is the only
       // thing this tip was ever teaching.
@@ -2008,38 +1977,24 @@
       id: "routines",
       copy: "Work that repeats can run itself. {Set up a routine} and it opens a session on schedule.",
       target: "settings:routines",
-      deskOnly: false,
       eligible: (f) => f.routineCount === 0,
     },
     {
       id: "connectors",
       copy: "Give your agent your tools. {Connect Notion, Linear or GitHub} and it can read and write them.",
       target: "settings:connectors",
-      deskOnly: true,
       eligible: (f) => f.connectorCount === 0,
-    },
-    {
-      id: "remote",
-      copy: "Leave the desk without leaving the work. {Continue on your phone.}",
-      target: "settings:account",
-      deskOnly: true,
-      // Three states, not two (see state.remoteLinked): null means the host has
-      // not read the token yet, and inviting an already-linked machine to link
-      // again is the exact confusion that tri-state exists to prevent.
-      eligible: (f) => f.remoteLinked === false,
     },
     {
       id: "readAloud",
       copy: "Grok can read its replies out loud — turn it on in {Voice settings}.",
       target: "settings:voice",
-      deskOnly: false,
       eligible: (f) => !f.readRepliesAloud,
     },
     {
       id: "voice",
       copy: "Talk instead of typing — set up {voice control} and dictate into the composer.",
       target: "settings:voice",
-      deskOnly: false,
       eligible: (f) => !f.voiceConfigured,
     },
     {
@@ -2048,12 +2003,7 @@
       // wide, and no amount of padding turns that into a finger-sized target
       // without visibly shoving the sentence around it.
       copy: "{Mention a file with @}, or drop one onto the composer.",
-      // Dropping a file works in the host's own webview only: the browser's
-      // drop handler reads file:// URIs and posts HOST paths, which a phone
-      // does not have. Advising it there is advice that cannot be taken.
-      copyWhen: (f) => (f.isRemote ? "{Mention a file with @} to bring it into the conversation." : undefined),
       target: "mention",
-      deskOnly: false,
       eligible: () => true,
     },
     {
@@ -2065,7 +2015,6 @@
       // nobody remembers ("… > Continue in a new chat > Use a new worktree").
       copy: "Trying something risky? {Start it in a worktree} — your checkout stays untouched.",
       target: "worktree",
-      deskOnly: true,
       // Every condition the destination list itself applies, so the link can
       // never fire something the host would refuse: coding mode, a CLI that
       // supports worktrees, and not already inside one (they do not nest).
@@ -2080,8 +2029,7 @@
   }
 
   /** A tip's copy for these facts: some tips say something different where the
-   *  action behind them differs (a cloud machine cannot connect Claude Code; a
-   *  browser cannot drop a file onto the composer). */
+   *  action behind them differs. */
   function welcomeTipCopy(tip, facts) {
     if (!tip) return "";
     const variant = typeof tip.copyWhen === "function" ? tip.copyWhen(facts || {}) : undefined;
@@ -2111,7 +2059,6 @@
     if (f.keepId) shownToday.delete(f.keepId);
     const known = {
       appPurpose: f.appPurpose === "coding" ? "coding" : "knowledge",
-      isRemote: !!f.isRemote,
       altAgentConnected: !!f.altAgentConnected,
       routineCount: typeof f.routineCount === "number" ? f.routineCount : -1,
       connectorCount: typeof f.connectorCount === "number" ? f.connectorCount : -1,
@@ -2122,18 +2069,10 @@
       // here would have hidden the tip on every host that never mentions it.
       worktreeSupported: f.worktreeSupported !== false,
       inWorktree: !!f.inWorktree,
-      cloudHost: !!f.cloudHost,
-      remoteCanConnectAgents: !!f.remoteCanConnectAgents,
-      remoteLinked: f.remoteLinked === true ? true : f.remoteLinked === false ? false : null,
     };
     return WELCOME_TIPS.filter((tip) => {
       if (dismissed.has(tip.id)) return false;
       if (shownToday.has(tip.id)) return false;
-      if (known.isRemote && tip.deskOnly) return false;
-      // A tip whose action needs a capability this remote does not have is the
-      // same dead end deskOnly was invented to prevent — just decided by what
-      // the host advertises rather than by where the reader is standing.
-      if (known.isRemote && tip.remoteNeedsSignIn && !known.remoteCanConnectAgents) return false;
       // -1 is "the host never told us" — see the doc comment.
       if (tip.id === "routines" && known.routineCount < 0) return false;
       if (tip.id === "connectors" && known.connectorCount < 0) return false;
@@ -2163,7 +2102,7 @@
   /**
    * The Add project menu, as data.
    *
-   * Two rails render this — the desktop/remote one in chat.js and VS Code's own
+   * Two rails render this — the desktop one in chat.js and VS Code's own
    * in projects-rail.js — and they have different popover primitives but must
    * not have different menus. So the SPEC lives here and each surface draws it.
    *
@@ -2428,23 +2367,6 @@
     githubHeading.className = "add-project-github-heading";
     const githubDesc = doc.createElement("p");
     githubDesc.className = "add-project-github-desc";
-    const githubCmd = doc.createElement("div");
-    githubCmd.className = "add-project-github-cmd";
-    const githubCode = doc.createElement("code");
-    const githubCopy = doc.createElement("button");
-    githubCopy.type = "button";
-    githubCopy.className = "add-project-github-copy";
-    githubCopy.title = "Copy";
-    githubCopy.textContent = "Copy";
-    githubCmd.appendChild(githubCode);
-    githubCmd.appendChild(githubCopy);
-    const githubOpen = doc.createElement("a");
-    githubOpen.className = "onb-action add-project-github-open";
-    githubOpen.target = "_blank";
-    githubOpen.rel = "noopener noreferrer";
-    githubOpen.textContent = "Open the sign-in page";
-    const githubNote = doc.createElement("p");
-    githubNote.className = "add-project-github-note";
     const githubRecheck = doc.createElement("button");
     githubRecheck.type = "button";
     githubRecheck.className = "add-project-github-recheck";
@@ -2452,9 +2374,6 @@
     githubRecheck.hidden = true;
     githubCard.appendChild(githubHeading);
     githubCard.appendChild(githubDesc);
-    githubCard.appendChild(githubCmd);
-    githubCard.appendChild(githubOpen);
-    githubCard.appendChild(githubNote);
     githubCard.appendChild(githubRecheck);
 
     const githubToken = doc.createElement("div");
@@ -2499,18 +2418,6 @@
     githubRecheck.addEventListener("click", function () {
       if (typeof o.onRecheck === "function") o.onRecheck();
     });
-    githubCopy.addEventListener("click", function () {
-      const code = githubCopy.dataset.cmd || "";
-      if (!code || !navigator.clipboard || typeof navigator.clipboard.writeText !== "function") return;
-      navigator.clipboard.writeText(code).then(function () {
-        githubCopy.textContent = "Copied";
-        githubCopy.classList.add("copied");
-        setTimeout(function () {
-          githubCopy.textContent = "Copy";
-          githubCopy.classList.remove("copied");
-        }, 1500);
-      }).catch(function () { /* clipboard blocked */ });
-    });
 
     const actions = doc.createElement("div");
     actions.className = "add-project-actions";
@@ -2530,7 +2437,6 @@
     let busy = false;
     let githubState = o.githubState && typeof o.githubState === "object" ? o.githubState : null;
     let repos = Array.isArray(o.repos) ? o.repos : null;
-    let reposTruncated = false;
     let activeIndex = 0;
     let paintedRows = [];
     let requestedRepos = false;
@@ -2714,61 +2620,15 @@
       submit.hidden = hidden;
     }
 
-    function paintGithubCard(g) {
-      const status = g && typeof g.status === "string" ? g.status : "starting";
-      githubBox.dataset.status = status;
-      const url = g && typeof g.url === "string" && /^https?:\/\//i.test(g.url) ? g.url : "";
-      const code = g && typeof g.code === "string" ? g.code : "";
-      githubOpen.removeAttribute("href");
-      if (status === "waiting" && url) {
-        githubHeading.textContent = "Finish signing in to GitHub";
-        githubDesc.textContent = code
-          ? "Open the link, then confirm this code:"
-          : "Open the link to finish signing in.";
-        githubDesc.hidden = false;
-        githubCmd.hidden = !code;
-        githubCode.textContent = code;
-        githubCopy.dataset.cmd = code;
-        githubCopy.textContent = "Copy";
-        githubCopy.classList.remove("copied");
-        githubOpen.hidden = false;
-        githubOpen.href = url;
-        githubNote.hidden = false;
-        githubNote.textContent = "Keep this page open — it finishes on its own.";
-        githubRecheck.hidden = true;
-        return true;
-      }
-      if (status === "done") {
-        githubHeading.textContent = "GitHub connected";
-        githubDesc.textContent = g && typeof g.message === "string" && g.message
-          ? g.message
-          : "Signed in to GitHub. Try to clone again.";
-        githubDesc.hidden = false;
-        githubCmd.hidden = true;
-        githubOpen.hidden = true;
-        githubNote.hidden = true;
-        githubRecheck.hidden = true;
-        return false;
-      }
-      if (status === "failed") {
-        githubHeading.textContent = "Could not connect GitHub";
-        githubDesc.textContent = g && typeof g.message === "string" ? g.message : "";
-        githubDesc.hidden = !githubDesc.textContent;
-        githubCmd.hidden = true;
-        githubOpen.hidden = true;
-        githubNote.hidden = true;
-        githubRecheck.hidden = true;
-        return false;
-      }
+    /** The terminal sign-in is running; the card waits for a re-check. */
+    function paintGithubCard() {
+      githubBox.dataset.status = "starting";
       githubHeading.textContent = "Connecting GitHub";
       const deskTerminal = o.terminalSignIn === true && typeof o.onRecheck === "function";
       githubDesc.textContent = deskTerminal
         ? "A terminal opened for GitHub sign-in. When it finishes, re-check."
         : "Asking the GitHub CLI for a sign-in code…";
       githubDesc.hidden = false;
-      githubCmd.hidden = true;
-      githubOpen.hidden = true;
-      githubNote.hidden = true;
       githubRecheck.hidden = !deskTerminal;
       return true;
     }
@@ -2837,13 +2697,9 @@
         return false;
       }
       if (githubPhase === "cli") {
-        const fromFrame = (s.github && typeof s.github === "object") ? s.github : null;
-        const fromState = (githubState && githubState.loginFlow && typeof githubState.loginFlow === "object")
-          ? githubState.loginFlow : null;
-        const g = fromFrame || fromState;
-        // A failed login is posted as `error` / `fix`, not as github.failed —
-        // drop back to the choice so that message is readable.
-        if (!g && s.error) {
+        // A failed login is posted as `error` / `fix` — drop back to the
+        // choice so that message is readable.
+        if (s.error) {
           githubPhase = "choice";
         } else {
           githubBox.dataset.phase = "cli";
@@ -2851,7 +2707,7 @@
           githubToken.hidden = true;
           githubCard.hidden = false;
           setCloneFieldsHidden(true);
-          return paintGithubCard(g || { status: "starting" });
+          return paintGithubCard();
         }
       }
       githubPhase = "choice";
@@ -2870,7 +2726,6 @@
       if (typeof s.root === "string" && s.root) root = s.root;
       if (s.githubState && typeof s.githubState === "object") githubState = s.githubState;
       if (Array.isArray(s.repos)) repos = s.repos;
-      if (s.reposTruncated === true) reposTruncated = true;
       busy = s.busy === kind;
       input.disabled = busy;
       collisionInput.disabled = busy;
@@ -3102,7 +2957,7 @@
     return { body: rest.trim(), sources };
   }
 
-  const api = { WELCOME_TIPS, welcomeTipById, welcomeTipsFor, welcomeTipCopy, splitWelcomeTipCopy, addProjectMenuItems, addProjectFolderPreview, addProjectForm, parseCloneQuery, filterGithubRepos, githubRepoNameParts, formatWaitElapsed, planEntriesProgress, formatReviewHeadline, FILE_EXTS, HOST_MESSAGE_TYPES, WEBVIEW_MESSAGE_TYPES, EXTENSION_HOST_SLASH_COMMANDS, isKnownHostMessage, composerHasSendIntent, explicitVisibleChips, normalizeQueuedSends, queuedSendsText, queuedSendsChips, contextOverheadTokens, nextContextBreakdown, contextBreakdownIsCurrent, createPendingOverlay, getMentionQuery, applyMentionPick, looksLikeFileRef, formatRelativeTime, modelPickerLabel, modelDisplayName, MIC_STATES, nextMicState, trailingSendPhrase, versionedSiblingUrl, buildQuestionAnswers, isFreeTextOptionLabel, isSubagentToolCall, subagentLabel, cleanSubagentOutput, parseSubagentTaskResult, shouldStickToBottom, stickThresholdPx, splitMath, stripUnsupportedTex, toolFailureText, isMediaGenToolCall, mediaGenZeroRetentionHint, TOOL_LABEL_MAX, middleElide, isAdvertisedSkill, getSlashQuery, applySlashPick, filterCommands, highlightQueryParts, appendHighlightedText, commandProgramLabel, commandTextPreview, MAX_COMMAND_OUTPUT_CHARS, capCommandOutput, extractToolResultOutput, commandOutputWasCancelled, commandOutputTruncationNote, computeLineDiff, parseAttachmentContext, parseSelectionBlocks, parseImageTags, parseContextBlocks, contextChipLabel, contextChipTitle, formatChipBytes, orderPermissionOptions, defaultPermissionIndex, shouldFocusPermissionCard, isTypeThroughKey, isInterjectionText, stripInterjectionEnvelope, spokenTextFromMarkdown, isRelaySendRejection, panelReclampOnResizeAllowed, wireFullscreenSafeReclamp, distributeSidePanelWidths, chatZoomFactor, unzoomClientPx, exportSessionMarkdown, exportSessionFilename, isExportableSessionEvent, replayedUserBubbleVerdict, truncateExportEvents, flattenHistoryMessages, splitHistoryWindow, countHistoryReplayCounters, partitionHistoryCards, GITHUB_FINE_GRAINED_TOKEN_URL, fillFineGrainedTokenHint };
+  const api = { WELCOME_TIPS, welcomeTipById, welcomeTipsFor, welcomeTipCopy, splitWelcomeTipCopy, addProjectMenuItems, addProjectFolderPreview, addProjectForm, parseCloneQuery, filterGithubRepos, githubRepoNameParts, formatWaitElapsed, planEntriesProgress, formatReviewHeadline, FILE_EXTS, HOST_MESSAGE_TYPES, WEBVIEW_MESSAGE_TYPES, EXTENSION_HOST_SLASH_COMMANDS, isKnownHostMessage, composerHasSendIntent, explicitVisibleChips, normalizeQueuedSends, queuedSendsText, queuedSendsChips, contextOverheadTokens, nextContextBreakdown, contextBreakdownIsCurrent, createPendingOverlay, getMentionQuery, applyMentionPick, looksLikeFileRef, formatRelativeTime, modelPickerLabel, modelDisplayName, MIC_STATES, nextMicState, trailingSendPhrase, versionedSiblingUrl, buildQuestionAnswers, isFreeTextOptionLabel, isSubagentToolCall, subagentLabel, cleanSubagentOutput, parseSubagentTaskResult, shouldStickToBottom, stickThresholdPx, splitMath, stripUnsupportedTex, toolFailureText, isMediaGenToolCall, mediaGenZeroRetentionHint, TOOL_LABEL_MAX, middleElide, isAdvertisedSkill, getSlashQuery, applySlashPick, filterCommands, highlightQueryParts, appendHighlightedText, commandProgramLabel, commandTextPreview, MAX_COMMAND_OUTPUT_CHARS, capCommandOutput, extractToolResultOutput, commandOutputWasCancelled, commandOutputTruncationNote, computeLineDiff, parseAttachmentContext, parseSelectionBlocks, parseImageTags, parseContextBlocks, contextChipLabel, contextChipTitle, formatChipBytes, orderPermissionOptions, defaultPermissionIndex, shouldFocusPermissionCard, isTypeThroughKey, isInterjectionText, stripInterjectionEnvelope, spokenTextFromMarkdown, panelReclampOnResizeAllowed, wireFullscreenSafeReclamp, distributeSidePanelWidths, chatZoomFactor, unzoomClientPx, exportSessionMarkdown, exportSessionFilename, isExportableSessionEvent, replayedUserBubbleVerdict, truncateExportEvents, flattenHistoryMessages, splitHistoryWindow, countHistoryReplayCounters, partitionHistoryCards, GITHUB_FINE_GRAINED_TOKEN_URL, fillFineGrainedTokenHint };
 
   if (typeof module !== "undefined" && module.exports) {
     module.exports = api;

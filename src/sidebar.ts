@@ -1,6 +1,5 @@
 import type {
   Host,
-  HostCancellationToken,
   HostContext,
   HostDisposable,
   HostTerminalCapture,
@@ -9,14 +8,14 @@ import type {
   HostWebviewView,
   HostEditorWebview,
 } from "./host";
-import { Uri, disposeAll, formatRemoteInstallId, shouldRehydrateOnWebviewReady } from "./host";
+import { Uri, disposeAll, shouldRehydrateOnWebviewReady } from "./host";
 import { isCanonicallyInsideRoot } from "./file-tree";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { execFileSync, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { AcpClient, EffortLevel, ExitPlanRequest, PermissionRequest, QuestionRequest } from "./acp";
-import type { AcpProvider, BackendSessionListEntry } from "./acp-backend";
+import type { AcpProvider } from "./acp-backend";
 import { isAdapterProvider, isAcpProvider, ACP_PROVIDERS } from "./acp-backend";
 import { allProviderCapabilities, providerCapability } from "./provider-capabilities";
 import { parsePlanEntries } from "./plan-entries";
@@ -101,7 +100,6 @@ import {
   type ProviderHistoryCursor,
 } from "./provider-ui";
 import {
-  nextWakeAt,
   ROUTINES_KEY,
   routineWindow,
   toRoutineView,
@@ -128,7 +126,6 @@ import {
   type Checkpoint,
 } from "./checkpoints";
 import { CheckpointStore, nodeCheckpointFs } from "./checkpoint-store";
-import { routinesMessageForRemote } from "./remote-compat";
 import { PersistedState } from "./persisted-state";
 import {
   Session,
@@ -153,9 +150,9 @@ import {
   type QuestionResponder,
 } from "./session";
 import { buildReapCandidates, selectReapable, computeDot, Dot } from "./session-pool";
-import { resolveVoiceKey, extractGrokAuthKey, parseVoiceCommand, buildSttKeyterms, voiceSettingForRepo, voiceSettingWriteTarget, sanitizeVoiceSendPhrase, sanitizeVoiceKeyterms, voiceConfiguredFingerprint, DEFAULT_SEND_PHRASE, MAX_RECORDING_SECONDS } from "./voice";
+import { resolveVoiceKey, extractGrokAuthKey, parseVoiceCommand, buildSttKeyterms, voiceSettingForRepo, voiceSettingWriteTarget, sanitizeVoiceSendPhrase, sanitizeVoiceKeyterms, voiceConfiguredFingerprint, DEFAULT_SEND_PHRASE } from "./voice";
 import { VoiceRecorder, transcribeAudio, resolveWindowsAudioDevice } from "./voice-recorder";
-import { PcmVoiceStreamer, PcmSttStream, createPcmVoiceStreamer, VoiceStreamer } from "./voice-streamer";
+import { VoiceStreamer } from "./voice-streamer";
 import { pickSttBackend, resolveOpenAiVoiceKey, SttBackend, SttPreference, VoiceBackendState, parseFinalVoiceCommand } from "./voice";
 import { OPENAI_STT_MODEL } from "./openai-voice";
 import { summarizeForSpeech } from "./speech-summary";
@@ -204,15 +201,6 @@ import {
   readGithubAuthState,
   type GithubAuthState,
 } from "./github-auth";
-import {
-  deviceLoginFailureText,
-  deviceLoginPlan,
-  deviceLoginPreflight,
-  deviceLoginCodeNote,
-  noRemoteSignInMessage,
-  deviceLoginUnavailable,
-  type DeviceLoginHandle,
-} from "./device-login";
 import { SubscriptionUsageBinding, SubscriptionUsageCache, subscriptionCredentialContext, type SubscriptionWindow } from "./subscription-usage";
 import { readCodexSubscriptionWindows } from "./codex-usage";
 import { providerConfigFiles, type ProviderConfigFile } from "./provider-config";
@@ -222,12 +210,6 @@ import { MuseBackend } from "./muse-backend";
 import { locateMuseCli, parseMuseVersionOutput } from "./muse-cli-locator";
 import { supportsClientMcpServers, supportsModeSwitching } from "./acp-backend";
 import { captureGitTurnBaseline, GitRunGate, readGitTurnFileBefore, runGit, type GitTurnBaseline } from "./git-run";
-import { probeClaudeAuthStatus, runDeviceLogin } from "./device-login-run";
-import { githubDeviceLoginFailureText, runGithubDeviceLogin } from "./github-device-login";
-import {
-  GITHUB_CLI_BIN,
-  isGithubCliMissing,
-} from "./github-auth";
 import {
   GITHUB_CLI_DOWNLOAD,
   classifyCloneFailure,
@@ -327,7 +309,6 @@ import {
 import { buildPromptWithImages, buildQueuedPromptWithImages, type PromptImageInput, type QueuedPromptContribution } from "./prompt-builder";
 import {
   chipsForQueueSend,
-  claimQueuedSendDispatch,
   cloneChipForQueue,
   dequeueQueuedSends,
   enqueueQueuedSend,
@@ -352,7 +333,6 @@ import {
   setCrewStatus,
   startCrewStep,
   stepsFromPlan,
-  type CrewRun,
   type CrewStep,
 } from "./crew";
 import { assignStep } from "./crew-assign";
@@ -363,8 +343,6 @@ import {
   presetReviewRole,
   presetRoles,
   presetToStageGraph,
-  type CrewPreset,
-  type CrewPresetFile,
   type CrewPresetSet,
 } from "./crew-preset";
 import {
@@ -457,7 +435,6 @@ import {
   rolePermissionsToRules,
   validateRoleModel,
   type AgentRole,
-  type AgentRoleFile,
   type AgentRoleSet,
 } from "./agent-roles";
 import {
@@ -507,7 +484,6 @@ import {
 import { sessionScopedRoots } from "./auth-roots";
 import { fileUriToPath, parseFileRef, shouldReadFileInline } from "./file-ref";
 import {
-  prepareFileUpload,
   retainedUploadDirectories,
   stagedUploadDirectory,
   unreferencedUploadsForRemovedSessions,
@@ -521,84 +497,18 @@ import {
 } from "./plan-review";
 import { isPrimerText } from "./grok-primer";
 import { AsyncSerialQueue } from "./async-serial";
-import { HOST_CAPABILITIES, HostMsg, INTERRUPTED_SEND_CODE, SESSION_SUPERSEDED_CODE, WebviewMsg, type GithubState, type ProjectSetupGithub, type CrewStartOptions, type WorkflowLineupView, type WorkflowPickerItem, type WorkflowRunView } from "./protocol";
+import { HOST_CAPABILITIES, HostMsg, INTERRUPTED_SEND_CODE, WebviewMsg, type GithubState, type CrewStartOptions, type WorkflowLineupView, type WorkflowPickerItem, type WorkflowRunView } from "./protocol";
 import { formatDurationShort, formatTokenCount, renderRunReport, runTableRows, runTotalsLine, targetText } from "./workflow-report";
 import { compareLabel, preselectGateTarget, proposeLineup, suggestVerifyCommands, type RoleTemplateInfo } from "./workflow-target";
 import { mergeReviewPackets, panelTargets } from "./workflow-panel";
 import { stallWarningText } from "./child-watch";
 import { withoutArchiveFields } from "./project-discovery";
 import { SessionRequestState } from "./session-request-state";
-import {
-  RemoteUplink,
-  RemoteClientState,
-  serializesRemoteSessionTransition,
-  RemotePcmIngress,
-  acceptRemotePcm,
-  allowFromRemote,
-  capabilitiesForRemote,
-  allowRemoteRepoTarget,
-  bracketRemoteSnapshot,
-  mayDeliverRemoteHostMsg,
-  remoteRequiresBoundSession,
-  repoScopeFor,
-  repoSessionsMessageForRemote,
-  sessionCwdBelongsToRepo,
-  sessionForRequest,
-  shouldAdoptDeskSession,
-  transformHostMsgForRemote,
-  type MediaInlineDeps,
-  type MsgOrigin,
-  type RemoteTier,
-  listRemoteProjectDir,
-  projectFileContentForWire,
-  readRemoteProjectFile,
-  resolveRemoteFileRoot,
-  writeRemoteProjectFile,
-  isCloudEnvironment,
-  CLOUD_ENVIRONMENT_ENV,
-  buildLinkStartBody,
-  deviceDisplayName,
-  httpBaseFromRelayUrl,
-  parseRelayFrame,
-  RELAY_DEVICE_TOKEN_SECRET,
-  resolveRelayUrl,
-} from "./remote-compat";
-
-/**
- * How long an unanswered card keeps a cloud machine awake.
- *
- * A backstop, not the main signal: a command that is still RUNNING keeps the
- * machine awake for as long as it runs, however long that is. This covers the
- * rest — an agent that has genuinely stopped and is waiting on a person. Long
- * enough not to punish somebody who steps away mid-thought, short enough that a
- * card nobody comes back to tonight stops costing money. Local wake locks are
- * unaffected; this is only about a machine somebody else is paying for.
- */
-const NEEDS_YOU_KEEP_AWAKE_MS = 20 * 60 * 1000;
-
-/**
- * Is this session actually holding work open?
- *
- * The status alone is not enough, and the gap is a real one: worktree teardown
- * detaches and disposes a session's client while leaving its row in the pool
- * with `working` still on it. That ghost then keeps the OS wake lock — and, on
- * a rented machine, the keep-awake heartbeat — running for the rest of the
- * session, long after everything it described was killed.
- *
- * Checking the CLIENT rather than patching that one caller is deliberate: a
- * session with no client has no agent, so it cannot be working whatever its
- * status says, and any other path that disposes a client without updating a
- * status is covered by the same line.
- */
-function hasLiveWork(s: { status: string; client?: unknown }): boolean {
-  if (!s.client) return false;
-  return s.status === "working" || s.status === "needs-you";
-}
-import { thumbnailImage, thumbnailMime } from "./image-thumbnail";
 import { historyImagePreviews } from "./image-history";
 import {
   SessionListEntry,
   SessionMetaOverrides,
+  sessionCwdBelongsToRepo,
   RepoArchives,
   RepoColors,
   RepoListEntry,
@@ -617,10 +527,8 @@ import {
   forkDisplayName,
   indexSessions,
   isEmptySession,
-  isPathInside,
   isRepoColor,
   REPO_COLOR_IDS,
-  mostRecentSession,
   neighbourAfterDelete,
   normalizeRepoPath,
   orderedResumeCwdCandidates,
@@ -748,7 +656,6 @@ import {
   imageHandlesToRevoke,
   imagePathStillAuthorized,
   pathBoundToClosedFolder,
-  remoteBoundCwdStillAuthorized,
   sessionBoundToClosedFolder,
 } from "./workspace-auth";
 import {
@@ -916,24 +823,8 @@ const IMPLICIT_CHIP_HIDDEN_KEY = "grok.implicitChipHidden";
 /** One helpful warning per install, even though every pooled process initializes. */
 const OAUTH_SHADOW_WARNING_KEY = "grok.oauthShadowWarningShown";
 
-interface RemoteVoiceEntry {
-  credentialCwd: string;
-  session: Session;
-  streamer: PcmSttStream;
-  backend: SttBackend;
-  key: string;
-  model: string;
-  starting?: Promise<void>;
-  ingress: RemotePcmIngress;
-  phrase: string;
-  keyterms: string[];
-  language?: string;
-  finalizing: boolean;
-}
-
 interface SessionLoadReservation {
   token: symbol;
-  ownerTabToken?: string;
   session?: Session;
   completion: Promise<void>;
   resolve: () => void;
@@ -942,28 +833,9 @@ interface SessionLoadReservation {
   timer: NodeJS.Timeout;
 }
 
-type RemoteResumeTarget =
-  | { kind: "conflict"; selectedCwd: string; ownerId: string; session: Session }
-  | { kind: "repo-mismatch"; selectedCwd: string }
-  | { kind: "live"; selectedCwd: string; session: Session }
-  | { kind: "disk"; selectedCwd: string; actualCwd: string; provider: AcpProvider }
-  | { kind: "missing"; selectedCwd: string };
-
-interface RemoteRequester {
-  clientId: string;
-  tabToken?: string;
-}
-
 /** Resolved at commit time, AFTER any await. Undefined means the tab that asked
  *  is gone and the attachment must be dropped — never redirected. */
 type AttachmentOwner = () => Session | undefined;
-
-interface RemoteBrowserPreferences {
-  fontScale: number;
-  readRepliesAloud: boolean;
-  summarizeRepliesAloud: boolean;
-  usesTouch: boolean;
-}
 
 interface CliCompatibilityResult {
   planModeAvailable: boolean;
@@ -1171,9 +1043,6 @@ export class GrokSidebar {
   private readonly lastSweepAt = new Map<string, number>();
   /** A whole-list refresh is already queued for this tick. See postSessionsList. */
   private sessionsListScheduled = false;
-  /** Providers whose device-login preflight advice has been shown this
-   *  activation. Advice, not a gate - see startDeviceLogin. */
-  private readonly deviceLoginPreflightShown = new Set<AcpProvider>();
   private reaper?: ReturnType<typeof setInterval>;
   private oauthShadowWarningShown = false;
   /** K-02: the threshold-mismatch notice shows once per window. */
@@ -1187,7 +1056,8 @@ export class GrokSidebar {
    *  one in-flight build. Open tabs are layered on at read time. */
   private mentionIndex: { at: number; rels: string[]; absByRel: Map<string, string> } | null = null;
   private mentionIndexPromise: Promise<{ rels: string[]; absByRel: Map<string, string> }> | null = null;
-  private readonly remoteMentionIndexes = new Map<string, {
+  /** Same snapshot, for a session whose cwd is not the open workspace folder. */
+  private readonly otherCwdMentionIndexes = new Map<string, {
     at: number;
     rels: string[];
     absByRel: Map<string, string>;
@@ -1217,21 +1087,9 @@ export class GrokSidebar {
   };
   private localVoiceCwd?: string;
   private localVoiceCredentialCwd?: string;
-  private readonly remoteVoice = new Map<string, RemoteVoiceEntry>();
-  private static readonly MAX_REMOTE_PCM_BYTES = MAX_RECORDING_SECONDS * 16_000 * 2;
-  private static readonly MAX_REMOTE_PCM_CHUNK_BYTES = 256 * 1024;
   private configWatcher?: HostDisposable;
-  // Remote uplink — outbound wss to the relay (REMOTE_RELAY_URL), active only
-  // when a device token is stored (the "AFK Pilot: Link this device" / gear
-  // sign-in flow). The taps in post()/emit() are no-ops when it's off, so the
-  // shipping path is unaffected.
-  private uplink?: RemoteUplink;
-  private readonly remoteClients: RemoteClientState<Session, RemoteBrowserPreferences>;
   /** Cold session/load claims the persisted id before ACP has emitted `session`. */
   private readonly sessionLoadReservations = new Map<string, SessionLoadReservation>();
-  /** Sessions being spawned on a remote tab's behalf — a reconnect burst must
-   *  not start the same one twice. */
-  private readonly startingForRemote = new WeakSet<Session>();
   /**
    * Per-Session start tail. Boot, client-ready, resume, and ensureClient all
    * share it with handleSend so a send cannot commit an echo while a start
@@ -1253,40 +1111,6 @@ export class GrokSidebar {
   /** First full boot pass — repo catalog AND the deferred session-list — finished. */
   private firstBootScanStarted = false;
   private firstBootScanCompleted = false;
-  private resolveFirstBootScan: () => void = () => {};
-  private firstBootScanDone = new Promise<void>((resolve) => {
-    this.resolveFirstBootScan = resolve;
-  });
-  /** Test hook: parks the first boot pass after catalog, before session-list. */
-  private testCatalogHold?: {
-    started: () => void;
-    wait: Promise<void>;
-    release: () => void;
-  };
-  /** Stalled boot must not hang a resume; the miss then stands as a real refusal. */
-  private static readonly FIRST_BOOT_SCAN_WAIT_MS = 8_000;
-  private static readonly DEVICE_GLOBAL_REMOTE_TYPES = new Set<HostMsg["type"]>([
-    "showThinking", "appPurpose", "fontScale", "grokUpdateStatus", "cliUpdating",
-    "onboarding", "providerState", "mcpServers", "mcpConnectors", "expandCommandOutputs", "steerByDefault", "soundNotifications",
-    // Device-global, not session-scoped: a phone reading conversation B asked
-    // for the routines page and must get it, even though the desk is focused on
-    // conversation A. Without this, `post` routes the answer through the
-    // FOCUSED session and the requesting tab stays empty for ever.
-    "routines",
-    "telemetryEnabled",
-    "thumbsFeedback",
-    // Device-global for the same reason as routines: the counts and the retired
-    // list describe the MACHINE, not the conversation a tab happens to be
-    // reading, so routing them through the focused session would leave a
-    // second tab's welcome screen permanently without advice.
-    "welcomeTips",
-    // Same reason: the Add project form is a property of the machine, and a
-    // phone that opened it while the desk is focused elsewhere must still
-    // get the answer to what it just asked for.
-    "projectSetup",
-    "githubState",
-    "githubRepos",
-  ]);
   private cliPath?: string;
   private codexCliPath?: string;
   private claudeCliPath?: string;
@@ -1389,62 +1213,13 @@ export class GrokSidebar {
     "githubLoginWithToken",
     "runGrokLogin",
     "refreshProviders",
-    // Both halves of a terminal sign-in started FROM this page. Without them
-    // the buttons were dead and said nothing: `recheckConnection` is what an
-    // agent row's "Re-check connection" sends, and `cancelDeviceLogin` is what
-    // either row's Cancel sends. GitHub's Re-check happened to work only
-    // because it asks for `refreshProviders`, which was already listed — two
-    // identical-looking buttons, one alive, and no way to tell from the page.
+    // An agent row's "Re-check connection" after a terminal sign-in started
+    // FROM this page.
     "recheckConnection",
-    "cancelDeviceLogin",
     "checkGrokUpdate",
     "updateGrok",
-    "openRemotePortal",
-    "remoteSignIn",
-    "unlinkRemoteDevice",
   ]);
   private readonly loginReprobeTimers = new Map<AcpProvider, ReturnType<typeof setTimeout>>();
-  /** Headless sign-ins in flight, one per provider, with the remote client that
-   *  asked. Keyed by provider rather than by client because the CREDENTIAL is
-   *  per-provider: two phones both connecting Grok want one flow and one code,
-   *  not two codes racing to write the same file.
-   *
-   *  A reconnecting tab (new socket, same tab token, already showing a code) is
-   *  adopted; an explicit Connect press starts over. See
-   *  {@link shouldAdoptInFlightDeviceLogin}. */
-  private readonly deviceLogins = new Map<
-    AcpProvider,
-    {
-      handle: DeviceLoginHandle;
-      clientId?: string;
-      /** The TAB that started this, which outlives the socket that did: a phone
-       *  reconnects on every trip to the vendor's code page, and `identify`
-       *  re-points this token at the new client. */
-      tabToken?: string;
-      /** What the flow last told its client, so a re-tap — usually a client
-       *  that RECONNECTED while visiting the vendor's code page — can be
-       *  shown the same code instead of silence. */
-      last?: Extract<HostMsg, { type: "onboarding" }>["device"];
-      /** Sends to whichever client currently owns the flow. */
-      send: (device: Extract<HostMsg, { type: "onboarding" }>["device"]) => void;
-    }
-  >();
-  /**
-   * Headless GitHub sign-in for the clone form / Settings. One at a time.
-   * Same adopt-vs-restart rule as `deviceLogins`: a reconnecting tab is
-   * adopted into the live flow; an explicit Connect press starts over.
-   * Separate map because that one is keyed by agent provider.
-   */
-  private githubLoginGen = 0;
-  private githubDeviceLogin?: {
-    gen: number;
-    handle?: DeviceLoginHandle;
-    clientId?: string;
-    tabToken?: string;
-    last?: ProjectSetupGithub;
-    source?: "clone" | "settings";
-    send: (github: ProjectSetupGithub) => void;
-  };
   /** Last `gh api user` snapshot. Refreshed after connect / sign-out. */
   private githubConnection?: GithubAuthState;
   /** A Settings → Providers refresh in flight. Reported on `providerState` so
@@ -1467,13 +1242,6 @@ export class GrokSidebar {
   private mcpListSupported: boolean | undefined;
   private grokMcpReserved: ReservedMcpIdentity = { names: [], urls: [] };
   private mcpConnectingId: ConnectorId | undefined;
-  private mcpRemoteAuthorization: {
-    id: ConnectorId;
-    clientId: string;
-    attemptId: string;
-    url: string;
-    complete: (redirectUrl: string) => Promise<void>;
-  } | undefined;
   private mcpConnectError: { id: ConnectorId; message: string } | undefined;
   /** In-memory PAT cache for key-auth connectors. Never written to PersistedState. */
   private readonly mcpConnectorKeys = new Map<string, string>();
@@ -1560,9 +1328,6 @@ export class GrokSidebar {
    *  execution noise and live in globalStorage, not in the project. */
   private readonly agentRuns: AgentRunStore;
   private routineTimer?: ReturnType<typeof setInterval>;
-  /** Last wake time the relay accepted. `undefined` = never published, which is
-   *  distinct from `null` = published "nothing scheduled". */
-  private publishedWakeAt: number | null | undefined;
   /** Routines whose session is live right now, so a slow turn cannot be
    *  overlapped by the next tick even though its window is still current. */
   private readonly routinesInFlight = new Set<string>();
@@ -1583,10 +1348,6 @@ export class GrokSidebar {
     );
     this.providerConnectionState = this.migrateProviderConnections();
     this.focused.provider = this.defaultProviderForProject(this.workspaceRoot());
-    this.remoteClients = new RemoteClientState<Session, RemoteBrowserPreferences>(
-      this.workspaceRoot(),
-      normalizeRepoPath,
-    );
     context.subscriptions.push(
       this.host.registerTextDocumentContentProvider(GROK_DIFF_SCHEME, this.diffProvider),
     );
@@ -1761,7 +1522,7 @@ export class GrokSidebar {
       }
       // Empty means "this agent's default" — the session already has it, and
       // asking to switch TO nothing is not a request the picker can serve.
-      if (routine.model) await this.switchModel(routine.model, session, undefined, routine.provider);
+      if (routine.model) await this.switchModel(routine.model, session, routine.provider);
       // Recorded BEFORE the turn: the session exists and is the run's result
       // even if the prompt errors, and a link to a half-finished conversation
       // beats a run with nothing to open.
@@ -1794,7 +1555,7 @@ export class GrokSidebar {
       this.postSessionsList();
       this.postRoutines();
 
-      await this.handleSend(routine.prompt, false, session, "local");
+      await this.handleSend(routine.prompt, false, session);
       // `handleSend` CATCHES a failed turn — it renders the error and resolves
       // normally — so awaiting it says nothing about whether the turn worked.
       // Reporting every one of those as a success would put a green tick on the
@@ -1986,7 +1747,7 @@ export class GrokSidebar {
    * Returns true when the message was consumed here, so the caller must not
    * fall through to an ordinary send.
    */
-  private async handleAgentCommand(text: string, session: Session, origin: MsgOrigin): Promise<boolean> {
+  private async handleAgentCommand(text: string, session: Session): Promise<boolean> {
     const parsed = parseAgentCommand(text);
     if (parsed.kind === "none") return false;
 
@@ -2095,7 +1856,6 @@ export class GrokSidebar {
       },
       "command",
       session,
-      origin,
     );
     return true;
   }
@@ -2112,7 +1872,6 @@ export class GrokSidebar {
     brief: BriefingInput,
     trigger: AgentRunTrigger,
     caller: Session,
-    origin: MsgOrigin,
     coords?: {
       runId: string;
       step: number;
@@ -2329,7 +2088,7 @@ export class GrokSidebar {
       } else {
         if (!reuse) this.nameAgentRoleSession(roleSession, role, runId, step);
         this.noteChildStarted(caller, roleSession, subagentCoords?.subagentId);
-        await this.handleSend(briefMarkdown, false, roleSession, origin);
+        await this.handleSend(briefMarkdown, false, roleSession);
         if (roleCancelled()) {
           outcome = "cancelled";
           detail = "Stopped while the role was working.";
@@ -3140,7 +2899,6 @@ export class GrokSidebar {
 
   private async startWorkflowRun(
     session: Session,
-    origin: MsgOrigin,
     idea: string,
     workflowName: string,
     options?: CrewStartOptions,
@@ -3215,7 +2973,7 @@ export class GrokSidebar {
     this.emitWorkflowRun(session);
     const first = options?.firstTarget ?? (options?.startNow ? session.workflowRun.gate?.preselectedTarget : undefined);
     if (first) {
-      await this.handleWorkflowGateAction(session, origin, {
+      await this.handleWorkflowGateAction(session, {
         type: "start",
         nextStageId: session.workflowRun.gate?.nextStageId,
         target: first as never,
@@ -3225,7 +2983,6 @@ export class GrokSidebar {
 
   private async handleWorkflowGateAction(
     session: Session,
-    origin: MsgOrigin,
     action: GateAction,
   ): Promise<void> {
     const run = session.workflowRun;
@@ -3277,7 +3034,7 @@ export class GrokSidebar {
       this.persistWorkflowRun(session);
       this.emitWorkflowRun(session);
       if (next.status === "running" && next.current) {
-        await this.executeWorkflowStage(session, origin, def, next, target);
+        await this.executeWorkflowStage(session, def, next, target);
       } else if (next.status === "done") {
         this.finishWorkflowRun(session, def);
       }
@@ -3343,7 +3100,6 @@ export class GrokSidebar {
    */
   private async handleHostGateAction(
     session: Session,
-    origin: MsgOrigin,
     msg: Extract<WebviewMsg, { type: "workflowGateAction" }>,
   ): Promise<boolean> {
     const run = session.workflowRun;
@@ -3354,7 +3110,7 @@ export class GrokSidebar {
         const message = String(msg.message ?? "").trim();
         const lastEntry = run.executed[run.executed.length - 1];
         if (!message || !lastEntry || run.status === "running") return true;
-        await this.reviseWorkflowStage(session, origin, def, lastEntry.stageId, lastEntry.sessionId, message);
+        await this.reviseWorkflowStage(session, def, lastEntry.stageId, lastEntry.sessionId, message);
         return true;
       }
       case "revertStage": {
@@ -3368,7 +3124,7 @@ export class GrokSidebar {
         // The person asked to try the exhausted companion again: allow it for
         // this run once more, and run the same stage on it.
         session.workflowRun = { ...run, exhausted: run.exhausted.filter((p) => p !== provider) };
-        await this.handleWorkflowGateAction(session, origin, { type: "start", nextStageId: stageId, target: { provider } });
+        await this.handleWorkflowGateAction(session, { type: "start", nextStageId: stageId, target: { provider } });
         return true;
       }
       case "nudge": {
@@ -3416,7 +3172,6 @@ export class GrokSidebar {
    */
   private async reviseWorkflowStage(
     session: Session,
-    origin: MsgOrigin,
     def: WorkflowDefinition,
     stageId: string,
     stageSessionId: string | undefined,
@@ -3431,7 +3186,7 @@ export class GrokSidebar {
     this.persistWorkflowRun(session);
     this.emit(session, { type: "userMessage", text: message, chips: [] });
     this.emitWorkflowRun(session);
-    await this.executeWorkflowStage(session, origin, def, next, undefined, {
+    await this.executeWorkflowStage(session, def, next, undefined, {
       continue: stageSessionId ? { sessionId: stageSessionId, message: `Revise your result with this feedback, then give the result block again.\n\n${message}` } : undefined,
     });
   }
@@ -3443,7 +3198,6 @@ export class GrokSidebar {
 
   private async executeWorkflowStage(
     session: Session,
-    origin: MsgOrigin,
     def: WorkflowDefinition,
     run: WorkflowRun,
     targetHint?: { provider: AcpProvider; model?: string; effort?: string },
@@ -3455,17 +3209,17 @@ export class GrokSidebar {
     if (!stage) return;
     const hint = targetHint ?? current.target;
     if (!opts?.continue && stage.fanOut && stage.fanOut.count > 1 && stage.profile === "read-only") {
-      await this.executePanelStage(session, origin, def, run, stage, hint);
+      await this.executePanelStage(session, def, run, stage, hint);
       return;
     }
     if (!opts?.continue && stage.strategy === "per-plan-step" && this.planStepsFor(run).length) {
-      await this.executePerPlanStepStage(session, origin, def, run, stage, hint);
+      await this.executePerPlanStepStage(session, def, run, stage, hint);
       return;
     }
     const prepared = this.prepareStageRun(session, def, run, stage, hint);
     if ("error" in prepared) {
       this.emit(session, { type: "hostNotice", level: "warning", text: prepared.error });
-      await this.finishWorkflowStage(session, origin, def, buildHandoffPacket({
+      await this.finishWorkflowStage(session, def, buildHandoffPacket({
         runId: run.runId,
         stageId: stage.id,
         stageOrdinal: current.ordinal,
@@ -3496,7 +3250,7 @@ export class GrokSidebar {
     const started = Date.now();
     let role = prepared.role;
     let switchedFrom: AcpProvider | undefined;
-    let outcome = await this.runStageRole(session, origin, run, stage, current, role, prepared, continueSession, continueMessage);
+    let outcome = await this.runStageRole(session, run, stage, current, role, prepared, continueSession, continueMessage);
     // C-16 / F-08: a usage limit never switches silently.
     const limitKind = outcome.outcome === "failed" ? classifyLimitError(role.provider, outcome.detail || "") : null;
     if (limitKind === "quota" || limitKind === "rate") {
@@ -3509,7 +3263,7 @@ export class GrokSidebar {
         this.emit(session, { type: "hostNotice", level: "warning", text });
         switchedFrom = role.provider;
         role = { ...role, provider: next, model: undefined, effort: role.effort };
-        outcome = await this.runStageRole(session, origin, run, stage, current, role, prepared, undefined, undefined);
+        outcome = await this.runStageRole(session, run, stage, current, role, prepared, undefined, undefined);
       } else {
         await this.stopAtLimitGate(session, def, run, stage, current, role.provider, outcome);
         return;
@@ -3549,7 +3303,7 @@ export class GrokSidebar {
       resultPath: this.agentRuns.resultPath(run.runId, current.ordinal, "stage"),
       contract: def.contracts[stage.contract],
     });
-    await this.finishWorkflowStage(session, origin, def, switchedFrom ? { ...packet, switchedFrom } : packet);
+    await this.finishWorkflowStage(session, def, switchedFrom ? { ...packet, switchedFrom } : packet);
   }
 
   /** Resolve who runs a stage and build its brief and overlay (C-01, C-03). */
@@ -3632,7 +3386,6 @@ export class GrokSidebar {
   /** One runAgentRole for a stage (or a step / panel member of it). */
   private runStageRole(
     session: Session,
-    origin: MsgOrigin,
     run: WorkflowRun,
     stage: WorkflowStage,
     current: NonNullable<WorkflowRun["current"]>,
@@ -3642,7 +3395,7 @@ export class GrokSidebar {
     continueMessage: string | undefined,
     sub?: { step: number; cwd?: string },
   ): ReturnType<GrokSidebar["runAgentRole"]> {
-    return this.runAgentRole(role, prepared.brief, "workflow-stage", session, origin, {
+    return this.runAgentRole(role, prepared.brief, "workflow-stage", session, {
       runId: run.runId,
       step: sub?.step ?? current.ordinal,
       cwd: sub?.cwd ?? run.worktree ?? run.cwd,
@@ -3660,7 +3413,7 @@ export class GrokSidebar {
    * Record a stage's packet, move the run, and preselect who runs next.
    * Auto-proceeds only where the run's autonomy allows it (C-05, D6).
    */
-  private async finishWorkflowStage(session: Session, origin: MsgOrigin, def: WorkflowDefinition, packet: HandoffPacket): Promise<void> {
+  private async finishWorkflowStage(session: Session, def: WorkflowDefinition, packet: HandoffPacket): Promise<void> {
     const live = session.workflowRun;
     if (!live) return;
     try {
@@ -3680,7 +3433,7 @@ export class GrokSidebar {
     if (session.workflowRun.status === "done") this.finishWorkflowRun(session, def);
     const gate = session.workflowRun.gate;
     if (gate?.autoProceed && session.workflowRun.status === "at-gate" && gate.nextStageId && !isReservedTarget(gate.nextStageId)) {
-      await this.handleWorkflowGateAction(session, origin, {
+      await this.handleWorkflowGateAction(session, {
         type: "start",
         nextStageId: gate.nextStageId,
         ...(gate.preselectedTarget ? { target: gate.preselectedTarget } : {}),
@@ -3734,7 +3487,6 @@ export class GrokSidebar {
    */
   private async executePerPlanStepStage(
     session: Session,
-    origin: MsgOrigin,
     def: WorkflowDefinition,
     run: WorkflowRun,
     stage: WorkflowStage,
@@ -3789,7 +3541,7 @@ export class GrokSidebar {
             stepCwd = made.path;
           }
         }
-        const outcome = await this.runStageRole(session, origin, run, stage, current, prepared.role, prepared, undefined, undefined, {
+        const outcome = await this.runStageRole(session, run, stage, current, prepared.role, prepared, undefined, undefined, {
           step: current.ordinal * 100 + crewStep.index,
           cwd: stepCwd,
         });
@@ -3884,7 +3636,7 @@ export class GrokSidebar {
     try {
       this.agentRuns.writeResult(run.runId, current.ordinal, `${summary}\n`, "stage");
     } catch { /* the per-step results are on disk; the summary is a convenience */ }
-    await this.finishWorkflowStage(session, origin, def, { ...packet, steps: stepsRecord });
+    await this.finishWorkflowStage(session, def, { ...packet, steps: stepsRecord });
   }
 
   /**
@@ -3894,7 +3646,6 @@ export class GrokSidebar {
    */
   private async executePanelStage(
     session: Session,
-    origin: MsgOrigin,
     def: WorkflowDefinition,
     run: WorkflowRun,
     stage: WorkflowStage,
@@ -3905,7 +3656,7 @@ export class GrokSidebar {
     const first = this.prepareStageRun(session, def, run, stage, hint);
     if ("error" in first) {
       this.emit(session, { type: "hostNotice", level: "warning", text: first.error });
-      await this.finishWorkflowStage(session, origin, def, buildHandoffPacket({
+      await this.finishWorkflowStage(session, def, buildHandoffPacket({
         runId: run.runId, stageId: stage.id, stageOrdinal: current.ordinal, visit: current.visit, role: stage.role,
         target: { provider: first.provider, modelVerified: false }, status: "failed", rawReply: first.error, durationMs: 0,
         resultPath: this.agentRuns.resultPath(run.runId, current.ordinal, "stage"),
@@ -3923,7 +3674,7 @@ export class GrokSidebar {
     const members = await Promise.all(targets.map(async (target, i) => {
       const prepared = i === 0 ? first : this.prepareStageRun(session, def, run, stage, target);
       if ("error" in prepared) return undefined;
-      const outcome = await this.runStageRole(session, origin, run, stage, current, prepared.role, prepared, undefined, undefined, {
+      const outcome = await this.runStageRole(session, run, stage, current, prepared.role, prepared, undefined, undefined, {
         step: current.ordinal * 100 + i + 1,
       });
       return { role: prepared.role, outcome, modelVerified: prepared.modelVerified };
@@ -3953,7 +3704,7 @@ export class GrokSidebar {
       contract: def.contracts[stage.contract],
     }));
     if (!packets.length) {
-      await this.finishWorkflowStage(session, origin, def, buildHandoffPacket({
+      await this.finishWorkflowStage(session, def, buildHandoffPacket({
         runId: run.runId, stageId: stage.id, stageOrdinal: current.ordinal, visit: current.visit, role: stage.role,
         target: { provider: first.role.provider, modelVerified: false }, status: "failed", rawReply: "No reviewer could run.",
         durationMs: Date.now() - started, resultPath: this.agentRuns.resultPath(run.runId, current.ordinal, "stage"),
@@ -3966,7 +3717,7 @@ export class GrokSidebar {
     try {
       this.agentRuns.writeResult(run.runId, current.ordinal, `${packet.summary}\n`, "stage");
     } catch { /* members' results are on disk */ }
-    await this.finishWorkflowStage(session, origin, def, packet);
+    await this.finishWorkflowStage(session, def, packet);
   }
 
   private packetMap(runId: string): Map<string, HandoffPacket> {
@@ -4135,11 +3886,11 @@ export class GrokSidebar {
     return "reverted";
   }
 
-  private async handleCrewSessionInput(text: string, session: Session, origin: MsgOrigin): Promise<void> {
+  private async handleCrewSessionInput(text: string, session: Session): Promise<void> {
     const run = session.workflowRun;
     if (!run || run.status === "done" || run.status === "cancelled" || run.status === "failed") {
       const name = this.defaultWorkflowName();
-      await this.startWorkflowRun(session, origin, text, name);
+      await this.startWorkflowRun(session, text, name);
       return;
     }
     if (run.status === "running") {
@@ -4161,7 +3912,7 @@ export class GrokSidebar {
         start: { type: "start" },
       };
       const action = map[parsed.command];
-      if (action) await this.handleWorkflowGateAction(session, origin, action);
+      if (action) await this.handleWorkflowGateAction(session, action);
       return;
     }
     session.workflowRun = appendGateNotes(run, parsed.text);
@@ -4209,18 +3960,17 @@ export class GrokSidebar {
   }
 
   private async openNewCrewSession(
-    origin: MsgOrigin,
     idea: string,
     workflowName: string,
     options?: CrewStartOptions,
   ): Promise<void> {
-    await this.newFocusedSession(origin);
+    await this.newFocusedSession();
     this.focused.sessionType = "crew";
     this.persistSessionType(this.focused);
     this.postSessionType(this.focused);
     this.postWorkflowList(this.focused, workflowName);
     if (idea.trim()) {
-      await this.startWorkflowRun(this.focused, origin, idea, workflowName, options);
+      await this.startWorkflowRun(this.focused, idea, workflowName, options);
     }
   }
 
@@ -4241,7 +3991,7 @@ export class GrokSidebar {
    * the step. Grok as planner is refused: an empty entries list is not "a
    * plan with zero steps".
    */
-  private async handleCrewCommand(text: string, session: Session, origin: MsgOrigin): Promise<boolean> {
+  private async handleCrewCommand(text: string, session: Session): Promise<boolean> {
     const parsed = parseCrewCommand(text);
     if (parsed.kind === "none") return false;
     if (parsed.kind === "error") {
@@ -4325,7 +4075,6 @@ export class GrokSidebar {
         },
         "crew-step",
         session,
-        origin,
         { runId, step: 1 },
       );
       entries = planned.planEntries.filter((e) => e.content.trim());
@@ -4479,7 +4228,7 @@ export class GrokSidebar {
       this.emitCrewRun(session);
       if (!prepared.length || !session.crewRun || session.crewRun.status !== "running") break;
 
-      const runOne = (p: Prepared) => this.executeCrewRole(p, session, origin, runId, !!preset.parallel);
+      const runOne = (p: Prepared) => this.executeCrewRole(p, session, runId, !!preset.parallel);
       const results = prepared.length > 1
         ? await Promise.all(prepared.map(runOne))
         : [await runOne(prepared[0]!)];
@@ -4489,7 +4238,7 @@ export class GrokSidebar {
         const p = prepared[i]!;
         const result = results[i]!;
         const settled = await this.settleCrewStep({
-          session, origin, roles, runId, cwd: p.stepCwd, step: p.step, role: p.role, result,
+          session, roles, runId, cwd: p.stepCwd, step: p.step, role: p.role, result,
         });
         if (settled.previous) summaries.push(settled.previous);
         if (!session.crewRun || session.crewRun.status !== "running") break;
@@ -4533,7 +4282,6 @@ export class GrokSidebar {
   private async executeCrewRole(
     prepared: { step: CrewStep; role: AgentRole; brief: ReturnType<typeof briefingForCrewStep>; stepCwd: string },
     session: Session,
-    origin: MsgOrigin,
     runId: string,
     live: boolean,
   ) {
@@ -4541,7 +4289,7 @@ export class GrokSidebar {
     const coords = { runId, step: step.index, cwd: stepCwd, ...(live ? { live: true as const } : {}) };
     const exhausted: AcpProvider[] = [];
     let provider: AcpProvider = role.provider;
-    let result = await this.runAgentRole({ ...role, provider }, brief, "crew-step", session, origin, coords);
+    let result = await this.runAgentRole({ ...role, provider }, brief, "crew-step", session, coords);
     while (
       result.outcome === "failed"
       && (() => {
@@ -4558,14 +4306,13 @@ export class GrokSidebar {
         event: "started", detail: `failover from ${provider} (limit)`,
       });
       provider = next;
-      result = await this.runAgentRole({ ...role, provider }, brief, "crew-step", session, origin, coords);
+      result = await this.runAgentRole({ ...role, provider }, brief, "crew-step", session, coords);
     }
     return result;
   }
 
   private async settleCrewStep(opts: {
     session: Session;
-    origin: MsgOrigin;
     roles: AgentRoleSet;
     runId: string;
     cwd: string;
@@ -4883,7 +4630,6 @@ export class GrokSidebar {
     kind: HandoffKind,
     roleName: string | undefined,
     session: Session,
-    origin: MsgOrigin,
     confirm: boolean,
   ): Promise<void> {
     const label = handoffLabel(kind);
@@ -4988,7 +4734,6 @@ export class GrokSidebar {
       },
       kind,
       session,
-      origin,
     );
   }
 
@@ -4997,7 +4742,7 @@ export class GrokSidebar {
    * companion and model. The first message is derived like a handoff — goal,
    * open steps, changed files — never the transcript.
    */
-  private async continueInFreshSession(session: Session, origin: MsgOrigin): Promise<void> {
+  private async continueInFreshSession(session: Session): Promise<void> {
     const derived = deriveBriefing(this.buildThreadContext(session, "handoff"));
     if (derived.kind === "refused") {
       this.agentNotice(session, "info", derived.reason);
@@ -5018,7 +4763,7 @@ export class GrokSidebar {
     await this.startSession();
     this.postSessionsList();
     this.host.appendLine(`[context] continued in a fresh ${provider} session`);
-    await this.handleSend(prompt, false, fresh, origin);
+    await this.handleSend(prompt, false, fresh);
   }
 
   /**
@@ -5027,7 +4772,7 @@ export class GrokSidebar {
    * Returns true when the message was consumed here, so the caller must not
    * fall through to an ordinary send.
    */
-  private async handleHandoffCommand(text: string, session: Session, origin: MsgOrigin): Promise<boolean> {
+  private async handleHandoffCommand(text: string, session: Session): Promise<boolean> {
     const parsed = parseHandoffCommand(text);
     if (parsed.kind === "none") return false;
     this.emit(session, { type: "userMessage", text, chips: [] });
@@ -5037,7 +4782,7 @@ export class GrokSidebar {
     }
     // Typed, so not confirmed: the user named the action and, if they wanted
     // one, the role.
-    await this.startHandoff(parsed.handoff, parsed.role, session, origin, false);
+    await this.startHandoff(parsed.handoff, parsed.role, session, false);
     return true;
   }
 
@@ -5645,7 +5390,7 @@ export class GrokSidebar {
       goal: description,
     };
     try {
-      const outcome = await this.runAgentRole(role, brief, "workflow-stage", caller, "local", {
+      const outcome = await this.runAgentRole(role, brief, "workflow-stage", caller, {
         runId: requestId,
         step: 1,
         generator: { requestId },
@@ -5730,58 +5475,10 @@ export class GrokSidebar {
     const message = this.buildRoutinesMessage();
     this.postLocal(message);
     void this.settingsEditor?.webview.postMessage(message);
-    this.broadcastRemoteDevice(
-      routinesMessageForRemote(message, this.authorizedSessionCwds(), pathsEqual),
-    );
     // The routine count is one of the two facts the empty-state tip pool cannot
     // observe for itself, and it just changed. Posted from here rather than
     // from each of the seven call sites above, so the two can never disagree.
     this.postWelcomeTips();
-    // Same reasoning, one layer out: this is the single choke point where the
-    // schedule can change, so it is the only honest place to tell the relay
-    // when this machine next needs to be awake.
-    void this.publishWakeAt();
-  }
-
-  /**
-   * Tell the relay when this environment next needs to be awake.
-   *
-   * ONLY a cloud environment does this, and only ever a timestamp. A laptop
-   * needs no such thing — it fires its own routines because somebody opened it
-   * — and sending one from a desk machine would put a schedule in a database
-   * that deliberately holds no payloads, for no benefit at all.
-   *
-   * `null` is a real and necessary value: a user who pauses or deletes their
-   * last routine must clear the standing wake, or the machine keeps starting up
-   * nightly for something that no longer exists.
-   *
-   * Best-effort by design. A relay that is unreachable, older than this
-   * endpoint, or serving no environments answers 404 or nothing, and the
-   * correct response is silence: routines still run when the machine is up, and
-   * catch-up is arithmetic. A failure here delays a routine; it never loses
-   * one, and it must never interrupt anybody.
-   */
-  private async publishWakeAt(): Promise<void> {
-    if (!isCloudEnvironment()) return;
-    // Through relayUrl(), like every other consumer: half the app on staging
-    // and half on production fails in a way that looks like a relay bug.
-    const base = httpBaseFromRelayUrl(this.relayUrl());
-    const token = await this.readDeviceToken().catch(() => undefined);
-    if (!base || !token) return;
-    const wakeAt = nextWakeAt(this.loadRoutines(), Date.now());
-    if (wakeAt === this.publishedWakeAt) return;
-    try {
-      const res = await fetch(`${base}/api/environment/wake-at`, {
-        method: "POST",
-        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-        body: JSON.stringify({ wakeAt }),
-      });
-      // Remembered only on success, so a transient failure is retried by the
-      // next schedule change rather than being assumed delivered.
-      if (res.ok) this.publishedWakeAt = wakeAt;
-    } catch {
-      /* the relay is unreachable; routines still run when this host is up */
-    }
   }
 
   /**
@@ -5809,19 +5506,13 @@ export class GrokSidebar {
   }
 
   /**
-   * May this connection point a routine at `cwd`?
-   *
-   * At the desk, any project in the catalog — archived included, because the
-   * rail hiding a project is a view decision and a routine is not the rail.
-   * From a remote, only the authorized set, which is the SAME set that decides
-   * whether that tab could open the project's conversations at all. Creating a
-   * routine is not the escalation; reaching a new project would be.
+   * May a routine point at `cwd`? Any project in the catalog — archived
+   * included, because the rail hiding a project is a view decision and a
+   * routine is not the rail.
    */
-  private mayTargetRoutineCwd(cwd: string, origin: MsgOrigin, clientId?: string): boolean {
+  private mayTargetRoutineCwd(cwd: string): boolean {
     if (!cwd) return false;
-    if (origin !== "remote") return !!this.resolveLocalRepoTarget(cwd);
-    void clientId;
-    return cwdIsAuthorized(cwd, this.authorizedSessionCwds(), pathsEqual);
+    return !!this.resolveLocalRepoTarget(cwd);
   }
 
   private providerConnections(): ProviderConnections {
@@ -6214,362 +5905,6 @@ export class GrokSidebar {
     }
   }
 
-  /**
-   * The remote half of connecting an agent: run the CLI's headless sign-in and
-   * report the URL and code it prints.
-   *
-   * Sends only to the client that asked. A code is for the person holding that
-   * device, and broadcasting it to a desk webview nobody is sitting at would be
-   * both useless and, for something that is briefly a bearer credential, worse
-   * than useless.
-   *
-   * The panel is posted BEFORE the flow starts. `starting` is a real state with
-   * a real duration — a cold CLI takes a second or two to say anything — and
-   * without it a phone shows nothing at all between the tap and the code, which
-   * reads as a button that did not work.
-   */
-  private async startDeviceLogin(
-    provider: AcpProvider,
-    cliPath: string,
-    clientId?: string,
-  ): Promise<void> {
-    const displayName = providerDisplayName(provider);
-    // The entry is created before the runner so `send` reads the CURRENT
-    // client off it: a phone that visits the vendor's code page and comes
-    // back has reconnected under a fresh clientId, and the re-tap path below
-    // re-binds this entry to it.
-    const entry: {
-      handle?: DeviceLoginHandle;
-      clientId?: string;
-      tabToken?: string;
-      last?: Extract<HostMsg, { type: "onboarding" }>["device"];
-      preflight?: Extract<HostMsg, { type: "onboarding" }>["device"] extends infer D
-        ? D extends { preflight?: infer P } ? P : never
-        : never;
-      note?: string;
-      send: (device: Extract<HostMsg, { type: "onboarding" }>["device"]) => void;
-    } = {
-      clientId,
-      tabToken: clientId ? this.remoteClients.tabToken(clientId) : undefined,
-      send: (device) => {
-        // The setting-to-check travels with every card of this flow, so it is
-        // still on screen when the code is.
-        if (device && entry.preflight && !device.preflight) {
-          device = { ...device, preflight: entry.preflight };
-        }
-        if (device && entry.note && device.status === "waiting" && !device.note) {
-          device = { ...device, note: entry.note };
-        }
-        entry.last = device;
-        const message: HostMsg = {
-          type: "onboarding",
-          state: providerLoginState(provider),
-          platform: process.platform,
-          provider,
-          launched: true,
-          device,
-        };
-        if (entry.clientId) this.sendRemoteClient(entry.clientId, message);
-        else this.post(message);
-      },
-    };
-    const send = entry.send;
-
-    const isCloud = isCloudEnvironment();
-    const unavailable = deviceLoginUnavailable(provider, { isCloud });
-    const plan = deviceLoginPlan(provider);
-    // Before anything is spawned. A person who reads this fixes a setting in
-    // fifteen seconds; a person who reads the failure afterwards has already
-    // waited for it.
-    // ONCE, then get out of the way.
-    //
-    // This used to return unconditionally, which made the flow impossible to
-    // finish: the panel's own "I've turned it on - connect" button posts
-    // `runGrokLogin` again, landed here again, and re-rendered the identical
-    // card. The button could never do anything, and to the person clicking it
-    // nothing happened at all (owner, on a cloud environment).
-    //
-    // The advice is still worth showing before the first attempt - it saves a
-    // wait for a failure almost everyone gets. It is advice, though, not a gate,
-    // so the second attempt runs. If the setting is still off, the real failure
-    // is classified and says so (classifyDeviceLoginFailure).
-    // Advice that RIDES ALONG with the flow rather than replacing it. It used
-    // to be sent on its own and return, so connecting Codex took two clicks:
-    // one to read the advice, another to actually start (owner, 2026-08-31).
-    // Now the first click starts the sign-in and the card carries the setting
-    // to check, which is the only ordering where the advice arrives in time to
-    // be useful — the code is worthless until that setting is on.
-    // Step 1 of 2, and it is a GATE on purpose. The code is worthless until
-    // the account setting is on, and a person who has just been handed a code
-    // does not go and read a settings page first. It shows once per provider
-    // per session; the button posts `runGrokLogin` again and lands past here.
-    const preflight = deviceLoginPreflight(provider, { isCloud });
-    if (preflight && !this.deviceLoginPreflightShown.has(provider)) {
-      this.deviceLoginPreflightShown.add(provider);
-      send({
-        status: "unavailable",
-        message: preflight.reason,
-        preflight: { ...preflight, steps: [...preflight.steps] },
-      });
-      return;
-    }
-    // Step 2 keeps the setting visible next to the code it gates, and adds the
-    // heads-up about the vendor's own security warning.
-    entry.preflight = preflight ? { ...preflight, steps: [...preflight.steps] } : undefined;
-    entry.note = deviceLoginCodeNote(provider);
-    if (unavailable || !plan) {
-      // Not an error, and it must not read as one: the agent can still be
-      // connected, just not from here. Saying which is the difference between
-      // a dead end and a next step.
-      send({
-        status: "unavailable",
-        message: unavailable ?? noRemoteSignInMessage(displayName, { isCloud }),
-      });
-      return;
-    }
-
-    // One flow per provider. A second tap while the first is polling would
-    // spawn a second child racing the first to write the same credential file,
-    // and would replace a code the user may already be typing.
-    //
-    // A reconnecting phone (new socket, same tab, already has a code) is
-    // adopted so the card comes back. An explicit Connect press — including a
-    // tap while the flow is still on `starting` — starts over: repeating a
-    // wedged starting card is how clone-form GitHub sat for 899s.
-    const running = this.deviceLogins.get(provider);
-    if (running) {
-      if (this.shouldAdoptInFlightDeviceLogin(running, clientId)) {
-        running.clientId = clientId;
-        if (clientId) running.tabToken = this.remoteClients.tabToken(clientId) ?? running.tabToken;
-        if (running.last) running.send(running.last);
-        this.host.appendLine(`[${provider}] device login already in flight; repeated its state to the new tap`);
-        return;
-      }
-      this.deviceLogins.delete(provider);
-      try { running.handle.cancel(); } catch { /* already gone */ }
-      this.host.appendLine(`[${provider}] device login restarted by an explicit press`);
-    }
-
-    send({ status: "starting" });
-    this.host.appendLine(`[${provider}] device login started`);
-    // Before the CLI is even spawned: the window that kills these flows opens
-    // immediately, while the person is walking to the vendor's page. Held until
-    // the credential is verified, not merely until the CLI exits.
-    const workId = this.beginDeviceLoginWork();
-    const startedAt = Date.now();
-    // Set once onDone has run, which can happen SYNCHRONOUSLY on a spawn
-    // failure — and registering the entry after that would park a settled
-    // flow in the map forever, silently blocking every later attempt.
-    let settled = false;
-    let handle: DeviceLoginHandle | undefined;
-    handle = runDeviceLogin(cliPath, plan.args, {
-      onPrompt: (prompt) => {
-        send({
-          status: "waiting",
-          url: prompt.url,
-          code: prompt.code,
-          ...(prompt.needsCode ? { needsCode: true } : {}),
-        });
-      },
-      onDone: (result) => {
-        settled = true;
-        if (this.deviceLogins.get(provider)?.handle === handle) {
-          this.deviceLogins.delete(provider);
-        }
-        // The hold is NOT released here on success: confirmDeviceLogin is still
-        // to come, it probes the CLI, and a machine paused underneath that is
-        // the same failure one step later. Its `finally` is the single exit.
-        // Cancellation arrives here too (runDeviceLogin settles `cancelled`),
-        // so this covers the cancel path without the handler knowing the token.
-        if (!result.ok) this.endDeviceLoginWork(workId);
-        const elapsed = Math.round((Date.now() - startedAt) / 1000);
-        if (!result.ok && "cancelled" in result) {
-          // Every settle leaves a line. The first real cloud test needed
-          // shell access to the machine to learn a flow had ended at all.
-          this.host.appendLine(`[${provider}] device login cancelled after ${elapsed}s`);
-          return;
-        }
-        if (result.ok) {
-          // The CLI exiting 0 says the vendor approved the code. It does NOT
-          // say a credential landed: codex 0.147 exited 0 on a flow that wrote
-          // no auth.json, and announcing "done" here told the user Connected
-          // while Settings said disconnected. Verify first, announce after.
-          // The card is still on "waiting", whose own copy promises the flow
-          // finishes on its own.
-          this.host.appendLine(`[${provider}] device login approved by the vendor after ${elapsed}s; verifying the credential`);
-          // The page must change when the vendor approves — "nothing happened"
-          // during a silent 30s probe was the owner's very first retest note.
-          send({ status: "verifying" });
-          void this.confirmDeviceLogin(provider, send, displayName, workId,
-            () => ({ clientId: entry.clientId, tabToken: entry.tabToken }));
-          return;
-        }
-        this.host.appendLine(`[${provider}] device login failed (${result.failure}) after ${elapsed}s: ${result.output.slice(-2000)}`);
-        send({
-          status: "failed",
-          message: deviceLoginFailureText(provider, result.failure, displayName),
-        });
-      },
-    }, undefined, undefined, { needsCode: !!plan.needsCode });
-    if (!settled) {
-      if (handle) {
-        entry.handle = handle;
-        this.deviceLogins.set(provider, entry as typeof entry & { handle: DeviceLoginHandle });
-      }
-    }
-  }
-
-  /**
-   * Reconnecting tab vs an explicit Connect press.
-   *
-   * A phone that left for the vendor's page comes back under a new client id
-   * with the same tab token. That tap is the same attempt, so adopt it and
-   * repeat the code — but only once there IS a code. Repeating `starting`
-   * is how a wedged flow sat on "Asking the CLI for a sign-in code" for the
-   * full device-code window.
-   *
-   * Any other tap (same socket, no code yet, a different tab) starts over.
-   */
-  private shouldAdoptInFlightDeviceLogin(
-    running: { clientId?: string; tabToken?: string; last?: { status?: string; url?: string } } | undefined,
-    clientId?: string,
-  ): boolean {
-    if (!running || !clientId) return false;
-    const incomingTab = this.remoteClients.tabToken(clientId);
-    const sameTab = !!(incomingTab && running.tabToken && incomingTab === running.tabToken);
-    const sameClient = running.clientId === clientId;
-    const last = running.last;
-    const hasPrompt = !!(last && last.status === "waiting" && typeof last.url === "string" && last.url);
-    return hasPrompt && sameTab && !sameClient;
-  }
-
-  /**
-   * Announce a device login only once the credential is USABLE on this host.
-   *
-   * Bounded retries, because vendors write the file a beat after the CLI
-   * exits; a verdict either way, because "Connected" with no credential and
-   * silence were the two halves of the first real cloud test's worst bug.
-   * Runs detached from the flow entry — by the time this fails, offering the
-   * user a fresh attempt must not be blocked by the old one.
-   */
-  /**
-   * The tab that started a device login, wherever its socket is now.
-   *
-   * Resolved through the tab token, because a phone reconnects on every trip to
-   * the vendor's code page and the starting client id is usually gone by the
-   * time this is asked. Falls back to the focused session rather than throwing:
-   * `remoteClients.cwd()` refuses an unknown client, and a sign-in that has
-   * already succeeded must not end in an exception.
-   */
-  private deviceLoginSession(clientId?: string, tabToken?: string): Session {
-    const live = tabToken ? this.remoteClients.clientForTabToken(tabToken) : undefined;
-    const id = live ?? clientId;
-    if (!id || this.remoteClients.cwdIfPresent(id) === undefined) return this.focused;
-    return this.remoteSessionFor(id);
-  }
-
-  private async confirmDeviceLogin(
-    provider: AcpProvider,
-    send: (device: Extract<HostMsg, { type: "onboarding" }>["device"]) => void,
-    displayName: string,
-    workId: number,
-    currentClient: () => { clientId?: string; tabToken?: string },
-  ): Promise<void> {
-    try {
-      await this.confirmDeviceLoginInner(provider, send, displayName, currentClient);
-    } finally {
-      // One door out, whatever happened above — and only this operation's.
-      this.endDeviceLoginWork(workId);
-    }
-  }
-
-  private async confirmDeviceLoginInner(
-    provider: AcpProvider,
-    send: (device: Extract<HostMsg, { type: "onboarding" }>["device"]) => void,
-    displayName: string,
-    currentClient: () => { clientId?: string; tabToken?: string } = () => ({}),
-  ): Promise<void> {
-    const delays = [0, 2_000, 5_000, 10_000, 20_000];
-    for (const delay of delays) {
-      if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
-      if (provider === "claude"
-        ? await this.deviceLoginCredentialReady(provider)
-        : await this.reprobeProviderCredentials(provider)) {
-        this.host.appendLine(`[${provider}] device login: credential verified`);
-        // Lower the needs-login flag too: Claude's check answers without the
-        // probe that clears it, and a flagged account after a sign-in the app
-        // itself verified would bring the card back (upstream 43aa4bc).
-        this.setProviderNeedsLogin(provider, false);
-        // Promote on evidence, exactly as the Providers refresh does. The probe
-        // just proved the account works; without this the persisted `connected`
-        // flag stays false, so Settings keeps offering Connect and never offers
-        // Sign out for an account that is plainly signed in (owner, 2026-08-31).
-        await this.setProviderConnected(provider, true);
-        send({ status: "done" });
-        // The same follow-through Settings' "Check again" runs. Promoting the
-        // account is not the job — putting an agent on the screen that just
-        // signed in is, and until this call the tab kept an empty model picker
-        // and a card still offering to connect until it was reloaded (owner, on
-        // a fresh cloud machine, 2026-08-31).
-        try {
-          const flow = currentClient();
-          await this.adoptSessionsForConnectedProvider(
-            provider,
-            this.deviceLoginSession(flow.clientId, flow.tabToken),
-          );
-        } catch (error) {
-          // The sign-in itself SUCCEEDED and has already been announced. A
-          // failure to start the session afterwards is a worse screen, not a
-          // worse account — and this runs under `void` on a machine with
-          // nobody at it, where an unhandled rejection is the only trace.
-          this.host.appendLine(`[${provider}] connected, but starting the session failed: ${errorDetail(error)}`);
-        }
-        return;
-      }
-    }
-    // Two very different failures share this exit, and the message must not
-    // blame the credential when the credential is fine: the first real cloud
-    // test's sign-in was valid the whole time — the PROBE was failing (a
-    // session/delete quirk) while the verdict said "no usable credential".
-    if (this.providerCredentialFilePresent(provider)) {
-      this.host.appendLine(`[${provider}] device login: credential present but the probe never passed`);
-      send({
-        status: "failed",
-        message: `${displayName} is signed in, but the agent did not answer this machine's check yet. Try again in a moment — the sign-in itself does not need repeating.`,
-      });
-      return;
-    }
-    this.host.appendLine(`[${provider}] device login: vendor approved, but no usable credential landed on this machine`);
-    send({
-      status: "failed",
-      message: `${displayName} approved the sign-in, but no usable credential landed on this machine. Try connecting again.`,
-    });
-  }
-
-  /**
-   * Whether this host can treat the sign-in as landed.
-   *
-   * Grok and Codex still go through the ACP probe. Claude's file is in the
-   * keychain (or `~/.claude/`), so presence-of-auth.json cannot speak for it —
-   * `claude auth status` `{ loggedIn: true }` is the authority. An unreadable
-   * status falls back to the ACP probe rather than failing closed on a CLI
-   * that printed something we have not seen.
-   */
-  private async deviceLoginCredentialReady(provider: AcpProvider): Promise<boolean> {
-    // After `muse login`, file presence confirms a credential landed, not that
-    // it is valid; a later auth failure takes the normal needs-login path.
-    if (provider === "muse") return this.providerCredentialFilePresent(provider);
-    if (provider === "claude") {
-      const cliPath = this.locateProvider("claude");
-      if (!cliPath) return false;
-      const loggedIn = await probeClaudeAuthStatus(cliPath);
-      if (loggedIn === true) return true;
-      if (loggedIn === false) return false;
-      return this.reprobeProviderCredentials(provider);
-    }
-    return this.reprobeProviderCredentials(provider);
-  }
-
   /** Does the provider's own credential file exist? Deliberately shallow —
    *  presence only, no validity claim: it separates "sign-in never landed"
    *  from "landed, but our probe is unhappy", which lead a person to
@@ -6590,15 +5925,6 @@ export class GrokSidebar {
     } catch {
       return false;
     }
-  }
-
-  /** Stop every headless sign-in. Called on dispose so a child polling a device
-   *  endpoint does not outlive the window that started it. */
-  private cancelAllDeviceLogins(): void {
-    for (const { handle } of this.deviceLogins.values()) handle.cancel();
-    this.deviceLogins.clear();
-    this.githubDeviceLogin?.handle?.cancel();
-    this.githubDeviceLogin = undefined;
   }
 
   /** Observe an interactive terminal login without requiring a reload. Terminal
@@ -6988,7 +6314,7 @@ export class GrokSidebar {
     // user's action just... does nothing.
     view.webview.onDidReceiveMessage((raw) => {
       const m = raw as WebviewMsg;
-      void this.onMessage(m, "local").catch((e) => {
+      void this.onMessage(m).catch((e) => {
         const msg = (e as Error)?.message ?? String(e);
         this.host.appendLine(`[webview] ${m.type} failed: ${msg}`);
         void this.host.showErrorMessage(`Grok: ${m.type} failed — ${msg}`);
@@ -7001,12 +6327,6 @@ export class GrokSidebar {
     if (!this.reaper) {
       this.reaper = setInterval(() => {
         this.reapPool();
-        // The only thing that re-evaluates keep-awake on the CLOCK rather than
-        // on an event. `needs-you` holds a cloud machine awake for a bounded
-        // window, and nothing else would ever notice that window closing —
-        // the heartbeat would run until the next status change, which on an
-        // abandoned permission card is never.
-        this.refreshKeepAwake();
       }, GrokSidebar.REAP_INTERVAL_MS);
     }
     // Re-tell the webview whether voice is set up when the relevant settings
@@ -7095,13 +6415,10 @@ export class GrokSidebar {
         // Drop the TTL-cached findFiles snapshot so the next `@` rebuilds with
         // the new cap (otherwise a raise would wait up to MENTION_INDEX_TTL_MS).
         this.mentionIndex = null;
-        this.remoteMentionIndexes.clear();
+        this.otherCwdMentionIndexes.clear();
       }
       if (e.affectsConfiguration("grok.terminalShell")) {
         this.applyTerminalShellPref();
-      }
-      if (e.affectsConfiguration("grok.remote.keepAwake")) {
-        this.refreshKeepAwake();
       }
       if (e.affectsConfiguration("grok.telemetry.enabled")) {
         this.post({
@@ -7138,7 +6455,6 @@ export class GrokSidebar {
     authWatcher.onDidDelete(refreshVoiceConfigured);
     this.configWatcher = disposeAll(configChanges, authWatcher);
     this.applyTerminalShellPref();
-    void this.maybeStartUplink();
   }
 
   /**
@@ -7198,7 +6514,7 @@ export class GrokSidebar {
       this.host.appendLine(`[projects-rail] ignored ${msg.type}`);
       return;
     }
-    await this.onMessage(msg, "local");
+    await this.onMessage(msg);
     // Opening a conversation from the rail is someone saying which conversation
     // they want to be in, so put them in it. The rail lives in its own activity
     // bar container, so without this the chat can stay behind another view and
@@ -7283,7 +6599,7 @@ export class GrokSidebar {
   }
 
   newSession(): void {
-    void this.newFocusedSession("local");
+    void this.newFocusedSession();
   }
 
   async pickModel(): Promise<void> {
@@ -7326,7 +6642,7 @@ export class GrokSidebar {
         if (!input || !input.trim()) return;
         targetModelId = input.trim();
       }
-      await this.switchModel(targetModelId, this.focused, undefined, picked.provider);
+      await this.switchModel(targetModelId, this.focused, picked.provider);
     }
   }
 
@@ -7341,7 +6657,6 @@ export class GrokSidebar {
   async switchModel(
     modelId: string,
     session: Session = this.focused,
-    requester?: RemoteRequester,
     provider: AcpProvider = session.provider,
   ): Promise<void> {
     const client = session.client;
@@ -7352,15 +6667,13 @@ export class GrokSidebar {
       if (session.hasHistory) {
         const current = providerDisplayName(session.provider);
         const requested = providerDisplayName(provider);
-        this.reportRequester(
-          requester,
-          "warning",
+        this.notifyUser("warning",
           `This ${current} conversation can only use ${current} models. Start a new conversation to switch to ${requested}.`,
         );
         return;
       }
       if (!this.connectedProviders().includes(provider)) {
-        this.reportRequester(requester, "warning", `${providerDisplayName(provider)} is not connected.`);
+        this.notifyUser("warning", `${providerDisplayName(provider)} is not connected.`);
         return;
       }
       const oldProvider = session.provider;
@@ -7376,7 +6689,6 @@ export class GrokSidebar {
       return;
     }
     if (modelId === client.currentModelId) return;
-    const cfg = this.host.getConfiguration("grok");
     if (!modelId) {
       if (session.hasHistory) return;
       const discardId = session.activeSessionId;
@@ -7393,7 +6705,7 @@ export class GrokSidebar {
       if (provider === "grok") await this.rememberGrokConfig("defaultModel", modelId);
     } catch (e) {
       if (!isIncompatibleAgentError(e)) {
-        this.reportRequester(requester, "error", `Failed to set model: ${(e as Error).message}`);
+        this.notifyUser("error", `Failed to set model: ${(e as Error).message}`);
         return;
       }
       if (!session.hasHistory) {
@@ -7404,14 +6716,6 @@ export class GrokSidebar {
         await this.rememberGrokConfig("defaultModel", modelId);
         await this.startSession(undefined, session);
         this.discardRestartedEmptySession(discardId, session);
-        return;
-      }
-      if (requester) {
-        this.reportRequester(
-          requester,
-          "warning",
-          "Switching to this model requires restarting the conversation from the VS Code view.",
-        );
         return;
       }
       const mode = await this.pickRestartMode("Switching to this model requires a new session.");
@@ -7486,7 +6790,6 @@ See design doc for the full state machine diagram.`;
   private postMode(session: Session = this.focused): void {
     const message: HostMsg = { type: "modeChanged", modeId: this.displayMode(session) };
     if (session === this.focused) this.view?.webview.postMessage(message);
-    this.sendRemoteSession(session, message);
   }
 
   /** Whether grok's config.toml forces always-approve (#31). Project
@@ -7637,7 +6940,6 @@ Only continue if you trust this code.`,
   async setMode(
     modeId: "agent" | "plan" | "yolo",
     session: Session = this.focused,
-    requester?: RemoteRequester,
   ): Promise<void> {
     // Agent/plan/yolo are mutually exclusive. Plan = client write/exec gate;
     // YOLO = auto-approve. Both ride on top of the CLI's agent mode, except
@@ -7653,18 +6955,14 @@ Only continue if you trust this code.`,
       if (!session.planModeVersionVerified) {
         const rechecked = await this.recheckPlanModeAvailability(session);
         if (!rechecked || !session.planModeAvailable) {
-          this.reportRequester(
-            requester,
-            "warning",
+          this.notifyUser("warning",
             session.planModeUnavailableReason ?? "Plan mode is unavailable for this Grok CLI version.",
           );
           return;
         }
         // Probe succeeded — fall through and enter Plan on this same click.
       } else {
-        this.reportRequester(
-          requester,
-          "warning",
+        this.notifyUser("warning",
           session.planModeUnavailableReason ?? "Plan mode is unavailable for this Grok CLI version.",
         );
         return;
@@ -7719,7 +7017,7 @@ Only continue if you trust this code.`,
           session.autoApprove = false;
           this.setPlanActive(session, true);
         } catch (e) {
-          this.reportRequester(requester, "error", `Couldn't switch mode: ${(e as Error).message}`);
+          this.notifyUser("error", `Couldn't switch mode: ${(e as Error).message}`);
         }
       }
       return;
@@ -7738,7 +7036,7 @@ Only continue if you trust this code.`,
           await session.client.setMode(ACT_MODE_ID);
         }
       }
-      catch (e) { this.reportRequester(requester, "error", `Couldn't switch mode: ${(e as Error).message}`); }
+      catch (e) { this.notifyUser("error", `Couldn't switch mode: ${(e as Error).message}`); }
     }
   }
 
@@ -8131,15 +7429,6 @@ Only continue if you trust this code.`,
     const cwd = this.sessionCwd(session);
     this.postSessionsList();
     if (cwd) this.sendLocalRepoSessionsPreview(cwd);
-    // Once per connected client. This was `refreshRemoteRepoPreview(undefined,
-    // cwd)`, and that method opens with `if (!clientId || !cwd) return` — so it
-    // returned immediately, every time, and no remote rail was ever told that a
-    // project OTHER than the one it is looking at had just become active. The
-    // currently-viewed project still refreshed (via postSessionsList above),
-    // which is exactly why this went unnoticed.
-    for (const clientId of this.remoteClients.clients()) {
-      this.refreshRemoteRepoPreview(clientId, cwd);
-    }
   }
 
   /** Persist an answered permission card (title + allowed/rejected + position) so
@@ -8574,22 +7863,10 @@ Only continue if you trust this code.`,
     const combined = this.queuedSendReadyText(session);
     if (combined === undefined) return;
     if (session.queuedSendCommit) return;
-    if (session.queuedSendRequiresRelay) {
-      if (this.remoteClients.clientsForActiveValue(session).length === 0) return;
-      const dispatch = claimQueuedSendDispatch(
-        session.queuedSendDispatch,
-        combined,
-        () => randomUUID(),
-      );
-      if (!dispatch || session.queuedSendDispatch) return;
-      session.queuedSendDispatch = dispatch;
-      this.sendRemoteSession(session, { type: "submitQueuedSend", ...dispatch });
-      return;
-    }
     const claim = beginQueuedSendCommit(session, combined);
     if (!claim) return;
     try {
-      await this.handleSend(combined, false, session, "local", claim);
+      await this.handleSend(combined, false, session, claim);
     } finally {
       finishQueuedSendCommit(session, claim, false);
     }
@@ -8614,7 +7891,6 @@ Only continue if you trust this code.`,
   private async steerSend(
     text: string,
     session: Session = this.focused,
-    requester?: RemoteRequester,
     requestedChips?: ContextChip[],
     fromQueue = false,
   ): Promise<void> {
@@ -8641,7 +7917,6 @@ Only continue if you trust this code.`,
       return;
     }
 
-    const relayFlag = session.queuedSendRequiresRelay;
     let contributions: QueuedSendEntry[];
     let fromComposer = false;
     if (takeQueue) {
@@ -8650,7 +7925,6 @@ Only continue if you trust this code.`,
         chips: item.chips.map(cloneChipForQueue),
       }));
       session.queuedSends = [];
-      session.queuedSendDispatch = undefined;
       session.queuedSendCommit = undefined;
       this.emitQueuedSends(session);
     } else {
@@ -8668,7 +7942,6 @@ Only continue if you trust this code.`,
     const putBackOnQueue = (): void => {
       if (takeQueue) {
         session.queuedSends = [...contributions, ...session.queuedSends];
-        session.queuedSendRequiresRelay = relayFlag;
       } else {
         for (const item of contributions) {
           session.queuedSends = enqueueQueuedSend(session.queuedSends, item.text, item.chips);
@@ -8679,7 +7952,6 @@ Only continue if you trust this code.`,
     const putBackOnComposer = (): void => {
       if (takeQueue) {
         session.queuedSends = [...contributions, ...session.queuedSends];
-        session.queuedSendRequiresRelay = relayFlag;
         this.emitQueuedSends(session);
         return;
       }
@@ -8729,9 +8001,7 @@ Only continue if you trust this code.`,
       // 0.2.x / unverified: interject still works, but `content` is ignored
       // and the pixels would vanish. Queue the whole item instead.
       putBackOnQueue();
-      this.reportRequester(
-        requester,
-        "warning",
+      this.notifyUser("warning",
         "This agent cannot steer attachments mid-turn — your message was queued instead. It will send when the turn finishes.",
       );
       return;
@@ -8773,7 +8043,6 @@ Only continue if you trust this code.`,
     // paid for, so the relay flag is cleared before the flush (upstream 4d74e90).
     if (!turnIsInFlight(session)) {
       putBackOnQueue();
-      session.queuedSendRequiresRelay = false;
       void this.maybeFlushQueuedSends(session);
       return;
     }
@@ -8786,7 +8055,6 @@ Only continue if you trust this code.`,
       chips: displayChips,
       steer: true,
     });
-    if (!session.queuedSends.length) session.queuedSendRequiresRelay = false;
 
     const rpcText = images.length ? displayText : built.text;
     try {
@@ -8799,9 +8067,7 @@ Only continue if you trust this code.`,
         this.emit(session, { type: "steerUnavailable" });
         this.emit(session, { type: "agentReset" });
         putBackOnQueue();
-        this.reportRequester(
-          requester,
-          "warning",
+        this.notifyUser("warning",
           // Grok's method is unadvertised, so "unsupported" there means an old
           // CLI that an update fixes. Every other backend advertises.
           session.provider === "grok"
@@ -8816,10 +8082,7 @@ Only continue if you trust this code.`,
         // reply being read) and no `steerUnavailable` (one refusal is not a
         // missing capability). The queue takes the text (upstream bb76a5a).
         putBackOnQueue();
-        session.queuedSendRequiresRelay = false;
-        this.reportRequester(
-          requester,
-          "warning",
+        this.notifyUser("warning",
           "The agent could not take that correction mid-turn — your message was queued instead. It will send when the turn finishes.",
         );
         return;
@@ -8926,7 +8189,6 @@ Only continue if you trust this code.`,
   private async handleTurnFeedback(
     rating: unknown,
     session: Session,
-    requester?: RemoteRequester,
   ): Promise<void> {
     const previous = session.turnRating;
     const revert = () => this.ackTurnFeedback(session, previous);
@@ -8947,13 +8209,13 @@ Only continue if you trust this code.`,
     }
     if (!session.liveFeedbackEligible) {
       revert();
-      this.reportRequester(requester, "warning", "Only the latest reply in this session can be rated.");
+      this.notifyUser("warning", "Only the latest reply in this session can be rated.");
       return;
     }
     const client = session.client;
     if (!client?.sessionId) {
       revert();
-      this.reportRequester(requester, "warning", "Start a Grok session before rating a turn.");
+      this.notifyUser("warning", "Start a Grok session before rating a turn.");
       return;
     }
     try {
@@ -8965,9 +8227,7 @@ Only continue if you trust this code.`,
       if (result === "unsupported") {
         this.latchFeedbackUnavailable(session);
         revert();
-        this.reportRequester(
-          requester,
-          "warning",
+        this.notifyUser("warning",
           "Turn ratings need a Grok Build CLI that accepts feedback.",
         );
         return;
@@ -8978,7 +8238,7 @@ Only continue if you trust this code.`,
       this.ackTurnFeedback(session, rating);
     } catch (e: any) {
       revert();
-      this.reportRequester(requester, "error", `Couldn't send that rating: ${e?.message ?? e}`);
+      this.notifyUser("error", `Couldn't send that rating: ${e?.message ?? e}`);
     }
   }
 
@@ -8991,13 +8251,13 @@ Only continue if you trust this code.`,
    * truncating `updates.jsonl`, so a partial fork would replay a conversation the
    * model has forgotten (see research/grok-build-oss-findings.md § 3a).
    */
-  private async forkFocusedSession(session: Session = this.focused, requester?: RemoteRequester): Promise<void> {
+  private async forkFocusedSession(session: Session = this.focused): Promise<void> {
     if (!session.client || !session.activeSessionId) {
-      this.reportRequester(requester, "warning", "Start a session before forking it.");
+      this.notifyUser("warning", "Start a session before forking it.");
       return;
     }
     if (!session.hasHistory) {
-      this.reportRequester(requester, "info", "Nothing to fork yet — this session has no conversation.");
+      this.notifyUser("info", "Nothing to fork yet — this session has no conversation.");
       return;
     }
     // Resolve the parent's name BEFORE the fork — it names the fork, so it must
@@ -9012,9 +8272,7 @@ Only continue if you trust this code.`,
       const cwd = this.sessionCwd(session);
       const r = await session.client.forkSession(cwd);
       if (r === "unsupported") {
-        this.reportRequester(
-          requester,
-          "warning",
+        this.notifyUser("warning",
           "Forking needs a newer Grok Build CLI. Update via Settings → About.",
         );
         return;
@@ -9057,22 +8315,14 @@ Only continue if you trust this code.`,
 
       // The fork is on disk but has no live process; openSession loads it into a
       // fresh pool member and focuses it, exactly like clicking a history row.
-      if (requester) {
-        const currentClientId = this.resolveRemoteRequester(requester);
-        if (!currentClientId) return;
-        await this.openRemoteSession(currentClientId, r.newSessionId, cwd);
-      } else {
-        await this.openSession(r.newSessionId, cwd);
-      }
-      this.reportRequester(
-        requester,
-        "info",
+      await this.openSession(r.newSessionId, cwd);
+      this.notifyUser("info",
         `Forked into "${forkName}". The original conversation is unchanged and is in your session history` +
           (parentName ? ` as "${parentName}"` : "") +
           ". Files on disk were not touched.",
       );
     } catch (e: any) {
-      this.reportRequester(requester, "error", `Fork failed: ${e?.message ?? e}`);
+      this.notifyUser("error", `Fork failed: ${e?.message ?? e}`);
     }
   }
 
@@ -9099,25 +8349,17 @@ Only continue if you trust this code.`,
    * peeled off.
    */
   /**
-   * `session` and `requester` are explicit since rewind/edit became reachable
-   * from a remote (2026-09-01). Both are load-bearing:
-   *
-   * - the session, because a phone driving a different repo must not rewind
-   *   whatever happens to be focused at the desk — that is exactly the bug that
-   *   forced the worktree rollback on 2026-08-07;
-   * - the requester, because every message below used to be a native modal on
-   *   the host. On a cloud machine there is nobody at that screen, and one of
-   *   them was awaited, so the handler simply hung.
+   * `session` is explicit: the conversation the message was edited in, not
+   * whatever happens to be focused by the time an await returns.
    */
   private async editLastMessage(
     userBubbleIndex: number,
     text: string,
     totalUserBubbles?: number,
     session: Session = this.focused,
-    requester?: RemoteRequester,
   ): Promise<void> {
     if (!session.client || !session.activeSessionId) {
-      return void this.reportRequester(requester, "warning", "Start a session before editing a message.");
+      return void this.notifyUser("warning", "Start a session before editing a message.");
     }
     if (session.status === "working" || session.status === "needs-you") {
       // Name the state. "Wait for the current turn" is useless when the turn
@@ -9126,9 +8368,7 @@ Only continue if you trust this code.`,
       this.host.appendLine(
         `[edit] refused: session.status=${session.status} bubble=${userBubbleIndex}`,
       );
-      return void this.reportRequester(
-        requester,
-        "warning",
+      return void this.notifyUser("warning",
         session.status === "needs-you"
           ? "Answer the pending permission or plan card first, then edit your last message."
           : "Wait for the current turn to finish (or Stop it) before editing your last message.",
@@ -9137,7 +8377,7 @@ Only continue if you trust this code.`,
     const { client, gen, activeSessionId, userMessageCount } = session;
     if (session.provider !== "grok") {
       await this.rewindFromClientCheckpoints(session, {
-        userBubbleIndex, bubbleText: text, totalUserBubbles, requester, edit: true,
+        userBubbleIndex, bubbleText: text, totalUserBubbles, edit: true,
       });
       return;
     }
@@ -9145,7 +8385,7 @@ Only continue if you trust this code.`,
       const points = await client.listRewindPoints();
       if (points === "unsupported") {
         await this.rewindFromClientCheckpoints(session, {
-          userBubbleIndex, bubbleText: text, totalUserBubbles, requester, edit: true,
+          userBubbleIndex, bubbleText: text, totalUserBubbles, edit: true,
         });
         return;
       }
@@ -9156,9 +8396,7 @@ Only continue if you trust this code.`,
         this.host.appendLine(
           `[rewind] map mismatch: ${userFacingRewindPoints(points).length} wire points vs ${totalUserBubbles} visible messages`,
         );
-        return void this.reportRequester(
-          requester,
-          "warning",
+        return void this.notifyUser("warning",
           "Grok's restore points no longer line up with this conversation, so rewinding could remove the wrong turn. Reload the window and try again.",
         );
       }
@@ -9167,10 +8405,8 @@ Only continue if you trust this code.`,
         // Was a modal offering "Copy text to composer" and awaiting the click.
         // Nobody can click it on a cloud machine, so the handler hung there —
         // and the button was the only sensible answer anyway. Do it, and say so.
-        this.restoreComposerFor(session, requester, text);
-        return void this.reportRequester(
-          requester,
-          "info",
+        this.restoreComposerFor(session, text);
+        return void this.notifyUser("info",
           "Grok has no restore point for that message, so it can't be rolled back. Its text is back in the composer.",
         );
       }
@@ -9198,8 +8434,7 @@ Only continue if you trust this code.`,
         session.userMessageCount !== userMessageCount ||
         ["working", "needs-you"].includes(session.status)
       ) {
-        return void this.reportRequester(
-          requester, "warning",
+        return void this.notifyUser("warning",
           "Edit cancelled because the conversation changed or another turn started. Nothing was rewound. Try Edit again when the conversation is idle.",
         );
       }
@@ -9209,13 +8444,13 @@ Only continue if you trust this code.`,
       });
       if (result === "unsupported") {
         await this.rewindFromClientCheckpoints(session, {
-          userBubbleIndex, bubbleText: text, totalUserBubbles, requester, edit: true,
+          userBubbleIndex, bubbleText: text, totalUserBubbles, edit: true,
         });
         return;
       }
       if (!result.success) {
         // Surface the CLI's own words — e.g. rewinding past a compaction point.
-        return void this.reportRequester(requester, "error", result.error || "Couldn't roll back that message.");
+        return void this.notifyUser("error", result.error || "Couldn't roll back that message.");
       }
 
       const reportedFiles = result.revertedFiles.length;
@@ -9227,16 +8462,14 @@ Only continue if you trust this code.`,
       await this.truncateSessionCardsAfterRewind(resumeId, surviving);
       this.applyRewindToView(session, surviving);
       if (resumeId) this.checkpointStore?.pruneAfter(resumeId, surviving);
-      this.restoreComposerFor(session, requester, text);
+      this.restoreComposerFor(session, text);
       if (reportedFiles > 0) {
-        this.reportRequester(
-          requester,
-          "info",
+        this.notifyUser("info",
           "Message moved back to the composer. Files were rolled back — anything created after that point may still be on disk.",
         );
       }
     } catch (e: any) {
-      this.reportRequester(requester, "error", `Couldn't edit that message: ${e?.message ?? e}`);
+      this.notifyUser("error", `Couldn't edit that message: ${e?.message ?? e}`);
     }
   }
 
@@ -9266,28 +8499,16 @@ Only continue if you trust this code.`,
    */
   private restoreComposerFor(
     session: Session,
-    requester: RemoteRequester | undefined,
     text: string,
   ): void {
     if (!text) return;
     const message: HostMsg = { type: "restoreComposer", text };
-    if (requester) {
-      // Resolve through the tab, so a phone that reconnected while the rewind
-      // was in flight still receives its own text — then check the tab is still
-      // ON this conversation. `sendRemoteRequester` alone would deliver to
-      // whatever that tab is showing NOW.
-      const clientId = this.resolveRemoteRequester(requester);
-      if (clientId && this.remoteClients.active(clientId) === session) {
-        this.sendRemoteClient(clientId, message);
-        return;
-      }
-    } else if (this.focused === session) {
-      // Same check for the desk: postLocal posts to the focused webview
-      // whatever it is displaying.
+    if (this.focused === session) {
+      // postLocal posts to the focused webview whatever it is displaying.
       this.postLocal(message);
       return;
     }
-    // The asking surface has moved to another conversation. Refusing to deliver
+    // The view has moved to another conversation. Refusing to deliver
     // is only half an answer: the rewind has ALREADY removed the message from
     // the transcript, so dropping it here loses the user's text outright — the
     // failure the previous attempt traded the cross-session paste for.
@@ -9307,31 +8528,28 @@ Only continue if you trust this code.`,
     void this.rememberQueuedDraft(id, parked ? `${parked}\n\n${text}` : text);
   }
 
-  /** See {@link editLastMessage} for why `session` and `requester` are explicit. */
+  /** See {@link editLastMessage} for why `session` is explicit. */
   async rewindFocusedSession(
     userBubbleIndex?: number,
     bubbleText?: string,
     totalUserBubbles?: number,
     session: Session = this.focused,
-    requester?: RemoteRequester,
   ): Promise<void> {
     if (!session.client || !session.activeSessionId) {
-      return void this.reportRequester(requester, "warning", "Start a session before rewinding it.");
+      return void this.notifyUser("warning", "Start a session before rewinding it.");
     }
     if (session.status === "working" || session.status === "needs-you") {
-      return void this.reportRequester(
-        requester,
-        "warning",
+      return void this.notifyUser("warning",
         "Wait for the current turn to finish (or Stop it) before rewinding.",
       );
     }
     if (!session.hasHistory) {
-      return void this.reportRequester(requester, "info", "Nothing to rewind yet — this session has no conversation.");
+      return void this.notifyUser("info", "Nothing to rewind yet — this session has no conversation.");
     }
     const { client, gen, activeSessionId, userMessageCount } = session;
     if (session.provider !== "grok") {
       await this.rewindFromClientCheckpoints(session, {
-        userBubbleIndex, bubbleText, totalUserBubbles, requester, edit: false,
+        userBubbleIndex, bubbleText, totalUserBubbles, edit: false,
       });
       return;
     }
@@ -9339,7 +8557,7 @@ Only continue if you trust this code.`,
       const points = await client.listRewindPoints();
       if (points === "unsupported") {
         await this.rewindFromClientCheckpoints(session, {
-          userBubbleIndex, bubbleText, totalUserBubbles, requester, edit: false,
+          userBubbleIndex, bubbleText, totalUserBubbles, edit: false,
         });
         return;
       }
@@ -9351,9 +8569,7 @@ Only continue if you trust this code.`,
         this.host.appendLine(
           `[rewind] map mismatch: ${userFacingRewindPoints(points).length} wire points vs ${totalUserBubbles} visible messages`,
         );
-        return void this.reportRequester(
-          requester,
-          "warning",
+        return void this.notifyUser("warning",
           "Grok's restore points no longer line up with this conversation, so rewinding could remove the wrong turn. Reload the window and try again.",
         );
       }
@@ -9362,23 +8578,10 @@ Only continue if you trust this code.`,
         // Bubble button: map visible user bubble → wire prompt_index (skips legacy hidden turns).
         target = resolveUserBubbleRewind(points, userBubbleIndex);
         if (!target) {
-          return void this.reportRequester(
-            requester,
-            "info",
+          return void this.notifyUser("info",
             "Can't rewind to this message — it's the latest turn, or the checkpoint is unavailable.",
           );
         }
-      } else if (requester) {
-        // The picker below is a host QuickPick, which a remote cannot see or
-        // answer — and on a cloud machine nobody can. Every remote rewind comes
-        // from a bubble button and carries its index, so this is unreachable in
-        // practice; it exists so that a future caller without one fails loudly
-        // instead of opening a dialog on an empty screen.
-        return void this.reportRequester(
-          requester,
-          "info",
-          "Pick the message to rewind to using the Rewind button on that message.",
-        );
       } else {
         // Gear / command palette: pick among user-facing points that aren't the tip.
         const facing = userFacingRewindPoints(points);
@@ -9434,8 +8637,7 @@ Only continue if you trust this code.`,
         session.userMessageCount !== userMessageCount ||
         ["working", "needs-you"].includes(session.status)
       ) {
-        return void this.reportRequester(
-          requester, "warning",
+        return void this.notifyUser("warning",
           "Rewind cancelled because the conversation changed or another turn started. Nothing was rewound. Try Rewind again when the conversation is idle.",
         );
       }
@@ -9445,13 +8647,13 @@ Only continue if you trust this code.`,
       });
       if (result === "unsupported") {
         await this.rewindFromClientCheckpoints(session, {
-          userBubbleIndex, bubbleText, totalUserBubbles, requester, edit: false,
+          userBubbleIndex, bubbleText, totalUserBubbles, edit: false,
         });
         return;
       }
       if (!result.success) {
         const err = result.error || "Rewind did not apply (no changes).";
-        return void this.reportRequester(requester, "error", err);
+        return void this.notifyUser("error", err);
       }
 
       const reportedFiles = result.revertedFiles.length;
@@ -9477,20 +8679,18 @@ Only continue if you trust this code.`,
       // off. So the QuickPick path (no bubble) restores nothing rather than
       // pasting plumbing into the composer.
       const restored = (bubbleText ?? "").trim();
-      if (restored) this.restoreComposerFor(session, requester, restored);
+      if (restored) this.restoreComposerFor(session, restored);
       // Only speak up when something happened the chat itself doesn't show.
       // The messages vanishing and the text landing in the composer are their
       // own feedback; a toast restating them is noise. Reverted files are NOT
       // visible in the chat, so those still get reported.
       if (reportedFiles > 0) {
-        this.reportRequester(
-          requester,
-          "info",
+        this.notifyUser("info",
           "Rewound. Files were rolled back — anything created after that point may still be on disk.",
         );
       }
     } catch (e: any) {
-      this.reportRequester(requester, "error", `Rewind failed: ${e?.message ?? e}`);
+      this.notifyUser("error", `Rewind failed: ${e?.message ?? e}`);
     }
   }
 
@@ -9642,12 +8842,6 @@ Only continue if you trust this code.`,
    * fresh session whose cwd is that worktree. Edits stay out of the main
    * checkout until the user runs Apply Worktree.
    */
-  /**
-   * Create an isolated worktree session. Authorization (git worktree list /
-   * path containment) is unchanged for remote callers — only the label prompt
-   * is skipped when `fromRemote` is true so a phone tap never stalls on a desk
-   * input box (auto-named worktree instead).
-   */
   /** Command Palette / `companions.runCrew` — same as typing `/crew`. */
   /** E-03: focus the conversation of the running (or last) Crew run. */
   async showCrewRun(): Promise<void> {
@@ -9682,10 +8876,10 @@ Only continue if you trust this code.`,
   }
 
   async runCrewCommand(): Promise<void> {
-    await this.handleCrewCommand("/crew", this.focused, "local");
+    await this.handleCrewCommand("/crew", this.focused);
   }
 
-  async newWorktreeSession(opts?: { fromRemote?: boolean }): Promise<void> {
+  async newWorktreeSession(): Promise<void> {
     // No worktree-from-worktree — checkouts stay singular. The gear hides this
     // inside a worktree; guard the Command-Palette path too.
     if (this.focused.worktree) {
@@ -9727,7 +8921,7 @@ Only continue if you trust this code.`,
     }
     this.worktreeCreateInFlight = true;
     try {
-      await this.createWorktreeSession(sourcePath, opts);
+      await this.createWorktreeSession(sourcePath);
     } finally {
       this.worktreeCreateInFlight = false;
     }
@@ -9737,22 +8931,14 @@ Only continue if you trust this code.`,
   private worktreeCreateInFlight = false;
 
   /** The body of {@link newWorktreeSession}, run under its single-flight guard. */
-  private async createWorktreeSession(
-    sourcePath: string,
-    opts?: { fromRemote?: boolean },
-  ): Promise<void> {
-    // Remote origin: skip the host input box (invisible to the phone). Local
-    // and Command Palette still prompt for an optional label.
-    let label = "";
-    if (!opts?.fromRemote) {
-      const rawLabel = await this.host.showInputBox({
-        prompt: "Worktree label (optional)",
-        placeHolder: "e.g. feat-auth — leave blank for an auto name",
-        ignoreFocusOut: true,
-      });
-      if (rawLabel === undefined) return; // cancelled
-      label = sanitizeWorktreeLabel(rawLabel);
-    }
+  private async createWorktreeSession(sourcePath: string): Promise<void> {
+    const rawLabel = await this.host.showInputBox({
+      prompt: "Worktree label (optional)",
+      placeHolder: "e.g. feat-auth — leave blank for an auto name",
+      ignoreFocusOut: true,
+    });
+    if (rawLabel === undefined) return; // cancelled
+    const label = sanitizeWorktreeLabel(rawLabel);
 
     await this.host.withProgress(
       { title: "Creating git worktree…", cancellable: false },
@@ -10342,42 +9528,6 @@ Only continue if you trust this code.`,
     );
   }
 
-  /**
-   * Get an AcpClient that can call worktree/create against `sourcePath`.
-   * Returns `{ disposeAfter:true }` when we spun up a temporary process.
-   */
-  private async clientForWorktreeCreate(
-    sourcePath: string,
-  ): Promise<{ client: AcpClient; disposeAfter: boolean } | undefined> {
-    // Reuse a live workspace-root session when we have one (cheap + no orphan).
-    for (const s of this.pool) {
-      if (s.client?.sessionId && pathsEqual(this.sessionCwd(s), sourcePath)) {
-        return { client: s.client, disposeAfter: false };
-      }
-    }
-    if (this.focused.client?.sessionId && pathsEqual(this.sessionCwd(this.focused), sourcePath)) {
-      return { client: this.focused.client, disposeAfter: false };
-    }
-    // Temporary client: initialize + session/new, caller disposes after create.
-    const cliPath = this.locateProvider("grok");
-    if (!cliPath) return undefined;
-    const client = new AcpClient({
-      cliPath,
-      cwd: sourcePath,
-      env: this.buildEnv(sourcePath),
-      log: (msg) => this.host.appendLine(msg),
-      grokVersion: this.providerCliVersions.grok,
-    });
-    // Minimal handlers so the handshake doesn't hang on server requests.
-    client.fsRead = async (p) => fs.readFileSync(p, "utf8");
-    client.fsWrite = async () => { /* create-only client */ };
-    // Owned by this client, so tearing it down takes its commands with it.
-    client.terminal = this.terminalManager.ownedBy(client);
-    await client.start();
-    await client.newSession();
-    return { client, disposeAfter: true };
-  }
-
   /** Merge the given session's worktree back into the main checkout.
    *  `skipConfirm` = the webview's custom confirm dialog already ran. */
   async applyFocusedWorktree(session: Session = this.focused, skipConfirm = false): Promise<void> {
@@ -10487,19 +9637,13 @@ Only continue if you trust this code.`,
     }
     try {
       // Any live process still using the worktree as cwd locks remove on Windows.
-      // Remember which remote tabs were attached to those sessions (the focused
-      // one included — desk↔remote co-attach): their conversation dies with the
-      // checkout, and they must be re-homed once the removal succeeds instead
-      // of being left on a dead session whose cwd no longer exists.
-      const strandedHolders = new Set<string>();
       for (const s of [...this.pool]) {
         if (s.worktree && pathsEqual(s.worktree.path, wt.path)) {
-          for (const holder of this.remoteClients.clientsForActiveValue(s)) strandedHolders.add(holder);
           // Detach, don't hand-roll: this used to drop the client without ending
           // the turn, so a cancel recovery armed before the removal still held a
           // live token and a matching generation and would respawn the session
           // against a checkout that no longer exists.
-          this.detachClient(s)?.dispose();
+          void this.detachClient(s)?.dispose();
           if (s !== session) this.pool.delete(s);
         }
       }
@@ -10522,7 +9666,7 @@ Only continue if you trust this code.`,
           this.host.appendLine(`[worktree] local remove failed (${local.error}); removing the checkout directly`);
           fs.rmSync(wt.path, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
         }
-        await this.finishRemovedWorktree(session, wt, strandedHolders, { removed: true });
+        await this.finishRemovedWorktree(session, wt, { removed: true });
         return;
       }
       this.host.appendLine("[worktree] using Grok RPC (clone mode available)");
@@ -10566,7 +9710,7 @@ Only continue if you trust this code.`,
           "Remove worktree needs a newer Grok Build CLI. Update via Settings → About.",
         );
       }
-      await this.finishRemovedWorktree(session, wt, strandedHolders, r);
+      await this.finishRemovedWorktree(session, wt, r);
     } catch (e: any) {
       void this.host.showErrorMessage(`Remove worktree failed: ${e?.message ?? e}`);
     }
@@ -10579,7 +9723,6 @@ Only continue if you trust this code.`,
   private async finishRemovedWorktree(
     session: Session,
     wt: { path: string; label: string; sourceGitRoot?: string },
-    strandedHolders: Set<string>,
     r: { removed: boolean },
   ): Promise<void> {
       // WHO OWNED IT — captured before the records that answer that are erased.
@@ -10618,25 +9761,9 @@ Only continue if you trust this code.`,
       // The catalog PROJECT that owned the worktree (captured above), not its
       // git root — that is the relationship the rail draws, and where the work
       // goes back to.
-      this.focused.cwd = worktreeOwnerCwd || wt.sourceGitRoot || this.historyCwdFor("local");
+      this.focused.cwd = worktreeOwnerCwd || wt.sourceGitRoot || this.historyCwdFor();
       await this.startSession();
       this.postSessionsList();
-      // Re-home the remote tabs that were on the removed worktree: a fresh
-      // snapshot gives each a new conversation in its selected repository —
-      // their old Session object is dead and its cwd is gone, so their next
-      // send (or a refresh-restore) had nowhere to land.
-      for (const holder of strandedHolders) {
-        // Cancel any live dictation FIRST: its voice entry still references
-        // the destroyed session, and a transcription completing after the
-        // re-home would submit old-conversation speech into the new one.
-        this.dropRemoteVoice(holder);
-        this.remoteClients.deleteActive(holder);
-        this.sendRemoteClient(holder, {
-          type: "error",
-          text: `Worktree "${wt.label}" was removed in VS Code, so that conversation ended. This tab now has a fresh session in its selected repository.`,
-        });
-        for (const message of this.buildRemoteSnapshot(holder)) this.sendRemoteClient(holder, message);
-      }
       void this.host.showInformationMessage(`Removed worktree "${wt.label}".`);
   }
 
@@ -12627,7 +11754,6 @@ Only continue if you trust this code.`,
         },
         "subagent",
         session,
-        "local",
         {
           runId: record.runId,
           step: 1,
@@ -12823,7 +11949,6 @@ Only continue if you trust this code.`,
           { goal: "", task: message, returnFormat: subagentReturnFormat() },
           "subagent",
           parent,
-          "local",
           {
             runId: reopened.runId,
             step: reopened.step,
@@ -13581,11 +12706,6 @@ Only continue if you trust this code.`,
     void this.state.update(REPO_ARCHIVES_KEY, next);
   }
 
-  private remoteTargetableCwd(cwd: string): boolean {
-    if (!cwd) return false;
-    return cwdIsAuthorized(cwd, this.authorizedSessionCwds(), pathsEqual);
-  }
-
   private postRepoCatalog(): void {
     this.normalizeArchiveChoices();
     // Both local and remote attached clients see the host's catalog: curated
@@ -13617,12 +12737,6 @@ Only continue if you trust this code.`,
     // history stuck on the open folder while the chat shows another project's
     // conversation is simply wrong: the user picked that conversation.
     //
-    // A remote still cannot drag this view. `selectRepo` routes by origin —
-    // `selectRemoteRepo` per client for remotes — so `selectedRepoCwd` is
-    // written by LOCAL selection only. That is what keeps the destructive
-    // actions this frame feeds (Clear-all's target, and the project name in its
-    // confirm dialog) aimed somewhere the user can actually see.
-    //
     // Desktop multi-folder already worked this way: selectedCwd tracks the open
     // folder the user chose, and may equal the active session cwd once a switch
     // settles.
@@ -13632,9 +12746,6 @@ Only continue if you trust this code.`,
       entries: localEntries,
       selectedCwd: localSelected,
       activeCwd,
-      // Local only. The remote frame below deliberately omits it: adding a
-      // project opens a native folder dialog on the desk, which a phone can
-      // neither see nor answer (remote-policy: `addProjectFolder` is host-local).
       canAddProject: this.canAddProjectFolder(),
       canCreateProject: this.canAddProjectFolder(),
       canCloneProject: this.canAddProjectFolder(),
@@ -13643,45 +12754,6 @@ Only continue if you trust this code.`,
       // window is there".
       workspaceCwd: this.workspaceRoot() || "",
     });
-    for (const clientId of this.remoteClients.clients()) {
-      this.sendRemoteClient(clientId, this.buildRemoteReposMsg(clientId, localEntries));
-    }
-  }
-
-  /**
-   * Remote `repos` frame with project-bearing fields scrubbed to the live
-   * authorized set. Per-tab state may still name a closed cwd (inbound refuse);
-   * the wire never does — {@link mayDeliverRemoteHostMsg} rejects otherwise.
-   */
-  private buildRemoteReposMsg(
-    clientId: string,
-    entries: RepoListEntry[] = this.localRepoCatalogEntries().map((entry) => ({
-      ...entry,
-      defaultProvider: this.defaultProviderForProject(entry.cwd),
-    })),
-  ): HostMsg {
-    const authorized = this.authorizedSessionCwds();
-    const selectedCwd =
-      authorizedListCwd(this.remoteClients.cwdIfPresent(clientId), authorized, pathsEqual) ?? "";
-    const active = this.remoteClients.active(clientId);
-    let activeCwd = selectedCwd;
-    if (active) {
-      const sc = this.sessionCwd(active);
-      if (authorizedListCwd(sc, authorized, pathsEqual)) activeCwd = sc;
-    }
-    // Per-tab fields and rows must still exclude projects actually removed.
-    const reachable = entries.filter((r) => cwdIsAuthorized(r.cwd, authorized, pathsEqual));
-    return {
-      type: "repos",
-      // Same catalog as local, less what a remote may not reach.
-      entries: reachable,
-      selectedCwd,
-      activeCwd,
-    };
-  }
-
-  private sendRemoteRepoCatalog(clientId: string): void {
-    this.sendRemoteClient(clientId, this.buildRemoteReposMsg(clientId));
   }
 
   /**
@@ -13724,11 +12796,10 @@ Only continue if you trust this code.`,
     cwd: string,
     limit: number | undefined,
     activeId: string | null | undefined,
-    scope: "local" | "remote" = "local",
   ): HostMsg {
     const hit = this.resolveLocalRepoTarget(cwd);
     if (!hit || !hit.available) {
-      this.host.appendLine(`[rail] listRepoSessions failed: project unavailable (${scope})`);
+      this.host.appendLine(`[rail] listRepoSessions failed: project unavailable`);
       return { type: "repoSessions", cwd, entries: [], dots: {}, total: 0, error: "project-unavailable" };
     }
     // Clamp: the rail wants a handful, and an unbounded limit would make every
@@ -13740,7 +12811,7 @@ Only continue if you trust this code.`,
       activeId,
     );
     if (list.type !== "sessions") {
-      this.host.appendLine(`[rail] listRepoSessions failed: session list unavailable (${scope})`);
+      this.host.appendLine(`[rail] listRepoSessions failed: session list unavailable`);
       return { type: "repoSessions", cwd: hit.cwd, entries: [], dots: {}, total: 0, error: "sessions-unavailable" };
     }
     return {
@@ -13755,24 +12826,8 @@ Only continue if you trust this code.`,
     };
   }
 
-  private sendRepoSessionsPreview(clientId: string, cwd: string, limit?: number): void {
-    const msg = this.buildRepoSessionsPreview(
-      cwd,
-      limit,
-      this.remoteActiveSessionId(clientId),
-      "remote",
-    );
-    this.sendRemoteClient(clientId, msg);
-  }
-
   private sendLocalRepoSessionsPreview(cwd: string, limit?: number): void {
-    const msg = this.buildRepoSessionsPreview(
-      cwd,
-      limit,
-      this.focused.activeSessionId,
-      "local",
-    );
-    this.postLocal(msg);
+    this.postLocal(this.buildRepoSessionsPreview(cwd, limit, this.focused.activeSessionId));
   }
 
   /**
@@ -14062,26 +13117,12 @@ Only continue if you trust this code.`,
     };
   }
 
-  /** Last GitHub device-login card, only for the tab that started it. */
-  private githubProjectSetupExtra(clientId: string): { github?: ProjectSetupGithub } {
-    const entry = this.githubDeviceLogin;
-    if (!entry?.last || entry.source === "settings") return {};
-    const live = entry.tabToken ? this.remoteClients.clientForTabToken(entry.tabToken) : undefined;
-    if (live === clientId || entry.clientId === clientId) return { github: entry.last };
-    return {};
-  }
-
-  private githubStatePayload(loginFlow?: ProjectSetupGithub): GithubState {
+  private githubStatePayload(): GithubState {
     const s = this.githubConnection;
-    const flow = loginFlow ?? (this.githubDeviceLogin?.last &&
-      (this.githubDeviceLogin.last.status === "starting" || this.githubDeviceLogin.last.status === "waiting")
-      ? this.githubDeviceLogin.last
-      : undefined);
     if (!s) {
       return {
         connected: false,
         cliPresent: true,
-        ...(flow ? { loginFlow: flow } : {}),
       };
     }
     return {
@@ -14091,23 +13132,22 @@ Only continue if you trust this code.`,
       ...(s.error ? { error: true } : {}),
       cliPresent: s.cliPresent,
       ...(s.message ? { message: s.message } : {}),
-      ...(flow ? { loginFlow: flow } : {}),
     };
   }
 
-  private githubStateMessage(loginFlow?: ProjectSetupGithub): Extract<HostMsg, { type: "githubState" }> {
-    return { type: "githubState", github: this.githubStatePayload(loginFlow) };
+  private githubStateMessage(): Extract<HostMsg, { type: "githubState" }> {
+    return { type: "githubState", github: this.githubStatePayload() };
   }
 
-  private postGithubState(loginFlow?: ProjectSetupGithub): void {
-    const message = this.githubStateMessage(loginFlow);
+  private postGithubState(): void {
+    const message = this.githubStateMessage();
     this.post(message);
     void this.settingsEditor?.webview.postMessage(message);
   }
 
-  private async refreshGithubState(loginFlow?: ProjectSetupGithub): Promise<void> {
+  private async refreshGithubState(): Promise<void> {
     this.githubConnection = await readGithubAuthState();
-    this.postGithubState(loginFlow);
+    this.postGithubState();
   }
 
   private postProjectSetup(
@@ -14124,74 +13164,7 @@ Only continue if you trust this code.`,
    * something a knowledge-work user just named "Q3 Positioning" would be us
    * deciding they are writing software.
    */
-  /**
-   * Finish "add a project" for the surface that ASKED for it.
-   *
-   * `addProjectFolder` registers the project with the HOST — on desktop it adds
-   * and activates a workspace folder. That is the whole job at a desk, where the
-   * person who clicked is looking at the window that just changed. It is only
-   * half the job for a browser tab: a remote client carries its OWN selected
-   * repository (`RemoteClientState`), and nothing here was touching it.
-   *
-   * So the owner cloned a private repository onto a cloud machine, watched it
-   * appear, and then found an empty file explorer and a New Session that did
-   * nothing visible — because his tab was still bound to the project he started
-   * from, and both of those follow the TAB's repository, not the host's. One
-   * cause, two symptoms that look unrelated.
-   *
-   * "Done" has to mean usable from the surface that asked. Host-owned: this
-   * reuses the same `selectRemoteRepo` an explicit tap goes through, including
-   * its project checks, so it grants a remote nothing it could not
-   * already ask for.
-   */
-  private async enterProjectForRequester(
-    dest: string,
-    origin: MsgOrigin,
-    clientId?: string,
-    tabToken?: string,
-  ): Promise<void> {
-    if (origin !== "remote" || !clientId) return;
-    // FOLLOW THE TAB ACROSS A RECONNECT. A clone runs for seconds to minutes and
-    // a phone changing network in that window is ordinary, not exotic. When it
-    // reconnects, `identify()` moves the tab's state to a NEW client id and
-    // drops the old one — and `select()` THROWS for an id it does not know. So
-    // binding the id we were called with would report a successful clone as a
-    // failure, skip the `done` frame, leave the form spinning, and leave the tab
-    // on its old project: every symptom this method exists to prevent.
-    //
-    // `currentClient` resolves an old id to whatever connection owns that
-    // logical tab now, and returns undefined once the tab has genuinely gone —
-    // in which case there is nobody to enter the project for, and doing nothing
-    // is right. The tab binds itself on its next explicit resume.
-    // The TAB TOKEN is the durable identity; the client id is one connection.
-    // `currentClient` walks id -> token -> current id, which only works while
-    // the ORIGINAL id still remembers its token — and `deleteClient` deletes
-    // exactly that mapping. So when the relay reports the old connection's
-    // departure BEFORE the replacement identifies (an ordinary refresh, and
-    // ordinary ordering), the lookup came back empty and the clone reported
-    // success while leaving the tab on its previous project: the very symptom
-    // this method exists to close, found by the second review round.
-    //
-    // Capturing the token when the operation STARTS removes the dependency on
-    // that mapping surviving. Not a new mechanism — a better identifier.
-    const current = (tabToken && this.remoteClients.clientForTabToken(tabToken))
-      || this.remoteClients.currentClient(clientId);
-    // Registered, not "has a non-empty cwd" — and the difference is a user's
-    // FIRST project. `ready()` stores `defaultCwd`, which is "" when the host
-    // has no project open, and `select` gates on the key being PRESENT, not on
-    // it being truthy. Testing truthiness here skipped the bind for exactly the
-    // person who had nothing to bind to yet, then reported done. Found by the
-    // third review round; it was my own guard that introduced it.
-    if (!current || this.remoteClients.cwdIfPresent(current) === undefined) return;
-    await this.selectRemoteRepo(current, dest);
-  }
-
-  async createProject(name: string, origin: MsgOrigin = "local", clientId?: string): Promise<void> {
-    // Read BEFORE the long-running work: the connection that asked may be gone
-    // by the time it finishes, but its logical tab is what we want to land on.
-    const requesterTab = origin === "remote" && clientId
-      ? this.remoteClients.tabToken(clientId)
-      : undefined;
+  async createProject(name: string): Promise<void> {
     const nameError = projectNameError(name);
     if (nameError) {
       this.postProjectSetup({ error: nameError });
@@ -14221,7 +13194,6 @@ Only continue if you trust this code.`,
       return;
     }
     await this.addProjectFolder(dest);
-    await this.enterProjectForRequester(dest, origin, clientId, requesterTab);
     this.postProjectSetup({ done: true });
   }
 
@@ -14237,12 +13209,7 @@ Only continue if you trust this code.`,
    * username prompt against a terminal that does not exist, and the form waits
    * for ever instead of reporting an auth failure it could offer to fix.
    */
-  async cloneProject(url: string, origin: MsgOrigin = "local", clientId?: string, name?: string): Promise<void> {
-    // Read BEFORE the long-running work: the connection that asked may be gone
-    // by the time it finishes, but its logical tab is what we want to land on.
-    const requesterTab = origin === "remote" && clientId
-      ? this.remoteClients.tabToken(clientId)
-      : undefined;
+  async cloneProject(url: string, name?: string): Promise<void> {
     const urlError = cloneUrlError(url);
     if (urlError) {
       this.postProjectSetup({ error: urlError });
@@ -14303,24 +13270,15 @@ Only continue if you trust this code.`,
       return;
     }
     await this.addProjectFolder(dest);
-    await this.enterProjectForRequester(dest, origin, clientId, requesterTab);
     this.postProjectSetup({ done: true });
   }
 
   /**
-   * Run the GitHub CLI step the failed clone needs.
-   *
-   * A LOCAL webview still opens a terminal: `gh auth login` asks questions
-   * and opens a browser, and a package manager asks for elevation. A REMOTE
-   * `auth` has no terminal to look at, so it runs the headless device-code
-   * flow and reports the URL and code on `projectSetup.github`.
+   * Run the GitHub CLI step the failed clone needs, in a terminal: `gh auth
+   * login` asks questions and opens a browser, and a package manager asks for
+   * elevation.
    */
-  async setupGithubCli(
-    action: "install" | "auth",
-    origin: MsgOrigin = "local",
-    clientId?: string,
-    surface?: "settings",
-  ): Promise<void> {
+  async setupGithubCli(action: "install" | "auth"): Promise<void> {
     // `sendText`, not `shellPath`/`shellArgs`: both of these are command LINES
     // rather than one binary with arguments. Signing in has to run two commands
     // in order — see githubSignInCommand for why the second is not optional —
@@ -14328,27 +13286,9 @@ Only continue if you trust this code.`,
     // host routes it through planRunCommandInTerminal, which keeps the window
     // open so the outcome stays readable).
     if (action === "auth") {
-      if (origin === "remote") {
-        this.startGithubDeviceLogin(clientId, surface === "settings" ? "settings" : "clone");
-        return;
-      }
       const term = this.host.createTerminal({ name: "GitHub sign-in" });
       term.show();
       term.sendText(githubSignInCommand(process.platform));
-      return;
-    }
-    // INSTALL IS DESK-ONLY, and the check belongs here rather than in the
-    // client that already declines to send it. `setupGithubCli` is `full` in
-    // remote-policy.ts so that `auth` can run headlessly — but the policy gates
-    // a message TYPE, not the action inside it, so widening the type handed a
-    // remote the installer as well. A package manager asks for elevation, so
-    // there is no headless path to offer: the honest answer is the same one the
-    // clone form shows, and the relay-is-policy-free invariant means the HOST
-    // has to be the one refusing.
-    if (origin === "remote") {
-      this.postProjectSetup({
-        error: `Install the GitHub CLI from ${GITHUB_CLI_DOWNLOAD} on that computer, then try again.`,
-      });
       return;
     }
     const install = githubCliInstallCommand(process.platform);
@@ -14361,154 +13301,6 @@ Only continue if you trust this code.`,
     const term = this.host.createTerminal({ name: "Install GitHub CLI" });
     term.show();
     term.sendText(install.display);
-  }
-
-  /**
-   * Stop a headless GitHub login without reporting a failure. Closing the
-   * clone form, picking the token path, or starting again all land here so
-   * `gh` is not left polling.
-   */
-  private cancelGithubDeviceLogin(): void {
-    const running = this.githubDeviceLogin;
-    if (!running) return;
-    this.githubDeviceLogin = undefined;
-    try { running.handle?.cancel(); } catch { /* already gone */ }
-    this.postGithubState();
-  }
-
-  /**
-   * Headless `gh auth login --web` plus `gh auth setup-git`, reported only to
-   * the client that asked. A code is for the person holding that device.
-   */
-  private startGithubDeviceLogin(clientId?: string, source: "clone" | "settings" = "clone"): void {
-    if (this.githubDeviceLogin) {
-      const prev = this.githubDeviceLogin;
-      if (this.shouldAdoptInFlightDeviceLogin(prev, clientId)) {
-        prev.clientId = clientId;
-        if (clientId) prev.tabToken = this.remoteClients.tabToken(clientId) ?? prev.tabToken;
-        if (prev.last) prev.send(prev.last);
-        this.host.appendLine("[github] device login already in flight; repeated its state to the new tap");
-        return;
-      }
-      this.githubDeviceLogin = undefined;
-      try { prev.handle?.cancel(); } catch { /* already gone */ }
-    }
-
-    const gen = ++this.githubLoginGen;
-    const send = (github: ProjectSetupGithub) => {
-      const entry = this.githubDeviceLogin;
-      if (!entry || entry.gen !== gen) return;
-      entry.last = github;
-      const id = this.githubAskerId(clientId);
-      if (entry.source !== "settings") {
-        const message = this.projectSetupMessage({ github });
-        if (id) this.sendRemoteClient(id, message);
-        else this.post(message);
-      }
-      this.postGithubState(github);
-    };
-
-    this.githubDeviceLogin = {
-      gen,
-      clientId,
-      tabToken: clientId ? this.remoteClients.tabToken(clientId) : undefined,
-      source,
-      send,
-    };
-
-    if (!commandOnPath(GITHUB_CLI_BIN)) {
-      this.finishGithubDeviceLoginMissing();
-      return;
-    }
-
-    send({ status: "starting" });
-    this.host.appendLine("[github] device login started");
-    const workId = this.beginDeviceLoginWork();
-    const startedAt = Date.now();
-    let settled = false;
-    const handle = runGithubDeviceLogin(GITHUB_CLI_BIN, {
-      onPrompt: (prompt) => {
-        send({
-          status: "waiting",
-          url: prompt.url,
-          ...(prompt.code ? { code: prompt.code } : {}),
-        });
-      },
-      onDone: (result) => {
-        settled = true;
-        this.endDeviceLoginWork(workId);
-        if (this.githubDeviceLogin?.gen !== gen) return;
-        this.githubDeviceLogin.handle = undefined;
-        const elapsed = Math.round((Date.now() - startedAt) / 1000);
-        if (result.ok) {
-          this.host.appendLine(`[github] device login completed after ${elapsed}s`);
-          send({
-            status: "done",
-            message: source === "settings"
-              ? "GitHub connected."
-              : "Signed in to GitHub. Try to clone again.",
-          });
-          void this.refreshGithubState();
-          return;
-        }
-        if ("failure" in result) {
-          const failure = isGithubCliMissing(result.output) ? "missing" as const : result.failure;
-          this.host.appendLine(`[github] device login failed (${failure}) after ${elapsed}s`);
-          this.finishGithubDeviceLoginFailure(failure, { setupGit: !!result.setupGit });
-          return;
-        }
-        this.host.appendLine(`[github] device login cancelled after ${elapsed}s`);
-      },
-    });
-    if (!settled && this.githubDeviceLogin?.gen === gen) {
-      this.githubDeviceLogin.handle = handle;
-    }
-  }
-
-  /** The tab that started GitHub sign-in, wherever its socket is now. */
-  private githubAskerId(fallback?: string): string | undefined {
-    const entry = this.githubDeviceLogin;
-    const live = entry?.tabToken ? this.remoteClients.clientForTabToken(entry.tabToken) : undefined;
-    return live ?? entry?.clientId ?? fallback;
-  }
-
-  private postGithubProjectSetup(
-    extra: Omit<Extract<HostMsg, { type: "projectSetup" }>, "type" | "root">,
-  ): void {
-    const message = this.projectSetupMessage(extra);
-    const id = this.githubAskerId();
-    if (id) this.sendRemoteClient(id, message);
-    else this.post(message);
-  }
-
-  private finishGithubDeviceLoginMissing(): void {
-    const offer = githubFixFor(process.platform, commandOnPath);
-    const extra: Omit<Extract<HostMsg, { type: "projectSetup" }>, "type" | "root"> =
-      offer.kind === "install"
-        ? { error: githubDeviceLoginFailureText("missing"), fix: "install-gh", fixCommand: offer.command }
-        : offer.kind === "download"
-          ? { error: `${githubDeviceLoginFailureText("missing")} Install it from ${offer.where} first.` }
-          : { error: githubDeviceLoginFailureText("missing"), fix: "install-gh" };
-    this.postGithubProjectSetup(extra);
-    this.githubDeviceLogin = undefined;
-    void this.refreshGithubState();
-  }
-
-  private finishGithubDeviceLoginFailure(
-    failure: Parameters<typeof githubDeviceLoginFailureText>[0],
-    opts: { setupGit?: boolean } = {},
-  ): void {
-    if (failure === "missing") {
-      this.finishGithubDeviceLoginMissing();
-      return;
-    }
-    const error = githubDeviceLoginFailureText(failure, opts);
-    this.postGithubProjectSetup({
-      error,
-      ...(failure === "unsupported" ? {} : { fix: "auth-gh" as const }),
-    });
-    this.githubDeviceLogin = undefined;
-    void this.refreshGithubState();
   }
 
   private async listGithubRepos(): Promise<void> {
@@ -14530,8 +13322,7 @@ Only continue if you trust this code.`,
    * Sign out of GitHub. An environment token outranks the keyring and cannot
    * be cleared from here — the snapshot after logout says so.
    */
-  private async githubSignOut(origin: MsgOrigin = "local"): Promise<void> {
-    if (origin === "remote" && !isCloudEnvironment()) return;
+  private async githubSignOut(): Promise<void> {
     const current = this.githubConnection;
     const login = current?.login;
     if (current?.envTokenInForce) {
@@ -14719,21 +13510,17 @@ Only continue if you trust this code.`,
 
   /**
    * Public: close a project folder from the desktop File menu. Closing is a
-   * **revocation**, not a catalog filter: sessions bound to the folder end,
-   * remote ownership on that cwd is released, and image handles under it are
-   * dropped. Closing the last folder leaves an empty rail (no re-seed).
+   * **revocation**, not a catalog filter: sessions bound to the folder end and
+   * image handles under it are dropped. Closing the last folder leaves an
+   * empty rail (no re-seed).
    */
-  async removeProjectFolder(
-    cwd?: string,
-    origin: MsgOrigin = "local",
-    clientId?: string,
-  ): Promise<void> {
+  async removeProjectFolder(cwd?: string): Promise<void> {
     if (!this.host.canSwitchWorkspaceFolder) {
       // VS Code: the only thing there is to remove is a folder the user ADDED
       // by hand. Everything else in the catalog is there because Grok has run
       // in it, and no button here would change that. Without this the added
       // folder was permanent — a mistaken or sensitive directory stayed
-      // selectable, and remotely browsable and editable, for ever.
+      // selectable for ever.
       await this.forgetExtraProjectFolder(cwd);
       return;
     }
@@ -14745,25 +13532,6 @@ Only continue if you trust this code.`,
     // silently. Ask first. The revoke recomputes its own list at use time, so
     // nothing here goes stale across the await.
     const working = this.sessionsBoundToFolder(target).filter(sessionHasWorkInFlight);
-    if (working.length && origin === "remote") {
-      // A REMOTE cannot answer a native modal, and on a cloud machine there is
-      // nobody at the screen it would open on: the host would wait for a click
-      // that can never come, and the browser would sit there having been told
-      // nothing. That is the exact silence this release exists to remove, so it
-      // must not come back through the door the same release opened.
-      //
-      // Refused rather than assumed. The browser's own confirmation asks a
-      // DIFFERENT question — it says nothing is deleted and the folder stays on
-      // disk — so it is not consent to end a turn in progress and throw the work
-      // away. Stopping the turn is one tap, and it is the user's call to make.
-      const many = working.length > 1;
-      const text = `“${path.basename(target)}” still has `
-        + `${many ? `${working.length} conversations` : "a conversation"} working. `
-        + `Hiding it would end ${many ? "them" : "it"} and discard the turn in `
-        + "progress. Stop it first, then hide the project.";
-      if (clientId) this.sendRemoteClient(clientId, { type: "error", text });
-      return;
-    }
     if (working.length) {
       const many = working.length > 1;
       const ok = await this.host.showWarningMessage(
@@ -14783,8 +13551,8 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       void this.host.showWarningMessage(`Could not close folder:\n${target}`);
       return;
     }
-    // Revoke first so a concurrent remote send cannot still route to a doomed
-    // session after the folder is gone from the open set.
+    // Revoke first so a concurrent send cannot still route to a doomed session
+    // after the folder is gone from the open set.
     this.revokeClosedProjectFolder(target);
 
     const next = this.host.workspaceRoot();
@@ -14870,22 +13638,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
 
     const doomed = this.sessionsBoundToFolder(closedCwd);
 
-    for (const s of doomed) {
-      const remoteHolders = this.remoteClients.clientsForActiveValue(s);
-      this.disposeSession(s);
-      for (const clientId of remoteHolders) {
-        this.rehomeRemoteClientAfterFolderClose(clientId, closedCwd);
-      }
-    }
-
-    // Clients whose selected repo was the closed folder (even with no session).
-    for (const clientId of this.remoteClients.clients()) {
-      const cwd = this.remoteClients.cwdIfPresent(clientId);
-      if (cwd && pathBoundToClosedFolder(cwd, closedCwd, pathsEqual)) {
-        this.remoteClients.deleteActive(clientId);
-        this.rehomeRemoteClientAfterFolderClose(clientId, closedCwd);
-      }
-    }
+    for (const s of doomed) void this.disposeSession(s);
 
     this.invalidateImageHandlesUnder(closedCwd);
 
@@ -14915,36 +13668,6 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     this.host.appendLine(`[auth] revoked project folder ${closedCwd} (epoch=${this.authEpoch})`);
   }
 
-  /** Re-point a remote tab at a remaining open folder, or leave it unbound. */
-  private rehomeRemoteClientAfterFolderClose(clientId: string, closedCwd: string): void {
-    const next =
-      this.openWorkspaceFolders().find((c) => !pathsEqual(c, closedCwd)) ||
-      this.host.workspaceRoot() ||
-      "";
-    try {
-      if (next && this.isAuthorizedCwd(next)) {
-        this.remoteClients.select(clientId, next);
-      } else if (this.remoteClients.cwdIfPresent(clientId)) {
-        // Keep the client alive but clear the active session; bound-cwd checks
-        // refuse ops until the tab selects an authorized repo.
-        this.remoteClients.deleteActive(clientId);
-        // Leave *client state* pointing at the closed path so selectRepo is
-        // required (isAuthorizedCwd(closed) is false → send/cancel refused).
-        // Outbound `repos`/`initialState` scrub that path to empty — the choke
-        // point rejects a closed selectedCwd on the wire.
-      }
-      this.sendRemoteRepoCatalog(clientId);
-      this.sendRemoteClient(clientId, {
-        type: "error",
-        text: "That project folder was closed on the desktop. Select another project to continue.",
-      });
-    } catch (e) {
-      this.host.appendLine(
-        `[auth] rehome remote client failed: ${(e as Error)?.message ?? e}`,
-      );
-    }
-  }
-
   private invalidateImageHandlesUnder(closedCwd: string): void {
     const handles = imageHandlesToRevoke(this.fullImagePaths, closedCwd, pathsEqual);
     for (const handle of handles) {
@@ -14955,8 +13678,8 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
   }
 
   /**
-   * Cancel local + remote voice bound to a just-closed project folder so a late
-   * transcript cannot land on a rehomed session or different focused project.
+   * Cancel voice bound to a just-closed project folder so a late transcript
+   * cannot land on a rehomed session or different focused project.
    */
   private revokeVoiceForClosedFolder(closedCwd: string): void {
     if (
@@ -14966,73 +13689,6 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     ) {
       this.stopVoiceInput();
     }
-    for (const clientId of [...this.remoteVoice.keys()]) {
-      const entry = this.remoteVoice.get(clientId);
-      if (!entry) continue;
-      const sessCwd = this.sessionCwd(entry.session);
-      if (
-        pathBoundToClosedFolder(entry.credentialCwd, closedCwd, pathsEqual) ||
-        sessionBoundToClosedFolder(
-          sessCwd,
-          entry.session.worktree?.path,
-          entry.session.worktree?.sourceGitRoot,
-          closedCwd,
-          pathsEqual,
-        )
-      ) {
-        this.dropRemoteVoice(clientId);
-      }
-    }
-  }
-
-  private async selectRemoteRepo(clientId: string, cwd: string): Promise<void> {
-    // Same catalog the client was sent (open folders on desktop, full on VS Code).
-    const hit = this.localRepoCatalogEntries().find((r) => pathsEqual(r.cwd, cwd));
-    if (!hit || !hit.available) return;
-    if (this.remoteVoice.has(clientId)) void this.handleRemoteVoiceStop(clientId, true);
-    this.parkRemoteSession(clientId);
-    this.remoteClients.select(clientId, hit.cwd);
-    this.sendRemoteRepoCatalog(clientId);
-
-    // A deliberate repository switch has its own rule: choose that repository's
-    // newest real conversation, or create a fresh one when it has no history.
-    // Do not route this through remoteSessionFor(): that method deliberately
-    // keeps the desk-adoption behavior for a tab that arrives with nothing of
-    // its own (Continue remotely / first visit).
-    const history = this.buildSessionsList(
-      hit.cwd,
-      { limit: Number.MAX_SAFE_INTEGER },
-      undefined,
-    );
-    const live = new Map(
-      [...this.pool]
-        .filter((session) => session.activeSessionId)
-        .map((session) => [session.activeSessionId!, session]),
-    );
-    const newest = history.type === "sessions"
-      ? mostRecentSession(history.entries.filter((entry) => {
-          const session = live.get(entry.id);
-          // An empty live session is not repository history; selecting a repo
-          // with no history should still make a new session.
-          return !session || session.hasHistory;
-        }))
-      : undefined;
-    if (newest) {
-      const liveSession = live.get(newest.id);
-      const ownedByOther = !!liveSession && this.remoteClients.clients().some((ownerId) =>
-        ownerId !== clientId && this.remoteClients.active(ownerId)?.activeSessionId === newest.id
-      );
-      // Re-selecting a repo whose conversation is already live must replay its
-      // buffer. focusRemoteSession needs no CLI; openRemoteSession would mint
-      // onboarding over a clientless live member. Another tab's live session
-      // still goes through openRemoteSession without a claim, which refuses
-      // the steal — selecting a repo is not an explicit conversation claim.
-      if (liveSession && !ownedByOther) this.focusRemoteSession(clientId, liveSession, false);
-      else await this.openRemoteSession(clientId, newest.id, newest.cwd, false);
-    } else {
-      await this.newRemoteSession(clientId, false);
-    }
-    this.sendRemoteRepoCatalog(clientId);
   }
 
   private async toggleRepoPin(cwd: string, pinned: boolean): Promise<void> {
@@ -15165,9 +13821,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
    *  Detached tabs keep META untouched until reattachment because
    *  `restoreComposer` is transient and has no recipient while detached. */
   private restorePersistedDraft(session: Session): void {
-    const hasComposer =
-      (session === this.focused && this.view !== undefined) ||
-      this.remoteClients.isActiveValueVisible(session);
+    const hasComposer = session === this.focused && this.view !== undefined;
     if (!hasComposer || session.needsProvider) return;
     const id = session.activeSessionId;
     if (!id) return;
@@ -15273,18 +13927,11 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     return { entries: filtered, dots };
   }
 
-  private postPinnedSessions(clientId?: string): void {
-    const hasRemote = this.remoteClients.clients().length > 0;
+  private postPinnedSessions(): void {
     // Desktop multi-folder rail OR the VS Code primary-side-bar projects view.
     const hasLocalRail = this.host.canSwitchWorkspaceFolder || !!this.projectsRail;
-    if (!clientId && !hasRemote && !hasLocalRail) return;
-    const message: HostMsg = { type: "pinnedSessions", ...this.buildPinnedSessions() };
-    if (clientId) {
-      this.sendRemoteClient(clientId, message);
-      return;
-    }
-    if (hasLocalRail) this.postLocal(message);
-    for (const id of this.remoteClients.clients()) this.sendRemoteClient(id, message);
+    if (!hasLocalRail) return;
+    this.postLocal({ type: "pinnedSessions", ...this.buildPinnedSessions() });
   }
 
   private annotateWorktreeLabels(
@@ -15477,13 +14124,9 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
    */
   async logout(
     provider: AcpProvider = "grok",
-    opts: { fromRemote?: boolean; report?: (text: string) => void } = {},
+    opts: { report?: (text: string) => void } = {},
   ): Promise<void> {
-    // Every failure below goes through here. A cloud environment has nobody at
-    // its desk: a modal blocks on an answer that never comes, and an error
-    // dialog is simply never seen — so the remote closed Settings believing it
-    // had signed out while the account stayed connected. Caught in review, after
-    // only the CONFIRMATION modal was made remote-aware.
+    // Every failure below goes through here.
     const fail = (text: string) => {
       this.host.appendLine(`[providers] ${text}`);
       if (opts.report) opts.report(text);
@@ -15496,41 +14139,25 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         fail(`${name} sign-out could not run because the ${name} CLI was not found. The account remains connected.`);
         return;
       }
-      // The modal is the DESK's confirmation step. A cloud environment has
-      // nobody at its desk, so showing one there asks a question no one can
-      // answer and the sign-out simply never happens. The remote already
-      // clicked Sign out on the only surface that host has.
-      if (!opts.fromRemote) {
-        const choice = await this.host.showWarningMessage(
-          `Sign out of ${name}? This clears the ${name} CLI's cached credentials.`,
-          { modal: true },
-          "Sign Out",
-        );
-        if (choice !== "Sign Out") return;
-      }
+      const choice = await this.host.showWarningMessage(
+        `Sign out of ${name}? This clears the ${name} CLI's cached credentials.`,
+        { modal: true },
+        "Sign Out",
+      );
+      if (choice !== "Sign Out") return;
       const logoutArgs = (provider === "claude" || provider === "gemini") ? ["auth", "logout"] : ["logout"];
       try {
         await execGrokCli(cliPath, logoutArgs, { timeout: 30_000, windowsHide: true });
       } catch (error) {
         const code = (error as NodeJS.ErrnoException).code;
         if (code === "ENOENT" || code === "EACCES" || code === "EPERM") {
-          // The terminal fallback is a DESK affordance: it works because someone
-          // is there to read it. On a cloud box it opens a window nobody sees and
-          // reports success that never happened, so that path is desk-only.
-          if (!opts.fromRemote) {
-            this.host.createTerminal({ name: `${name} Logout`, shellPath: cliPath, shellArgs: logoutArgs }).show();
-            // The cause, in the log, next to the sentence that hides it. This
-            // branch fires when the resolved CLI cannot be executed at all —
-            // on Windows that is almost always an extensionless npm shim run
-            // without a shell — and the user-facing text cannot say that, so
-            // for months the only record was "could not be observed" with no
-            // path and no errno (owner hit it on a stale extension host,
-            // 2026-08-31).
-            this.host.appendLine(`[providers] ${provider} logout spawn failed: ${cliPath} (${code}) ${errorDetail(error)}`);
-            fail(`${name} sign-out could not be observed, so it was opened in a terminal. The account remains connected until sign-out is confirmed.`);
-          } else {
-            fail(`${name} sign-out could not run here: ${errorDetail(error)}. The account remains connected.`);
-          }
+          this.host.createTerminal({ name: `${name} Logout`, shellPath: cliPath, shellArgs: logoutArgs }).show();
+          // The cause, in the log, next to the sentence that hides it. This
+          // branch fires when the resolved CLI cannot be executed at all —
+          // on Windows that is almost always an extensionless npm shim run
+          // without a shell — and the user-facing text cannot say that.
+          this.host.appendLine(`[providers] ${provider} logout spawn failed: ${cliPath} (${code}) ${errorDetail(error)}`);
+          fail(`${name} sign-out could not be observed, so it was opened in a terminal. The account remains connected until sign-out is confirmed.`);
         } else {
           fail(`${name} sign-out failed: ${errorDetail(error)}. The account remains connected.`);
         }
@@ -15545,30 +14172,15 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       this.post({ type: "onboarding", state: "missing-cli", platform: process.platform, provider: "grok" });
       return;
     }
-    if (!opts.fromRemote) {
-      const choice = await this.host.showWarningMessage(
-        "Sign out of Grok? This clears the CLI's cached credentials.",
-        { modal: true },
-        "Sign Out",
-      );
-      if (choice !== "Sign Out") return;
-      // shellPath/shellArgs, not sendText — a quoted path typed into PowerShell
-      // is parsed as a string literal rather than an invocation.
-      this.host.createTerminal({ name: "Grok Logout", shellPath: cliPath, shellArgs: ["logout"] });
-      await this.finishProviderLogout("grok", opts.report);
-      return;
-    }
-    // A terminal nobody can see is not evidence. Run it and WAIT, so the
-    // disconnected state is recorded only if the CLI actually cleared the
-    // credential — the desk path can be optimistic because a person is watching
-    // the terminal it opened.
-    try {
-      await execGrokCli(cliPath, ["logout"], { timeout: 30_000, windowsHide: true });
-    } catch (error) {
-      fail(`Grok sign-out failed: ${errorDetail(error)}. The account remains connected.`);
-      this.postProviderState();
-      return;
-    }
+    const choice = await this.host.showWarningMessage(
+      "Sign out of Grok? This clears the CLI's cached credentials.",
+      { modal: true },
+      "Sign Out",
+    );
+    if (choice !== "Sign Out") return;
+    // shellPath/shellArgs, not sendText — a quoted path typed into PowerShell
+    // is parsed as a string literal rather than an invocation.
+    this.host.createTerminal({ name: "Grok Logout", shellPath: cliPath, shellArgs: ["logout"] });
     await this.finishProviderLogout("grok", opts.report);
   }
 
@@ -15577,10 +14189,6 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     report?: (text: string) => void,
   ): Promise<void> {
     this.setProviderConnectedInMemory(provider, false);
-    // Next sign-in starts at step 1 again. The latch stops the advice from
-    // repeating inside one flow; a sign-out ends the flow, and the account
-    // setting it names is the first thing to check before the next one.
-    this.deviceLoginPreflightShown.delete(provider);
     const reset = this.resetProviderSessionsAfterLogout(provider);
     try {
       await this.persistProviderConnections();
@@ -15589,7 +14197,6 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       const detail = errorDetail(error);
       this.host.appendLine(`[providers] ${providerName} signed out, but saving connection state failed: ${detail}`);
       const text = `${providerName} signed out and its conversations were reset, but the disconnected state could not be saved: ${detail}`;
-      // Same reason as the failures above: on a cloud box a dialog is nobody's.
       if (report) report(text);
       else await this.host.showErrorMessage(text);
     }
@@ -15598,16 +14205,6 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
   }
 
   private async resetProviderSessionsAfterLogout(provider: AcpProvider): Promise<void> {
-    const affectedClients = this.remoteClients.clients().filter(
-      (clientId) => this.remoteClients.active(clientId)?.provider === provider,
-    );
-    const queuedByClient = new Map(affectedClients.map((clientId) => {
-      const active = this.remoteClients.active(clientId);
-      return [clientId, {
-        id: active?.activeSessionId,
-        text: active ? queuedSendsText(active.queuedSends) : "",
-      }] as const;
-    }));
     const connected = this.connectedProviders();
     // Never the opposite provider just because this one signed out: with nothing
     // connected that mints a session bound to an account the user does not have,
@@ -15617,50 +14214,16 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     const needsProvider = connected.length === 0;
     const replacementProvider = (cwd: string) => this.defaultProviderForProject(cwd);
     const providerName = providerDisplayName(provider);
-    const detachedReplacements: Session[] = [];
-    const detachedSessions = this.remoteClients.replaceDetachedActiveWhere(
-      (session) => session.provider === provider,
-      (cwd, session) => {
-        const replacement = new Session();
-        replacement.provider = replacementProvider(cwd);
-        replacement.needsProvider = needsProvider;
-        replacement.priming = connected.length > 0;
-        this.setSessionCwd(replacement, cwd, this.workspaceRoot());
-        replacement.lastActiveAt = Date.now();
-        const queuedText = queuedSendsText(session.queuedSends);
-        // Nothing will start this tab until an account comes back, so the draft
-        // has to outlive the buffered notice below (a start clears the buffer).
-        if (queuedText) {
-          replacement.strandedDraft = queuedText;
-          replacement.strandedDraftSessionId = session.activeSessionId;
-        }
-        replacement.buffer.push({ type: "clearMessages" });
-        // A sign-out notice is momentary UI, never conversation history. A tab
-        // that was detached at the instant of sign-out misses the notice; its
-        // draft remains safe in META and is restored after a successful start.
-        detachedReplacements.push(replacement);
-        return replacement;
-      },
+    const affectedSessions = new Set<Session>(
+      [...this.pool].filter((session) => session.provider === provider),
     );
-    const affectedSessions = new Set<Session>([
-      ...[...this.pool].filter((session) => session.provider === provider),
-      ...affectedClients
-        .map((clientId) => this.remoteClients.active(clientId))
-        .filter((session): session is Session => !!session),
-      ...detachedSessions,
-    ]);
     if (this.focused.provider === provider) affectedSessions.add(this.focused);
     const replacingFocused = this.focused.provider === provider;
     const focusedQueuedText = replacingFocused ? queuedSendsText(this.focused.queuedSends) : "";
     const focusedDraftId = replacingFocused ? this.focused.activeSessionId : undefined;
     const focusedCwd = replacingFocused ? this.sessionCwd(this.focused) : "";
     const backgroundQueued = [...affectedSessions]
-      .filter((session) =>
-        session !== this.focused &&
-        !this.remoteClients.isActiveValueVisible(session) &&
-        !detachedSessions.includes(session) &&
-        session.queuedSends.length > 0
-      )
+      .filter((session) => session !== this.focused && session.queuedSends.length > 0)
       .map((session) => ({
         id: session.activeSessionId,
         name: this.sessionDisplayName(session) || "a background conversation",
@@ -15689,7 +14252,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     // Atomic boundary: detach every signed-out-provider client before any
     // replacement startup can await. Membership is provider identity only;
     // another provider's crashed/clientless session remains resumable.
-    for (const session of affectedSessions) this.disposeSession(session);
+    for (const session of affectedSessions) void this.disposeSession(session);
     for (const shell of shells) {
       if (isAdapterProvider(shell.provider)) {
         void this.discardAdapterEmptySession(shell.provider, shell.id, shell.cwd);
@@ -15723,51 +14286,10 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       else this.post({ type: "onboarding", state: "connect-agent", platform: process.platform });
     }
 
-    const remoteReplacements = new Map<string, Session>();
-    for (const clientId of affectedClients) {
-      this.dropRemoteVoice(clientId);
-      this.remoteClients.deleteActive(clientId);
-      const cwd = this.remoteClients.cwd(clientId);
-      const replacement = new Session();
-      replacement.provider = replacementProvider(cwd);
-      replacement.needsProvider = needsProvider;
-      replacement.priming = connected.length > 0;
-      this.setSessionCwd(replacement, cwd, this.workspaceRoot());
-      replacement.lastActiveAt = Date.now();
-      this.remoteClients.setActive(clientId, replacement);
-      remoteReplacements.set(clientId, replacement);
-      this.emit(replacement, { type: "clearMessages" });
-      const queued = queuedByClient.get(clientId);
-      if (queued?.text) {
-        replacement.strandedDraft = queued.text;
-        replacement.strandedDraftSessionId = queued.id;
-      }
-      if (connected.length) {
-        this.emit(replacement, { type: "setBusy", value: true, locked: true });
-      } else {
-        this.sendRemoteClient(
-          clientId,
-          this.buildSessionsList(this.remoteClients.cwd(clientId), undefined, null),
-        );
-        this.sendRemoteClient(clientId, {
-          type: "onboarding",
-          state: "connect-agent",
-          platform: process.platform,
-        });
-      }
-      this.sendRemoteClient(clientId, {
-        type: "error",
-        text: `${providerName} was signed out, so that conversation ended. This tab has been reset${connected.length ? " to a fresh session" : ""}.`,
-      });
-    }
-
     // A background conversation's draft belongs to that conversation, not to
-    // whoever happens to be focused: `post` forwards to the remote clients
-    // attached to the focused session, so an unrelated phone tab received text
-    // typed into a different conversation — and being unbuffered, the only copy
-    // died on the next focus switch or reload. The draft is persisted to its own
-    // meta (restored by `restorePersistedDraft` when that conversation next
-    // starts) and the desk gets a transient, content-light pointer to it.
+    // whoever happens to be focused. The draft is persisted to its own meta
+    // (restored by `restorePersistedDraft` when that conversation next starts)
+    // and the view gets a transient, content-light pointer to it.
     const draftNoticeTarget = localReplacement ?? this.focused;
     for (const queued of backgroundQueued) {
       if (!queued.id) {
@@ -15783,46 +14305,18 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       });
     }
 
-    // Startup begins only after the atomic disposal/re-home phase above. Sends
-    // during any stall now target an inert replacement and stay composer/queue
-    // owned; no signed-out client remains reachable locally or remotely.
+    // Startup begins only after the atomic disposal phase above. Sends during
+    // any stall now target an inert replacement and stay composer/queue owned;
+    // no signed-out client remains reachable.
     if (localReplacement && connected.length) {
       const started = await this.startSession(undefined, localReplacement);
       if (started && !localReplacement.needsProvider) this.restoreStrandedDraft(localReplacement);
     }
-    if (connected.length) {
-      for (const [clientId, replacement] of remoteReplacements) {
-        const started = await this.startSession(undefined, replacement);
-        if (started && !replacement.needsProvider) this.restoreStrandedDraft(replacement);
-        await this.persistWorktreeBinding(replacement);
-        this.sweepEmptySessions(this.sessionCwd(replacement));
-        this.sendRemoteSessionList(replacement, this.remoteClients.tabToken(clientId));
-      }
-    }
-    for (const replacement of detachedReplacements) this.pool.add(replacement);
-    if (affectedClients.length) this.postRepoCatalog();
   }
 
   /**
-   * Adopt every view left agent-less by a last-provider sign-out.
-   *
-   * Signing back in used to fix only whichever session the `recheckConnection`
-   * arrived on — the desk, in practice — while every phone tab kept a
-   * replacement bound to nothing, with no action available on it. Provider
-   * connection is machine-wide, so the recovery has to be too: local focused,
-   * every remote tab, and the detached replacements sitting in the pool waiting
-   * for their tab to come back.
-   */
-  /**
-   * A provider just became usable — put every view that was waiting for one to
-   * work.
-   *
-   * Both ways in end here: Settings' "Check again" (`recheckConnection`) and
-   * the device-code sign-in a phone or a cloud machine uses. The second one did
-   * none of this until 2026-08-31: it promoted the account and stopped, so the
-   * tab that had just signed in kept an empty model picker and a card still
-   * offering to connect, and only a page reload — which starts a session for
-   * its own reasons — put the agent on screen.
+   * A provider just became usable (Settings' "Check again",
+   * `recheckConnection`) — put every session that was waiting for one to work.
    */
   private async adoptSessionsForConnectedProvider(
     provider: AcpProvider,
@@ -15902,13 +14396,6 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     };
     consider(this.focused);
     for (const session of this.pool) consider(session);
-    for (const session of this.remoteClients.detachedActiveValues()) consider(session);
-    const clientOf = new Map<Session, string>();
-    for (const clientId of this.remoteClients.clients()) {
-      const active = this.remoteClients.active(clientId);
-      consider(active);
-      if (active?.needsProvider) clientOf.set(active, clientId);
-    }
     if (!targets.size) return targets;
     // Bind and lock all of them before the first start can await, for the same
     // reason the sign-out path detaches before it starts: a send arriving
@@ -15924,12 +14411,6 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     // rather than becoming permanently unreachable.
     for (const session of targets) {
       const started = await this.startSession(undefined, session);
-      const clientId = clientOf.get(session);
-      if (clientId) {
-        await this.persistWorktreeBinding(session);
-        this.sweepEmptySessions(this.sessionCwd(session));
-        this.sendRemoteSessionList(session, this.remoteClients.tabToken(clientId));
-      }
       if (started && !session.needsProvider) this.restoreStrandedDraft(session);
     }
     return targets;
@@ -15941,12 +14422,9 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     if (this.routineTimer) { clearInterval(this.routineTimer); this.routineTimer = undefined; }
     if (this.workflowTimer) { clearInterval(this.workflowTimer); this.workflowTimer = undefined; }
     for (const timer of this.loginReprobeTimers.values()) clearTimeout(timer);
-    this.cancelAllDeviceLogins();
     this.loginReprobeTimers.clear();
     for (const timer of this.turnOrderTimers) clearTimeout(timer);
     this.turnOrderTimers.clear();
-    this.uplink?.dispose();
-    this.uplink = undefined;
     // Window reload and extension deactivation both land here. Closing the pipe
     // cancels every outstanding question first — a CLI blocked inside
     // `tools/call` has no timeout of its own and would wait for ever.
@@ -15974,7 +14452,6 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     this.configWatcher?.dispose();
     this.terminalManager.disposeAll();
     this.stopVoiceInput();
-    this.remoteClients.clear();
     try { if (this.voiceTempPath) fs.unlinkSync(this.voiceTempPath); } catch { /* best effort */ }
   }
 
@@ -16946,7 +15423,6 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     session.compactUsageArmed = false;
     session.adapterCompactThisTurn = false;
     session.adapterTurnCallUsed = [];
-    session.queuedSendDispatch = undefined;
     // session.authRecoveryTried deliberately NOT reset here: recoverAuthAndResend
     // calls startSession as its own retry, and a reset would let an entitlement
     // failure (#58) pay a full restart+resend cycle on every prompt. Only a clean
@@ -17032,7 +15508,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         };
       }
     }
-    if (this.mcpConnectorKeysReady) await this.mcpConnectorKeysReady;
+    if (this.mcpConnectorKeysReady !== undefined) await this.mcpConnectorKeysReady;
     if (gen !== session.gen) return undefined;
     const env = session.provider === "grok" ? this.buildEnv(cwd) : { ...process.env };
     session.compactThresholdRequested = session.provider === "grok" ? normalizeCompactThreshold(env[GROK_COMPACT_ENV]) : undefined;
@@ -17633,10 +16109,8 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         ...(turnIsInFlight(session) ? this.turnEndFields(session, "failed") : {}),
       });
       if (session.queuedSends.length) {
-        session.queuedSendDispatch = undefined;
         session.queuedSendCommit = undefined;
         session.queuedSends = [];
-        session.queuedSendRequiresRelay = false;
         this.emitQueuedSends(session);
       }
       this.setStatus(session, "error");
@@ -17678,7 +16152,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       const spawnAt = clock.now();
       await client.start();
       clock.record("spawn+init", clock.elapsed(spawnAt));
-      if (gen !== session.gen) { client.dispose(); return undefined; }
+      if (gen !== session.gen) { void client.dispose(); return undefined; }
       // AP-10: a role's model is set on the `newSession` path, before the first
       // turn, and NEVER by a live switch — the CLI locks the model's agent type
       // after turn one and a cross-agent `set_model` then fails with
@@ -17845,7 +16319,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
           } catch { /* best-effort */ }
         }
       }
-      if (gen !== session.gen) { client.dispose(); session.client = undefined; return undefined; }
+      if (gen !== session.gen) { void client.dispose(); session.client = undefined; return undefined; }
       this.host.appendLine(clock.summary(session.historyEventCount));
       this.postSessionName(session);
 
@@ -17919,7 +16393,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       if (session.client !== client) { this.pool.delete(session); return undefined; }
       return client;
     } catch (err) {
-      if (gen !== session.gen) { client.dispose(); return undefined; }
+      if (gen !== session.gen) { void client.dispose(); return undefined; }
       const msg = (err as any).message ?? String(err);
       // Decide the branch first: only the plain-failure path retries. Auth
       // must surface immediately; the Windows stdio pin has its own recovery.
@@ -17933,7 +16407,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       const userFacing = credentialFailure || stdioRegression || replayBegan || attempt >= startSpawnAttempts;
       client.removeAllListeners("exit");
       this.drainPendingConfirms(session);
-      client.dispose();
+      void client.dispose();
       session.client = undefined;
       if (!userFacing) {
         await new Promise<void>((resolve) => setTimeout(resolve, startSpawnBackoffMs[attempt - 1]));
@@ -18022,67 +16496,16 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     return undefined;
   }
 
-  private remoteSessionFor(clientId: string): Session {
-    const cwd = this.remoteClients.cwd(clientId);
-    const active = this.remoteClients.active(clientId);
-    if (active) return active;
-    if (this.remoteClients.requiresExplicitSession(clientId)) {
-      throw new Error(`Remote client ${clientId} has no session`);
-    }
-    // A tab arriving with nothing of its own — "Continue remotely", or a first
-    // visit — CONTINUES WHAT THE DESK IS DOING. That is the feature's whole
-    // promise, and desk↔remote co-attach is what finally makes it possible:
-    // before, a fresh tab got a blank session that had never been started, so
-    // it showed "Starting" forever and the first send silently began a
-    // SECOND conversation. Only within the tab's selected repo — adopting a
-    // session from another checkout would be cross-repo bleed. A tab that
-    // remembers its own conversation never reaches here (it resumes), and a
-    // deliberate New session still replaces this one.
-    const deskSession = this.focused;
-    const canAdoptDesk = shouldAdoptDeskSession(
-      this.sessionCwd(deskSession),
-      this.sessionCwdsForRepo(cwd, this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {})),
-      this.remoteClients.isActiveValueVisible(deskSession),
-      pathsEqual,
-    );
-    if (canAdoptDesk) {
-      this.remoteClients.setActive(clientId, deskSession);
-      return deskSession;
-    }
-    const session = new Session();
-    session.cwd = cwd;
-    session.provider = this.defaultProviderForProject(cwd);
-    this.remoteClients.setActive(clientId, session);
-    return session;
-  }
-
-  private async onMessage(msg: WebviewMsg, origin: MsgOrigin, clientId?: string): Promise<void> {
-    const remoteBound = origin === "remote" && clientId
-      ? this.remoteClients.active(clientId)
-      : undefined;
-    if (
-      origin === "remote" &&
-      clientId &&
-      remoteRequiresBoundSession(msg.type) &&
-      !remoteBound
-    ) {
-      this.refuseUnboundRemoteSession(clientId);
-      return;
-    }
-    let session = remoteBound ?? this.focused;
+  private async onMessage(msg: WebviewMsg): Promise<void> {
+    let session = this.focused;
     // X-01: an answer to a card relayed from a hidden child goes to the child.
     const relayed = this.resolveRelayedAnswer(msg);
     if (relayed) {
       session = relayed.session;
       msg = relayed.msg;
     }
-    const requester = origin === "remote" && clientId
-      ? this.captureRemoteRequester(clientId)
-      : undefined;
-    const attachmentOwner: AttachmentOwner = () => this.attachmentOwner(origin, clientId);
-    const messageCwd = origin === "remote" && clientId
-      ? this.remoteClients.cwd(clientId)
-      : this.workspaceRoot();
+    const attachmentOwner: AttachmentOwner = () => this.focused;
+    const messageCwd = this.workspaceRoot();
     switch (msg.type) {
       case "ready": {
         // Decide BEFORE postInitialState runs: its cold-start branch calls
@@ -18115,46 +16538,16 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         }
         break;
       }
-      case "remotePreferences":
-        if (origin === "remote" && clientId) {
-          if (
-            Number.isFinite(msg.fontScale) &&
-            msg.fontScale >= 80 &&
-            msg.fontScale <= 160
-          ) {
-            this.remoteClients.setMetadata(clientId, {
-              fontScale: msg.fontScale,
-              readRepliesAloud: msg.readRepliesAloud,
-              summarizeRepliesAloud:
-                msg.readRepliesAloud && msg.summarizeRepliesAloud === true,
-              usesTouch: msg.usesTouch,
-            });
-          }
-        }
-        break;
       case "composerFocus":
-        if (origin === "local") {
-          await this.host.setContext("grok.composerFocus", !!msg.focused);
-        }
+        await this.host.setContext("grok.composerFocus", !!msg.focused);
         break;
       case "summarizeSpeech": {
-        const remotePreferences = origin === "remote" && clientId
-          ? this.remoteClients.metadata(clientId)
-          : undefined;
-        if (
-          origin === "remote" &&
-          (!requester ||
-            remotePreferences?.readRepliesAloud !== true ||
-            remotePreferences?.summarizeRepliesAloud !== true)
-        ) break;
         const text = await summarizeForSpeech(
           msg.text,
           this.resolveVoiceApiKey(session.cwd || this.workspaceRoot()),
           (line) => this.host.appendLine(line),
         );
-        const response: HostMsg = { type: "speechSummary", requestId: msg.requestId, text };
-        if (requester) this.sendRemoteRequester(requester, response);
-        else this.postLocal(response);
+        this.postLocal({ type: "speechSummary", requestId: msg.requestId, text });
         break;
       }
       case "requestImageOriginal": {
@@ -18165,27 +16558,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         if (!source || !this.isImagePathAuthorizedNow(source, session)) break;
         const src = await this.readOriginalImage(source);
         if (!this.isImagePathAuthorizedNow(source, session)) break;
-        const response: HostMsg = { type: "imageOriginal", fullId: msg.fullId, requestId: msg.requestId, src };
-        if (requester) this.sendRemoteRequester(requester, response);
-        else this.postLocal(response);
-        break;
-      }
-      case "requestImageFull": {
-        // Local webviews open the real file directly, so this exists for remotes,
-        // which otherwise can only enlarge the 320px thumbnail.
-        if (origin !== "remote" || !requester) break;
-        const source = this.fullImagePaths.get(msg.fullId);
-        // Unknown handle: say nothing. The overlay keeps showing the thumbnail,
-        // and a probe learns nothing about what does or does not exist on disk.
-        if (!source) break;
-        // Revalidate against the current open set — a handle minted while a
-        // folder was open must not survive closing that folder.
-        if (!this.isImagePathAuthorizedNow(source)) {
-          this.host.appendLine(`[remote] refused imageFull (path no longer authorized)`);
-          break;
-        }
-        const src = await this.renderFullImage(source);
-        this.sendRemoteRequester(requester, { type: "imageFull", fullId: msg.fullId, src });
+        this.postLocal({ type: "imageOriginal", fullId: msg.fullId, requestId: msg.requestId, src });
         break;
       }
       case "send":
@@ -18198,62 +16571,27 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         // ordinary send before the duplicate-dequeue check below, which is one
         // of the few places in this file where the ordering is the behaviour.
         if (parseAgentCommand(msg.text).kind !== "none") {
-          await this.handleAgentCommand(msg.text, session, origin);
+          await this.handleAgentCommand(msg.text, session);
           break;
         }
         // AP-11, under the same rule as the guard above and for the same
         // reason: parsed SYNCHRONOUSLY, awaited only on a hit.
         if (parseHandoffCommand(msg.text).kind !== "none") {
-          await this.handleHandoffCommand(msg.text, session, origin);
+          await this.handleHandoffCommand(msg.text, session);
           break;
         }
         if (parseCrewCommand(msg.text).kind !== "none") {
-          await this.handleCrewCommand(msg.text, session, origin);
+          await this.handleCrewCommand(msg.text, session);
           break;
         }
         if (parseSubagentsCommand(msg.text).kind !== "none") {
           this.handleSubagentsCommand(msg.text, session);
           break;
         }
-        let queuedSendCommit: { text: string; items: QueuedSendEntry[] } | undefined;
-        if (origin === "remote" && msg.queuedSendId) {
-          if (session.completedQueuedSendIds.includes(msg.queuedSendId)) {
-            this.host.appendLine(`[queue] ignored duplicate remote dequeue ${msg.queuedSendId}`);
-            break;
-          }
-          const dispatch = session.queuedSendDispatch;
-          if (
-            !dispatch ||
-            dispatch.id !== msg.queuedSendId ||
-            dispatch.text.trim() !== msg.text.trim()
-          ) {
-            this.host.appendLine(`[queue] ignored stale or mismatched remote dequeue ${msg.queuedSendId}`);
-            break;
-          }
-          session.completedQueuedSendIds.push(dispatch.id);
-          if (session.completedQueuedSendIds.length > 32) session.completedQueuedSendIds.shift();
-          session.queuedSendDispatch = undefined;
-          queuedSendCommit = beginQueuedSendCommit(session, dispatch.text);
-          if (!queuedSendCommit) break;
-        }
-        else if (
-          origin === "remote" &&
-          session.queuedSendDispatch?.text.trim() === msg.text.trim()
-        ) {
-          this.host.appendLine("[queue] ignored an unidentifiable legacy dequeue echo");
-          break;
-        }
-        try {
-          await this.handleSend(msg.text, msg.bare === true, session, origin, queuedSendCommit, msg.submissionId);
-        } finally {
-          if (queuedSendCommit) finishQueuedSendCommit(session, queuedSendCommit, false);
-        }
+        await this.handleSend(msg.text, msg.bare === true, session, undefined, msg.submissionId);
         break;
       case "newSession":
-        // A remote's cwd is deliberately not forwarded: newRemoteSession starts
-        // in that tab's own repo, which is the only project it is entitled to.
-        if (origin === "remote" && clientId) await this.newRemoteSession(clientId);
-        else await this.newFocusedSession(origin, msg.cwd);
+        await this.newFocusedSession(msg.cwd);
         break;
       case "cancel": {
         // Stop stops the ROLE when one is running for this thread (AP-10) —
@@ -18274,13 +16612,6 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         const text = typeof msg.text === "string" ? msg.text : "";
         const chips = chipsForQueueSend(s.chips, msg.chips);
         if (text.trim() || chips.length) {
-          s.queuedSendDispatch = undefined;
-          // STICKY, never overwritten back to false: with desk↔remote
-          // co-attach both views append to ONE queue, and the combined flush
-          // is a single submission — if ANY contribution is remote it must
-          // round-trip the relay so it gets metered (a local overwrite here
-          // would flush remote text through the unmetered local branch).
-          if (origin === "remote") s.queuedSendRequiresRelay = true;
           s.queuedSends = enqueueQueuedSend(s.queuedSends, text, chips);
           s.chips = consumeChips(s.chips, chips);
           if (s === this.focused) this.refreshImplicitChip(true);
@@ -18296,19 +16627,16 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         // Remove / Steer. Chip-aware clients use `clearQueuedSends` for that
         // block, so this message keeps the pre-split meaning: the pending
         // block, not the first of several entries. Passing `false` is the
-        // capability gate — we cannot see whether a remote honored
-        // `queueSendChips`, and every client that still sends `dequeueSend`
-        // is the old one.
+        // capability gate — every client that still sends `dequeueSend` is the
+        // old one.
         const s = session;
         const result = dequeueQueuedSends(s.queuedSends, msg.index, false);
         if (result) {
-          s.queuedSendDispatch = undefined;
           s.queuedSendCommit = undefined;
           if (result.removed.some((item) => item.chips.length)) {
             s.chips = restoreQueuedChips(s.chips, result.removed);
           }
           s.queuedSends = result.rest;
-          if (!s.queuedSends.length) s.queuedSendRequiresRelay = false;
           if (s === this.focused) this.refreshImplicitChip(true);
           else this.postChips(s);
           this.emitQueuedSends(s);
@@ -18316,57 +16644,33 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         break;
       }
       case "steerSend":
-        await this.steerSend(msg.text, session, requester, msg.chips, msg.fromQueue === true);
+        await this.steerSend(msg.text, session, msg.chips, msg.fromQueue === true);
         break;
       case "turnFeedback":
-        await this.handleTurnFeedback(msg.rating, session, requester);
+        await this.handleTurnFeedback(msg.rating, session);
         break;
       case "forkSession":
-        if (this.refuseMismatchedSessionId(msg.sessionId, session, requester)) break;
-        await this.forkFocusedSession(session, requester);
+        if (this.refuseMismatchedSessionId(msg.sessionId, session)) break;
+        await this.forkFocusedSession(session);
         break;
       case "newWorktreeSession":
-        await this.newWorktreeSession({ fromRemote: origin === "remote" });
+        await this.newWorktreeSession();
         break;
       case "setAppPurpose": {
         const purpose = parseAppPurpose(msg.value);
         await this.state.update(APP_PURPOSE_KEY, purpose);
-        // Mirror to every open view (local + remote) so disclosure stays in sync.
         this.post({ type: "appPurpose", value: purpose });
         break;
       }
       case "applyWorktree":
         // The webview's custom confirm already ran (native modals stay only on
         // the Command-Palette path).
-        if (this.refuseMismatchedSessionId(msg.sessionId, session, requester)) break;
+        if (this.refuseMismatchedSessionId(msg.sessionId, session)) break;
         await this.applyFocusedWorktree(session, true);
         break;
       case "removeWorktree":
-        if (this.refuseMismatchedSessionId(msg.sessionId, session, requester)) break;
+        if (this.refuseMismatchedSessionId(msg.sessionId, session)) break;
         await this.removeFocusedWorktree(session, true);
-        break;
-      case "remoteSignIn":
-        await this.linkRemoteDevice();
-        break;
-      case "remoteSignOut":
-      case "unlinkRemoteDevice": {
-        // Desktop confirms natively for both messages. VS Code's palette still
-        // calls unlinkRemoteDevice() directly; a leftover remoteSignOut there
-        // stays immediate.
-        if (msg.type === "unlinkRemoteDevice" || this.host.canSwitchWorkspaceFolder) {
-          const name = deviceDisplayName(os.hostname(), process.platform, os.release());
-          const ok = await this.confirmHostExecute(
-            "Unlink this device?",
-            `${name} will be unlinked from AFK Pilot. Other devices will lose access to this machine.`,
-            "Unlink",
-          );
-          if (!ok) break;
-        }
-        await this.unlinkRemoteDevice();
-        break;
-      }
-      case "openRemotePortal":
-        void this.host.showInformationMessage("Remote portal is disabled in this standalone build.");
         break;
       case "rewindSession":
         await this.rewindFocusedSession(
@@ -18375,10 +16679,9 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
           // Was dropped here while editLastMessage forwarded it, so the
           // bubble<->restore-point consistency check never ran for the Rewind
           // button — the one path that reverts files without the user naming a
-          // target from a list. It matters more now that a remote can ask.
+          // target from a list.
           msg.totalUserBubbles,
           session,
-          requester,
         );
         break;
       case "uiConfirmAnswer": {
@@ -18398,7 +16701,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         break;
       }
       case "editLastMessage":
-        await this.editLastMessage(msg.userBubbleIndex, msg.text, msg.totalUserBubbles, session, requester);
+        await this.editLastMessage(msg.userBubbleIndex, msg.text, msg.totalUserBubbles, session);
         break;
       case "workflowControl":
         await this.controlWorkflow(msg.action, msg.displayName, session);
@@ -18420,11 +16723,9 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         // the cancelled turn's wake — this runs BEFORE cancel on that path.
         const s = session;
         if (s.queuedSends.length) {
-          s.queuedSendDispatch = undefined;
           s.queuedSendCommit = undefined;
           const items = s.queuedSends;
           s.queuedSends = [];
-          s.queuedSendRequiresRelay = false;
           if (msg.restore) {
             s.chips = restoreQueuedChips(s.chips, items);
           }
@@ -18438,7 +16739,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         await this.pickModel();
         break;
       case "setMode":
-        await this.setMode(msg.modeId, session, requester);
+        await this.setMode(msg.modeId, session);
         break;
       case "setSessionType":
         this.setSessionType(session, msg.sessionType);
@@ -18504,7 +16805,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         // The button form (AP-11). Confirmed, unlike the typed one: a click
         // named neither the role nor the task, so the host shows what it
         // chose before spending anything on it.
-        await this.startHandoff(msg.kind, msg.role, session, origin, true);
+        await this.startHandoff(msg.kind, msg.role, session, true);
         break;
       }
       case "childMessage": {
@@ -18518,7 +16819,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         await this.answerContextOverflow(session, msg);
         break;
       case "continueInFreshSession":
-        await this.continueInFreshSession(session, origin);
+        await this.continueInFreshSession(session);
         break;
       case "stopCrew": {
         this.cancelAgentRun(session);
@@ -18584,7 +16885,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         await this.reviewRevertFile(session, msg.path, msg.scope);
         break;
       case "reviewRevertAll":
-        await this.reviewRevertAll(session, msg.scope, requester);
+        await this.reviewRevertAll(session, msg.scope);
         break;
       case "exportExpr":
         await this.exportExpr(msg, session);
@@ -18602,16 +16903,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
           msg.data,
           msg.mimeType,
           attachmentOwner,
-          requester,
           msg.previewId,
-        ));
-        break;
-      case "uploadFile":
-        await this.trackAttach(this.addUploadedFile(
-          msg.name,
-          msg.data,
-          attachmentOwner,
-          requester,
         ));
         break;
       case "permissionAnswer":
@@ -18709,7 +17001,6 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         await this.switchModel(
           msg.modelId,
           session,
-          requester,
           isAcpProvider(msg.provider)
             ? msg.provider
             : this.providerForRequestedModel(msg.modelId, session.provider),
@@ -18721,7 +17012,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
             await session.client.setConfigOption((msg as any).configId, (msg as any).value);
             this.host.appendLine(`[acp] setConfigOption ${(msg as any).configId}=${JSON.stringify((msg as any).value)} succeeded`);
           } catch (e) {
-            this.reportRequester(requester, "error", `Failed to set ${(msg as any).configId}: ${(e as Error).message}`);
+            this.notifyUser("error", `Failed to set ${(msg as any).configId}: ${(e as Error).message}`);
           }
         }
         break;
@@ -18741,7 +17032,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         // against the whole catalog: a remote may create routines, and reach is
         // the property that has to be bounded.
         const cwd = typeof msg.draft.cwd === "string" ? msg.draft.cwd : "";
-        if (!this.mayTargetRoutineCwd(cwd, origin, clientId)) {
+        if (!this.mayTargetRoutineCwd(cwd)) {
           this.routineError = { id: msg.id, message: "Pick a project for this routine to run in." };
           this.postRoutines();
           break;
@@ -18769,7 +17060,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       case "deleteRoutine": {
         const existing = this.loadRoutines();
         const target = existing.find((r) => r.id === msg.id);
-        if (!target || !this.mayTargetRoutineCwd(target.cwd, origin, clientId)) break;
+        if (!target || !this.mayTargetRoutineCwd(target.cwd)) break;
         await this.saveRoutines(existing.filter((r) => r.id !== msg.id));
         this.routineRuns.forget(msg.id);
         this.routineError = undefined;
@@ -18779,7 +17070,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       case "setRoutinePaused": {
         const existing = this.loadRoutines();
         const target = existing.find((r) => r.id === msg.id);
-        if (!target || !this.mayTargetRoutineCwd(target.cwd, origin, clientId)) break;
+        if (!target || !this.mayTargetRoutineCwd(target.cwd)) break;
         await this.saveRoutines(
           existing.map((r) => (r.id === msg.id ? { ...r, paused: msg.paused === true } : r)),
         );
@@ -18788,7 +17079,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       }
       case "runRoutineNow": {
         const target = this.loadRoutines().find((r) => r.id === msg.id);
-        if (!target || !this.mayTargetRoutineCwd(target.cwd, origin, clientId)) break;
+        if (!target || !this.mayTargetRoutineCwd(target.cwd)) break;
         if (this.routinesInFlight.has(target.id)) break;
         const now = Date.now();
         // A manual key, so an explicit run never consumes the scheduled window
@@ -18815,7 +17106,6 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       case "setEffort": {
         if (session.priming) break; // ignore changes fired mid-session-start (see switchModel)
         const newLevel = msg.level;
-        const cfg2 = this.host.getConfiguration("grok");
 
         if (!session.hasHistory || !session.client) {
           // As with a model switch on an empty session: restart without the summarize-vs-restart
@@ -18848,14 +17138,6 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
           }
         }
 
-        if (origin === "remote" && clientId) {
-          this.reportRequester(
-            requester,
-            "warning",
-            "Changing reasoning effort here requires restarting the conversation from the VS Code view.",
-          );
-          break;
-        }
         const mode = await this.pickRestartMode("Changing reasoning effort requires restarting the session.");
         if (!mode) break; // dismissed — leave the remembered effort untouched
         await this.persistEffort(session.provider, newLevel);
@@ -18866,32 +17148,23 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         await this.addProjectFolder();
         break;
       case "removeProjectFolder":
-        // NO LONGER always local: CLOUD_DISPOSITION admits this from a remote on
-        // a cloud machine, where there is no desk to walk to. A path the renderer
-        // names is still not trusted on its own — allowRemoteRepoTarget requires a
-        // cwd the catalog knows, and removeWorkspaceFolder returns false for
-        // anything not in the open set.
-        await this.removeProjectFolder(msg.cwd, origin, clientId);
+        // removeWorkspaceFolder returns false for anything not in the open set.
+        await this.removeProjectFolder(msg.cwd);
         break;
       case "createProject":
-        await this.createProject(msg.name, origin, clientId);
+        await this.createProject(msg.name);
         break;
       case "cloneProject":
-        await this.cloneProject(msg.url, origin, clientId, msg.name);
+        await this.cloneProject(msg.url, msg.name);
         break;
       case "setupGithubCli":
-        await this.setupGithubCli(
-          msg.action === "install" ? "install" : "auth",
-          origin,
-          clientId,
-          msg.surface,
-        );
+        await this.setupGithubCli(msg.action === "install" ? "install" : "auth");
         break;
       case "listGithubRepos":
         await this.listGithubRepos();
         break;
       case "githubSignOut":
-        await this.githubSignOut(origin);
+        await this.githubSignOut();
         break;
       case "githubLoginWithToken":
         await this.githubLoginWithToken(msg.token);
@@ -18992,23 +17265,23 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       case "workflowStart": {
         const target = [...this.pool].find((s) => s.activeSessionId === msg.sessionId) ?? session;
         if (msg.openNew) {
-          await this.openNewCrewSession(origin, msg.idea, msg.workflowName, msg.options);
+          await this.openNewCrewSession(msg.idea, msg.workflowName, msg.options);
           break;
         }
-        await this.startWorkflowRun(target, origin, msg.idea, msg.workflowName, msg.options);
+        await this.startWorkflowRun(target, msg.idea, msg.workflowName, msg.options);
         break;
       }
       case "workflowPlanEdit":
         this.applyWorkflowPlanEdit(session, msg);
         break;
       case "workflowGateAction": {
-        if (await this.handleHostGateAction(session, origin, msg)) break;
+        if (await this.handleHostGateAction(session, msg)) break;
         const action = this.gateActionFromMsg(msg);
-        if (action) await this.handleWorkflowGateAction(session, origin, action);
+        if (action) await this.handleWorkflowGateAction(session, action);
         break;
       }
       case "openCrewWithGoal":
-        await this.openNewCrewSession(origin, msg.goal, this.defaultWorkflowName());
+        await this.openNewCrewSession(msg.goal, this.defaultWorkflowName());
         break;
       case "subagentRoutingSave": {
         // Written as the shape the setting documents, with empty strings
@@ -19101,7 +17374,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         break;
       }
       case "runWorkflow":
-        await this.openNewCrewSession(origin, "", msg.name);
+        await this.openNewCrewSession("", msg.name);
         break;
       case "listPermissionRules": {
         this.postPermissionRules(session);
@@ -19128,15 +17401,10 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         break;
       }
       case "connectMcpConnector":
-        if (origin === "remote" && !clientId) break;
         await this.connectMcpConnector(msg.id, {
           key: typeof msg.key === "string" ? msg.key : undefined,
           readOnly: typeof msg.readOnly === "boolean" ? msg.readOnly : undefined,
-          clientId: origin === "remote" ? clientId : undefined,
         });
-        break;
-      case "completeMcpConnectorOAuth":
-        if (origin === "remote" && clientId) await this.completeMcpConnectorOAuth(msg, clientId);
         break;
       case "disconnectMcpConnector":
         await this.disconnectMcpConnector(msg.id);
@@ -19291,15 +17559,6 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
           });
           break;
         }
-        // A remote has no terminal to look at and no keyboard attached to the
-        // host, so the desk path is not merely worse there — it does nothing
-        // visible at all. Run the CLI's headless flow instead and put the URL
-        // and code in the transcript. Everything below this branch is the desk
-        // path and is deliberately unchanged.
-        if (origin === "remote") {
-          await this.startDeviceLogin(provider, cliPath, clientId);
-          break;
-        }
         // Connecting an account and RENEWING one are different errands, and
         // only the second is about the conversation on screen. Read the flag
         // before any probe below can clear it (upstream 61e0c57).
@@ -19334,15 +17593,11 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         // terminal — and the panel below still shows; the fresh session simply
         // waits until there is a project to put it in.
         //
-        // The `origin !== "remote"` this used to carry is gone because the
-        // remote branch above returns before here — TypeScript pointed out the
-        // comparison could no longer be false, which is the check that the two
-        // paths really are separate rather than merely intended to be.
         // A RENEWAL is the exception: the composer's sign-in card sits on a
         // conversation whose replies are being refused and offers to fix THAT
         // conversation, so parking it for the login panel is not wanted.
         if (session.hasHistory && this.workspaceRoot() && !renewing) {
-          await this.newFocusedSession(origin);
+          await this.newFocusedSession();
         }
         // ALWAYS show this provider's login panel, and say the terminal was
         // launched. Two bugs lived in the gate this replaces.
@@ -19363,48 +17618,6 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
           provider,
           launched: true,
         });
-        break;
-      }
-      case "submitDeviceLoginCode": {
-        const provider: AcpProvider = isAcpProvider(msg.provider) ? msg.provider : "grok";
-        const running = this.deviceLogins.get(provider);
-        if (!running) break;
-        const code = typeof msg.code === "string" ? msg.code.trim() : "";
-        if (!code) break;
-        // Re-bind the tapper the same way a re-tap does: they left for the
-        // vendor's page and came back under a new socket.
-        if (clientId) {
-          running.clientId = clientId;
-          running.tabToken = this.remoteClients.tabToken(clientId) ?? running.tabToken;
-        }
-        running.handle.submitCode(code);
-        if (running.last && running.last.status === "waiting") {
-          running.send({ ...running.last, submitted: true });
-        }
-        break;
-      }
-      case "cancelDeviceLogin": {
-        if (msg.provider === "github") {
-          this.cancelGithubDeviceLogin();
-          break;
-        }
-        const provider: AcpProvider = isAcpProvider(msg.provider) ? msg.provider : "grok";
-        const running = this.deviceLogins.get(provider);
-        if (!running) break;
-        this.deviceLogins.delete(provider);
-        // The hold is released by onDone, which cancel() settles synchronously
-        // — the token belongs to that operation, not to this handler.
-        running.handle.cancel();
-        // Back to the plain sign-in panel, with no code and no failure. The
-        // person cancelled; telling them it failed would be a small lie.
-        const message: HostMsg = {
-          type: "onboarding",
-          state: providerLoginState(provider),
-          platform: process.platform,
-          provider,
-        };
-        if (clientId) this.sendRemoteClient(clientId, message);
-        else this.post(message);
         break;
       }
       case "recheckConnection": {
@@ -19444,36 +17657,16 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       }
       case "retryProviderSession": {
         const provider: AcpProvider = isAcpProvider(msg.provider) ? msg.provider : session.provider;
-        if (!this.connectedProviders().includes(provider)) {
-          if (requester) this.sendRemoteRequester(requester, {
-            type: "error",
-            text: `${providerDisplayName(provider)} must be connected at the desk before a remote session can be retried.`,
-          });
-          break;
-        }
+        if (!this.connectedProviders().includes(provider)) break;
         if (session.provider === provider && !session.client) {
           await this.startSession(session.hasHistory ? session.activeSessionId : undefined, session);
         }
         break;
       }
       case "logout":
-        // `fromRemote` is not a permission — the gate above already decided
-        // that, and it only lets this through on a cloud environment. It says
-        // there is NOBODY AT THE MACHINE to answer a modal.
         await this.logout(
           isAcpProvider(msg.provider) ? msg.provider : "grok",
-          {
-            fromRemote: origin === "remote",
-            // `requester`, NOT clientId. Host dialogs are invisible on a cloud
-            // box, so the asking client is the only surface that can be told —
-            // and a clientId is ephemeral: a same-tab reconnect replaces it, and
-            // sign-out can sit for 30 seconds, so one phone network blip is
-            // enough to address the failure to a dead connection while the
-            // credential stays on the machine. `reportRequester` is the
-            // reconnect-stable path and already falls back to a host dialog at a
-            // desk, which is what the first version of this reinvented badly.
-            report: (text) => this.reportRequester(requester, "error", text),
-          },
+          { report: (text) => this.notifyUser("error", text) },
         );
         break;
       case "refreshProviders":
@@ -19491,33 +17684,22 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         await this.updateGrokCliOnDemand();
         break;
       case "listSessions":
-        if (origin === "remote" && clientId) {
-          this.sendRemoteClient(clientId, this.buildSessionsList(messageCwd, {
-          offset: msg.offset, limit: msg.limit, query: msg.query, providerCursor: msg.providerCursor,
-          }, this.remoteActiveSessionId(clientId)));
-        } else {
         this.postSessionsList({ offset: msg.offset, limit: msg.limit, query: msg.query, providerCursor: msg.providerCursor });
-        }
         break;
       case "listRepoSessions":
         // Preview rows for a repo WITHOUT selecting it (the projects rail).
         // Local: desktop multi-folder rail and the VS Code primary-side-bar rail.
-        if (origin === "remote" && clientId) {
-          this.sendRepoSessionsPreview(clientId, msg.cwd, msg.limit);
-        } else {
-          this.sendLocalRepoSessionsPreview(msg.cwd, msg.limit);
-        }
+        this.sendLocalRepoSessionsPreview(msg.cwd, msg.limit);
         break;
       case "toggleSessionPin":
-        // Rail pin. Remote always; local when any projects rail is live
-        // (desktop multi-folder or VS Code primary-side-bar view).
-        if (origin === "remote" || this.host.canSwitchWorkspaceFolder || this.projectsRail) {
+        // Rail pin, when any projects rail is live (desktop multi-folder or
+        // VS Code primary-side-bar view).
+        if (this.host.canSwitchWorkspaceFolder || this.projectsRail) {
           await this.toggleSessionPin(msg.id, msg.cwd, msg.pinned);
         }
         break;
       case "selectRepo":
-        if (origin === "remote" && clientId) await this.selectRemoteRepo(clientId, msg.cwd);
-        else await this.selectRepo(msg.cwd);
+        await this.selectRepo(msg.cwd);
         break;
       case "setRepoArchived":
         await this.setRepoArchived(msg.cwd, msg.archived);
@@ -19529,19 +17711,16 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         await this.toggleRepoPin(msg.cwd, msg.pinned);
         break;
       case "resumeSession":
-        if (origin === "remote" && clientId) {
-          await this.openRemoteSession(clientId, msg.id, msg.cwd, true, msg.claim === true);
-        }
-        else await this.openSession(msg.id, msg.cwd);
+        await this.openSession(msg.id, msg.cwd);
         break;
-       case "renameSession":
-          this.renameSession(msg.id, msg.name, origin, clientId, msg.cwd);
-          break;
+      case "renameSession":
+        this.renameSession(msg.id, msg.name, msg.cwd);
+        break;
       case "deleteSession":
-        await this.deleteSession(msg.id, msg.name, origin, clientId, msg.cwd);
+        await this.deleteSession(msg.id, msg.name, msg.cwd);
         break;
       case "clearAllSessions":
-        await this.clearAllSessions(msg.cwd, origin, clientId);
+        await this.clearAllSessions(msg.cwd);
         break;
       case "pickFile":
         await this.trackAttach(this.pickFileFromComputer());
@@ -19560,12 +17739,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         // exactly what it was, and so `files` keeps meaning "paths the mention
         // catalog can resolve".
         const sources = filterMentionSources(msg.query);
-        const reply: HostMsg = { type: "mentionResults", query: msg.query, files, sources };
-        if (requester) {
-          this.sendRemoteRequester(requester, reply);
-        } else {
-          this.post(reply);
-        }
+        this.post({ type: "mentionResults", query: msg.query, files, sources });
         break;
       }
       case "addMentionFile": {
@@ -19574,28 +17748,17 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
 
         let catalogMatch: string | undefined;
         let openTabMatch: string | undefined;
-        if (origin === "remote") {
-          // A remote can only echo a path the host currently exposes through
-          // its merged mention catalog. It never gets the local #69 fallback.
-          try {
-            catalogMatch = (await this.mentionFileIndexForCwd(workspaceRoot)).absByRel.get(msg.relPath);
-          } catch (e) {
-            this.host.appendLine(`[mention] index failed while validating remote pick: ${(e as Error).message}`);
-          }
-        } else {
-          // Local picks preserve the #69 fallback for a result whose cached/open
-          // entry disappeared between rendering and selection.
-          try {
-            catalogMatch = (await this.mentionFileIndexForCwd(workspaceRoot)).absByRel.get(msg.relPath);
-          } catch (e) {
-            this.host.appendLine(`[mention] index failed while validating local pick: ${(e as Error).message}`);
-          }
-          if (pathsEqual(workspaceRoot, this.workspaceRoot())) {
-            openTabMatch = this.openWorkspaceFileEntries().find((e) => e.rel === msg.relPath)?.abs;
-          }
+        // Keeps the #69 fallback for a result whose cached/open entry
+        // disappeared between rendering and selection.
+        try {
+          catalogMatch = (await this.mentionFileIndexForCwd(workspaceRoot)).absByRel.get(msg.relPath);
+        } catch (e) {
+          this.host.appendLine(`[mention] index failed while validating pick: ${(e as Error).message}`);
+        }
+        if (pathsEqual(workspaceRoot, this.workspaceRoot())) {
+          openTabMatch = this.openWorkspaceFileEntries().find((e) => e.rel === msg.relPath)?.abs;
         }
         const abs = resolveMentionAttachmentPath(
-          origin,
           workspaceRoot,
           msg.relPath,
           catalogMatch,
@@ -19619,222 +17782,17 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         break;
       }
       case "addContextChip":
-        this.addContextSourceChip(msg.source, attachmentOwner, requester);
+        this.addContextSourceChip(msg.source, attachmentOwner);
         break;
       case "openContextChipSource":
-        // host-local by policy — a remote never reaches this arm.
         await this.host.revealContextSource(msg.source);
         break;
-      case "listProjectDir": {
-        // Remote file browse. Fence: repoScopeFor (which root) +
-        // listTreeDir/resolveTreePath (paths inside it).
-        // Local VS Code / desktop webviews may receive the capability flag but
-        // never mount a second explorer — only remotes post these messages.
-        const rel = typeof msg.relPath === "string" ? msg.relPath : "";
-        const correlation = typeof msg.requestId === "string" ? { requestId: msg.requestId } : {};
-        const selectedCwd = origin === "remote" && clientId
-          ? this.remoteClients.cwd(clientId)
-          : this.workspaceRoot();
-        const rootResult = resolveRemoteFileRoot({
-          origin,
-          claimedCwd: msg.cwd,
-          selectedCwd,
-          workspaceRoot: this.workspaceRoot(),
-          isKnownCwd: (cwd) =>
-            origin === "remote"
-              ? this.remoteTargetableCwd(cwd)
-              : pathsEqual(cwd, this.workspaceRoot()),
-          sameCwd: pathsEqual,
-        });
-        const replyList = (body: Extract<HostMsg, { type: "projectDirListing" }>) => {
-          if (requester) this.sendRemoteRequester(requester, body);
-          else this.post(body);
-        };
-        if (!rootResult.ok) {
-          this.host.appendLine(`[remote-files] list rejected: ${rootResult.reason} (${msg.cwd})`);
-          replyList({ type: "projectDirListing", ...correlation, cwd: msg.cwd, relPath: rel, ok: false, reason: rootResult.reason });
-          break;
-        }
-        const listed = listRemoteProjectDir(rootResult.root, rel);
-        if (!listed.ok) {
-          replyList({ type: "projectDirListing", ...correlation, cwd: msg.cwd, relPath: rel, ok: false, reason: listed.reason });
-        } else {
-          replyList({
-            type: "projectDirListing",
-            ...correlation,
-            cwd: msg.cwd,
-            relPath: rel,
-            ok: true,
-            entries: listed.entries,
-            truncated: listed.truncated,
-          });
-        }
-        break;
-      }
-      case "readProjectFile": {
-        // One file, text/image preview caps from file-tree.ts. When the host
-        // advertises edit, text kinds also carry stamp + absPath for a save
-        // round-trip (see writeProjectFile).
-        const correlation = typeof msg.requestId === "string" ? { requestId: msg.requestId } : {};
-        const selectedCwd = origin === "remote" && clientId
-          ? this.remoteClients.cwd(clientId)
-          : this.workspaceRoot();
-        const rootResult = resolveRemoteFileRoot({
-          origin,
-          claimedCwd: msg.cwd,
-          selectedCwd,
-          workspaceRoot: this.workspaceRoot(),
-          isKnownCwd: (cwd) =>
-            origin === "remote"
-              ? this.remoteTargetableCwd(cwd)
-              : pathsEqual(cwd, this.workspaceRoot()),
-          sameCwd: pathsEqual,
-        });
-        const replyFile = (body: Extract<HostMsg, { type: "projectFileContent" }>) => {
-          if (requester) this.sendRemoteRequester(requester, body);
-          else this.post(body);
-        };
-        if (!rootResult.ok) {
-          this.host.appendLine(`[remote-files] read rejected: ${rootResult.reason} (${msg.cwd})`);
-          replyFile({
-            type: "projectFileContent",
-            ...correlation,
-            cwd: msg.cwd,
-            relPath: msg.relPath,
-            ok: false,
-            reason: rootResult.reason,
-          });
-          break;
-        }
-        const read = readRemoteProjectFile(rootResult.root, msg.relPath);
-        // includeEditMeta only when we advertise the write path — otherwise a
-        // browse-only host must not leak absPath/stamp to the phone.
-        const wire = projectFileContentForWire(read, {
-          includeEditMeta: !!HOST_CAPABILITIES.editProjectFiles,
-        });
-        if (wire.ok) {
-          replyFile({
-            type: "projectFileContent",
-            ...correlation,
-            cwd: msg.cwd,
-            relPath: wire.relPath,
-            ok: true,
-            kind: wire.kind,
-            ...(wire.text !== undefined ? { text: wire.text } : {}),
-            ...(wire.dataUrl !== undefined ? { dataUrl: wire.dataUrl } : {}),
-            ...(wire.pretty !== undefined ? { pretty: wire.pretty } : {}),
-            ...(wire.reformatted !== undefined ? { reformatted: wire.reformatted } : {}),
-            ...(wire.stamp !== undefined ? { stamp: wire.stamp } : {}),
-            ...(wire.absPath !== undefined ? { absPath: wire.absPath } : {}),
-          });
-        } else {
-          replyFile({
-            type: "projectFileContent",
-            ...correlation,
-            cwd: msg.cwd,
-            relPath: msg.relPath,
-            ok: false,
-            reason: wire.reason,
-          });
-        }
-        break;
-      }
-      case "writeProjectFile": {
-        // Existing-file save only (no create/delete/rename). Reuses writeTreeFile
-        // so stamp + expectedAbsPath both apply — a remote tab that went stale
-        // after the desk switched projects is the expectedAbsPath scenario.
-        // Capability gate: a host that does not advertise edit refuses here so
-        // an older client cannot invent a write path the UI never offered.
-        const correlation = typeof msg.requestId === "string" ? { requestId: msg.requestId } : {};
-        const replyWrite = (body: Extract<HostMsg, { type: "projectFileWriteResult" }>) => {
-          if (requester) this.sendRemoteRequester(requester, body);
-          else this.post(body);
-        };
-        if (!HOST_CAPABILITIES.editProjectFiles) {
-          replyWrite({
-            type: "projectFileWriteResult",
-            ...correlation,
-            cwd: msg.cwd,
-            relPath: msg.relPath,
-            ok: false,
-            reason: "editing is not available",
-          });
-          break;
-        }
-        const selectedCwd = origin === "remote" && clientId
-          ? this.remoteClients.cwd(clientId)
-          : this.workspaceRoot();
-        const rootResult = resolveRemoteFileRoot({
-          origin,
-          claimedCwd: msg.cwd,
-          selectedCwd,
-          workspaceRoot: this.workspaceRoot(),
-          isKnownCwd: (cwd) =>
-            origin === "remote"
-              ? this.remoteTargetableCwd(cwd)
-              : pathsEqual(cwd, this.workspaceRoot()),
-          sameCwd: pathsEqual,
-        });
-        if (!rootResult.ok) {
-          this.host.appendLine(`[remote-files] write rejected: ${rootResult.reason} (${msg.cwd})`);
-          replyWrite({
-            type: "projectFileWriteResult",
-            ...correlation,
-            cwd: msg.cwd,
-            relPath: msg.relPath,
-            ok: false,
-            reason: rootResult.reason,
-          });
-          break;
-        }
-        const written = writeRemoteProjectFile(
-          rootResult.root,
-          msg.relPath,
-          msg.text,
-          msg.stamp,
-          {
-            expectedAbsPath: msg.expectedAbsPath,
-            // Same executable policy as desktop opens/saves — do not weaken it
-            // for remote just because the phone never shell.opens the path.
-          },
-        );
-        if (written.ok) {
-          replyWrite({
-            type: "projectFileWriteResult",
-            ...correlation,
-            cwd: msg.cwd,
-            relPath: written.relPath,
-            ok: true,
-            stamp: written.stamp,
-          });
-        } else {
-          this.host.appendLine(`[remote-files] write refused: ${written.reason} (${msg.relPath})`);
-          replyWrite({
-            type: "projectFileWriteResult",
-            ...correlation,
-            cwd: msg.cwd,
-            relPath: msg.relPath,
-            ok: false,
-            reason: written.reason,
-          });
-        }
-        break;
-      }
       case "voiceStart":
         await this.handleVoiceStart(session);
         break;
       case "voiceStop":
         if (msg.discard) this.stopVoiceInput();
         else await this.handleVoiceStop();
-        break;
-      case "remoteVoiceStart":
-        if (origin === "remote" && clientId) await this.handleRemoteVoiceStart(clientId, session);
-        break;
-      case "remoteVoiceChunk":
-        if (origin === "remote" && clientId) this.handleRemoteVoiceChunk(clientId, msg.data);
-        break;
-      case "remoteVoiceStop":
-        if (origin === "remote" && clientId) await this.handleRemoteVoiceStop(clientId, !!msg.cancel);
         break;
     }
 
@@ -19980,14 +17938,6 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     void this.settingsEditor?.webview.postMessage(view);
   }
 
-  private mcpServersMessage(): Extract<HostMsg, { type: "mcpServers" }> {
-    return {
-      type: "mcpServers",
-      servers: this.mcpServersView,
-      warning: MCP_GLOBAL_SCOPE_WARNING,
-    };
-  }
-
   private connectedConnectorStore(): ConnectedConnectorStore {
     return parseConnectedConnectorStore(this.state.get(MCP_CONNECTORS_KEY, {}));
   }
@@ -19996,7 +17946,6 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     const store = this.connectedConnectorStore();
     return {
       type: "mcpConnectors",
-      remoteConnect: true,
       connectors: connectorViews(store, {
         connectingId: this.mcpConnectingId,
         errorId: this.mcpConnectError?.id,
@@ -20163,7 +18112,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
 
   private async connectMcpConnector(
     id: string,
-    opts: { key?: string; readOnly?: boolean; clientId?: string } = {},
+    opts: { key?: string; readOnly?: boolean } = {},
   ): Promise<void> {
     if (!isConnectorId(id)) return;
     if (this.mcpConnectingId) {
@@ -20199,13 +18148,6 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         args: mcpRemoteArgs(endpoint, undefined, metadata?.path),
         shell: npx.shell,
         env: npx.env,
-        onAuthorization: opts.clientId ? (url, complete) => {
-          const pending = { id, clientId: opts.clientId!, attemptId: randomUUID(), url, complete };
-          this.mcpRemoteAuthorization = pending;
-          this.deliverRemote([pending.clientId], {
-            type: "mcpConnectorAuthorization", id, attemptId: pending.attemptId, status: "waiting", url,
-          });
-        } : undefined,
       });
       if (this.mcpConnectingId !== id) return;
       if (!result.ok) {
@@ -20226,42 +18168,8 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       this.mcpConnectError = { id, message: (error as Error).message || "Could not connect." };
     } finally {
       try { metadata?.dispose(); } catch { /* best-effort */ }
-      const pending = this.mcpRemoteAuthorization;
-      if (pending?.id === id) {
-        this.mcpRemoteAuthorization = undefined;
-        this.deliverRemote([pending.clientId], {
-          type: "mcpConnectorAuthorization", id, attemptId: pending.attemptId, status: "finished",
-        });
-      }
       if (this.mcpConnectingId === id) this.mcpConnectingId = undefined;
       this.postMcpConnectors();
-    }
-  }
-
-  private async completeMcpConnectorOAuth(
-    msg: Extract<WebviewMsg, { type: "completeMcpConnectorOAuth" }>,
-    clientId: string,
-  ): Promise<void> {
-    const pending = this.mcpRemoteAuthorization;
-    if (!pending || pending.clientId !== clientId || pending.id !== msg.id || pending.attemptId !== msg.attemptId) {
-      this.deliverRemote([clientId], {
-        type: "mcpConnectorAuthorization", id: msg.id, attemptId: msg.attemptId, status: "finished",
-        error: "This sign-in is no longer active in this tab. Connect again to get a new link.",
-      });
-      return;
-    }
-    try {
-      await pending.complete(msg.redirectUrl);
-      if (this.mcpRemoteAuthorization !== pending) return;
-      this.deliverRemote([clientId], {
-        type: "mcpConnectorAuthorization", id: pending.id, attemptId: pending.attemptId, status: "submitted",
-      });
-    } catch (error) {
-      if (this.mcpRemoteAuthorization !== pending) return;
-      this.deliverRemote([clientId], {
-        type: "mcpConnectorAuthorization", id: pending.id, attemptId: pending.attemptId, status: "waiting",
-        url: pending.url, error: (error as Error).message,
-      });
     }
   }
 
@@ -20509,12 +18417,8 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
    * Remote scope is untouched and still goes through {@link repoScopeFor},
    * which is where per-tab isolation lives.
    */
-  private historyCwdFor(origin: MsgOrigin): string {
-    if (origin === "local") return this.selectedHistoryCwd() || this.workspaceRoot();
-    return repoScopeFor(origin, {
-      selectedCwd: this.selectedHistoryCwd(),
-      workspaceRoot: this.workspaceRoot(),
-    });
+  private historyCwdFor(): string {
+    return this.selectedHistoryCwd() || this.workspaceRoot();
   }
 
   /** Refresh local history plus each connected remote tab. */
@@ -20550,7 +18454,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
   }
 
   private postSessionsListNow(opts?: SessionsListOptions): void {
-    const localCwd = this.historyCwdFor("local");
+    const localCwd = this.historyCwdFor();
     const local = this.buildSessionsList(localCwd, opts, undefined);
     this.postLocal(local);
     this.postSessionName(this.focused);
@@ -20562,19 +18466,6 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     // think of. Cheap when nothing is pinned — the scan is over an in-memory map
     // and reads no disk until a pin actually exists.
     this.postPinnedSessions();
-    for (const clientId of this.remoteClients.clients()) {
-      // Per-tab cwd may still name a closed project after revoke leaves it for
-      // selectRepo — buildSessionsList enforces the live authorized set.
-      // Same landmine as the voice-config refresh: a mid-handshake tab is in
-      // the roster with no project, and this list rebuild is not a request
-      // from that tab.
-      const cwd = this.remoteClients.cwdIfPresent(clientId);
-      if (!cwd) continue;
-      const activeId = this.remoteActiveSessionId(clientId);
-      this.sendRemoteClient(clientId, this.buildSessionsList(cwd, undefined, activeId));
-      const active = this.remoteClients.active(clientId);
-      if (active) this.postSessionName(active);
-    }
   }
 
   private buildSessionsList(
@@ -20657,10 +18548,6 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       ...(!query && combinedPage ? { providerCursor: combinedPage.providerCursor } : {}),
       query,
     };
-  }
-
-  private scheduleCodexHistoryRefresh(cwd: string): void {
-    this.scheduleAdapterHistoryRefresh("codex", cwd);
   }
 
   private scheduleAdapterHistoryRefresh(provider: AcpProvider, cwd: string): void {
@@ -20989,7 +18876,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
 
   /** Push the focused conversation's title independently of history pagination.
    *  The VS Code webview must not depend on the history popover having been
-   *  opened, while remote tabs need the same live update after a rename or turn. */
+   *  opened. */
   private postSessionName(session: Session, name = this.sessionDisplayName(session)): void {
     const id = session.activeSessionId;
     if (!id) return;
@@ -21006,15 +18893,12 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       ...(owner && !pathsEqual(owner, cwd) ? { repoCwd: owner } : {}),
     };
     if (session === this.focused) this.postLocal(message);
-    this.sendRemoteSession(session, message);
   }
 
   private postSessionRemoved(id: string | undefined, cwd: string): void {
     if (!id) return;
     const message: HostMsg = { type: "sessionRemoved", id, cwd };
     this.postLocal(message);
-    // Every tab holds previews and pins, including for projects it isn't viewing.
-    this.deliverRemote(this.remoteClients.clients(), message, cwd);
   }
 
   private liveSessionEntry(
@@ -21043,31 +18927,6 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       modelId: undefined,
       provider: session.provider,
     };
-  }
-
-  /** Read entries for the given ids, serving unchanged ones from {@link sessionCache} and re-reading
-   *  only those whose `summary.json` mtime moved (or that aren't cached). Keeps the popover's
-   *  steady-state cost near zero across opens, load-more, and search. */
-  private readEntriesCached(
-    ids: string[],
-    mtimeById: Map<string, number>,
-    overrides: SessionMetaOverrides,
-    cwd: string,
-    grokHome: string,
-    log: (m: string) => void,
-  ): SessionListEntry[] {
-    const stale: string[] = [];
-    for (const id of ids) {
-      const cached = this.sessionCache.get(id);
-      if (!cached || cached.mtimeMs !== (mtimeById.get(id) ?? -1)) stale.push(id);
-    }
-    if (stale.length) {
-      const fresh = readSessionEntries({ fs: defaultFs, grokHome, cwd, ids: stale, overrides, log });
-      for (const e of fresh) {
-        this.sessionCache.set(e.id, { mtimeMs: mtimeById.get(e.id) ?? 0, entry: e });
-      }
-    }
-    return ids.map((id) => this.sessionCache.get(id)?.entry).filter((e): e is SessionListEntry => !!e);
   }
 
   /**
@@ -21101,135 +18960,12 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     return ids.map((id) => this.sessionCache.get(id)?.entry).filter((e): e is SessionListEntry => !!e);
   }
 
-  /** Which repo a remote request may act in. The client's selection by default;
-   *  a NAMED repo when it asks for one and that repo is in the host's own
-   *  catalog. Matching the catalog is the whole boundary — the path is never
-   *  trusted as given, so a remote can only ever reach projects this host has
-   *  already discovered and told it about.
-   *
-   *  Widened from selection-only deliberately: the rail lists every project, and
-   *  refusing to rename a row it just drew is a broken affordance, not a guard.
-   *  It was never much of a guard either — a remote can select any catalog repo
-   *  and then act, so the selection only ever added a step to the same reach. */
-  private remoteRepoScope(clientId: string, requestedCwd?: string): string | undefined {
-    if (requestedCwd) {
-      // Host catalog the client was told about (open folders on desktop).
-      const hit = this.localRepoCatalogEntries().find((r) => pathsEqual(r.cwd, requestedCwd));
-      // The host's own spelling, never the client's.
-      if (hit?.available) return hit.cwd;
-      return undefined;
-    }
-    return this.remoteClients.cwd(clientId);
-  }
-
-  /** The catalog repo that owns a session cwd — the checkout itself, or the parent
-   *  of one of its worktrees. A rail row for a worktree session names the WORKTREE
-   *  as its cwd, because that is where its transcript lives, and a worktree is
-   *  deliberately not a catalog row (see sessionCwdsForRepo) — so scoping by
-   *  catalog alone refused every action on one. The catalog is still the whole
-   *  boundary: the parent has to be a repo this host exposes (open on desktop,
-   *  discovered on VS Code). */
-  private repoOwningSessionCwd(
-    cwd: string,
-    overrides: SessionMetaOverrides,
-    entries: RepoListEntry[] = this.localRepoCatalogEntries(),
-  ): string | undefined {
-    return entries.find(
-      (r) => r.available && this.sessionCwdsForRepo(r.cwd, overrides).some((c) => pathsEqual(c, cwd)),
-    )?.cwd;
-  }
-
-  /** Where a remote's rename/delete may land, or why it may not.
-   *
-   *  "gone" is not a permission answer: the project IS in scope, the conversation
-   *  simply is not in it any more. That is exactly what a rail row left over from
-   *  a clear-all looks like, and answering it with "wrong repository" sent people
-   *  hunting a permissions bug that was really a stale list. */
-  private remoteSessionTarget(
-    clientId: string,
-    id: string,
-    overrides: SessionMetaOverrides,
-    requestedCwd?: string,
-  ): { cwd: string; reason?: undefined } | { cwd?: undefined; reason: "scope" | "gone"; repoCwd?: string } {
-    // A named repo the catalog does not know is a refusal, not a fallback to the
-    // selected one — otherwise a bad cwd would quietly act somewhere else.
-    const selectedCwd = this.remoteRepoScope(clientId, requestedCwd)
-      ?? (requestedCwd ? this.repoOwningSessionCwd(requestedCwd, overrides) : undefined);
-    if (!selectedCwd) return { reason: "scope" };
-    const allowedCwds = this.sessionCwdsForRepo(selectedCwd, overrides);
-    const live = [...this.pool].find((session) => session.activeSessionId === id);
-    if (live) {
-      const cwd = this.sessionCwd(live);
-      if (sessionCwdBelongsToRepo(cwd, allowedCwds, pathsEqual)) return { cwd };
-    }
-
-    const cachedAdapter = findCachedAdapterSession(
-      this.allAdapterCatalogs(),
-      id,
-      allowedCwds,
-      (cwd, allowed) => sessionCwdBelongsToRepo(cwd, allowed, pathsEqual),
-    );
-    const provider = live?.provider ?? overrides[id]?.provider ?? cachedAdapter?.provider ?? "grok";
-    if (provider && isAdapterProvider(provider)) {
-      return cachedAdapter ? { cwd: cachedAdapter.cwd } : { reason: "gone", repoCwd: selectedCwd };
-    }
-
-    const candidates = [...new Set([
-      overrides[id]?.worktreePath,
-      this.sessionCache.get(id)?.entry.cwd,
-      ...allowedCwds,
-    ].filter((cwd): cwd is string =>
-      !!cwd && sessionCwdBelongsToRepo(cwd, allowedCwds, pathsEqual)
-    ))];
-    const grokHome = resolveGrokHome(process.env);
-    const found = candidates.find((cwd) =>
-      indexSessions({ fs: defaultFs, grokHome, cwd })
-        .some((entry) => entry.id === id)
-    );
-    return found ? { cwd: found } : { reason: "gone", repoCwd: selectedCwd };
-  }
-
-  private reportUnauthorizedSessionTarget(
-    clientId: string,
-    action: "rename" | "delete",
-    id: string,
-    miss: { reason: "scope" | "gone"; repoCwd?: string },
-  ): void {
-    if (miss.reason === "gone") {
-      this.host.appendLine(`[remote] dropped ${action}Session for ${id} (no longer in ${miss.repoCwd})`);
-      // Refresh what the client is looking at rather than argue with it: the row
-      // it acted on is stale, so the honest repair is to make the row disappear.
-      this.postSessionsList();
-      this.refreshRemoteRepoPreview(clientId, miss.repoCwd);
-      this.sendRemoteClient(clientId, {
-        type: "error",
-        text: "That conversation is no longer in this project. The list has been refreshed.",
-      });
-      return;
-    }
-    this.host.appendLine(`[remote] refused ${action}Session for ${id} (session is outside every known project)`);
-    this.sendRemoteClient(clientId, {
-      type: "error",
-      text: `Could not ${action} this conversation because it does not belong to a project this computer knows about.`,
-    });
-  }
-
   private renameSession(
     id: string,
     name: string,
-    origin: MsgOrigin,
-    clientId?: string,
     requestedCwd?: string,
   ): void {
     const overrides = this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
-    const target = origin === "remote" && clientId
-      ? this.remoteSessionTarget(clientId, id, overrides, requestedCwd)
-      : undefined;
-    if (target?.reason && clientId) {
-      this.reportUnauthorizedSessionTarget(clientId, "rename", id, target);
-      return;
-    }
-    const authorizedCwd = target?.cwd;
     const trimmed = (name || "").trim();
     const next: SessionMetaOverrides = { ...overrides };
     if (!trimmed) {
@@ -21271,89 +19007,19 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     // project from its `repoSessions` preview — so renaming a conversation in
     // project B while A is selected left B's rows showing the old name, and the
     // cache entry that would have corrected them was just dropped.
-    const localCwd = origin === "local" ? requestedCwd : undefined;
-    if (localCwd) this.sendLocalRepoSessionsPreview(localCwd);
-    this.refreshRemoteRepoPreview(clientId, authorizedCwd);
+    if (requestedCwd) this.sendLocalRepoSessionsPreview(requestedCwd);
   }
 
-  /** Re-push one repo's preview after acting on a session inside it. `postSessionsList`
-   *  only refreshes the repo the client has SELECTED, so a rename or delete in any
-   *  other project would leave the rail showing the old row until something else
-   *  happened to refetch it. */
-  private refreshRemoteRepoPreview(clientId?: string, cwd?: string): void {
-    if (!clientId || !cwd) return;
-    // Resolve to the PROJECT, not the session's own directory. A worktree
-    // conversation lives in a worktree, which is deliberately not a catalog row
-    // — so a preview addressed to it lands under a key no project matches, and
-    // the parent project quietly keeps showing the row that was just renamed or
-    // deleted. Every caller here passes a session cwd, so the resolution belongs
-    // at this seam rather than in each of them.
-    const overrides = this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
-    const repoCwd = this.repoCatalog().find((r) => pathsEqual(r.cwd, cwd))?.cwd
-      ?? this.repoOwningSessionCwd(cwd, overrides);
-    if (!repoCwd) return;
-    const clientCwd = this.remoteClients.cwdIfPresent(clientId);
-    if (!clientCwd || pathsEqual(repoCwd, clientCwd)) return;
-    // The rail's expanded cap — matches what its own probe asks for, so a
-    // refresh never returns fewer rows than the client already had.
-    this.sendRepoSessionsPreview(clientId, repoCwd, 20);
-  }
-
-  // No native confirm here: the webview shows its own confirm dialog before
-  // posting deleteSession (works in the browser client too, where a host-side
-  // modal would stall invisibly).
-  /**
-   * Is somebody OTHER than the asker looking at this conversation?
-   *
-   * `this.focused` is the host's own view. On a desk that is a real second
-   * surface — a VS Code panel or a desktop window with a person at it — and
-   * deleting out from under it is what this protection exists to stop.
-   *
-   * ON A CLOUD MACHINE THERE IS NOBODY AT THAT SCREEN, EVER. The host still
-   * keeps a focused session, so whatever it adopted stayed “owned” for good:
-   * the moment the only real user navigated elsewhere they were told to go
-   * close it “in another tab or the VS Code view” — naming two surfaces that
-   * do not exist there. The owner hit this and said, correctly, that if it
-   * were open anywhere he would have been offered the take-it-back button;
-   * that affordance is driven by REMOTE ownership, so its absence was the
-   * proof that the claimant was this pointer.
-   *
-   * Remote ownership is unchanged: a second phone or tab still protects a
-   * conversation, on cloud exactly as anywhere else.
-   */
+  /** Is this conversation on screen? Only the focused session is. */
   private sessionHasLiveOwner(session: Session): boolean {
-    const localOwner = session === this.focused && !isCloudEnvironment();
-    return localOwner || this.remoteClients.isActiveValueVisible(session);
+    return session === this.focused;
   }
 
-  private reportProtectedSession(origin: MsgOrigin, clientId: string | undefined, action: "delete" | "clear"): void {
+  private reportProtectedSession(action: "delete" | "clear"): void {
     const text = action === "delete"
-      ? "This conversation is open in another tab or the VS Code view. Close it there before deleting it."
-      : "Open conversations were kept. Close them in their tabs or the VS Code view before clearing them.";
-    if (origin === "remote" && clientId) {
-      this.sendRemoteClient(clientId, { type: "error", text });
-    } else {
-      void this.host.showInformationMessage(text);
-    }
-  }
-
-  private captureRemoteRequester(clientId: string): RemoteRequester {
-    return { clientId, tabToken: this.remoteClients.tabToken(clientId) };
-  }
-
-  private resolveRemoteRequester(requester: RemoteRequester): string | undefined {
-    if (requester.tabToken) {
-      return this.remoteClients.clientForTabToken(requester.tabToken);
-    }
-    return this.remoteClients.isCurrent(requester.clientId)
-      && this.remoteClients.cwdIfPresent(requester.clientId)
-      ? requester.clientId
-      : undefined;
-  }
-
-  private sendRemoteRequester(requester: RemoteRequester, message: HostMsg): void {
-    const clientId = this.resolveRemoteRequester(requester);
-    if (clientId) this.sendRemoteClient(clientId, message);
+      ? "This conversation is open. Close it before deleting it."
+      : "Open conversations were kept. Close them before clearing them.";
+    void this.host.showInformationMessage(text);
   }
 
   /**
@@ -21365,30 +19031,18 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
   private refuseMismatchedSessionId(
     requestedId: string | undefined,
     session: Session,
-    requester: RemoteRequester | undefined,
   ): boolean {
     if (requestedId === undefined || requestedId === session.activeSessionId) return false;
     const text = "That conversation is no longer focused — nothing was changed.";
-    if (requester) {
-      this.reportRequester(requester, "info", text);
-    } else {
-      this.postLocal({ type: "hostNotice", level: "info", text });
-    }
+    this.postLocal({ type: "hostNotice", level: "info", text });
     return true;
   }
 
-  private reportRequester(
-    requester: RemoteRequester | undefined,
+  /** A host notification at the given severity. */
+  private notifyUser(
     level: "info" | "warning" | "error",
     text: string,
   ): void {
-    if (requester) {
-      this.sendRemoteRequester(
-        requester,
-        level === "error" ? { type: "error", text } : { type: "hostNotice", level, text },
-      );
-      return;
-    }
     if (level === "error") void this.host.showErrorMessage(text);
     else if (level === "warning") void this.host.showWarningMessage(text);
     else void this.host.showInformationMessage(text);
@@ -21397,57 +19051,18 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
   private async deleteSession(
     id: string,
     _name: string | undefined,
-    origin: MsgOrigin,
-    clientId?: string,
     requestedCwd?: string,
   ): Promise<void> {
     const overridesNow = this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
-    const target = origin === "remote" && clientId
-      ? this.remoteSessionTarget(clientId, id, overridesNow, requestedCwd)
-      : undefined;
-    if (target?.reason && clientId) {
-      this.reportUnauthorizedSessionTarget(clientId, "delete", id, target);
-      return;
-    }
-    const authorizedRemoteCwd = target?.cwd;
     if (this.isSessionLoadReserved(id)) {
       this.host.appendLine(`[sessions] refused delete of reserved session ${id}`);
-      this.reportProtectedSession(origin, clientId, "delete");
+      this.reportProtectedSession("delete");
       return;
     }
+    // Deleting the conversation you are reading is allowed; the view lands on
+    // its neighbour below.
     const live = [...this.pool].find((s) => s.activeSessionId === id);
-    // Deleting the conversation you are READING is allowed. The guard exists to
-    // stop one surface pulling a conversation out from under another, not to
-    // protect you from your own delete — and having the same conversation open
-    // at the desk AND in the browser is an ordinary way to work, so either side
-    // may delete it and every side lands somewhere sensible. What stays refused
-    // is deleting a live conversation you are NOT the one looking at.
-    const watchers = live ? this.remoteClients.clientsForActiveValue(live) : [];
-    const requesterWatches = !!live && (
-      origin === "remote" && clientId
-        ? watchers.includes(clientId)
-        : live === this.focused
-    );
-    if (live && this.sessionHasLiveOwner(live) && !requesterWatches) {
-      // Enough to prove the mechanism from one production line. The bare
-      // version of this cost an evening: five identical refusals that said
-      // “owned elsewhere” and could not say by whom, while the answer — a
-      // local pointer on a machine with no local user — was a field away.
-      // No client ids: who is watching is not something the log needs.
-      this.host.appendLine(
-        `[sessions] refused delete of live session ${id} owned elsewhere`
-        + ` (localFocused=${live === this.focused} cloud=${isCloudEnvironment()}`
-        + ` remoteOwners=${this.remoteClients.clientsForActiveValue(live).length}`
-        + ` requesterWatches=${requesterWatches})`,
-      );
-      this.reportProtectedSession(origin, clientId, "delete");
-      return;
-    }
-    // Last-resort cwd — and this one deletes files, so it resolves in the
-    // ASKER's scope. A delete from VS Code must never fall back to a repo that
-    // some remote client happens to have selected.
-    //
-    // A LOCAL row may name its own project, validated through the catalog. The
+    // A row may name its own project, validated through the catalog. The
     // rail lists other projects' conversations now, and their rows carry a cwd
     // that this chain ignored: rename a cold conversation in project B (which
     // drops its cache entry), then Delete the same row, and it resolved to the
@@ -21455,7 +19070,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     // wrong, and leaving the conversation in B under its old name. Resolved
     // rather than trusted: an unknown path falls through to the chain below.
     const localNamedCwd =
-      origin === "local" && requestedCwd
+      requestedCwd
         ? this.resolveLocalRepoTarget(requestedCwd)?.cwd
           ?? (this.localTrustedSessionCwds(overridesNow).some((c) => pathsEqual(c, requestedCwd))
             ? requestedCwd
@@ -21463,13 +19078,12 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         : undefined;
     const cachedAdapter = [...this.allAdapterCatalogs()].flat().find((entry) => entry.id === id);
     const cwd =
-      authorizedRemoteCwd ||
       live?.cwd ||
       overridesNow[id]?.worktreePath ||
       this.sessionCache.get(id)?.entry.cwd ||
       cachedAdapter?.cwd ||
       localNamedCwd ||
-      this.historyCwdFor(origin);
+      this.historyCwdFor();
     const provider = live?.provider ?? overridesNow[id]?.provider ?? cachedAdapter?.provider ?? "grok";
     // Tear the CLI down BEFORE touching the disk, not after. The live process
     // owns this conversation and re-persists it: delete the directory first and
@@ -21544,7 +19158,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         );
       }
       if (temporary) await temporary.dispose();
-      if (live) this.disposeSession(live);
+      if (live) void this.disposeSession(live);
       const history = this.adapterHistory(provider);
       if (history) {
         for (const [key, entries] of history.cache) {
@@ -21556,7 +19170,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       // oversight: awaiting widens the same unbound window the adapter
       // branch above was reverted for, by up to the process kill timeout.
       // Worth revisiting only together with the recovery this path lacks.
-      if (live) this.disposeSession(live);
+      if (live) void this.disposeSession(live);
       try {
         deleteSessionDir({
           fs: defaultFs,
@@ -21608,58 +19222,26 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         // while history and the rail stay on the project the deleted
         // conversation belonged to. Same rule as newFocusedSession: the local
         // scope IS the selection.
-        this.setSessionCwd(this.focused, this.historyCwdFor("local"), this.workspaceRoot());
-        this.focused.provider = this.defaultProviderForProject(this.historyCwdFor("local"));
+        this.setSessionCwd(this.focused, this.historyCwdFor(), this.workspaceRoot());
+        this.focused.provider = this.defaultProviderForProject(this.historyCwdFor());
         await this.startSession();
       }
     }
-    // Every watcher goes through `openRemoteSession`, the function that
-    // enforces one remote per conversation.
-    //
-    // Attaching them straight to a live neighbour skipped that check, and two
-    // browser tabs ended up on one conversation: the deleter's next message
-    // went into the tab that was already there, and refreshing then hit the
-    // conflicting-owner refusal and left them with nothing. Sharing between
-    // the desk and a remote is fine; between two remotes it is not, and this
-    // loop is not the place to invent an exception.
-    for (const watcher of watchers) {
-      this.dropRemoteVoice(watcher);
-      if (neighbour) await this.openRemoteSession(watcher, neighbour.id, neighbour.cwd, false);
-      // No neighbour, or it would not take them: a blank conversation of their
-      // own, which is what v4.1.4 did for every watcher.
-      if (!this.remoteClients.active(watcher)) await this.newRemoteSession(watcher, false);
-    }
-    if (watchers.length) this.postRepoCatalog();
     this.postSessionsList();
     // The rail's per-project rows come from `repoSessions`, which is a separate
-    // frame from the selected repo's list that postSessionsList refreshes. Only
-    // the remote preview was being refreshed here, so on the desk the deleted
-    // conversation stayed on screen until something else happened to redraw it —
-    // a row you could click that no longer existed.
+    // frame from the selected repo's list that postSessionsList refreshes.
     if (cwd) this.sendLocalRepoSessionsPreview(cwd);
-    this.refreshRemoteRepoPreview(clientId, authorizedRemoteCwd);
   }
 
-  /** Delete every inactive session in the requested repo's history. Every session
-   *  currently owned by a remote tab or the local VS Code view is kept: deleting a
-   *  watched session would strand that owner's rendered transcript over a blank
-   *  replacement process. The webview confirms first (custom dialog). */
-  private async clearAllSessions(
-    requestedCwd: string,
-    origin: MsgOrigin,
-    clientId?: string,
-  ): Promise<void> {
-    // Any project in the host's own catalog, not just the selected one — the rail
-    // offers this per project, and the catalog is the boundary (see
-    // remoteRepoScope). A path the host has never discovered still gets nothing.
-    const selectedCwd = origin === "remote" && clientId
-      ? this.remoteRepoScope(clientId, requestedCwd)
-      : requestedCwd;
-    if (!selectedCwd) {
-      this.host.appendLine("[remote] dropped clearAllSessions (cwd is not a known repository)");
-      return;
-    }
-    const repo = this.localRepoCatalogEntries().find((r) => pathsEqual(r.cwd, selectedCwd));
+  /** Delete every inactive session in the requested repo's history. The
+   *  conversation on screen is kept: deleting it would strand the rendered
+   *  transcript over a blank replacement process. The webview confirms first
+   *  (custom dialog). */
+  private async clearAllSessions(requestedCwd: string): Promise<void> {
+    // Any project in the host's own catalog, not just the selected one — the
+    // rail offers this per project, and the catalog is the boundary. A path the
+    // host has never discovered still gets nothing.
+    const repo = this.localRepoCatalogEntries().find((r) => pathsEqual(r.cwd, requestedCwd));
     if (!repo) return;
     const cwd = repo.cwd;
     const grokHome = resolveGrokHome(process.env);
@@ -21696,8 +19278,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       } catch (error) {
         const text = `${providerDisplayName(provider)} history could not be checked, so its conversations were not cleared: ${(error as Error).message}`;
         this.host.appendLine(`[sessions] ${text}`);
-        if (origin === "remote" && clientId) this.sendRemoteClient(clientId, { type: "error", text });
-        else void this.host.showErrorMessage(text);
+        void this.host.showErrorMessage(text);
       }
     }
     const protectedIds = new Set(
@@ -21707,12 +19288,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         .filter((id): id is string => !!id),
     );
     for (const id of this.reservedSessionIds()) protectedIds.add(id);
-    const requester = sessionForRequest(
-      origin,
-      this.focused,
-      origin === "remote" && clientId ? this.remoteClients.active(clientId) : undefined,
-    );
-    const requesterId = requester?.activeSessionId;
+    const requesterId = this.focused.activeSessionId;
     // Count via the cheap stat-only index — no need to parse every summary just to confirm.
     const repoEntries = mergeSessionIndexes(repoCwds.map((sessionCwd) => ({
       cwd: sessionCwd,
@@ -21731,24 +19307,13 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       (entry) => protectedIds.has(entry.id) && entry.id !== requesterId,
     );
     const clearableCount = allEntries.filter((entry) => !protectedIds.has(entry.id)).length;
-    // A notice is a line in the transcript, and a transcript belongs to ONE
-    // project — so a remark about a project you are not talking in lands in the
-    // wrong conversation. Where the rail is the thing that asked, the refreshed
-    // rail is the answer: the project shows itself empty, in its own place.
-    const clientCwd = origin === "remote" && clientId ? this.remoteClients.cwd(clientId) : undefined;
-    const inThisConversation = origin !== "remote" || (!!clientCwd && pathsEqual(cwd, clientCwd));
     if (clearableCount === 0) {
-      if (keptForAnotherOwner) this.reportProtectedSession(origin, clientId, "clear");
-      else if (inThisConversation) this.reportRequester(
-        origin === "remote" && clientId ? this.captureRemoteRequester(clientId) : undefined,
-        "info",
-        "No history to clear.",
-      );
+      if (keptForAnotherOwner) this.reportProtectedSession("clear");
+      else this.notifyUser("info", "No history to clear.");
       // Ownerless live empties may have been disposed above without a catalog
       // row. The rail still has to drop them.
       this.postSessionsList();
       this.sendLocalRepoSessionsPreview(cwd);
-      this.refreshRemoteRepoPreview(clientId, cwd);
       return;
     }
     // Confirm lives in the webview (custom dialog) — see deleteSession.
@@ -21795,15 +19360,13 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
           } catch (error) {
             const text = `${name} refused to delete “${entry.displayName}”: ${(error as Error).message}`;
             this.host.appendLine(`[sessions] ${text}`);
-            if (origin === "remote" && clientId) this.sendRemoteClient(clientId, { type: "error", text });
-            else void this.host.showErrorMessage(text);
+            void this.host.showErrorMessage(text);
           }
         }
       } catch (error) {
         const text = `${name} conversations were not cleared: ${(error as Error).message}`;
         this.host.appendLine(`[sessions] ${text}`);
-        if (origin === "remote" && clientId) this.sendRemoteClient(clientId, { type: "error", text });
-        else void this.host.showErrorMessage(text);
+        void this.host.showErrorMessage(text);
       } finally {
         if (client) await client.dispose();
       }
@@ -21844,7 +19407,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     for (const s of [...this.pool]) {
       if (s.activeSessionId && gone.has(s.activeSessionId)) {
         removedFocused ||= s === this.focused;
-        this.disposeSession(s);
+        void this.disposeSession(s);
       }
     }
     if (removedFocused) {
@@ -21857,8 +19420,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     // — no confirmation, and a later delete on one of those ghosts failed with a
     // permissions error that was really "this is not there any more".
     this.sendLocalRepoSessionsPreview(cwd);
-    this.refreshRemoteRepoPreview(clientId, cwd);
-    if (keptForAnotherOwner) this.reportProtectedSession(origin, clientId, "clear");
+    if (keptForAnotherOwner) this.reportProtectedSession("clear");
   }
 
   private async pickFileFromComputer(): Promise<void> {
@@ -22048,7 +19610,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
    *  `grok.telemetry.enabled`; fully fire-and-forget. Must not rediscover
    *  providers or resolve credentials — those flags come from the last
    *  providerState / voiceConfigured refresh. */
-  private reportSessionStart(session: Session, origin: MsgOrigin): void {
+  private reportSessionStart(session: Session): void {
     // Telemetry must NEVER affect the user's turn. Build the event synchronously
     // from already-cached session + settings + the last connection/voice snapshot
     // (so it captures THIS session's mode/model/effort — focus could move during
@@ -22064,12 +19626,6 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       if (!enabled) return;
       const cfg = this.host.getConfiguration("grok");
       const appVersion = this.context.extensionVersion;
-      const remoteClientId = origin === "remote"
-        ? this.remoteClients.clientsForActiveValue(session)[0]
-        : undefined;
-      const remotePreferences = remoteClientId
-        ? this.remoteClients.metadata(remoteClientId)
-        : undefined;
       const cwd = this.sessionCwd(session);
       // Read before installId(): getOrCreate would create the id first and make
       // every send look like a returning install. Reuse the value rather than
@@ -22099,9 +19655,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
           chatFontScale: Math.round(this.chatFontScale() * 100),
           readRepliesAloud: cfg.get<boolean>("readRepliesAloud", false),
           soundNotifications: cfg.get<boolean>("soundNotifications", false),
-          remoteFontScale: remotePreferences?.fontScale,
-          remoteReadRepliesAloud: remotePreferences?.readRepliesAloud,
-          ...sessionStartSurface(origin, remotePreferences?.usesTouch),
+          ...sessionStartSurface(),
           host: this.host.appName || undefined,
           hostKind: sessionStartHostKind(this.host.canSwitchWorkspaceFolder),
           appPurpose: this.appPurpose(),
@@ -22190,28 +19744,6 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       this.postLocal(localMsg);
       void this.settingsEditor?.webview.postMessage(localMsg);
     });
-    for (const clientId of this.remoteClients.clients()) {
-      // Scope = the project whose config we resolved. Classification is "scope"
-      // so a closed/re-homed tab cannot receive the prior project's prefs.
-      //
-      // This refresh is a host-wide watcher/config event, not a request from
-      // this tab. A connected client can still have no project (desktop
-      // empty-workspace ready() stores ""). The strict cwd accessor throws
-      // for that state and would take down the desktop main process. Skip —
-      // the next snapshot carries voiceConfigured.
-      const active = this.remoteClients.active(clientId);
-      const remoteCwd = active
-        ? this.sessionCwd(active)
-        : this.remoteClients.cwdIfPresent(clientId);
-      if (!remoteCwd) continue;
-      const provider = active?.provider ?? this.defaultProviderForProject(remoteCwd);
-      const remoteConfigured = !!this.voiceBackendState(remoteCwd, provider).backend;
-      this.rememberVoiceConfigured(remoteCwd, remoteConfigured);
-      const remoteMsg = this.voiceConfiguredMsg(remoteCwd, remoteConfigured, provider);
-      this.deliverVoiceConfigured(`remote:${clientId}`, remoteMsg, () => {
-        this.sendRemoteClient(clientId, remoteMsg, remoteCwd);
-      });
-    }
   }
 
   private voiceSetting<T>(cwd: string, key: string, fallback: T): T {
@@ -22227,7 +19759,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
   private async mentionFileIndexForCwd(cwd: string): Promise<{ rels: string[]; absByRel: Map<string, string> }> {
     if (pathsEqual(cwd, this.workspaceRoot())) return this.mentionFileIndex();
     const key = normalizeRepoPath(cwd);
-    const cached = this.remoteMentionIndexes.get(key);
+    const cached = this.otherCwdMentionIndexes.get(key);
     if (cached && Date.now() - cached.at < MENTION_INDEX_TTL_MS) return cached;
     const cfg = this.host.getConfiguration();
     const exclude = buildExcludeGlob([
@@ -22245,7 +19777,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       if (rel && !absByRel.has(rel)) absByRel.set(rel, abs);
     }
     const value = { at: Date.now(), rels: orderMentionIndex([...absByRel.keys()]), absByRel };
-    this.remoteMentionIndexes.set(key, value);
+    this.otherCwdMentionIndexes.set(key, value);
     return value;
   }
 
@@ -22267,17 +19799,9 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
   /** Begin recording the microphone (in the extension host — the webview can't
    *  reach the mic). The webview has already flipped its button to "listening";
    *  on any setup failure we send `voiceError` to reset it. */
-  private rejectVoiceStart(clientId?: string): void {
-    const message = clientId
-      ? "Voice control is already active in this browser tab."
-      : "Voice control is already active.";
-    if (clientId) {
-      this.sendRemoteClient(clientId, { type: "voiceError" });
-      this.sendRemoteClient(clientId, { type: "error", text: message });
-    } else {
-      this.postLocal({ type: "voiceError" });
-      void this.host.showWarningMessage(message);
-    }
+  private rejectVoiceStart(): void {
+    this.postLocal({ type: "voiceError" });
+    void this.host.showWarningMessage("Voice control is already active.");
   }
 
   private claimVoice(cwd: string): boolean {
@@ -22605,13 +20129,6 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       this.localVoiceCredentialCwd = undefined;
       if (wasActive) this.postLocal({ type: "voiceState", status: "idle" });
     }
-    for (const [clientId, remote] of [...this.remoteVoice]) {
-      if (session && remote.session !== session) continue;
-      remote.ingress.close();
-      remote.streamer.cancel();
-      this.remoteVoice.delete(clientId);
-      this.sendRemoteClient(clientId, { type: "voiceState", status: "idle" });
-    }
   }
 
   /** Stop recording, transcribe with the pinned backend, and fill the composer. */
@@ -22685,219 +20202,6 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         this.localVoiceCredentialCwd = undefined;
       }
     }
-  }
-
-  private async startRemotePcm(
-    clientId: string,
-    entry: RemoteVoiceEntry,
-  ): Promise<void> {
-    const key = this.resolveSttApiKey(entry.credentialCwd, entry.backend) || entry.key;
-    entry.key = key;
-    const streamer = createPcmVoiceStreamer(entry.backend);
-    entry.streamer = streamer;
-    const current = () => this.remoteVoice.get(clientId) === entry && entry.streamer === streamer;
-    streamer.on("partial", (ev: { text: string; speechFinal: boolean }) => {
-      if (!current()) return;
-      this.sendRemoteClient(
-        clientId,
-        { type: "voicePartial", text: ev.text },
-        entry.credentialCwd,
-      );
-      if (!entry.finalizing && ev.speechFinal && entry.phrase) {
-        const parsed = parseVoiceCommand(ev.text, entry.phrase);
-        if (parsed.send) void this.commitRemoteVoice(clientId, parsed.text);
-      }
-    });
-    streamer.on("ended", () => {
-      if (current()) void this.handleRemoteVoiceStop(clientId, false);
-    });
-    streamer.on("error", (e: Error) => {
-      if (!current() || entry.finalizing) return;
-      this.host.appendLine(`[remote-voice] stream error: ${e.message}`);
-      this.failRemoteVoice(clientId, e.message);
-    });
-    await streamer.start({
-      apiKey: key,
-      model: entry.model,
-      keyterms: entry.keyterms,
-      language: entry.language,
-      log: (m) => this.host.appendLine(`[remote] ${m}`),
-    });
-    if (!current()) {
-      streamer.cancel();
-      return;
-    }
-    const pending = entry.ingress.ready();
-    for (const bytes of pending) {
-      if (!streamer.writePcm(bytes)) {
-        this.failRemoteVoice(clientId, "The Speech-to-Text stream did not accept buffered microphone audio.");
-        return;
-      }
-    }
-    if (!entry.finalizing) this.sendRemoteClient(clientId, { type: "voiceState", status: "listening" });
-  }
-
-  private async handleRemoteVoiceStart(clientId: string, session: Session): Promise<void> {
-    const credentialCwd = this.sessionCwd(session);
-    const backend = this.voiceBackendState(credentialCwd, session.provider).backend;
-    const key = backend && this.resolveSttApiKey(credentialCwd, backend);
-    if (!backend || !key) {
-      this.rememberVoiceConfigured(credentialCwd, false);
-      const payload = this.voiceConfiguredMsg(credentialCwd, false, session.provider);
-      this.deliverVoiceConfigured(`remote:${clientId}`, payload, () => {
-        this.sendRemoteClient(clientId, payload, credentialCwd);
-      });
-      this.sendRemoteClient(clientId, { type: "voiceError" });
-      this.sendRemoteClient(clientId, {
-        type: "error",
-        text: "Voice needs a credential for the selected backend on the host: an OpenAI API key, or an xAI key / Grok sign-in. Codex sign-in does not include transcription API access.",
-      });
-      return;
-    }
-    if (this.remoteVoice.has(clientId)) {
-      this.rejectVoiceStart(clientId);
-      return;
-    }
-    const phrase = this.voiceSetting(credentialCwd, "voiceSendPhrase", DEFAULT_SEND_PHRASE);
-    const keyterms = buildSttKeyterms(
-      phrase,
-      this.voiceSetting<string[]>(credentialCwd, "voiceKeyterms", []),
-    );
-    const language = this.voiceSetting(credentialCwd, "voiceLanguage", "").trim() || undefined;
-    let entry!: RemoteVoiceEntry;
-    const ingress = new RemotePcmIngress(
-      GrokSidebar.MAX_REMOTE_PCM_CHUNK_BYTES,
-      GrokSidebar.MAX_REMOTE_PCM_BYTES,
-      MAX_RECORDING_SECONDS * 1000,
-      () => { void this.handleRemoteVoiceStop(clientId, false); },
-    );
-    entry = {
-      credentialCwd,
-      session,
-      streamer: createPcmVoiceStreamer(backend),
-      backend,
-      key,
-      model: this.voiceSetting(credentialCwd, "voiceOpenAiModel", OPENAI_STT_MODEL),
-      ingress,
-      phrase,
-      keyterms,
-      language,
-      finalizing: false,
-    };
-    this.remoteVoice.set(clientId, entry);
-    try {
-      await (entry.starting = this.startRemotePcm(clientId, entry));
-    } catch (e) {
-      if (this.remoteVoice.get(clientId) !== entry) return;
-      this.failRemoteVoice(clientId, (e as Error).message);
-    }
-  }
-
-  private handleRemoteVoiceChunk(clientId: string, data: string): void {
-    const entry = this.remoteVoice.get(clientId);
-    if (entry?.finalizing) return;
-    const accepted = acceptRemotePcm(entry?.ingress, data);
-    switch (accepted.kind) {
-      case "unowned":
-        this.sendRemoteClient(clientId, { type: "voiceError" });
-        return;
-      case "invalid":
-        this.failRemoteVoice(clientId, "The browser sent an invalid microphone audio chunk.");
-        return;
-      case "limit":
-        void this.handleRemoteVoiceStop(clientId, false);
-        return;
-      case "buffered":
-        return;
-      case "write":
-        if (!entry!.streamer.writePcm(accepted.bytes)) {
-          this.failRemoteVoice(clientId, "The Speech-to-Text stream is not ready for microphone audio.");
-        }
-    }
-  }
-
-  private async commitRemoteVoice(clientId: string, text: string): Promise<void> {
-    const entry = this.remoteVoice.get(clientId);
-    if (!entry || entry.finalizing) return;
-    if (!entry.ingress.restarting()) return;
-    const old = entry.streamer;
-    old.cancel();
-    this.sendRemoteClient(
-      clientId,
-      { type: "voiceSubmit", text: text.trim() },
-      entry.credentialCwd,
-    );
-    try {
-      await (entry.starting = this.startRemotePcm(clientId, entry));
-    } catch (e) {
-      if (this.remoteVoice.get(clientId) !== entry) return;
-      this.failRemoteVoice(clientId, (e as Error).message);
-    }
-  }
-
-  private async handleRemoteVoiceStop(clientId: string, cancel: boolean): Promise<void> {
-    const entry = this.remoteVoice.get(clientId);
-    // A cancelled stream can still emit an ended/error callback while its stop
-    // promise is settling. Its entry identity is the generation guard; do not
-    // turn that late completion into a new client-visible event.
-    if (!entry) return;
-    if (cancel) { this.dropRemoteVoice(clientId); return; }
-    if (entry.finalizing) return;
-    entry.finalizing = true;
-    this.sendRemoteClient(clientId, { type: "voiceState", status: "transcribing" });
-    let transcript = "";
-    let completed = true;
-    try { await entry.starting; } catch { /* start path reports the failure */ }
-    if (this.remoteVoice.get(clientId) !== entry) return;
-    entry.ingress.close();
-    try { transcript = await entry.streamer.stop(); } catch (err) {
-      completed = false;
-      transcript = entry.streamer.transcript;
-      if (this.remoteVoice.get(clientId) === entry) this.sendRemoteClient(clientId, { type: "error", text: (err as Error).message });
-    }
-    if (this.remoteVoice.get(clientId) !== entry) return;
-    this.remoteVoice.delete(clientId);
-    const { text, send } = parseFinalVoiceCommand(transcript, completed ? entry.streamer.finalizedTranscript : "", entry.phrase);
-    if (!text && !send) {
-      this.sendRemoteClient(clientId, { type: "voiceError" });
-      return;
-    }
-    if (send) {
-      this.sendRemoteClient(
-        clientId,
-        { type: "voiceSubmit", text: text.trim() },
-        entry.credentialCwd,
-      );
-      this.sendRemoteClient(clientId, { type: "voiceState", status: "idle" });
-    } else {
-      this.sendRemoteClient(
-        clientId,
-        { type: "voiceTranscript", text, send: false },
-        entry.credentialCwd,
-      );
-    }
-  }
-
-  private dropRemoteVoice(clientId: string): void {
-    const entry = this.remoteVoice.get(clientId);
-    if (!entry) return;
-    entry.ingress.close();
-    entry.streamer.cancel();
-    this.remoteVoice.delete(clientId);
-    this.sendRemoteClient(clientId, { type: "voiceState", status: "idle" });
-  }
-
-  private failRemoteVoice(clientId: string, detail: string): void {
-    const entry = this.remoteVoice.get(clientId);
-    if (entry) {
-      entry.ingress.close();
-      entry.streamer.cancel();
-      this.remoteVoice.delete(clientId);
-      this.sendRemoteClient(clientId, { type: "voiceError" });
-    } else {
-      this.sendRemoteClient(clientId, { type: "voiceError" });
-    }
-    this.sendRemoteClient(clientId, { type: "error", text: `Voice transcription failed: ${detail}` });
   }
 
   private async openDiffEditor(
@@ -23033,20 +20337,19 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       case "conflict":
         respond(false, "The file has changed since this edit and can't be safely reverted.");
         return;
-      case "delete-confirm": {
-        const choice = await this.host.showWarningMessage(
-          `${path.basename(abs)} has changed since this edit. Delete it anyway?`,
-          "Delete",
-          "Cancel",
-        );
-        if (choice !== "Delete") {
-          respond(false, "Cancelled.");
-          return;
-        }
-        // falls through to the same delete as "delete"
-      }
-      // eslint-disable-next-line no-fallthrough
+      case "delete-confirm":
       case "delete":
+        if (plan.action === "delete-confirm") {
+          const choice = await this.host.showWarningMessage(
+            `${path.basename(abs)} has changed since this edit. Delete it anyway?`,
+            "Delete",
+            "Cancel",
+          );
+          if (choice !== "Delete") {
+            respond(false, "Cancelled.");
+            return;
+          }
+        }
         try {
           await this.host.fs.delete(Uri.file(abs), { useTrash: true });
           this.forgetReviewPath(session, msg.path, { toolCallId: msg.toolCallId });
@@ -23166,19 +20469,19 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       case "conflict":
         fail("The file has changed since this edit and can't be safely reverted.");
         return;
-      case "delete-confirm": {
-        const choice = await this.host.showWarningMessage(
-          `${path.basename(abs)} has changed since this edit. Delete it anyway?`,
-          "Delete",
-          "Cancel",
-        );
-        if (choice !== "Delete") {
-          fail("Cancelled.");
-          return;
-        }
-      }
-      // eslint-disable-next-line no-fallthrough
+      case "delete-confirm":
       case "delete":
+        if (plan.action === "delete-confirm") {
+          const choice = await this.host.showWarningMessage(
+            `${path.basename(abs)} has changed since this edit. Delete it anyway?`,
+            "Delete",
+            "Cancel",
+          );
+          if (choice !== "Delete") {
+            fail("Cancelled.");
+            return;
+          }
+        }
         try {
           await this.host.fs.delete(Uri.file(abs), { useTrash: true });
         } catch {
@@ -23212,7 +20515,6 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
   private async reviewRevertAll(
     session: Session,
     scope: ReviewScope,
-    requester?: { clientId: string } | undefined,
   ): Promise<void> {
     const currentTurnId = String(session.userMessageCount);
     const plan = planDiscardAll(scope, currentTurnId);
@@ -23279,28 +20581,16 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     }
     let overwrite = false;
     if (restore.conflicts.length) {
-      const listed = restore.conflicts.map((f) => `• ${f}`).join("\n");
-      if (requester) {
-        const ok = await this.confirmInChat(session, {
-          title: "Files changed since this snapshot",
-          body: `These files were modified after the checkpoint. Overwrite them?\n${listed}`,
-          confirmLabel: "Overwrite",
-          danger: true,
-        });
-        if (!ok) return;
-        overwrite = true;
-      } else {
-        const items = [
-          { label: "Overwrite all conflicting files", description: `${restore.conflicts.length} file(s) changed since the snapshot`, action: "overwrite" as const },
-          { label: "Cancel", action: "cancel" as const },
-        ];
-        const pick = await this.host.showQuickPick(items, {
-          placeHolder: "Restore anyway? Foreign changes will be overwritten.",
-          ignoreFocusOut: true,
-        });
-        if (!pick || pick.action === "cancel") return;
-        overwrite = true;
-      }
+      const items = [
+        { label: "Overwrite all conflicting files", description: `${restore.conflicts.length} file(s) changed since the snapshot`, action: "overwrite" as const },
+        { label: "Cancel", action: "cancel" as const },
+      ];
+      const pick = await this.host.showQuickPick(items, {
+        placeHolder: "Restore anyway? Foreign changes will be overwritten.",
+        ignoreFocusOut: true,
+      });
+      if (!pick || pick.action === "cancel") return;
+      overwrite = true;
     }
 
     const toAck = (scope === "turn"
@@ -23700,19 +20990,15 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       userBubbleIndex?: number;
       bubbleText?: string;
       totalUserBubbles?: number;
-      requester?: RemoteRequester;
       edit: boolean;
     },
   ): Promise<void> {
-    const { requester } = opts;
     const sid = session.activeSessionId;
     if (!sid) {
-      return void this.reportRequester(requester, "warning", "Start a session before rewinding it.");
+      return void this.notifyUser("warning", "Start a session before rewinding it.");
     }
     if (typeof opts.totalUserBubbles === "number" && opts.totalUserBubbles !== session.userMessageCount) {
-      return void this.reportRequester(
-        requester,
-        "warning",
+      return void this.notifyUser("warning",
         "Restore points no longer line up with this conversation, so rewinding could remove the wrong turn. Reload the window and try again.",
       );
     }
@@ -23720,28 +21006,18 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     let surviving: number;
     if (typeof opts.userBubbleIndex === "number") {
       if (opts.userBubbleIndex < 0 || opts.userBubbleIndex >= session.userMessageCount) {
-        return void this.reportRequester(
-          requester,
-          "info",
+        return void this.notifyUser("info",
           opts.edit
             ? "Can't edit this message — the checkpoint is unavailable."
             : "Can't rewind to this message — it's the latest turn, or the checkpoint is unavailable.",
         );
       }
       if (!opts.edit && opts.userBubbleIndex === session.userMessageCount - 1) {
-        return void this.reportRequester(
-          requester,
-          "info",
+        return void this.notifyUser("info",
           "Can't rewind to this message — it's the latest turn, or the checkpoint is unavailable.",
         );
       }
       surviving = survivingAfterClientRewind(opts.userBubbleIndex);
-    } else if (opts.requester) {
-      return void this.reportRequester(
-        requester,
-        "info",
-        "Pick the message to rewind to using the Rewind button on that message.",
-      );
     } else {
       const users = session.buffer.filter((m) => m.type === "userMessage" && !m.steer);
       const selectable = opts.edit ? users : users.slice(0, Math.max(0, users.length - 1));
@@ -23805,37 +21081,24 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     }
     let overwrite = false;
     if (plan.conflicts.length) {
-      const listed = plan.conflicts.map((f) => `• ${f}`).join("\n");
-      if (opts.requester) {
-        const ok = await this.confirmInChat(session, {
-          title: "Files changed since this snapshot",
-          body: `These files were modified after the checkpoint. Overwrite them?\n${listed}`,
-          confirmLabel: "Overwrite",
-          danger: true,
-        });
-        if (!ok) return;
-        overwrite = true;
-      } else {
-        const items = [
-          { label: "Overwrite all conflicting files", description: `${plan.conflicts.length} file(s) changed since the snapshot`, action: "overwrite" as const },
-          { label: "Cancel", action: "cancel" as const },
-          ...plan.conflicts.map((f) => ({ label: f, description: "changed since snapshot", action: "overwrite" as const })),
-        ];
-        const pick = await this.host.showQuickPick(items, {
-          placeHolder: "Restore anyway? Foreign changes will be overwritten.",
-          ignoreFocusOut: true,
-        });
-        if (!pick || pick.action === "cancel") return;
-        overwrite = true;
-      }
+      const items = [
+        { label: "Overwrite all conflicting files", description: `${plan.conflicts.length} file(s) changed since the snapshot`, action: "overwrite" as const },
+        { label: "Cancel", action: "cancel" as const },
+        ...plan.conflicts.map((f) => ({ label: f, description: "changed since snapshot", action: "overwrite" as const })),
+      ];
+      const pick = await this.host.showQuickPick(items, {
+        placeHolder: "Restore anyway? Foreign changes will be overwritten.",
+        ignoreFocusOut: true,
+      });
+      if (!pick || pick.action === "cancel") return;
+      overwrite = true;
     }
 
     if (
       ["working", "needs-you"].includes(session.status) ||
       session.activeSessionId !== sid
     ) {
-      return void this.reportRequester(
-        requester, "warning",
+      return void this.notifyUser("warning",
         `${opts.edit ? "Edit" : "Rewind"} cancelled because the conversation changed or another turn started. Nothing was rewound. Try ${opts.edit ? "Edit" : "Rewind"} again when the conversation is idle.`,
       );
     }
@@ -23868,17 +21131,15 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     this.applyRewindToView(session, surviving);
     this.checkpointStore?.pruneAfter(sid, surviving);
     const restoredText = (opts.bubbleText ?? "").trim();
-    if (restoredText) this.restoreComposerFor(session, requester, restoredText);
+    if (restoredText) this.restoreComposerFor(session, restoredText);
 
     if (failed.length) {
-      this.reportRequester(requester, "error", `Rewound the conversation, but some files could not be restored:\n${failed.join("\n")}`);
+      this.notifyUser("error", `Rewound the conversation, but some files could not be restored:\n${failed.join("\n")}`);
     } else if (restored.length || plan.skipped.length) {
       const skip = plan.skipped.length
         ? ` Not restorable: ${plan.skipped.map((s) => s.relPath).join(", ")}.`
         : "";
-      this.reportRequester(
-        requester,
-        "info",
+      this.notifyUser("info",
         restored.length
           ? `Rewound. Restored ${restored.length} file(s).${skip}`
           : `Rewound.${skip}`,
@@ -24021,27 +21282,6 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     return tracked;
   }
 
-  /** Resolve attachment ownership at commit time. Session transitions can
-   * replace the active session while staging is awaiting the filesystem; a
-   * captured Session would then deliver the chip to the conversation the tab
-   * has already left.
-   *
-   * Returns undefined when the asking tab is gone, and callers MUST drop the
-   * attachment rather than pick somewhere for it. Falling back to `this.focused`
-   * looks harmless and is not: a phone that uploads and then reconnects gets a
-   * new relay id, so the staging that was still awaiting resolves to no client
-   * and the image lands in whatever conversation the DESK happens to be showing.
-   * That is content crossing conversations, which is worse than losing it.
-   *
-   * The ephemeral relay id is resolved through `currentClient`, which follows
-   * the tab across a reconnect via its stable token — so the ordinary
-   * refresh-mid-upload keeps working and only a genuinely departed tab drops. */
-  private attachmentOwner(origin: MsgOrigin, clientId?: string): Session | undefined {
-    if (origin !== "remote") return this.focused;
-    const current = clientId ? this.remoteClients.currentClient(clientId) : undefined;
-    return current ? this.remoteClients.active(current) : undefined;
-  }
-
   /**
    * Session-NEUTRAL staging dir for images waiting in the composer. Deliberately
    * NOT the grok session dir: composer chips are provider-level state that
@@ -24100,42 +21340,6 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         } catch { /* raced or locked — next activation gets it */ }
       }
     } catch { /* staging dir doesn't exist yet */ }
-  }
-
-  /** Validate and stage one remote browser document, then mint the exact same
-   * explicit path chip as a local drag-and-drop. */
-  private async addUploadedFile(
-    suppliedName: string,
-    data: string,
-    owner: AttachmentOwner = () => this.focused,
-    requester?: RemoteRequester,
-  ): Promise<void> {
-    const prepared = prepareFileUpload(suppliedName, data, MAX_VISION_IMAGE_BYTES);
-    if (!prepared.ok) {
-      const detail = prepared.reason === "unsupported-extension"
-        ? "supported types are .md, .txt, .pdf, .csv, .xlsx, and .docx"
-        : prepared.reason === "too-large"
-          ? "the file exceeds the 20 MiB attachment limit"
-          : prepared.reason === "empty"
-            ? "the file is empty"
-            : "the file data is invalid";
-      this.host.appendLine(`[upload] rejected ${suppliedName}: ${detail}`);
-      this.reportRequester(requester, "error", `Could not attach document — ${detail}.`);
-      return;
-    }
-
-    const dir = path.join(this.fileStagingDir(), randomUUID());
-    const absPath = path.join(dir, prepared.name);
-    try {
-      await fs.promises.mkdir(dir, { recursive: true });
-      await fs.promises.writeFile(absPath, prepared.bytes, { flag: "wx" });
-      const session = await this.addDroppedFile(absPath, false, owner);
-      if (session === this.focused) this.revealAndFocusComposer();
-    } catch (e) {
-      void fs.promises.rm(dir, { recursive: true, force: true }).catch(() => {});
-      this.host.appendLine(`[upload] staging failed for ${prepared.name}: ${(e as Error).message}`);
-      this.reportRequester(requester, "error", `Could not attach document — ${(e as Error).message}`);
-    }
   }
 
   private async retainUploadedFilesForSession(session: Session, chips: ContextChip[]): Promise<void> {
@@ -24222,25 +21426,24 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     base64: string,
     mimeType: string,
     owner: AttachmentOwner = () => this.focused,
-    requester?: RemoteRequester,
     previewId?: string,
   ): Promise<void> {
     try {
       if (!isVisionMime(mimeType)) {
-        this.reportRequester(requester, "error", `Grok: unsupported image type ${mimeType} — use PNG, JPEG, GIF, or WebP.`);
+        this.notifyUser("error", `Grok: unsupported image type ${mimeType} — use PNG, JPEG, GIF, or WebP.`);
         return;
       }
       const bytes = Buffer.from(base64, "base64");
       if (bytes.length === 0) return;
       if (bytes.length > MAX_VISION_IMAGE_BYTES) {
-        this.reportRequester(requester, "error", "Grok: pasted image exceeds the 20 MiB vision limit.");
+        this.notifyUser("error", "Grok: pasted image exceeds the 20 MiB vision limit.");
         return;
       }
       const session = await this.stageImageAttachment(bytes, mimeType, undefined, owner, previewId);
       if (session === this.focused) this.revealAndFocusComposer();
     } catch (e) {
       this.host.appendLine(`[image] paste failed: ${(e as Error).message}`);
-      this.reportRequester(requester, "error", `Grok: could not attach the pasted image — ${(e as Error).message}`);
+      this.notifyUser("error", `Grok: could not attach the pasted image — ${(e as Error).message}`);
     }
   }
 
@@ -24336,7 +21539,6 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
   private addContextSourceChip(
     source: ContextSourceId,
     owner: AttachmentOwner,
-    requester?: RemoteRequester,
   ): void {
     const session = owner();
     if (!session) return; // asking tab gone — drop, never redirect
@@ -24347,11 +21549,11 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         count = this.host.getDiagnostics({ scope: "workspace" }).length;
       } catch (e) {
         this.host.appendLine(`[context-chip] diagnostics probe failed: ${(e as Error).message}`);
-        this.reportRequester(requester, "warning", "Could not read the editor's problems.");
+        this.notifyUser("warning", "Could not read the editor's problems.");
         return;
       }
       if (!count) {
-        this.reportRequester(requester, "info", "No problems reported — nothing to attach.");
+        this.notifyUser("info", "No problems reported — nothing to attach.");
         return;
       }
       chip = makeDiagnosticsChip({ scope: "workspace", count });
@@ -24361,13 +21563,11 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         capture = this.host.getTerminalCapture();
       } catch (e) {
         this.host.appendLine(`[context-chip] terminal probe failed: ${(e as Error).message}`);
-        this.reportRequester(requester, "warning", "Could not read the terminal.");
+        this.notifyUser("warning", "Could not read the terminal.");
         return;
       }
       if (!capture?.text.trim()) {
-        this.reportRequester(
-          requester,
-          "info",
+        this.notifyUser("info",
           "No terminal output captured yet. Run a command in the integrated terminal first — capture needs shell integration.",
         );
         return;
@@ -24518,7 +21718,6 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       return;
     }
     if (!text.trim() && !chips.length) return;
-    session.queuedSendDispatch = undefined;
     session.queuedSends = enqueueQueuedSend(session.queuedSends, text, chips);
     if (chips.length) {
       session.chips = consumeChips(session.chips, chips);
@@ -24533,7 +21732,6 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     text: string,
     bare = false,
     target?: Session,
-    origin: MsgOrigin = "local",
     queuedSendCommit?: { text: string; items: QueuedSendEntry[] },
     submissionId?: string,
   ): Promise<void> {
@@ -24551,17 +21749,17 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     // entry suspends every send before the `turnInFlight` fast path below, and
     // the races that path exists for are decided in exactly that window.
     if (parseAgentCommand(text).kind !== "none") {
-      await this.handleAgentCommand(text, session, origin);
+      await this.handleAgentCommand(text, session);
       return;
     }
     // AP-11. Same backstop, same synchronous-guard rule. A briefing never
     // starts with one of these either, so a role run cannot re-enter here.
     if (parseHandoffCommand(text).kind !== "none") {
-      await this.handleHandoffCommand(text, session, origin);
+      await this.handleHandoffCommand(text, session);
       return;
     }
     if (parseCrewCommand(text).kind !== "none") {
-      await this.handleCrewCommand(text, session, origin);
+      await this.handleCrewCommand(text, session);
       return;
     }
     if (parseSubagentsCommand(text).kind !== "none") {
@@ -24569,7 +21767,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       return;
     }
     if (session.sessionType === "crew" && !session.pendingHiddenChild) {
-      await this.handleCrewSessionInput(text, session, origin);
+      await this.handleCrewSessionInput(text, session);
       return;
     }
     await this.waitForSessionStart(session);
@@ -24770,7 +21968,7 @@ ${directives.block}`;
       // "[Image #1]" customName over every screenshot-first session.
       session.firstUserMessageForTitle = text;
       // One `session_start` per session, on the first real user message.
-      this.reportSessionStart(session, origin);
+      this.reportSessionStart(session);
       // ST-2. This send is the first submitted content, whatever it consists of
       // — text, a voice utterance, or nothing but chips and images. The type is
       // settled from here on and never comes undone, not by a rewind either.
@@ -24995,7 +22193,7 @@ ${directives.block}`;
     if (!pending || pending.id !== msg.id) return;
     session.pendingOverflow = undefined;
     if (msg.action === "fresh") {
-      await this.continueInFreshSession(session, "local");
+      await this.continueInFreshSession(session);
       return;
     }
     if (msg.action !== "compact-retry") return;
@@ -25288,14 +22486,9 @@ ${directives.block}`;
       thumbsFeedback: cfg.get("thumbsFeedback", false),
       appPurpose: this.appPurpose() || DEFAULT_APP_PURPOSE,
       ...(commandLanguage ? { commandLanguage } : {}),
-      // For a remote's About page. A phone is looking at neither GUI,
-      // so it has to be told which one is on the other end and what the machine
-      // is called. `canSwitchWorkspaceFolder` is the desktop app's defining
-      // capability and is already how every other host-kind decision here is
-      // made. The name is the same string the device list shows, so the two
-      // surfaces cannot disagree about what the machine is called.
+      // `canSwitchWorkspaceFolder` is the desktop app's defining capability and
+      // is how every other host-kind decision here is made.
       hostKind: this.host.canSwitchWorkspaceFolder ? "desktop" : "extension",
-      hostName: deviceDisplayName(os.hostname(), process.platform, os.release()),
       // Wire baseline + host-kind UI affordances (gear Move view / Show logs).
       capabilities: {
         ...HOST_CAPABILITIES,
@@ -25314,23 +22507,7 @@ ${directives.block}`;
         // DevTools is discoverable without the auto-hidden application menu.
         toggleDevTools: this.host.canToggleDevTools,
         // OPT-IN: absent/false hides Settings → Connectors.
-        //
-        // A cloud environment withholds it. Connecting an MCP connector is a
-        // browser OAuth flow at the VENDOR, and there is no browser in a hosted
-        // machine — nor, unlike a desk, any computer to walk over to. Every
-        // other host-local capability re-homes to the remote client, which knows
-        // how to present a file or open a URL itself; this one genuinely cannot,
-        // until a connector offers a device-code flow.
-        //
-        // Withheld rather than shown-and-disabled: a control that explains why
-        // it will not work is still a control that does not work, and the page
-        // behind it would list servers nobody can connect.
-        ...(this.host.canShowMcpSettings && !isCloudEnvironment() ? { mcpSettings: true } : {}),
-        // Sign OUT from a remote, cloud only. See HostUiCapabilities and the
-        // CLOUD_DISPOSITION override in remote-policy.ts, which is the half that
-        // actually admits the message — this flag only decides whether the page
-        // offers the control.
-        ...(isCloudEnvironment() ? { remoteAgentSignOut: true } : {}),
+        ...(this.host.canShowMcpSettings ? { mcpSettings: true } : {}),
         // Absent/true = host opens files in an editor tab; false = no editor
         // (desktop → in-app lightbox for generated images). See Host.canOpenInEditor.
         openInEditor: this.host.canOpenInEditor,
@@ -25339,8 +22516,7 @@ ${directives.block}`;
         servesMediaRanges: this.host.canServeMediaRanges,
         showInFolder: this.host.canShowInFolder,
         // OPT-IN: desktop only. View all / proposed diffs open the in-app
-        // overlay instead of a host editor or bare window. Remotes never
-        // receive this (DESK_ONLY_CAPABILITIES).
+        // overlay instead of a host editor or bare window.
         previewInApp: this.host.canPreviewInApp,
         // OPT-IN: VS Code editor tab. Desktop/remotes keep the in-page overlay.
         settingsEditor: this.host.canOpenSettingsEditor,
@@ -25353,8 +22529,7 @@ ${directives.block}`;
         // flags and keeps offering only the picker.
         createProject: this.canAddProjectFolder(),
         cloneProject: this.canAddProjectFolder(),
-        // Closing an open folder is meaningful only at a local desk.
-        removeProjectFolder: !isCloudEnvironment() && this.canAddProjectFolder(),
+        removeProjectFolder: this.canAddProjectFolder(),
       },
     };
   }
@@ -25381,7 +22556,6 @@ ${directives.block}`;
     // gate + no-editor case live inside refreshImplicitChip).
     this.refreshImplicitChip(true);
     this.postVoiceConfigured();
-    void this.postRemoteStatus();
     // Usable, not connected: with only a lapsed provider there is nothing that
     // can answer, and connect-agent lets the user pick any of the three rather
     // than being funnelled into that one provider's login instructions.
@@ -25413,7 +22587,7 @@ ${directives.block}`;
     // or write A. Every other entry point sets this (newFocusedSession, resume,
     // the delete replacement); the one that starts by itself did not.
     if (!this.focused.cwd) {
-      this.setSessionCwd(this.focused, this.historyCwdFor("local"), this.workspaceRoot());
+      this.setSessionCwd(this.focused, this.historyCwdFor(), this.workspaceRoot());
     }
     if (!this.focused.hasHistory && !this.focused.client) {
       this.focused.provider = this.defaultProviderForProject(this.sessionCwd(this.focused));
@@ -25487,13 +22661,11 @@ ${directives.block}`;
   }
 
   private postChips(session: Session = this.focused): void {
-    const remoteMessage: HostMsg = { type: "chips", chips: session.chips };
     if (session === this.focused && this.view) {
       const webview = this.view.webview;
       const localMessage: HostMsg = { type: "chips", chips: this.localPreviewChips(session, webview) };
       void webview.postMessage(localMessage);
     }
-    this.sendRemoteSession(session, remoteMessage);
   }
 
   private localPreviewChips(session: Session, webview: HostWebview): ContextChip[] {
@@ -25609,13 +22781,9 @@ ${directives.block}`;
     "cloneProject",
     "setupGithubCli",
     "listGithubRepos",
-    // The rail renders the same clone form as the chat, so it can reach every
-    // step of that form — including the token paste and the cancel that ends a
-    // device login. Omitting them made both silently ignored from the rail:
-    // the token field cleared with GitHub still disconnected, and Cancel left
-    // the login running for its full 15-minute timeout.
+    // The rail renders the same clone form as the chat, so it can reach the
+    // token paste too.
     "githubLoginWithToken",
-    "cancelDeviceLogin",
     "listSessions",
     "listRepoSessions",
     "selectRepo",
@@ -25639,11 +22807,6 @@ ${directives.block}`;
     if (this.focused.suppressContent && GrokSidebar.SUPPRESS_TYPES.has(message.type)) return;
     this.view?.webview.postMessage(message);
     this.mirrorToProjectsRail(message);
-    if (GrokSidebar.DEVICE_GLOBAL_REMOTE_TYPES.has(message.type)) {
-      this.broadcastRemoteDevice(message);
-    } else {
-      this.sendRemoteSession(this.focused, message);
-    }
   }
 
   /** Chat + the settings tab (when open) both consume About update status. */
@@ -25654,7 +22817,7 @@ ${directives.block}`;
 
   /** Post to the VS Code webview only (plus catalog mirror to the projects rail). */
   private postLocal(message: HostMsg): void {
-    this.postTap?.("local", message);
+    this.postTap?.(message);
     this.view?.webview.postMessage(message);
     this.mirrorToProjectsRail(message);
   }
@@ -25669,148 +22832,22 @@ ${directives.block}`;
     void this.projectsRail.webview.postMessage(message);
   }
 
-  /**
-   * Sidebar orchestration for remote HostMsgs: pre-authorize (so postTap and
-   * logs see the drop), transform media, then hand off to {@link RemoteUplink}.
-   *
-   * **The hard authorization boundary is inside RemoteUplink** — every socket
-   * write (`broadcast` / `broadcastTo` / catch-up `snapshot`) re-checks
-   * {@link mayDeliverRemoteHostMsg}. A new sender that forgot this method still
-   * cannot put project data on the wire. Live fan-out still routes here so
-   * transforms and the test postTap stay in one place.
-   *
-   * `scopeCwd` is the session or repo cwd that owns the payload. Required for
-   * conversation/session types; list frames are checked against their entries;
-   * device prefs and errors need no scope.
-   */
-  private deliverRemote(
-    clientIds: readonly string[],
-    message: HostMsg,
-    scopeCwd?: string,
-  ): void {
-    if (clientIds.length === 0) return;
-    const authorized = this.authorizedSessionCwds();
-    const remoteMessage = this.messageForRemote(message);
-    if (message.type === "repoSessions" && remoteMessage.type === "repoSessions"
-      && remoteMessage.entries.length !== message.entries.length) {
-      const removed = message.entries.length - remoteMessage.entries.length;
-      this.host.appendLine(
-        `[remote] filtered ${removed} unauthorized repoSessions ${removed === 1 ? "entry" : "entries"}`,
-      );
-    }
-    if (!mayDeliverRemoteHostMsg(remoteMessage, authorized, scopeCwd, pathsEqual)) {
-      this.host.appendLine(
-        `[remote] dropped ${message.type} (project scope not authorized: ${scopeCwd ?? "<none>"})`,
-      );
-      return;
-    }
-    this.postTap?.("remote", remoteMessage, [...clientIds]);
-    const out = transformHostMsgForRemote(remoteMessage, this.remoteMediaDeps);
-    if (!out) return;
-    // Pass scope through so the uplink gate does not re-derive from a stale
-    // per-tab mapping for multi-client session fan-out.
-    this.uplink?.broadcastTo([...clientIds], out, scopeCwd);
-  }
-
-  /** Remote clients receive media bytes only through the remote media policy;
-   *  they must never inherit capabilities that describe the DESK machine. The
-   *  list lives with the rest of the remote policy (DESK_ONLY_CAPABILITIES) so
-   *  adding a capability has one obvious place to check, and so the stripping
-   *  is testable without standing up a sidebar. */
-  private messageForRemote(message: HostMsg): HostMsg {
-    if (message.type === "repoSessions") {
-      return repoSessionsMessageForRemote(
-        message,
-        this.authorizedSessionCwds(),
-        pathsEqual,
-      );
-    }
-    if (message.type !== "initialState") return message;
-    return { ...message, capabilities: capabilitiesForRemote(message.capabilities) };
-  }
-
-  /** Target one opaque relay clientId. */
-  private sendRemoteClient(clientId: string, message: HostMsg, scopeCwd?: string): void {
-    // Derive scope when the caller did not pass one: message field → active
-    // session cwd. Never invent a grant from a stale per-tab repo selection alone
-    // for conversation types (that is exactly the close-ordering hole).
-    let scope = scopeCwd;
-    if (scope === undefined) {
-      if (message.type === "sessionName") scope = message.cwd;
-      else if (message.type === "repoSessions") scope = message.cwd;
-      else {
-        const active = this.remoteClients.active(clientId);
-        if (active) scope = this.sessionCwd(active);
-      }
-    }
-    this.deliverRemote([clientId], message, scope);
-  }
-
-  private sendRemoteRepo(cwd: string, message: HostMsg): void {
-    // Repo-scoped fan-out (dots, etc.): the named cwd is the authorization scope.
-    this.deliverRemote(this.remoteClients.clientsForCwd(cwd), message, cwd);
-  }
-
-  private sendRemoteSession(session: Session, message: HostMsg): void {
-    const scope = this.sessionCwd(session);
-    // Belt: refuse before iterating so a disposed/closed-folder session cannot
-    // drip transcript to any remaining holder.
-    if (!mayDeliverRemoteHostMsg(message, this.authorizedSessionCwds(), scope, pathsEqual)) {
-      this.host.appendLine(
-        `[remote] dropped ${message.type} for session (cwd not authorized: ${scope})`,
-      );
-      return;
-    }
-    for (const clientId of this.remoteClients.clients()) {
-      if (this.remoteClients.active(clientId) === session) {
-        this.sendRemoteClient(clientId, message, scope);
-      }
-    }
-  }
-
-  private sendRemoteHistorySnapshot(session: Session): void {
-    const scope = this.sessionCwd(session);
-    if (!this.isAuthorizedCwd(scope)) {
-      this.host.appendLine(
-        `[remote] dropped history snapshot (cwd not authorized: ${scope})`,
-      );
-      return;
-    }
-    const clientIds = this.remoteClients.clientsForActiveValue(session);
-    if (clientIds.length === 0) return;
-    const snapshot = bracketRemoteSnapshot(session.buffer);
-    for (const clientId of clientIds) {
-      for (const message of snapshot) this.sendRemoteClient(clientId, message, scope);
-    }
-  }
-
-  private broadcastRemoteDevice(message: HostMsg): void {
-    // Device-global prefs only (DEVICE_GLOBAL_REMOTE_TYPES) — no project scope.
-    this.deliverRemote(this.remoteClients.clients(), message, undefined);
-  }
-
-  /** Test-only tap on the split posts. Never assigned in a released build:
+  /** Test-only tap on local posts. Never assigned in a released build:
    *  `extension.ts` hands out `installTestHooks` only under
    *  `ExtensionMode.Test`, which VS Code sets exclusively for a test runner. */
-  private postTap?: (dest: MsgOrigin, message: HostMsg, clientIds?: string[]) => void;
+  private postTap?: (message: HostMsg) => void;
 
   /**
-   * Test-only seam for the integration suite. It exists because one property of
-   * the local/remote split is unreachable from any pure unit test: that the
-   * LOCAL payload reaches the webview and the REMOTE payload the uplink.
-   * `repoScopeFor` proves WHICH cwd each audience should get; only this proves
-   * the two are not wired to the wrong destinations — a swap that all 1386 unit
-   * tests still pass (verified by performing it).
+   * Test-only seam for the integration suite: drives the real host against a
+   * real Extension Host, where a unit test would have to fake the webview.
    */
   installTestHooks(): {
-    onPost(fn: (dest: MsgOrigin, message: HostMsg, clientIds?: string[]) => void): void;
-    fromRemote(message: WebviewMsg, clientId?: string): void;
+    onPost(fn: (message: HostMsg) => void): void;
     fromLocal(message: WebviewMsg): Promise<void>;
-    fromRelayFrame(raw: string): void;
-    emitRemote(clientId: string, message: HostMsg): void;
-    replayRemote(clientId: string, messages: HostMsg[], during?: () => void, fail?: boolean): Promise<void>;
-    seedRemoteSession(
-      clientId: string,
+    /** Replay `messages` into the focused session as a cold `session/load` would. */
+    replayFocused(messages: HostMsg[], during?: () => void, fail?: boolean): Promise<void>;
+    /** Replace the focused session with a live-looking one (stub client). */
+    seedFocusedSession(
       id: string,
       cwd: string,
       messages?: HostMsg[],
@@ -25819,51 +22856,23 @@ ${directives.block}`;
     ): void;
     seedLocalBackgroundSession(id: string, cwd: string): void;
     openLocalSession(id: string, cwd: string): Promise<void>;
-    seedWorktree(record: WorktreeRecord): void;
-    seedWorktreeRefresh(sourceRepo: string, records: WorktreeRecord[]): void;
-    seedRemoteUnstartedSession(clientId: string, cwd: string): void;
-    seedRemoteStartingSession(clientId: string, id: string, cwd: string, queuedText: string): void;
-    seedRemoteQueuedDispatch(
-      clientId: string,
-      id: string,
-      cwd: string,
-      queuedText: string,
-      chips?: FileChip[],
-    ): {
-      promptCount(): number;
-      queuedSends(): string[];
-      /** The blocks of the last prompt actually handed to the CLI — the only
-       *  place a test can read the `[Image #N]` tags and the image blocks they
-       *  name as one artifact. */
-      lastPromptBlocks(): Parameters<AcpClient["prompt"]>[0] | undefined;
-    };
-    finishRemoteStartup(clientId: string): void;
-    seedRemoteVoice(clientId: string): { cancelled(): boolean };
-    emitContextUsage(clientId: string): void;
+    emitContextUsage(): void;
     seedUsageLedger(
-      clientId: string,
       entries: { afterUserMessage: number; afterHistoryEvent?: number; usage?: PromptUsage }[],
       userMessageCount: number,
     ): Promise<void>;
     restartUsageSession(
-      clientId: string,
       id: string,
       mode: "clear" | "summarize",
       summaryUsage?: PromptUsage,
     ): Promise<void>;
-    rewindUsageLedger(clientId: string, surviving: number): Promise<void>;
-    completeUsageTurn(clientId: string, usage: PromptUsage): Promise<void>;
-    reloadUsageLedger(clientId: string, userMessageCount: number): {
+    rewindUsageLedger(surviving: number): Promise<void>;
+    completeUsageTurn(usage: PromptUsage): Promise<void>;
+    reloadUsageLedger(userMessageCount: number): {
       usageLog: NonNullable<SessionMetaOverrides[string]["usageLog"]>;
       sessionUsage: PromptUsage | undefined;
     };
     delayNextSessionStart(resumeId?: string): { started: Promise<void>; release(): void };
-    delayFirstCatalogBuild(): { started: Promise<void>; release(): void; beginDeferred(): void };
-    waitForSessionLoad(id: string): Promise<void>;
-    setSessionStatus(id: string, status: SessionStatus): void;
-    activeRemoteSessionId(clientId: string): string | undefined;
-    activeRemoteWorktree(clientId: string): Session["worktree"];
-    focusedSessionId(): string | undefined;
     seedFocusedWorktreeSession(
       id: string,
       worktree: NonNullable<Session["worktree"]>,
@@ -25875,7 +22884,6 @@ ${directives.block}`;
       restore(): void;
     };
 
-    hasLiveSession(id: string): boolean;
     /**
      * Latch Grok discovery to the missing-CLI path. `locateProvider("grok")`
      * will not search config or PATH; an explicit `provisionFakeGrok` path
@@ -25892,8 +22900,6 @@ ${directives.block}`;
      * function puts the previous CLI path and connection flag back.
      */
     provisionFakeGrok(cliPath: string): () => void;
-    remoteClientLeft(clientId: string): void;
-    remoteClientRoster(clientIds: string[]): void;
     sweepEmptySessions(cwd: string): void;
     workspaceRoot(): string;
   } {
@@ -25901,32 +22907,17 @@ ${directives.block}`;
       onPost: (fn) => {
         this.postTap = fn;
       },
-      fromRemote: (message, clientId = "test-client") => this.handleRemoteMessage(clientId, message),
-      fromLocal: (message) => this.onMessage(message, "local"),
-      fromRelayFrame: (raw) => {
-        const frame = parseRelayFrame(raw);
-        if (frame?.t !== "client-ready") return;
-        this.handleRemoteClientReady(frame.clientId, frame.tabToken);
-        for (const message of this.buildRemoteSnapshot(frame.clientId)) {
-          this.sendRemoteClient(frame.clientId, message);
-        }
-      },
-      emitRemote: (clientId, message) => {
-        const session = this.remoteSessionFor(clientId);
-        this.emit(session, message);
-      },
-      replayRemote: async (clientId, messages, during, fail = false) => {
-        const session = this.remoteSessionFor(clientId);
+      fromLocal: (message) => this.onMessage(message),
+      replayFocused: async (messages, during, fail = false) => {
+        const session = this.focused;
         await this.replayLoadedHistory(session, async () => {
           for (const message of messages) this.emit(session, message);
           during?.();
           if (fail) throw new Error("synthetic session/load failure");
         });
       },
-      seedRemoteSession: (clientId, id, cwd, messages = [], hasHistory = false, chips = []) => {
-        this.remoteClients.ready(clientId);
-        this.remoteClients.select(clientId, cwd);
-        const session = new Session();
+      seedFocusedSession: (id, cwd, messages = [], hasHistory = false, chips = []) => {
+        const session = this.newLocalSession();
         session.cwd = cwd;
         session.activeSessionId = id;
         // sessionId is required for sessionReadyForPrompt (flush + send).
@@ -25934,8 +22925,9 @@ ${directives.block}`;
         session.hasHistory = hasHistory;
         session.chips = chips;
         session.buffer.push(...messages);
+        this.parkFocused();
+        this.focused = session;
         this.pool.add(session);
-        this.remoteClients.setActive(clientId, session);
       },
       seedLocalBackgroundSession: (id, cwd) => {
         const session = this.newLocalSession();
@@ -25946,101 +22938,9 @@ ${directives.block}`;
         this.pool.add(session);
       },
       openLocalSession: (id, cwd) => this.openSession(id, cwd),
-      seedWorktree: (record) => {
-        this.worktreeCache = this.worktreeCache.filter((wt) => !pathsEqual(wt.path, record.path));
-        this.worktreeCache.push(record);
-      },
-      seedWorktreeRefresh: (sourceRepo, records) => {
-        this.worktreeCache = mergeWorktreeRefresh(this.worktreeCache, sourceRepo, records);
-      },
-      seedRemoteUnstartedSession: (clientId, cwd) => {
-        this.remoteClients.ready(clientId);
-        this.remoteClients.select(clientId, cwd);
-        const session = new Session();
-        this.setSessionCwd(session, cwd, this.workspaceRoot());
-        this.remoteClients.setActive(clientId, session);
-      },
-      seedRemoteStartingSession: (clientId, id, cwd, queuedText) => {
-        this.remoteClients.ready(clientId);
-        this.remoteClients.select(clientId, cwd);
-        const session = new Session();
-        session.cwd = cwd;
-        session.activeSessionId = id;
-        // Priming: client may exist without a session id (spawn window).
-        session.client = { dispose() {} } as AcpClient;
-        session.priming = true;
-        session.queuedSends = [{ text: queuedText, chips: [] }];
-        session.queuedSendRequiresRelay = true;
-        this.pool.add(session);
-        this.remoteClients.setActive(clientId, session);
-      },
-      seedRemoteQueuedDispatch: (clientId, id, cwd, queuedText, chips = []) => {
-        this.remoteClients.ready(clientId);
-        this.remoteClients.select(clientId, cwd);
-        let prompts = 0;
-        let lastBlocks: Parameters<AcpClient["prompt"]>[0] | undefined;
-        const session = new Session();
-        session.cwd = cwd;
-        session.activeSessionId = id;
-        session.client = {
-          sessionId: id,
-          availableCommands: [],
-          dispose() {},
-          prompt: async (blocks: Parameters<AcpClient["prompt"]>[0]) => {
-            prompts += 1;
-            lastBlocks = blocks;
-            return {};
-          },
-        } as unknown as AcpClient;
-        session.hasHistory = true;
-        session.status = "done";
-        session.chips = [];
-        session.queuedSends = [{ text: queuedText, chips: chips.map((chip) => ({ ...chip })) }];
-        session.queuedSendRequiresRelay = true;
-        this.pool.add(session);
-        this.remoteClients.setActive(clientId, session);
-        void this.maybeFlushQueuedSends(session);
-        return {
-          promptCount: () => prompts,
-          queuedSends: () => session.queuedSends.map((item) => item.text),
-          lastPromptBlocks: () => lastBlocks,
-        };
-      },
-      finishRemoteStartup: (clientId) => {
-        const session = this.remoteClients.active(clientId);
-        if (!session) return;
-        session.priming = false;
-        session.queuedSendDispatch = undefined;
-        session.queuedSends = [];
-        session.queuedSendRequiresRelay = false;
-      },
-      seedRemoteVoice: (clientId) => {
-        const session = this.remoteSessionFor(clientId);
-        let cancelled = false;
-        const ingress = new RemotePcmIngress(
-          GrokSidebar.MAX_REMOTE_PCM_CHUNK_BYTES,
-          GrokSidebar.MAX_REMOTE_PCM_BYTES,
-          MAX_RECORDING_SECONDS * 1000,
-          () => {},
-        );
-        const streamer = {
-          cancel: () => { cancelled = true; },
-        } as PcmVoiceStreamer;
-        this.remoteVoice.set(clientId, {
-          backend: "xai", key: "test", model: OPENAI_STT_MODEL,
-          credentialCwd: this.sessionCwd(session),
-          session,
-          streamer,
-          ingress,
-          phrase: DEFAULT_SEND_PHRASE,
-          keyterms: buildSttKeyterms(DEFAULT_SEND_PHRASE),
-          finalizing: false,
-        });
-        return { cancelled: () => cancelled };
-      },
-      emitContextUsage: (clientId) => this.emitContextUsage(this.remoteSessionFor(clientId)),
-      seedUsageLedger: async (clientId, entries, userMessageCount) => {
-        const session = this.remoteSessionFor(clientId);
+      emitContextUsage: () => this.emitContextUsage(this.focused),
+      seedUsageLedger: async (entries, userMessageCount) => {
+        const session = this.focused;
         const id = session.activeSessionId;
         if (!id) throw new Error("Seeded usage session has no id");
         session.userMessageCount = userMessageCount;
@@ -26063,8 +22963,8 @@ ${directives.block}`;
           },
         });
       },
-      restartUsageSession: async (clientId, id, mode, summaryUsage) => {
-        const session = this.remoteSessionFor(clientId);
+      restartUsageSession: async (id, mode, summaryUsage) => {
+        const session = this.focused;
         session.activeSessionId = id;
         session.userMessageCount = 0;
         session.historyEventCount = 0;
@@ -26072,20 +22972,19 @@ ${directives.block}`;
           await this.accumulateUsage(session, { totalTokens: 1, usage: summaryUsage });
         }
       },
-      rewindUsageLedger: async (clientId, surviving) => {
-        const session = this.remoteSessionFor(clientId);
+      rewindUsageLedger: async (surviving) => {
+        const session = this.focused;
         if (!session.activeSessionId) throw new Error("Seeded usage session has no id");
         await this.truncateSessionCardsAfterRewind(session.activeSessionId, surviving);
         session.userMessageCount = surviving;
       },
-      completeUsageTurn: async (clientId, usage) => {
-        const session = this.remoteSessionFor(clientId);
+      completeUsageTurn: async (usage) => {
+        const session = this.focused;
         session.userMessageCount += 1;
         await this.accumulateUsage(session, { totalTokens: 1, usage });
       },
-      reloadUsageLedger: (clientId, userMessageCount) => {
-        const current = this.remoteSessionFor(clientId);
-        const id = current.activeSessionId;
+      reloadUsageLedger: (userMessageCount) => {
+        const id = this.focused.activeSessionId;
         if (!id) return { usageLog: [], sessionUsage: undefined };
         const ledger = this.persistedUsageLedger(id, userMessageCount);
         return { usageLog: ledger.usageLog, sessionUsage: ledger.usage };
@@ -26098,49 +22997,12 @@ ${directives.block}`;
         this.testSessionStartDelay = { resumeId, started: markStarted, wait };
         return { started, release };
       },
-      delayFirstCatalogBuild: () => {
-        let markStarted!: () => void;
-        let releaseWait!: () => void;
-        const started = new Promise<void>((resolve) => { markStarted = resolve; });
-        const wait = new Promise<void>((resolve) => { releaseWait = resolve; });
-        let released = false;
-        const release = () => {
-          if (released) return;
-          released = true;
-          this.testCatalogHold = undefined;
-          releaseWait();
-        };
-        this.firstBootScanStarted = false;
-        this.firstBootScanCompleted = false;
-        this.firstBootScanDone = new Promise<void>((resolve) => {
-          this.resolveFirstBootScan = resolve;
-        });
-        this.testCatalogHold = { started: markStarted, wait, release };
-        return {
-          started,
-          release,
-          beginDeferred: () => { void this.runFirstBootScan({ deferSessions: true }); },
-        };
-      },
-      waitForSessionLoad: (id) => {
-        const reservation = this.sessionLoadReservations.get(id);
-        return reservation
-          ? reservation.completion
-          : Promise.reject(new Error(`No in-flight session load for ${id}`));
-      },
-      setSessionStatus: (id, status) => {
-        const session = [...this.pool].find((candidate) => candidate.activeSessionId === id);
-        if (session) this.setStatus(session, status);
-      },
-      activeRemoteSessionId: (clientId) => this.remoteActiveSessionId(clientId) ?? undefined,
-      activeRemoteWorktree: (clientId) => this.remoteClients.active(clientId)?.worktree,
-      focusedSessionId: () => this.focused.activeSessionId,
       seedFocusedWorktreeSession: (id, worktree) => {
         // Tear down a leftover live/in-flight client first. startSession writes
         // session.client with no gen check, so a stub seeded onto that same
         // Session is overwritten and apply/remove never reach this probe.
         const prev = this.focused;
-        this.detachClient(prev)?.dispose();
+        void this.detachClient(prev)?.dispose();
         this.focused = this.newLocalSession();
         this.focused.activeSessionId = id;
         this.focused.cwd = worktree.sourceGitRoot;
@@ -26173,9 +23035,6 @@ ${directives.block}`;
           },
         };
       },
-      hasLiveSession: (id) => [...this.pool].some((session) =>
-        session.activeSessionId === id && !!session.client
-      ),
       isolateFromInstalledGrok: () => {
         this.testForceMissingGrokCli = true;
         this.cliPath = undefined;
@@ -26194,8 +23053,6 @@ ${directives.block}`;
           this.setProviderConnectedInMemory("grok", previous.connected);
         };
       },
-      remoteClientLeft: (clientId) => this.releaseRemoteClient(clientId),
-      remoteClientRoster: (clientIds) => this.retainRemoteClients(clientIds),
       // Asking for the sweep by name means now — see the `force` note there.
       sweepEmptySessions: (cwd) => this.sweepEmptySessions(cwd, { force: true }),
       workspaceRoot: () => this.workspaceRoot(),
@@ -26287,45 +23144,19 @@ ${directives.block}`;
       }
     }
     if (session === this.focused) {
-      this.postTap?.("local", message);
+      this.postTap?.(message);
       const webview = this.view?.webview;
       if (webview) webview.postMessage(this.localizeHistoryMessage(message, webview));
       // Active-session identity for the projects rail (highlight + pin home).
       this.mirrorToProjectsRail(message);
     }
-    if (!session.replaying) this.sendRemoteSession(session, message);
-  }
-
-  /**
-   * Session-scoped like {@link emit}, but the message never leaves this machine.
-   *
-   * The pairing exists because the two properties a desk-only notice needs pull
-   * in opposite directions: `post` reaches the desk but forwards to whichever
-   * remote clients hold the focused session (so a notice about conversation A
-   * lands in a tab reading B), while `emit`'s buffering is exactly what stops a
-   * notice dying on the next focus switch. Buffer like `emit`, deliver like
-   * `postLocal`.
-   */
-  private emitLocal(session: Session, message: HostMsg): void {
-    if (session.suppressContent && GrokSidebar.SUPPRESS_TYPES.has(message.type)) return;
-    if (message.type === "clearMessages") session.buffer = [];
-    else if (!GrokSidebar.TRANSIENT_TYPES.has(message.type)) session.buffer.push(message);
-    if (message.type === "userMessage" && !message.steer) {
-      session.liveFeedbackEligible = false;
-      session.turnRating = 0;
-    }
-    if (session !== this.focused) return;
-    this.postTap?.("local", message);
-    const webview = this.view?.webview;
-    if (webview) webview.postMessage(this.localizeHistoryMessage(message, webview));
-    this.mirrorToProjectsRail(message);
   }
 
   /** Desk-targeted, non-replayable delivery for one-shot notices. */
   private emitLocalTransient(session: Session, message: HostMsg): void {
     if (session.suppressContent && GrokSidebar.SUPPRESS_TYPES.has(message.type)) return;
     if (session !== this.focused) return;
-    this.postTap?.("local", message);
+    this.postTap?.(message);
     const webview = this.view?.webview;
     if (webview) webview.postMessage(this.localizeHistoryMessage(message, webview));
     this.mirrorToProjectsRail(message);
@@ -26334,7 +23165,6 @@ ${directives.block}`;
   private async replayLoadedHistory(session: Session, load: () => Promise<void>): Promise<void> {
     // Join an in-flight load rather than superseding it: session/load cannot
     // be aborted, and a second stream would interleave into the same buffer.
-    // `replaying` stays a boolean so remotes still see "any replay in progress".
     await runExclusiveHistoryLoad(session, async () => {
       await load();
       // A saved id may still be an untouched shell: an old but empty
@@ -26346,26 +23176,11 @@ ${directives.block}`;
       onStart: () => this.emit(session, { type: "historyReplay", active: true }),
       onFinish: () => {
         this.emit(session, { type: "historyReplay", active: false });
-        this.sendRemoteHistorySnapshot(session);
       },
     });
   }
 
   // ---------- session pool ----------
-
-  /**
-   * Make `session` the visible one and rebuild the chat from its buffer. The
-   * buffer holds every post that built that session's view (in order), so a
-   * clear + replay reconstructs it losslessly — including a turn still in flight
-   * (its still-wired handlers keep emitting straight to the webview once focused).
-   * Bypasses `emit` deliberately: we post the buffer's contents to the webview
-   * without re-running the suppress/clearMessages bookkeeping (that already ran
-   * when each message was first buffered).
-   */
-  private liveSessionById(id: string): Session | undefined {
-    if (this.focused.activeSessionId === id) return this.focused;
-    return [...this.pool].find((session) => session.activeSessionId === id);
-  }
 
   /** An unused empty conversation is one nobody is looking at, with no real
    *  work in it. Minting another while one of these exists is how a project
@@ -26383,7 +23198,6 @@ ${directives.block}`;
 
   private findUnusedEmptySession(
     cwd: string,
-    scope: "local" | "remote",
     excludeId?: string,
   ): { session?: Session; id: string; cwd: string } | undefined {
     if (!cwd) return undefined;
@@ -26444,14 +23258,9 @@ ${directives.block}`;
 
   private reserveSessionLoad(
     id: string,
-    ownerTabToken?: string,
   ): { reservation: SessionLoadReservation; joined: boolean } | undefined {
     const existing = this.sessionLoadReservations.get(id);
-    if (existing && existing.expiresAt > Date.now()) {
-      return ownerTabToken && existing.ownerTabToken === ownerTabToken
-        ? { reservation: existing, joined: true }
-        : undefined;
-    }
+    if (existing && existing.expiresAt > Date.now()) return undefined;
     if (existing) {
       clearTimeout(existing.timer);
       this.sessionLoadReservations.delete(id);
@@ -26471,7 +23280,6 @@ ${directives.block}`;
     timer.unref?.();
     const reservation: SessionLoadReservation = {
       token,
-      ownerTabToken,
       completion,
       resolve,
       reject,
@@ -26480,11 +23288,6 @@ ${directives.block}`;
     };
     this.sessionLoadReservations.set(id, reservation);
     return { reservation, joined: false };
-  }
-
-  private bindSessionLoad(id: string, reservation: SessionLoadReservation, session: Session): void {
-    const current = this.sessionLoadReservations.get(id);
-    if (current?.token === reservation.token) current.session = session;
   }
 
   private releaseSessionLoad(
@@ -26513,39 +23316,6 @@ ${directives.block}`;
     return [...this.sessionLoadReservations.keys()].filter((id) => this.isSessionLoadReserved(id));
   }
 
-  private remoteActiveSessionId(clientId: string): string | null {
-    const session = this.remoteClients.active(clientId);
-    if (session?.activeSessionId) return session.activeSessionId;
-    if (!session) return null;
-    const reservations = this.sessionLoadReservations;
-    if (!reservations) return null;
-    for (const [id, reservation] of reservations) {
-      if (reservation.session === session && this.isSessionLoadReserved(id)) return id;
-    }
-    return null;
-  }
-
-  private sendRemoteSessionList(session: Session, ownerTabToken?: string): void {
-    const currentOwner = ownerTabToken
-      ? this.remoteClients.clientForTabToken(ownerTabToken)
-      : undefined;
-    const clientIds = ownerTabToken
-      ? currentOwner && this.remoteClients.active(currentOwner) === session
-        ? [currentOwner]
-        : []
-      : this.remoteClients.clientsForActiveValue(session);
-    for (const clientId of clientIds) {
-      this.sendRemoteClient(
-        clientId,
-        this.buildSessionsList(
-          this.remoteClients.cwd(clientId),
-          undefined,
-          this.remoteActiveSessionId(clientId),
-        ),
-      );
-    }
-  }
-
   private focusSession(session: Session): void {
     if (session === this.focused) return;
     this.focused = session;
@@ -26567,24 +23337,6 @@ ${directives.block}`;
         this.displayMode(session),
         this.localPreviewChips(session, wv),
       )) wv.postMessage(m);
-    }
-    // Remote clients don't share the webview, so replay the same clear + buffer
-    // to them over the uplink — otherwise re-focusing a session that's still
-    // live in the pool (this path) reloads only the local webview while the
-    // remote keeps showing the previous session (switching a session in history
-    // didn't always reload on the browser client). Cold loads go through
-    // emit()/post(), which already mirror; this path deliberately bypasses them.
-    // The targeted send applies the normal remote transform; the calls below
-    // refresh current mode, repository, and history chrome independently.
-    if (this.uplink) {
-      const replay: HostMsg[] = [
-        { type: "clearMessages" },
-        ...(identity ? [identity] : []),
-        ...bracketRemoteSnapshot(session.buffer),
-      ];
-      for (const m of replay) {
-        this.sendRemoteSession(session, m);
-      }
     }
     this.postMode();
     this.postRepoCatalog();
@@ -26646,8 +23398,6 @@ ${directives.block}`;
     // the first is still opening, which the rail does not prevent because loads
     // are reserved per session id, not globally.
     if (cur.priming) return;
-    // Co-attached: a remote tab still shows this session — not ours to tear down.
-    if (this.remoteClients.clientsForActiveValue(cur).length > 0) return;
     // Empty session being left behind (New Session, or switching to
     // another): tear down its process AND delete its on-disk dir so it doesn't pile
     // up in history (#24). The next focused session becomes the single live "New
@@ -26672,7 +23422,7 @@ ${directives.block}`;
     // Retain the pipe for session/delete. disposeSession still owns all pool
     // and remote bookkeeping; its second detach finds no client to terminate.
     const client = isAdapterProvider(provider) ? this.detachClient(session) : undefined;
-    this.disposeSession(session);
+    void this.disposeSession(session);
     if (isAdapterProvider(provider)) {
       void this.discardAdapterEmptySession(provider, id, cwd, client).finally(() => client?.dispose()).then((removed) => {
         if (removed) this.postSessionRemoved(id, cwd);
@@ -26680,79 +23430,6 @@ ${directives.block}`;
         this.host.appendLine(`[${provider}] empty-session cleanup failed: ${(error as Error).message}`);
       });
     } else if (this.removeSessionFromDisk(id, cwd)) this.postSessionRemoved(id, cwd);
-  }
-
-  /** Remote counterpart of parkFocused: abandoning an empty tab session
-   * must not leave an ownerless process or history row behind. */
-  private parkRemoteSession(clientId: string, next?: Session): void {
-    const current = this.remoteClients.active(clientId);
-    if (!current || current === next) return;
-    const busy = current.status === "working" || current.status === "needs-you";
-    if (current.needsProvider || current.strandedDraft) {
-      this.pool.add(current);
-      return;
-    }
-    if (
-      current.hasHistory ||
-      busy ||
-      current.needsProvider ||
-      !!current.strandedDraft ||
-      current.priming ||
-      current.queuedSends.length > 0 ||
-      current.chips.length > 0 ||
-      current.worktree
-    ) return;
-    // Co-attached elsewhere (the VS Code view, or — defensively — another
-    // tab): the session is still on screen there; only this tab lets go.
-    if (current === this.focused) return;
-    if (this.remoteClients.clientsForActiveValue(current).some((ownerId) => ownerId !== clientId)) return;
-    const id = current.activeSessionId;
-    const cwd = this.sessionCwd(current);
-    const provider = current.provider;
-    const client = isAdapterProvider(provider) ? this.detachClient(current) : undefined;
-    this.disposeSession(current);
-    if (isAdapterProvider(provider)) {
-      void this.discardAdapterEmptySession(provider, id, cwd, client).finally(() => client?.dispose()).then((removed) => {
-        if (removed) this.postSessionRemoved(id, cwd);
-      }).catch((error) => {
-        this.host.appendLine(`[${provider}] empty-session cleanup failed: ${(error as Error).message}`);
-      });
-    } else if (this.removeSessionFromDisk(id, cwd)) this.postSessionRemoved(id, cwd);
-  }
-
-  /** The sole remote-client release path: abandon its session before deleting ownership. */
-  private releaseRemoteClient(clientId: string): void {
-    this.forgetPostedVoiceConfigured(`remote:${clientId}`);
-    const current = this.remoteClients.active(clientId);
-    const preserveLogicalTab = (
-      // A DEMOTED tab is a logical tab worth keeping, and it is the one case
-      // with no active session to prove it. `deleteClient` drops the tab's
-      // selected repo along with the latch, so an ordinary mobile network blip
-      // after a takeover would land the page on the host's default repo with a
-      // fresh session, its composer re-enabled and the old draft still in it —
-      // and the next Send would file text written for one conversation into
-      // another, in another REPOSITORY. `detachClient` keeps both for the same
-      // tab token, which is exactly what a reconnect needs.
-      this.remoteClients.requiresExplicitSession(clientId) ||
-      (!!current && (
-        current.needsProvider ||
-        !!current.strandedDraft ||
-        current.priming ||
-        current.queuedSends.length > 0 ||
-        current.chips.length > 0
-      ))
-    );
-    this.parkRemoteSession(clientId);
-    this.dropRemoteVoice(clientId);
-    if (preserveLogicalTab) this.remoteClients.detachClient(clientId);
-    else this.remoteClients.deleteClient(clientId);
-  }
-
-  private retainRemoteClients(clientIds: Iterable<string>): void {
-    const keep = new Set(clientIds);
-    for (const clientId of this.remoteClients.clients()) {
-      if (!keep.has(clientId)) this.releaseRemoteClient(clientId);
-    }
   }
 
   /** Delete a session's on-disk dir + drop its meta override and read-cache entry.
@@ -26854,13 +23531,6 @@ ${directives.block}`;
     const liveIds = new Set<string>();
     for (const s of this.pool) if (s.activeSessionId) liveIds.add(s.activeSessionId);
     if (this.focused.activeSessionId) liveIds.add(this.focused.activeSessionId);
-    for (const clientId of this.remoteClients.clients()) {
-      const id = this.remoteClients.active(clientId)?.activeSessionId;
-      if (id) liveIds.add(id);
-    }
-    for (const detached of this.remoteClients.detachedActiveValues()) {
-      if (detached.activeSessionId) liveIds.add(detached.activeSessionId);
-    }
     for (const id of this.sessionLoadReservations.keys()) liveIds.add(id);
 
     let proven = this.provenNonEmpty.get(repoKey);
@@ -27012,16 +23682,7 @@ ${directives.block}`;
     // want the pool entry gone can keep ignoring this, exactly as before.
     const exited = this.detachClient(session)?.dispose();
     this.pool.delete(session);
-    this.remoteClients.deleteActiveValue(session);
     if (id) this.post({ type: "sessionDot", id, dot: this.dotForId(id) });
-    // A session can leave the pool while it is still WORKING — deleting the
-    // conversation you are watching is allowed, and reaping and worktree
-    // teardown end here too. Every one of those can take the last turn away, so
-    // the wake lock and the cloud heartbeat are re-asserted HERE rather than at
-    // each caller: setStatus covers a turn that finishes, and this covers a
-    // turn that is taken away. Without it the heartbeat outlives the work and
-    // holds a machine we rent awake until something else happens to stop it.
-    this.refreshKeepAwake();
     return exited ?? Promise.resolve();
   }
 
@@ -27036,28 +23697,13 @@ ${directives.block}`;
    * Called eagerly after each new start (cap) and on the periodic timer (TTL).
    */
   private reapPool(): void {
-    const candidates = buildReapCandidates(
-      this.pool,
-      this.focused,
-      (session) => this.remoteClients.isActiveValueVisible(session),
-    );
+    const candidates = buildReapCandidates(this.pool, this.focused);
     const doomed = selectReapable(candidates, {
       maxLive: GrokSidebar.MAX_LIVE_SESSIONS,
       idleTtlMs: GrokSidebar.IDLE_TTL_MS,
       now: Date.now(),
     });
-    for (const c of doomed) {
-      const visibleClients = this.remoteClients.clientsForActiveValue(c.session);
-      this.disposeSession(c.session);
-      for (const clientId of visibleClients) {
-        this.remoteClients.setActive(clientId, c.session);
-        for (const message of this.buildRemoteSnapshot(clientId)) this.sendRemoteClient(clientId, message);
-        this.sendRemoteClient(clientId, {
-          type: "error",
-          text: "This session was unloaded to keep the live session pool bounded. It will reload automatically when you next send.",
-        });
-      }
-    }
+    for (const c of doomed) void this.disposeSession(c.session);
   }
 
   /**
@@ -27079,8 +23725,6 @@ ${directives.block}`;
       this.setMetaUnread(session.activeSessionId, true, status === "error");
     }
     this.pushDot(session);
-    // Wake lock: a turn starting or ending can change turnInFlight.
-    this.refreshKeepAwake();
     if (status === "done" || status === "error") this.refreshSessionOrderAfterTurn(session);
   }
 
@@ -27395,83 +24039,6 @@ ${directives.block}`;
       return;
     }
     this.touch(session);
-    this.refreshKeepAwake();
-  }
-
-  private anyTurnInFlight(): boolean {
-    for (const s of this.pool) {
-      if (hasLiveWork(s)) return true;
-    }
-    return false;
-  }
-
-  /**
-   * Does a machine we rent still need to be awake?
-   *
-   * `working` always counts. The hard case is `needs-you`, and it has been
-   * wrong in both directions:
-   *
-   * - Counting it for ever holds a machine running and billing while an
-   *   unanswered permission card sits there and nobody is coming back tonight.
-   * - Not counting it at all is worse, because `needs-you` does not mean the
-   *   machine is idle. Terminal work is deliberately asynchronous, so an agent
-   *   can start a long test run and THEN ask a question — and freezing the
-   *   machine underneath that kills exactly the work somebody walked away from.
-   *
-   * So a card holds the machine for a while and then stops. Anything a
-   * background process was going to finish, it finishes; an abandoned card
-   * stops costing money. Nothing is lost either way — opening the page wakes
-   * the machine and the card is still there.
-   */
-  /** Sign-in operations in flight — spawning, polling a vendor, or having a
-   *  credential verified afterwards. Deliberately NOT the `deviceLogins` guard
-   *  map (populated after the runner starts, cleared before verification, so
-   *  keep-awake read it as "no work" through the whole dangerous window), and
-   *  deliberately keyed by OPERATION rather than by provider: a successful
-   *  login leaves the guard map before it finishes verifying, so a second tab
-   *  can legitimately start the same provider meanwhile, and a provider-keyed
-   *  hold let the older operation's cleanup release the newer one's machine
-   *  (both found in review, 2026-08-31). */
-  private readonly deviceLoginWork = new Set<number>();
-  private deviceLoginWorkSeq = 0;
-
-  /** A sign-in is in progress somewhere. Counts as work for the keep-awake
-   *  above: the machine must not be paused underneath it. */
-  private deviceLoginInFlight(): boolean {
-    return this.deviceLoginWork.size > 0;
-  }
-
-  /** Take the keep-awake hold for one sign-in. The token is the ownership. */
-  private beginDeviceLoginWork(): number {
-    const id = ++this.deviceLoginWorkSeq;
-    this.deviceLoginWork.add(id);
-    if (this.deviceLoginWork.size === 1) this.refreshKeepAwake();
-    return id;
-  }
-
-  /** Release one sign-in's hold. Idempotent, and only ever its own. */
-  private endDeviceLoginWork(id: number): void {
-    if (!this.deviceLoginWork.delete(id)) return;
-    if (this.deviceLoginWork.size === 0) this.refreshKeepAwake();
-  }
-
-  private anyTurnWorking(): boolean {
-    // A command that is still running is the one answer that does not depend on
-    // reading a status. An agent can start a twenty-five-minute build and THEN
-    // ask a question — the session then says it is waiting for a person while
-    // the build carries on, and any window we pick is a guess about how long
-    // that build takes. This is not a guess.
-    if (this.terminalManager.anyRunning()) return true;
-    const now = Date.now();
-    for (const s of this.pool) {
-      if (!hasLiveWork(s)) continue;
-      if (s.status === "working") return true;
-      // `lastActiveAt` is stamped when a session becomes working or needs-you,
-      // so this is "how long ago the agent last did something", not "how long
-      // the card has been on screen".
-      if (now - s.lastActiveAt < NEEDS_YOU_KEEP_AWAKE_MS) return true;
-    }
-    return false;
   }
 
   /** Push just this session's recomputed dot to the webview (cheap — no disk read
@@ -27483,17 +24050,6 @@ ${directives.block}`;
     const message: HostMsg = { type: "sessionDot", id, dot: this.dotForId(id) };
     this.view?.webview.postMessage(message);
     this.mirrorToProjectsRail(message);
-    const overrides = this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
-    const sent = new Set<string>();
-    for (const clientId of this.remoteClients.clients()) {
-      const repoCwd = this.remoteClients.cwdIfPresent(clientId);
-      if (!repoCwd) continue;
-      const key = normalizeRepoPath(repoCwd);
-      if (sent.has(key)) continue;
-      if (!this.sessionCwdsForRepo(repoCwd, overrides).some((cwd) => pathsEqual(cwd, this.sessionCwd(session)))) continue;
-      sent.add(key);
-      this.sendRemoteRepo(repoCwd, message);
-    }
   }
 
   /** The dashboard dot for a grok-session id, from live status (if it's a live pool
@@ -27960,7 +24516,7 @@ ${directives.block}`;
   }
 
   /** Start a brand-new session, keeping the current one alive in the background. */
-  private async newFocusedSession(origin: MsgOrigin, requestedCwd?: string): Promise<void> {
+  private async newFocusedSession(requestedCwd?: string): Promise<void> {
     // Repo selection only changes history scope; New Session is the deliberate
     // second action that starts Grok in the selected cwd — deliberate only for
     // the client that can SEE the selection. That used to exclude VS Code,
@@ -27989,10 +24545,10 @@ ${directives.block}`;
     if (named && !pathsEqual(named.cwd, this.selectedRepoCwd || "")) {
       this.selectedRepoCwd = named.cwd;
     }
-    const targetCwd = named?.cwd ?? this.historyCwdFor(origin);
+    const targetCwd = named?.cwd ?? this.historyCwdFor();
     const leavingId = this.focused.activeSessionId;
     this.parkFocused();
-    const unused = this.findUnusedEmptySession(targetCwd, "local", leavingId);
+    const unused = this.findUnusedEmptySession(targetCwd, leavingId);
     if (unused?.session?.client) {
       this.focusSession(unused.session);
     } else if (unused?.session) {
@@ -28026,137 +24582,6 @@ ${directives.block}`;
     this.postSessionsList();
   }
 
-  private focusRemoteSession(clientId: string, session: Session, notifyCatalog = true): void {
-    const cwd = this.remoteClients.cwd(clientId);
-    this.remoteClients.setActive(clientId, session);
-    this.touch(session);
-    this.markRead(session);
-    this.sendRemoteClient(clientId, { type: "clearMessages" });
-    // Before the transcript, so the replay renders under the right agent rather
-    // than being relabelled after the fact. See sessionIdentityFrame.
-    const identity = this.sessionIdentityFrame(session);
-    if (identity) this.sendRemoteClient(clientId, identity);
-    for (const msg of bracketRemoteSnapshot(session.buffer)) this.sendRemoteClient(clientId, msg);
-    for (const msg of sessionUiSnapshot(session, this.displayMode(session))) this.sendRemoteClient(clientId, msg);
-    if (notifyCatalog) this.postRepoCatalog();
-    this.sendRemoteClient(clientId, this.buildSessionsList(cwd, undefined, this.remoteActiveSessionId(clientId)));
-    // `clearMessages` above drops the client's latched name, and this path builds
-    // its own targeted list instead of going through postSessionsList — so the
-    // name has to be re-announced here or the header loses its rename affordance
-    // until something unrelated refreshes it.
-    this.postSessionName(session);
-    // NOT restorePersistedDraft. It hands the draft back with session-wide
-    // `emit`, which appends it to every surface viewing the conversation — so
-    // calling it here re-created, on the switch-back, the desk-composer
-    // pollution this whole sequence removed. Parked text therefore returns on
-    // the next load of the conversation rather than the instant you switch to
-    // it. That is a narrower promise, kept, instead of a wider one that leaks.
-  }
-
-  private async newRemoteSession(clientId: string, notifyCatalog = true): Promise<void> {
-    const ownerTabToken = this.remoteClients.tabToken(clientId);
-    const cwd = this.remoteClients.cwd(clientId);
-    const leavingId = this.remoteClients.active(clientId)?.activeSessionId;
-    this.parkRemoteSession(clientId);
-    this.dropRemoteVoice(clientId);
-    const unused = this.findUnusedEmptySession(cwd, "remote", leavingId);
-    if (unused?.session?.client) {
-      this.focusRemoteSession(clientId, unused.session, notifyCatalog);
-      return;
-    }
-    if (unused?.session) {
-      this.remoteClients.setActive(clientId, unused.session);
-      this.emit(unused.session, { type: "clearMessages" });
-      await this.startSession(unused.id, unused.session, "ensure");
-      await this.persistWorktreeBinding(unused.session);
-      this.sweepEmptySessions(this.sessionCwd(unused.session));
-      if (notifyCatalog) this.postRepoCatalog();
-      this.sendRemoteSessionList(unused.session, ownerTabToken);
-      return;
-    }
-    if (unused) {
-      await this.openRemoteSession(clientId, unused.id, unused.cwd, notifyCatalog);
-      return;
-    }
-    const session = new Session();
-    this.setSessionCwd(session, cwd, this.workspaceRoot());
-    session.provider = this.defaultProviderForProject(cwd);
-    this.remoteClients.setActive(clientId, session);
-    this.emit(session, { type: "clearMessages" });
-    await this.startSession(undefined, session);
-    await this.persistWorktreeBinding(session);
-    this.sweepEmptySessions(this.sessionCwd(session));
-    if (notifyCatalog) this.postRepoCatalog();
-    this.sendRemoteSessionList(session, ownerTabToken);
-  }
-
-  private refuseRemoteResume(
-    clientId: string,
-    id: string,
-    text: string,
-    selectedCwd: string,
-    code?: typeof SESSION_SUPERSEDED_CODE,
-  ): void {
-    this.sendRemoteClient(clientId, {
-      type: "error",
-      text,
-      resumeFailed: { id },
-      ...(code ? { code } : {}),
-    });
-    this.sendRemoteClient(clientId, this.buildSessionsList(selectedCwd, undefined, this.remoteActiveSessionId(clientId)));
-  }
-
-  private refuseUnboundRemoteSession(clientId: string): void {
-    const id = this.remoteClients.supersededSessionId(clientId);
-    this.host.appendLine(`[remote] refused session-bound message (tab has no active conversation)`);
-    this.sendRemoteClient(clientId, {
-      type: "error",
-      text: "This conversation is open in another tab. Continue here to take it back.",
-      ...(id ? { resumeFailed: { id } } : {}),
-      code: SESSION_SUPERSEDED_CODE,
-    });
-  }
-
-  /**
-   * Hand a live conversation from one remote tab to another. Same Session
-   * object — no cold-load, no second ACP process. The desk `focused` pointer
-   * is left alone so a claim of a desk-visible session co-attaches.
-   *
-   * Ownership moves synchronously: no await between deleteActive and setActive.
-   */
-  private transferRemoteResume(
-    winnerId: string,
-    target: Extract<RemoteResumeTarget, { kind: "conflict" }>,
-    notifyCatalog: boolean,
-  ): void {
-    const { ownerId: loserId, session, selectedCwd } = target;
-    const id = session.activeSessionId;
-    if (!id || this.remoteClients.active(loserId) !== session || loserId === winnerId) {
-      this.parkRemoteSession(winnerId, session);
-      this.dropRemoteVoice(winnerId);
-      this.focusRemoteSession(winnerId, session, notifyCatalog);
-      return;
-    }
-    this.remoteClients.deleteActive(loserId, session);
-    this.remoteClients.markRequiresExplicitSession(loserId, id);
-    this.pool.add(session);
-    this.parkRemoteSession(winnerId, session);
-    this.dropRemoteVoice(winnerId);
-    this.dropRemoteVoice(loserId);
-    this.focusRemoteSession(winnerId, session, notifyCatalog);
-    this.notifyRemoteSessionSuperseded(loserId, id, this.remoteClients.cwdIfPresent(loserId) ?? selectedCwd);
-  }
-
-  private notifyRemoteSessionSuperseded(clientId: string, id: string, selectedCwd: string): void {
-    this.sendRemoteClient(clientId, {
-      type: "error",
-      text: "This conversation is now open in another tab. Continue here to take it back.",
-      resumeFailed: { id },
-      code: SESSION_SUPERSEDED_CODE,
-    });
-    this.sendRemoteClient(clientId, this.buildSessionsList(selectedCwd, undefined, undefined));
-  }
-
   /**
    * First full boot pass: repo catalog plus the deferred session-list build
    * that ready/cold-boot schedule after it. "Warmed" means this pair finished,
@@ -28167,14 +24592,6 @@ ${directives.block}`;
     this.firstBootScanStarted = true;
     this.postRepoCatalog();
     const finish = async () => {
-      const hold = this.testCatalogHold;
-      if (hold) {
-        // Consume before awaiting so a resume that arrives in this window
-        // waits on firstBootScanCompleted, not on the hold flag itself.
-        this.testCatalogHold = undefined;
-        hold.started();
-        await hold.wait;
-      }
       this.postSessionsList();
       this.completeFirstBootScan();
     };
@@ -28186,267 +24603,7 @@ ${directives.block}`;
   }
 
   private completeFirstBootScan(): void {
-    if (this.firstBootScanCompleted) return;
     this.firstBootScanCompleted = true;
-    this.resolveFirstBootScan();
-  }
-
-  private async waitForCatalogWarmup(): Promise<void> {
-    if (this.firstBootScanCompleted) return;
-    if (!this.firstBootScanStarted) {
-      void this.runFirstBootScan({ deferSessions: false });
-    }
-    await Promise.race([
-      this.firstBootScanDone,
-      new Promise<void>((resolve) => {
-        setTimeout(resolve, GrokSidebar.FIRST_BOOT_SCAN_WAIT_MS);
-      }),
-    ]);
-  }
-
-  private findRemoteResumeTarget(clientId: string, id: string, sessionCwd?: string): RemoteResumeTarget {
-    const overrides = this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
-    const selectedCwd = this.adoptRepoForRemoteSession(clientId, sessionCwd, overrides);
-    const allowedCwds = this.sessionCwdsForRepo(selectedCwd, overrides);
-    const conflictingOwner = this.remoteClients.clients().find((ownerId) =>
-      ownerId !== clientId && this.remoteClients.active(ownerId)?.activeSessionId === id
-    );
-    if (conflictingOwner) {
-      const session = this.remoteClients.active(conflictingOwner);
-      if (session) return { kind: "conflict", selectedCwd, ownerId: conflictingOwner, session };
-    }
-    for (const session of this.pool) {
-      if (session.activeSessionId === id && session.client) {
-        if (!sessionCwdBelongsToRepo(this.sessionCwd(session), allowedCwds, pathsEqual)) {
-          return { kind: "repo-mismatch", selectedCwd };
-        }
-        return { kind: "live", selectedCwd, session };
-      }
-    }
-    const cachedCwd = this.sessionCache.get(id)?.entry.cwd;
-    const resumeCandidates = orderedResumeCwdCandidates({
-      messageCwd: sessionCwd,
-      trustedCwds: allowedCwds,
-      metaWorktreePath: overrides[id]?.worktreePath,
-      cachedCwd: overrides[id]?.providerCwd ?? cachedCwd,
-      sameCwd: pathsEqual,
-    });
-    const provider = overrides[id]?.provider ?? "grok";
-    const actualCwd = provider && isAdapterProvider(provider)
-      ? resumeCandidates.find((candidate) => allowedCwds.some((allowed) => pathsEqual(candidate, allowed)))
-      : findSessionCatalogCwd({
-          fs: defaultFs,
-          grokHome: resolveGrokHome(process.env),
-          id,
-          candidates: resumeCandidates,
-        });
-    if (!actualCwd) return { kind: "missing", selectedCwd };
-    return { kind: "disk", selectedCwd, actualCwd, provider };
-  }
-
-  private async openRemoteSession(
-    clientId: string,
-    id: string,
-    sessionCwd?: string,
-    notifyCatalog = true,
-    explicitClaim = false,
-  ): Promise<void> {
-    // Same reason the local open owns its clock: a phone tapping a conversation
-    // waits through the reservation, the repo adoption and the metadata reads
-    // before `startSession` is reached, and a clock made down there reports
-    // `resolve 0ms` however long that took.
-    const clock = new OpenClock();
-    const load = this.reserveSessionLoad(id, this.remoteClients.tabToken(clientId));
-    if (!load) {
-      const selectedCwd = this.remoteClients.cwd(clientId);
-      this.host.appendLine(`[remote] dropped resumeSession (session load is reserved by another view)`);
-      this.refuseRemoteResume(
-        clientId,
-        id,
-        "Could not restore this conversation because it is already being opened in another tab or the VS Code view.",
-        selectedCwd,
-      );
-      return;
-    }
-    if (load.joined) {
-      this.host.appendLine(`[remote] joined in-flight session load for the same logical tab`);
-      await load.reservation.completion;
-      return;
-    }
-    let failure: unknown;
-    try {
-      await this.openRemoteSessionReserved(
-        clientId, id, load.reservation, sessionCwd, notifyCatalog, clock, explicitClaim,
-      );
-    } catch (error) {
-      failure = error;
-      throw error;
-    } finally {
-      this.releaseSessionLoad(id, load.reservation, failure);
-    }
-    const opened = this.remoteClients.active(clientId);
-    if (opened) this.sweepEmptySessions(this.sessionCwd(opened));
-  }
-
-  /** The repo scope a remote `resumeSession` should run under. Normally the tab's
-   *  own selection; when the named session cwd belongs to a different catalog
-   *  repo, the tab is moved there first and told about it. Returns the scope to
-   *  use. A cwd owned by no catalog repo leaves the selection untouched, so the
-   *  caller's existing "not found in selected repo" refusal still fires. */
-  private adoptRepoForRemoteSession(
-    clientId: string,
-    sessionCwd: string | undefined,
-    overrides: SessionMetaOverrides,
-  ): string {
-    const selectedCwd = this.remoteClients.cwd(clientId);
-    if (!sessionCwd) return selectedCwd;
-    if (sessionCwdBelongsToRepo(sessionCwd, this.sessionCwdsForRepo(selectedCwd, overrides), pathsEqual)) {
-      return selectedCwd;
-    }
-    const owner = this.repoCatalog().find((repo) =>
-      repo.available &&
-      sessionCwdBelongsToRepo(sessionCwd, this.sessionCwdsForRepo(repo.cwd, overrides), pathsEqual),
-    );
-    if (!owner) return selectedCwd;
-    if (this.remoteVoice.has(clientId)) void this.handleRemoteVoiceStop(clientId, true);
-    this.parkRemoteSession(clientId);
-    this.remoteClients.select(clientId, owner.cwd);
-    this.sendRemoteRepoCatalog(clientId);
-    return owner.cwd;
-  }
-
-  private async openRemoteSessionReserved(
-    clientId: string,
-    id: string,
-    reservation: SessionLoadReservation,
-    sessionCwd?: string,
-    notifyCatalog = true,
-    clock?: OpenClock,
-    explicitClaim = false,
-  ): Promise<void> {
-    // A remote may name a session that lives in a DIFFERENT repo of the catalog
-    // it was shown — the projects rail lists every repo's sessions at once, so
-    // "open that conversation over there" is now an ordinary click. Move the
-    // tab's selection to the owning repo as part of THIS operation instead of
-    // refusing it.
-    //
-    // Deliberately not two messages: `selectRepo` opens that repo's newest
-    // session on its own, so a client that switched and then resumed would race
-    // its own switch and load a session the user did not pick. The isolation
-    // this replaces is unchanged in substance — the cwd must still belong to a
-    // repo in the catalog (`remoteTargetableCwd` already gated it inbound), and
-    // a cwd owned by no catalog repo still falls through to the refusal below.
-    let target = this.findRemoteResumeTarget(clientId, id, sessionCwd);
-    // Retry only while the first boot pass could EXPLAIN the miss — a completed
-    // catalog+session-list miss is genuine, and waiting again would just delay
-    // the refusal. catalog-posted-but-list-still-deferred is still warming.
-    if (target.kind === "missing" && !this.firstBootScanCompleted) {
-      await this.waitForCatalogWarmup();
-      // Re-resolve after the await: the requesting tab, reservation, and catalog
-      // can all have moved. Thread the live Session object, not a captured id.
-      if (!this.remoteClients.isCurrent(clientId)) return;
-      const held = this.sessionLoadReservations.get(id);
-      if (held?.token !== reservation.token) return;
-      target = this.findRemoteResumeTarget(clientId, id, sessionCwd);
-    }
-    // Remote holders are mutually exclusive. The newest tab that EXPLICITLY
-    // claims a conversation wins; a reconnect restore (no claim bit) still
-    // refuses, so a thawing background tab cannot steal it back. The VS Code
-    // view is NOT a rival tab — a session open (or parked) at the desk is
-    // joined, not refused: emit() fans every frame to the focused webview and
-    // to each remote holder, so the desk and the phone stay in sync.
-    if (target.kind === "conflict") {
-      const stillHeld = this.remoteClients.active(target.ownerId) === target.session
-        && target.ownerId !== clientId;
-      if (stillHeld && explicitClaim) {
-        this.host.appendLine(`[remote] transferred resumeSession from ${target.ownerId} to ${clientId}`);
-        this.transferRemoteResume(clientId, target, notifyCatalog);
-        return;
-      }
-      if (stillHeld) {
-        this.host.appendLine(`[remote] dropped resumeSession (session is open in another tab)`);
-        this.refuseRemoteResume(
-          clientId,
-          id,
-          "Could not restore this conversation because it is already open in another tab.",
-          target.selectedCwd,
-          SESSION_SUPERSEDED_CODE,
-        );
-        return;
-      }
-      this.parkRemoteSession(clientId, target.session);
-      this.dropRemoteVoice(clientId);
-      this.focusRemoteSession(clientId, target.session, notifyCatalog);
-      return;
-    }
-    if (target.kind === "repo-mismatch") {
-      this.host.appendLine(`[remote] dropped resumeSession (session cwd does not match selected repo)`);
-      this.refuseRemoteResume(
-        clientId,
-        id,
-        "Could not restore this tab's conversation because its repository is no longer selected or available.",
-        target.selectedCwd,
-      );
-      return;
-    }
-    if (target.kind === "live") {
-      this.parkRemoteSession(clientId, target.session);
-      this.dropRemoteVoice(clientId);
-      this.focusRemoteSession(clientId, target.session, notifyCatalog);
-      return;
-    }
-    if (target.kind === "missing") {
-      this.host.appendLine(`[remote] dropped resumeSession (session was not found in selected repo)`);
-      this.refuseRemoteResume(
-        clientId,
-        id,
-        "Could not restore this tab's previous conversation. It may have been deleted, or its repository may no longer be available. Start a new session explicitly to continue.",
-        target.selectedCwd,
-      );
-      return;
-    }
-    const { selectedCwd, actualCwd, provider } = target;
-    const overrides = this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
-    const current = this.remoteClients.active(clientId);
-    // Mirror of the desk-side adoption: if the DESK still holds this
-    // conversation as a clientless object (crashed / reaped focused session),
-    // resume INTO that object rather than forking the session directory into
-    // a second live process. Other tabs' objects can't reach here — the
-    // conflictingOwner guard above refused them regardless of client state.
-    const session = current?.activeSessionId === id
-      ? current
-      : this.focused.activeSessionId === id
-        ? this.focused
-        : [...this.pool].find((candidate) => candidate.activeSessionId === id && !candidate.client)
-          ?? new Session();
-    session.provider = provider;
-    const savedWorktree = overrides[id];
-    if (savedWorktree?.worktreePath) {
-      session.cwd = actualCwd;
-      session.worktree = {
-        path: savedWorktree.worktreePath,
-        label: savedWorktree.worktreeLabel || path.basename(savedWorktree.worktreePath),
-        sourceGitRoot: savedWorktree.sourceGitRoot || selectedCwd,
-      };
-    } else if (!session.worktree) {
-      this.setSessionCwd(session, actualCwd, selectedCwd);
-    } else {
-      session.cwd = actualCwd;
-    }
-    this.pool.add(session);
-    this.parkRemoteSession(clientId, session);
-    this.dropRemoteVoice(clientId);
-    this.remoteClients.setActive(clientId, session);
-    this.bindSessionLoad(id, reservation, session);
-    // Opening a named conversation is not an empty session. Mark it before
-    // start so a failed spawn cannot later look "stranded" and be handed to
-    // whichever provider just signed in.
-    session.hasHistory = true;
-    this.sendRemoteClient(clientId, { type: "clearMessages" });
-    await this.startSession(id, session, "ensure", clock);
-    this.markRead(session);
-    if (notifyCatalog) this.postRepoCatalog();
-    this.sendRemoteSessionList(session, reservation.ownerTabToken);
   }
 
   /**
@@ -28586,10 +24743,6 @@ ${directives.block}`;
   }
 
   private async openSessionReserved(id: string, sessionCwd?: string, clock?: OpenClock): Promise<void> {
-    // A session held by a remote tab is not off-limits here: the desk JOINS it
-    // — focusSession replays the shared buffer into the webview and already
-    // mirrors the replay to remote holders, and emit() keeps serving both
-    // views from then on.
     for (const s of this.pool) {
       if (s.activeSessionId === id && s.client) {
         await this.followSessionWorkspace(s);
@@ -28598,43 +24751,6 @@ ${directives.block}`;
       }
     }
     this.parkFocused();
-    // A remote tab may still hold this conversation as a CLIENTLESS object
-    // (its CLI crashed, or it was LRU-reaped — the mapping deliberately
-    // survives so the tab reloads on its next send). Cold-loading a NEW
-    // object here would hand the same Grok session directory to two live
-    // processes the moment both views touch it — adopt the held object
-    // instead, so this restart lands in BOTH views.
-    const held = this.remoteClients.clients()
-      .map((clientId) => this.remoteClients.active(clientId))
-      .find((s): s is Session => !!s && s.activeSessionId === id);
-    if (held) {
-      // Keep the host-owned cwd on the held object. A forged resumeSession.cwd
-      // must not re-home an existing process or widen desktopAuthRoots.
-      // A held session whose folder was closed is no longer authorized — do not
-      // adopt/restart it (startSession would also refuse; fail closed here).
-      if (
-        this.host.canSwitchWorkspaceFolder &&
-        held.cwd &&
-        !this.isAuthorizedCwd(held.cwd)
-      ) {
-        this.host.appendLine(
-          `[sessions] refused held-session adopt (cwd not authorized): ${held.cwd}`,
-        );
-        void this.host.showInformationMessage(
-          "Could not restore this conversation — its project folder is no longer open.",
-        );
-        await this.startSession();
-        this.postRepoCatalog();
-        return;
-      }
-      this.focused = held;
-      this.pool.add(this.focused);
-      await this.followSessionWorkspace(this.focused);
-      await this.startSession(id, this.focused, "ensure", clock);
-      this.markRead(this.focused);
-      this.postRepoCatalog();
-      return;
-    }
     this.focused = this.newLocalSession();
     this.pool.add(this.focused);
     // Session cwd is resolved host-side from the on-disk catalog. The message
@@ -28926,19 +25042,6 @@ ${directives.block}`;
     return env;
   }
 
-  // ---------- remote control (thin client only — the relay server and web
-  // client are a separate project) ----------
-
-  /** v1 ships one capability tier — every paired remote is fully trusted
-   *  (decision 2026-07-16). The policy module supports read-only/propose for a
-   *  later per-device setting. */
-  private static readonly REMOTE_TIER: RemoteTier = "full";
-
-  /** Longest edge of the render a remote gets when it taps a thumbnail. Big
-   *  enough to read a screenshot on a phone, small enough not to push a
-   *  multi-megabyte frame over a mobile connection for a single tap. */
-  private static readonly FULL_IMAGE_MAX_EDGE = 1600;
-  private static readonly FULL_IMAGE_MAX_BYTES = 2 * 1024 * 1024;
   /** How many enlargeable images a session remembers. Bounded because the map
    *  is keyed by a handle we mint per path and never otherwise expire. */
   private static readonly FULL_IMAGE_HANDLE_LIMIT = 300;
@@ -29022,443 +25125,6 @@ ${directives.block}`;
     });
   }
 
-  /** Render a bigger version for a remote's tap. Undefined when the source is
-   *  gone (the seven-day sweep, or a deleted original) or will not fit — the
-   *  browser then keeps the thumbnail it already has rather than blanking. */
-  private async renderFullImage(imagePath: string): Promise<string | undefined> {
-    try {
-      const bytes = await fs.promises.readFile(imagePath);
-      const thumb = thumbnailImage(bytes, guessMediaMime(imagePath), GrokSidebar.FULL_IMAGE_MAX_EDGE);
-      if (!thumb || thumb.byteLength === 0 || thumb.byteLength > GrokSidebar.FULL_IMAGE_MAX_BYTES) {
-        return undefined;
-      }
-      return `data:${thumbnailMime(thumb)};base64,${Buffer.from(thumb).toString("base64")}`;
-    } catch {
-      return undefined;
-    }
-  }
-
-  /** Impure half of the media inline transform (the decision logic is the pure
-   *  remote-policy). Sync read keeps broadcast ordering; media is rare + capped.
-   *  Per-instance rather than static: the full-image handles it issues belong to
-   *  this provider, and a shared registry would let one window hand out handles
-   *  into another's files. */
-  private readonly remoteMediaDeps: MediaInlineDeps = {
-    registerFullImage: (p) => this.registerFullImage(p),
-    thumbnailCache: new Map<string, string | null>(),
-    readFile: (p) => {
-      try {
-        return fs.readFileSync(p);
-      } catch {
-        return null;
-      }
-    },
-    toBase64: (bytes) => Buffer.from(bytes).toString("base64"),
-    thumbnail: (bytes, mimeType, maxDimension) => {
-      const thumb = thumbnailImage(bytes, mimeType, maxDimension);
-      return thumb ? { bytes: thumb, mime: thumbnailMime(thumb) } : null;
-    },
-    mtimeMs: (p) => {
-      try {
-        return fs.statSync(p).mtimeMs;
-      } catch {
-        return undefined;
-      }
-    },
-  };
-
-  /** The single inbound choke point for remote clients: capability-gate, then
-   *  route into the normal onMessage switch. */
-  private handleRemoteMessage(clientId: string, m: WebviewMsg): void {
-    try {
-      // Compatibility path for a relay/browser pair that still forwards the raw
-      // webview ready message in addition to client-ready.
-      if (m.type === "ready") {
-        this.handleRemoteClientReady(clientId, m.tabToken);
-        if (!this.remoteClients.isCurrent(clientId)) return;
-        for (const message of this.buildRemoteSnapshot(clientId)) {
-          this.sendRemoteClient(clientId, message);
-        }
-        return;
-      }
-      if (!allowFromRemote(m.type, GrokSidebar.REMOTE_TIER, { isCloud: isCloudEnvironment() })) {
-        this.host.appendLine(`[remote] dropped ${m.type} (not allowed from a remote client)`);
-        return;
-      }
-      if (!allowRemoteRepoTarget(m, (cwd) => this.remoteTargetableCwd(cwd))) {
-        this.host.appendLine(`[remote] dropped ${m.type} (cwd was not discovered)`);
-        if (m.type === "listRepoSessions") {
-          this.sendRemoteClient(clientId, {
-            type: "repoSessions", cwd: m.cwd, entries: [], dots: {}, total: 0,
-            error: "project-unavailable",
-          });
-        }
-        return;
-      }
-      // Messages with no cwd still act on a bound session / client-selected
-      // repo. A closed folder must revoke those ops even when allowRemoteRepoTarget
-      // returns true (its default branch). selectRepo is the escape hatch to a
-      // still-authorized target and is gated only by the message cwd above.
-      if (m.type !== "selectRepo" && m.type !== "listRepoSessions") {
-        const active = this.remoteClients.active(clientId);
-        const boundCwd = active
-          ? this.sessionCwd(active)
-          : this.remoteClients.cwdIfPresent(clientId);
-        // Fresh tab with no binding yet may still only call ready / list — if
-        // it has a client cwd (after ready), that cwd must remain authorized.
-        if (
-          boundCwd !== undefined &&
-          !remoteBoundCwdStillAuthorized(boundCwd, this.authorizedSessionCwds(), pathsEqual)
-        ) {
-          this.host.appendLine(
-            `[remote] dropped ${m.type} (bound cwd no longer authorized: ${boundCwd})`,
-          );
-          this.sendRemoteClient(clientId, {
-            type: "error",
-            text: "That project folder is no longer open on the desktop. Select another project to continue.",
-          });
-          return;
-        }
-      }
-      if (!this.remoteClients.isCurrent(clientId)) {
-        this.host.appendLine(`[remote] dropped ${m.type} from a superseded tab connection`);
-        this.sendRemoteClient(clientId, {
-          type: "error",
-          text: "This page's remote connection was replaced by another tab. Open AFK Pilot in a new tab to reconnect independently.",
-        });
-        return;
-      }
-      this.remoteClients.ready(clientId);
-      if (remoteRequiresBoundSession(m.type) && !this.remoteClients.active(clientId)) {
-        this.refuseUnboundRemoteSession(clientId);
-        return;
-      }
-      const requester = this.captureRemoteRequester(clientId);
-      const transition = async (currentClientId: string) => {
-        if (m.type === "newSession") {
-          await this.newRemoteSession(currentClientId);
-        } else if (m.type === "resumeSession") {
-          await this.openRemoteSession(currentClientId, m.id, m.cwd, true, m.claim === true);
-        } else if (m.type === "selectRepo") {
-          await this.selectRemoteRepo(currentClientId, m.cwd);
-        }
-      };
-      const operation = serializesRemoteSessionTransition(m.type)
-        ? this.remoteClients.runSessionTransition(
-            clientId,
-            m.type === "resumeSession" ? m.id : undefined,
-            transition,
-          )
-        : m.type === "send"
-          ? this.remoteClients.runAfterSessionTransition(
-              clientId,
-              (currentClientId) => this.onMessage(m, "remote", currentClientId),
-            )
-          : this.onMessage(m, "remote", clientId);
-      void operation.catch((e) => {
-        const detail = (e as Error)?.message ?? String(e);
-        this.host.appendLine(`[remote] ${m.type} failed: ${detail}`);
-        this.sendRemoteRequester(requester, {
-          type: "error",
-          text: `Grok: ${m.type} failed — ${detail}`,
-        });
-      });
-    } catch (e) {
-      this.host.appendLine(`[remote] dropped malformed frame: ${(e as Error)?.message ?? String(e)}`);
-    }
-  }
-
-  private handleRemoteClientReady(clientId: string, tabToken?: string): void {
-    if (tabToken) {
-      const superseded = this.remoteClients.identify(clientId, tabToken);
-      if (superseded) {
-        this.dropRemoteVoice(superseded);
-        this.sendRemoteClient(superseded, {
-          type: "error",
-          text: "This page's remote connection was replaced by another tab. Open AFK Pilot in a new tab to reconnect independently.",
-        });
-        this.host.appendLine(`[remote] handed tab ownership from ${superseded} to ${clientId}`);
-      }
-    }
-    if (!this.remoteClients.isCurrent(clientId)) return;
-    // A ready client has rebuilt its page and therefore has no live capture to
-    // feed an older host ingress. Drop it before buildRemoteSnapshot inspects
-    // remoteVoice, so reconnect cannot resurrect a host-only listening state.
-    this.dropRemoteVoice(clientId);
-    this.remoteClients.ready(clientId);
-    // Empty default cwd (no desktop project yet) is not a bound repo. The
-    // snapshot still goes out unbound; adopting/starting here would throw.
-    if (!this.remoteClients.cwdIfPresent(clientId)) return;
-    // A tab that lost this conversation to another tab's claim must not
-    // adopt the desk session or mint a blank one on reconnect. The snapshot
-    // below stays unbound; an automatic restore (no claim bit) then lands
-    // in the taken-over state instead of stealing the conversation back.
-    if (this.remoteClients.requiresExplicitSession(clientId) && !this.remoteClients.active(clientId)) {
-      return;
-    }
-    const session = this.remoteSessionFor(clientId);
-    if (session.client && !session.needsProvider) {
-      this.restorePersistedDraft(session);
-      this.restoreStrandedDraft(session);
-    }
-    // A tab attached to a session with no live process would sit on "Starting"
-    // forever — nothing ever emits `initialized`, and the first send would
-    // quietly spawn a DIFFERENT conversation. Bring the process up (resuming
-    // its id when it has one, so a crashed/reaped conversation reloads its
-    // own history). Deferred: the caller sends this client's snapshot
-    // synchronously right after we return, and the start's frames must land
-    // after it, not race it.
-    if (!session.client) {
-      // Enqueue on the tab tail immediately so a following send waits. The
-      // 0-delay stays inside the action so the snapshot posted after we
-      // return still lands first.
-      void this.remoteClients.runSessionTransition(
-        clientId,
-        session.activeSessionId,
-        async (currentClientId) => {
-          await new Promise<void>((resolve) => setTimeout(resolve, 0));
-          if (this.remoteClients.active(currentClientId) !== session) return;
-          if (session.client || this.startingForRemote.has(session)) return;
-          this.startingForRemote.add(session);
-          this.pool.add(session);
-          try {
-            const started = await this.startSession(session.activeSessionId, session, "ensure");
-            if (
-              started &&
-              this.remoteClients.active(currentClientId) === session &&
-              !session.needsProvider
-            ) this.restoreStrandedDraft(session);
-          } finally {
-            this.startingForRemote.delete(session);
-          }
-        },
-      );
-    }
-  }
-
-  private static readonly DEVICE_TOKEN_SECRET = RELAY_DEVICE_TOKEN_SECRET;
-
-  /**
-   * The relay this build talks to — the production constant, unless a
-   * DEVELOPMENT build names another in `GROK_RELAY_URL` (see resolveRelayUrl).
-   *
-   * Every consumer goes through here, including the two HTTP ones (the web
-   * portal link and device unlink). Half the app on staging and half on
-   * production would fail in a way that looks like a relay bug.
-   */
-  private relayUrl(): string {
-    return resolveRelayUrl({
-      isProduction: this.context.isProduction,
-      env: process.env,
-      cloudBuild: this.context.isCloudBuild,
-    });
-  }
-
-  /** Start the relay uplink when a device token is stored (from the link flow).
-   *  Idempotent. */
-  private async maybeStartUplink(): Promise<void> {
-    return;
-  }
-
-  /**
-   * Read the stored device token without failing startup when ciphertext is
-   * undecryptable (keychain unavailable / key rotated). Returns undefined and
-   * logs — treat as "not linked".
-   */
-  private async readDeviceToken(): Promise<string | undefined> {
-    try {
-      return await this.context.secrets.get(GrokSidebar.DEVICE_TOKEN_SECRET);
-    } catch (e) {
-      this.host.appendLine(
-        `[remote] stored device token unreadable (treating as unlinked): ${(e as Error)?.message ?? e}`,
-      );
-      return undefined;
-    }
-  }
-
-  private async handleRemoteCredentialRevoked(
-    revokedToken: string,
-    revokedUplink: RemoteUplink,
-  ): Promise<void> {
-    // A replaced/disposed uplink may deliver a late close event. Only the
-    // currently-owned connection is allowed to clear the credential it used.
-    if (this.uplink !== revokedUplink) return;
-    const storedToken = await this.readDeviceToken();
-    if (this.uplink !== revokedUplink || storedToken !== revokedToken) return;
-
-    this.clearRemoteRuntime();
-    this.post({ type: "remoteStatus", linked: false });
-    try {
-      await this.context.secrets.delete(GrokSidebar.DEVICE_TOKEN_SECRET);
-    } catch (e) {
-      this.host.appendLine(`[remote] failed to clear revoked device token: ${(e as Error)?.message ?? e}`);
-      const retry = "Retry unlink";
-      void this.host.showErrorMessage(
-        "AFK Pilot access was revoked, but the stored device token could not be cleared.",
-        retry,
-      ).then((choice) => {
-        if (choice === retry) void this.host.unlinkRemote();
-      });
-      return;
-    }
-
-    const relink = "Link this device again";
-    void this.host.showWarningMessage(
-      "AFK Pilot access for this device was revoked, so it has been unlinked. Link it again to continue remotely.",
-      relink,
-    ).then((choice) => {
-      if (choice === relink) void this.host.linkRemote();
-    });
-  }
-
-  private clearRemoteRuntime(): void {
-    this.uplink?.dispose();
-    this.uplink = undefined;
-    this.stopVoiceInput();
-    this.remoteClients.clear();
-    this.refreshKeepAwake();
-  }
-
-  /** Re-assert the wake lock against linked / turn-in-flight / setting. Called
-   *  after every event that can change those; both start and stop are
-   *  idempotent, so callers never have to know the previous state. Wrapped
-   *  because keeping the machine awake is never worth failing a link/unlink or a
-   *  config change over. The opt-out key remains `grok.remote.keepAwake` (ships
-   *  today) even though local turns are now covered too. */
-  private refreshKeepAwake(): void {
-    // No-op: keep-awake removed in standalone All your Companions extension
-  }
-
-  /** "AFK Pilot: Link this device" — disabled in standalone build. */
-  async linkRemoteDevice(): Promise<void> {
-    void this.host.showInformationMessage("Remote access is disabled in this standalone build.");
-  }
-
-  /** "AFK Pilot: Unlink this device" — drop stored token if present. */
-  async unlinkRemoteDevice(): Promise<void> {
-    try {
-      await this.context.secrets.delete(GrokSidebar.DEVICE_TOKEN_SECRET);
-    } catch {
-      // ignore
-    }
-    this.post({ type: "remoteStatus", linked: false });
-  }
-
-  /** Tell the webview whether this machine holds a relay device token. Always false in standalone build. */
-  private async postRemoteStatus(): Promise<void> {
-    this.post({ type: "remoteStatus", linked: false });
-  }
-
-  /** Ordered catch-up built from this client's cwd and active remote session. */
-  private buildRemoteSnapshot(clientId: string): HostMsg[] {
-    const cwd = this.remoteClients.cwdIfPresent(clientId) ?? "";
-    // Live authorized set for this host — not "whatever the tab last selected".
-    const authorized = this.authorizedSessionCwds();
-    const listCwd = authorizedListCwd(cwd, authorized, pathsEqual);
-    const demoted = this.remoteClients.requiresExplicitSession(clientId)
-      && !this.remoteClients.active(clientId);
-    const session = demoted
-      ? undefined
-      : cwd
-        ? this.remoteSessionFor(clientId)
-        : this.remoteClients.active(clientId);
-    // Catalog is already open-folder-filtered on desktop; still the sole source.
-    const entries = this.localRepoCatalogEntries();
-    // Never put a closed cwd on the wire (choke point rejects it); empty = unbound.
-    const initial = this.messageForRemote({ ...this.buildInitialStateMsg(session ?? this.focused), cwd: listCwd ?? "" });
-    const sessionCwd = session ? this.sessionCwd(session) : "";
-    const sessionCwdOk = !!session && !!authorizedListCwd(sessionCwd, authorized, pathsEqual);
-    const snap: HostMsg[] = [];
-    snap.push(initial);
-    snap.push(this.providerStateMessage());
-    snap.push(this.githubStateMessage());
-    snap.push(this.mcpConnectorsMessage());
-    snap.push(this.mcpServersMessage());
-    // SIXTH hand-written registry, and it is not the same one as
-    // DEVICE_GLOBAL_REMOTE_TYPES. That set decides how a frame is ROUTED once
-    // something posts it; this list decides whether a newly-connected browser
-    // ever receives it at all. Both are needed and TypeScript enforces neither.
-    //
-    // Without these two, a phone came up with no tip facts and no project root:
-    // every count read as unknown, the dismissed list read as empty, so a tip
-    // the user had retired weeks ago came back on every empty screen and the
-    // once-a-day rule never applied — the host was recording faithfully and
-    // nobody was listening.
-    snap.push(this.welcomeTipsMessage());
-    snap.push(this.projectSetupMessage(this.githubProjectSetupExtra(clientId)));
-    // A demoted tab already has a frozen transcript. clearMessages here would
-    // wipe it on a same-page reconnect (mobile thaw). A rebuilt page starts
-    // empty, so skipping the clear is a no-op there.
-    if (!demoted) snap.push({ type: "clearMessages" });
-    // Conversation buffer only when the bound session still lives under an
-    // authorized cwd (revoke disposes doomed sessions; this is the belt).
-    if (session && sessionCwdOk && !session.replaying) {
-      snap.push(...bracketRemoteSnapshot(session.buffer));
-    }
-    if (session && sessionCwdOk) {
-      snap.push(...sessionUiSnapshot(session, this.displayMode(session)));
-    }
-    if (session && sessionCwdOk && session.queuedSendRequiresRelay) {
-      session.queuedSendDispatch = claimQueuedSendDispatch(
-        session.queuedSendDispatch,
-        this.queuedSendReadyText(session),
-        () => randomUUID(),
-      );
-    }
-    if (session && sessionCwdOk && session.queuedSendDispatch) {
-      snap.push({ type: "submitQueuedSend", ...session.queuedSendDispatch });
-    }
-    const voiceCwd = sessionCwdOk ? sessionCwd : this.workspaceRoot();
-    const voiceProvider = sessionCwdOk && session ? session.provider : this.defaultProviderForProject(voiceCwd);
-    const voiceConfigured = !!this.voiceBackendState(voiceCwd, voiceProvider).backend;
-    this.rememberVoiceConfigured(voiceCwd, voiceConfigured);
-    const voicePayload = this.voiceConfiguredMsg(voiceCwd, voiceConfigured, voiceProvider);
-    this.seedPostedVoiceConfigured(`remote:${clientId}`, voicePayload);
-    snap.push(voicePayload);
-    const activeVoice = this.remoteVoice.get(clientId);
-    if (activeVoice) {
-      snap.push({ type: "voiceState", status: activeVoice.finalizing ? "transcribing" : "listening" });
-    }
-    // Scrubbed selected/active; entries are the open-folder catalog only.
-    snap.push(this.buildRemoteReposMsg(clientId, entries));
-    // buildSessionsList re-checks authorization (empty list if listCwd missing).
-    snap.push(
-      this.buildSessionsList(
-        listCwd ?? "",
-        undefined,
-        sessionCwdOk ? this.remoteActiveSessionId(clientId) : null,
-      ),
-    );
-    if (demoted) {
-      const supersededId = this.remoteClients.supersededSessionId(clientId);
-      snap.push({
-        type: "error",
-        text: "This conversation is now open in another tab. Continue here to take it back.",
-        ...(supersededId ? { resumeFailed: { id: supersededId } } : {}),
-        code: SESSION_SUPERSEDED_CODE,
-      });
-    }
-    if (session && sessionCwdOk && session.activeSessionId) {
-      snap.push({
-        type: "sessionName",
-        sessionId: session.activeSessionId,
-        name: this.sessionDisplayName(session),
-        cwd: sessionCwd,
-      });
-    }
-    // Pins belong in the snapshot, not behind a `ready` handler: `ready` from a
-    // remote is answered HERE and never reaches onMessage's switch, so anything
-    // pushed from there would simply never arrive on a fresh tab or a reconnect.
-    // buildPinnedSessions filters to the live authorized set.
-    snap.push({ type: "pinnedSessions", ...this.buildPinnedSessions() });
-    const out: HostMsg[] = [];
-    for (const m of snap) {
-      const t = transformHostMsgForRemote(m, this.remoteMediaDeps);
-      if (t) out.push(t);
-    }
-    return out;
-  }
-
   /**
    * HTML for the primary-side-bar projects rail. Self-contained: does not load
    * chat.js (that would create a second chat client).
@@ -29528,10 +25194,7 @@ ${directives.block}`;
     panel.onDidDispose(() => {
       if (this.settingsEditor === panel) this.settingsEditor = undefined;
     });
-    const token = await this.readDeviceToken();
-    if (this.settingsEditor !== panel) return;
     panel.webview.html = this.getSettingsHtml(panel.webview, {
-      remoteLinked: !!token,
       category: targetCategory,
     });
     panel.webview.onDidReceiveMessage((raw) => {
@@ -29548,12 +25211,12 @@ ${directives.block}`;
       this.host.appendLine(`[settings] ignored ${msg.type}`);
       return;
     }
-    await this.onMessage(msg, "local");
+    await this.onMessage(msg);
   }
 
   private getSettingsHtml(
     webview: HostWebview,
-    opts: { remoteLinked: boolean; category?: string },
+    opts: { category?: string },
   ): string {
     const nonce = getNonce();
     const mediaUri = (file: string) =>
@@ -29589,7 +25252,6 @@ ${directives.block}`;
         extVersion: this.context.extensionVersion,
         cliVersion: this.providerCliVersions.grok || "",
         hostKind: "extension" as const,
-        hostName: deviceDisplayName(os.hostname(), process.platform, os.release()),
         grokUpdate: null,
         mcpServers: this.mcpServersView,
         mcpLoading: false,
@@ -29609,7 +25271,6 @@ ${directives.block}`;
         clientOwnsFontScale: false,
         steerSupported: true,
         providersKnown: true,
-        remoteLinked: opts.remoteLinked,
         hostCaps: {
           relocateView: this.host.canRelocateView,
           secondarySideBar: this.host.canUseSecondarySideBar,
@@ -29884,13 +25545,10 @@ ${openMain}
       <button id="session-type-crew" class="cx-seg-opt session-type-opt" type="button" role="radio" aria-checked="false" tabindex="-1" data-session-type="crew">Crew</button>
     </div>
     <span id="session-type-badge" class="cx-pill cx-pill--outline cx-session-badge" hidden></span>
-    <button id="repo-btn" class="repo-chip" type="button" title="Choose repository"></button>
-    <button id="remote-btn" class="icon-btn remote-btn" title="Continue remotely" hidden></button>
     <button id="history-btn" class="icon-btn" title="Session history"></button>
     <button id="new-btn" class="icon-btn" title="New session"></button>
     ${this.host.canSwitchWorkspaceFolder ? `<div id="session-head-actions"></div>` : ""}
     ${this.host.canSwitchWorkspaceFolder ? "" : `<div id="vscode-session-actions"></div>`}
-    <div id="repo-popover" class="toolbar-popover repo-popover" hidden></div>
     <div id="history-popover" class="toolbar-popover history-popover" hidden></div>
   </header>
 ${fileShellOpen}

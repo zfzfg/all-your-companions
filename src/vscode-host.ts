@@ -475,12 +475,6 @@ export function createVsCodeHost(
         },
       };
     },
-    async linkRemote() {
-      await vscode.commands.executeCommand("grok.linkRemote");
-    },
-    async unlinkRemote() {
-      await vscode.commands.executeCommand("grok.unlinkRemote");
-    },
     setContext(key: string, value: unknown) {
       return vscode.commands.executeCommand("setContext", key, value);
     },
@@ -817,7 +811,6 @@ export function createVsCodeHost(
     // VS Code: webview moves / Reload Webviews recreate the document under a
     // live session — still startSession (v3.1.0), never rehydrate.
     webviewReloadsUnderLiveSession: false,
-    remoteInstallIdSuffix: "",
     canRelocateView: true,
     get canUseSecondarySideBar() {
       return secondarySideBar;

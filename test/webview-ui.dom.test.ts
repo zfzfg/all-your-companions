@@ -7,10 +7,9 @@
 //   2. Session rows "only clickable on the label" -> whole row resumes; action
 //      buttons stopPropagation so they don't also resume
 //   3. Reasoning traces "no longer expandable" -> header click toggles the body
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { bootWebview, dispatch, click, Posted } from "./webview-harness";
 import { countsAsUserBubble } from "../src/plan-restore";
-import type { HostMsg } from "../src/protocol";
 
 const $ = (doc: Document, id: string) => doc.getElementById(id) as HTMLElement;
 function openSettingsOverlay(window: Window, doc: Document) {
@@ -90,24 +89,6 @@ describe("focused conversation name chip", () => {
     ]);
   });
 
-  it("adds the remote affordance only after sessionName arrives, and carries cwd", () => {
-    const { window, doc, posted } = bootWebview({ remote: true });
-    dispatch(window, { type: "sessions", entries: [row("s1", "Remote title", "/work/remote")], activeId: "s1", dots: {} });
-    expect(doc.getElementById("session-head-title")!.textContent).toBe("Remote title");
-    expect(doc.getElementById("session-head-edit")).toBeNull();
-
-    dispatch(window, { type: "sessionName", sessionId: "s1", name: "Remote title", cwd: "/work/remote" });
-    expect(doc.getElementById("session-head-title")!.getAttribute("title")).toBe("Remote title");
-    expect(doc.getElementById("session-head-edit")).not.toBeNull();
-    click(window, doc.getElementById("session-head-title")!);
-    const input = doc.getElementById("session-head-title") as HTMLInputElement;
-    input.value = "Remote renamed";
-    input.dispatchEvent(new (window as any).KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
-    expect(posted.filter((message) => message.type === "renameSession")).toEqual([
-      { type: "renameSession", id: "s1", name: "Remote renamed", cwd: "/work/remote" },
-    ]);
-  });
-
   it("paints a header rename on the history row before any host frame", () => {
     const { window, doc } = bootWebview();
     dispatch(window, { type: "sessions", entries: [row("s1", "Keep this")], activeId: "s1", dots: {} });
@@ -164,12 +145,7 @@ describe("focused conversation name chip", () => {
     const local = bootWebview();
     dispatch(local.window, { type: "sessions", entries: [row("s1", "Legacy title")], activeId: "s1", dots: {} });
     expect((local.doc.getElementById("session-name-chip") as HTMLElement).hidden).toBe(true);
-
-    const remote = bootWebview({ remote: true });
-    dispatch(remote.window, { type: "sessions", entries: [row("s1", "Legacy title")], activeId: "s1", dots: {} });
-    expect(remote.doc.getElementById("session-head-title")!.getAttribute("title")).toBe("Legacy title");
-    expect(remote.doc.getElementById("session-head-edit")).toBeNull();
-    expect(remote.posted.filter((message) => message.type === "renameSession")).toEqual([]);
+    expect(local.posted.filter((message) => message.type === "renameSession")).toEqual([]);
   });
 });
 
@@ -434,7 +410,7 @@ describe("session rows (regression: only the label was clickable)", () => {
     // The host says what it can do; every real snapshot carries this.
     dispatch(h.window, {
       type: "initialState", useCtrlEnter: false,
-      capabilities: { uploadFile: true, remoteVoice: true, deleteActiveSession: true },
+      capabilities: { uploadFile: true, deleteActiveSession: true },
     });
     click(h.window, $(h.doc, "history-btn"));
     h.posted.length = 0;
@@ -464,7 +440,7 @@ describe("session rows (regression: only the label was clickable)", () => {
     const h = bootWebview();
     dispatch(h.window, {
       type: "initialState", useCtrlEnter: false,
-      capabilities: { uploadFile: true, remoteVoice: true },
+      capabilities: { uploadFile: true },
     });
     click(h.window, $(h.doc, "history-btn"));
     dispatch(h.window, { type: "sessions", entries, activeId: "s1" });
@@ -1092,8 +1068,8 @@ describe("gear settings lock (model + effort disabled while busy / priming)", ()
     expect(posted).toContainEqual({ type: "setModel", modelId: "grok-composer-2.5-fast" });
   });
 
-  it("groups remote empty-session models deterministically and switches providers additively", () => {
-    const h = bootWebview({ remote: true });
+  it("groups empty-session models deterministically and switches providers additively", () => {
+    const h = bootWebview();
     dispatch(h.window, {
       type: "providerState",
       providers: [
@@ -1122,8 +1098,8 @@ describe("gear settings lock (model + effort disabled while busy / priming)", ()
     expect(h.posted).toContainEqual({ type: "setModel", modelId: "gpt-5.6-sol", provider: "codex" });
   });
 
-  it("scopes a remote non-empty Codex conversation to Codex models", () => {
-    const h = bootWebview({ remote: true });
+  it("scopes a non-empty Codex conversation to Codex models", () => {
+    const h = bootWebview();
     dispatch(h.window, {
       type: "providerState",
       providers: [
@@ -1181,24 +1157,6 @@ describe("gear settings lock (model + effort disabled while busy / priming)", ()
       .find((el) => el.textContent?.includes("Codex")) as HTMLElement;
     click(h.window, codex);
     expect(h.posted).toContainEqual({ type: "runGrokLogin", provider: "codex" });
-  });
-
-  it("never renders provider management or posts account actions remotely", () => {
-    const h = bootWebview({ remote: true });
-    dispatch(h.window, {
-      type: "providerState",
-      providers: [
-        { id: "grok", connected: true },
-        { id: "codex", connected: false },
-      ],
-    });
-    click(h.window, $(h.doc, "gear-btn"));
-    const text = h.doc.getElementById("gear-popover")!.textContent || "";
-    expect(text).not.toContain("Accounts");
-    expect(text).not.toContain("Sign out");
-    expect(text).not.toContain("Connect");
-    expect(types(h.posted)).not.toContain("logout");
-    expect(types(h.posted)).not.toContain("runGrokLogin");
   });
 
   it("while priming, the model button is disabled and clicking it neither opens the picker nor posts", () => {
@@ -1260,51 +1218,6 @@ describe("provider onboarding", () => {
     expect(add).toBeTruthy();
     click(window, add);
     expect(posted).toContainEqual({ type: "addProjectFolder" });
-  });
-
-  it("tells a remote client to add the folder at the desk", () => {
-    const { window, doc, posted } = bootWebview({ remote: true });
-    dispatch(window, { type: "onboarding", state: "no-project" });
-    const onboarding = doc.getElementById("welcome-onboarding")!;
-    expect(onboarding.textContent).toContain("Add a project folder on the computer");
-    expect(onboarding.querySelectorAll("button")).toHaveLength(0);
-    expect(posted).toEqual([]);
-  });
-
-  it("offers a remote sign-in on every provider panel, and still no sign-out", () => {
-    // This test used to assert the opposite — "Sign in at the desk", and zero
-    // buttons — which was correct while `runGrokLogin` opened a terminal a
-    // remote could not see. The host now runs the CLI's headless device-code
-    // flow for a remote request, so a dead end became an offer.
-    //
-    // What has NOT changed, and is the half still worth pinning: a remote is
-    // offered no way to sign OUT, on any of these panels.
-    //
-    // The capability is not decoration here. Without it this panel falls back
-    // to the old desk-only guidance on purpose, because a host that predates
-    // remote sign-in drops the request silently — see
-    // test/remote-device-login.dom.test.ts for that half.
-    const { window, doc, posted } = bootWebview({ remote: true });
-    dispatch(window, {
-      type: "initialState",
-      effort: "", cwd: "/w", useCtrlEnter: false, extVersion: "3.18.0",
-      showThinking: false, expandCommandOutputs: false, steerByDefault: false,
-      soundNotifications: false, processingSound: false, readRepliesAloud: false,
-      capabilities: { remoteAgentSignIn: true },
-    });
-    posted.length = 0;
-
-    for (const state of ["connect-agent", "auth-required", "codex-login", "claude-login"] as const) {
-      dispatch(window, { type: "onboarding", state });
-      const onboarding = doc.getElementById("welcome-onboarding")!;
-      expect(onboarding.textContent).not.toContain("Sign in at the desk");
-      expect(onboarding.querySelectorAll('[data-act="connectRemote"]').length).toBeGreaterThan(0);
-      expect(onboarding.querySelectorAll('[data-act="logout"]')).toHaveLength(0);
-    }
-
-    // Nothing is posted until something is pressed.
-    expect(types(posted)).not.toContain("runGrokLogin");
-    expect(types(posted)).not.toContain("logout");
   });
 
   it("offers both agents when none is connected and keeps Grok visually primary", () => {
@@ -1419,18 +1332,9 @@ describe("provider onboarding", () => {
 });
 
 describe("gear menu — AFK Pilot onboarding", () => {
-  const gearItem = (doc: Document, label: string) =>
-    [...doc.querySelectorAll("#gear-popover .toolbar-popover-item")].find(
-      (el) => el.textContent?.includes(label),
-    ) as HTMLElement | undefined;
-  const button = (doc: Document, label: string) =>
-    [...doc.querySelectorAll(".confirm-panel button")].find(
-      (el) => el.textContent?.trim() === label,
-    ) as HTMLButtonElement | undefined;
 
   it("gear menu does not show legacy AFK Pilot onboarding items", () => {
     const { window, doc } = bootWebview();
-    dispatch(window, { type: "remoteStatus", linked: true });
     click(window, $(doc, "gear-btn"));
     const labels = [...doc.querySelectorAll("#gear-popover .toolbar-popover-item")]
       .map((el) => el.textContent || "");
@@ -1920,7 +1824,6 @@ describe("gear menu — Other group + About / Settings", () => {
       // VS Code host affordances — gear gates logs / Move view on these.
       capabilities: {
         uploadFile: true,
-        remoteVoice: true,
         deleteActiveSession: true,
         relocateView: true,
         showOutput: true,
@@ -2012,92 +1915,6 @@ describe("gear menu — Other group + About / Settings", () => {
     expect(overlay.querySelector('[data-id="aboutGrokCli"]')).toBeNull();
     expect(overlay.querySelector('[data-id="aboutUpdateGrok"]')).toBeNull();
     expect(types(h.posted)).not.toContain("checkGrokUpdate");
-  });
-
-  describe("on a remote, About describes the desk machine and offers nothing", () => {
-    function bootRemoteAbout(extra?: Record<string, unknown>) {
-      const h = bootWebview({ remote: true });
-      const meta = h.doc.createElement("meta");
-      meta.setAttribute("name", "grok-web-version");
-      meta.setAttribute("content", "3.5.0");
-      h.doc.head.appendChild(meta);
-      dispatch(h.window, {
-        type: "initialState",
-        useCtrlEnter: false,
-        effort: "",
-        cwd: "/x",
-        extVersion: "1.4.0",
-        hostKind: "desktop",
-        hostName: "Pawel-Desk",
-        capabilities: { uploadFile: true, deleteActiveSession: true },
-        ...extra,
-      });
-      dispatch(h.window, { type: "initialized", info: { version: "0.2.33" } });
-      h.posted.length = 0;
-      openAbout(h);
-      return h;
-    }
-
-    it("names what you are holding and what it is connected to", () => {
-      const h = bootRemoteAbout();
-      const text = aboutSurface(h).textContent || "";
-      expect(text).toContain("Web app");
-      expect(text).toContain("v3.5.0");
-      expect(text).toContain("Connected to");
-      expect(text).toContain("Pawel-Desk");
-      expect(text).toContain("Desktop app");
-      expect(text).toContain("v1.4.0");
-      expect(text).toContain("v0.2.33");
-      // "This extension" is the local panel's wording, and it is wrong on a
-      // phone — the phone is not the thing being versioned.
-      expect(text).not.toContain("This extension");
-    });
-
-    it("never asks the host to check for updates", () => {
-      // The old panel did, and the answer never arrived — a spinner that could
-      // not resolve. Not sending it is what removes the spinner.
-      const h = bootRemoteAbout();
-      expect(types(h.posted)).not.toContain("checkGrokUpdate");
-      expect(aboutSurface(h).textContent).not.toContain("Checking for updates");
-    });
-
-    it("reports an available CLI update but offers no way to run it", () => {
-      const h = bootRemoteAbout();
-      dispatch(h.window, {
-        type: "grokUpdateStatus", current: "0.2.3", latest: "0.2.33", updateAvailable: true,
-      });
-      const overlay = aboutSurface(h);
-      const text = overlay.textContent || "";
-      expect(text).toContain("CLI update available");
-      expect(text).toContain("at the desk");
-      expect(overlay.querySelector('[data-id="aboutUpdateGrok"]')).toBeNull();
-    });
-
-    it("renders host-reported provider versions view-only", () => {
-      const h = bootRemoteAbout();
-      dispatch(h.window, {
-        type: "providerState",
-        providers: [
-          { id: "grok", connected: true, cliVersion: "0.2.117" },
-          { id: "codex", connected: true, cliVersion: "0.146.0", adapterVersion: "1.1.14", latestCliVersion: "0.147.0", updateAvailable: true },
-        ],
-      });
-      const overlay = aboutSurface(h);
-      const text = overlay.textContent || "";
-      expect(text).toContain("Grok Build CLI");
-      expect(text).toContain("Codex CLI");
-      expect(text).not.toContain("Codex ACP adapter");
-      expect(text).not.toContain("Codex update available");
-      expect(types(h.posted)).not.toContain("checkGrokUpdate");
-      expect(overlay.querySelector('[data-id="aboutUpdateGrok"]')).toBeNull();
-    });
-
-    it("keeps the local panel when the host is too old to describe itself", () => {
-      // Capability by field presence: no hostKind means no answers, and a page
-      // of blanks is worse than the panel that was already there.
-      const h = bootRemoteAbout({ hostKind: undefined, hostName: undefined });
-      expect(aboutSurface(h).textContent).toContain("This extension");
-    });
   });
 
   it("enables Update Grok Build when an update is available and posts updateGrok", () => {
@@ -2994,7 +2811,6 @@ describe("gear entry: Move view (Settings → Advanced)", () => {
       useCtrlEnter: false,
       capabilities: {
         uploadFile: true,
-        remoteVoice: true,
         relocateView: true,
         secondarySideBar: false,
         showOutput: true,
@@ -3022,7 +2838,7 @@ describe("gear entry: Move view (Settings → Advanced)", () => {
       type: "initialState",
       useCtrlEnter: false,
       // No relocateView / showOutput — mirrors released v3.1.0 hosts.
-      capabilities: { uploadFile: true, remoteVoice: true },
+      capabilities: { uploadFile: true },
     });
     openAdvancedSettings(window, doc);
     expect(itemByLabel(doc, "Show extension logs")).toBeTruthy();
@@ -3048,7 +2864,7 @@ describe("gear entry: Move view (Settings → Advanced)", () => {
     dispatch(window, {
       type: "initialState",
       useCtrlEnter: false,
-      capabilities: { uploadFile: true, remoteVoice: true, relocateView: false, showOutput: false },
+      capabilities: { uploadFile: true, relocateView: false, showOutput: false },
     });
     openAdvancedSettings(window, doc);
     expect(itemByLabel(doc, "Move view")).toBeUndefined();
@@ -3825,312 +3641,5 @@ describe("welcome screen visibility (logo/byline hides once real content exists)
     dispatch(window, { type: "historyReplay", active: false });
 
     expect(($(doc, "welcome") as any).hidden).toBe(false);
-  });
-});
-describe("remote tab session reconnect", () => {
-  function broadcastChannelFixture() {
-    const channels: Array<{
-      name: string;
-      closed: boolean;
-      onmessage?: (event: { data: unknown }) => void;
-    }> = [];
-    return class FakeBroadcastChannel {
-      closed = false;
-      onmessage?: (event: { data: unknown }) => void;
-
-      constructor(readonly name: string) {
-        channels.push(this);
-      }
-
-      postMessage(data: unknown) {
-        for (const peer of channels) {
-          if (peer !== this && !peer.closed && peer.name === this.name) {
-            setTimeout(() => peer.onmessage?.({ data }), 0);
-          }
-        }
-      }
-
-      close() {
-        this.closed = true;
-      }
-    };
-  }
-
-  it("regenerates copied tab state before a duplicated page identifies or resumes", async () => {
-    const FakeBroadcastChannel = broadcastChannelFixture();
-    const remembered = {
-      id: "copied-session",
-      repoCwd: "/work/repo-b",
-      cwd: "/work/repo-b",
-    };
-    const original = bootWebview({
-      remote: true,
-      beforeScripts: (w) => {
-        (w as any).BroadcastChannel = FakeBroadcastChannel;
-        w.sessionStorage.setItem("grok.remote.tabSession:default", JSON.stringify(remembered));
-      },
-    });
-    await vi.waitFor(() => (original.window as any).__grokTabTokenReady);
-    const originalToken = original.window.sessionStorage.getItem("grok.remote.tabToken:default");
-    const originalOwner = original.window.sessionStorage.getItem("grok.remote.tabOwner:default");
-
-    const duplicate = bootWebview({
-      remote: true,
-      beforeScripts: (w) => {
-        (w as any).BroadcastChannel = FakeBroadcastChannel;
-        w.sessionStorage.setItem("grok.remote.tabToken:default", originalToken!);
-        w.sessionStorage.setItem("grok.remote.tabOwner:default", originalOwner!);
-        w.sessionStorage.setItem("grok.remote.tabSession:default", JSON.stringify(remembered));
-      },
-    });
-    const tokenReady = (duplicate.window as any).__grokTabTokenReady as Promise<string | undefined>;
-    expect(typeof tokenReady?.then).toBe("function");
-    expect(duplicate.posted.find((message) => message.type === "ready")).toBeUndefined();
-    const settledToken = await tokenReady;
-    await Promise.resolve();
-
-    const duplicateToken = duplicate.window.sessionStorage.getItem("grok.remote.tabToken:default");
-    expect(duplicateToken).not.toBe(originalToken);
-    expect(settledToken).toBe(duplicateToken);
-    expect(duplicate.window.sessionStorage.getItem("grok.remote.tabSession:default")).toBeNull();
-    expect(duplicate.posted.find((message) => message.type === "ready")).toEqual({
-      type: "ready",
-      tabToken: duplicateToken,
-    });
-
-    duplicate.posted.length = 0;
-    dispatch(duplicate.window, { type: "initialState", cwd: "/work/repo-a" });
-    expect(duplicate.posted.filter((message) =>
-      message.type === "selectRepo" || message.type === "resumeSession"
-    )).toEqual([]);
-  });
-
-  it("resolves tab-token readiness promptly when BroadcastChannel is unavailable", async () => {
-    const { window } = bootWebview({
-      remote: true,
-      beforeScripts: (w) => {
-        (w as any).BroadcastChannel = undefined;
-      },
-    });
-    const stored = window.sessionStorage.getItem("grok.remote.tabToken:default");
-
-    await expect((window as any).__grokTabTokenReady).resolves.toBe(stored);
-  });
-
-  it("starts fresh from copied state when BroadcastChannel is unavailable", async () => {
-    const oldToken = "copied-token";
-    const { window } = bootWebview({
-      remote: true,
-      beforeScripts: (w) => {
-        (w as any).BroadcastChannel = undefined;
-        w.sessionStorage.setItem("grok.remote.tabToken:default", oldToken);
-        w.sessionStorage.setItem("grok.remote.tabOwner:default", "other-page");
-        w.sessionStorage.setItem("grok.remote.tabSession:default", JSON.stringify({
-          id: "copied-session",
-          repoCwd: "/work/repo-b",
-        }));
-      },
-    });
-
-    const token = await (window as any).__grokTabTokenReady;
-    expect(token).not.toBe(oldToken);
-    expect(window.sessionStorage.getItem("grok.remote.tabSession:default")).toBeNull();
-  });
-
-  it("starts fresh from copied state when BroadcastChannel construction throws", async () => {
-    const oldToken = "copied-token";
-    const { window } = bootWebview({
-      remote: true,
-      beforeScripts: (w) => {
-        (w as any).BroadcastChannel = class {
-          constructor() { throw new Error("disabled"); }
-        };
-        w.sessionStorage.setItem("grok.remote.tabToken:default", oldToken);
-        w.sessionStorage.setItem("grok.remote.tabOwner:default", "other-page");
-        w.sessionStorage.setItem("grok.remote.tabSession:default", JSON.stringify({
-          id: "copied-session",
-          repoCwd: "/work/repo-b",
-        }));
-      },
-    });
-
-    const token = await (window as any).__grokTabTokenReady;
-    expect(token).not.toBe(oldToken);
-    expect(window.sessionStorage.getItem("grok.remote.tabSession:default")).toBeNull();
-  });
-
-  it("retains identity and conversation when a stale owner marker has no live channel participant", async () => {
-    const oldToken = "discarded-tab-token";
-    const remembered = {
-      id: "discarded-session",
-      repoCwd: "/work/repo-b",
-      cwd: "/work/repo-b",
-    };
-    const { window, posted } = bootWebview({
-      remote: true,
-      beforeScripts: (w) => {
-        (w as any).BroadcastChannel = class {
-          onmessage?: (event: { data: unknown }) => void;
-          postMessage() {}
-          close() {}
-        };
-        w.sessionStorage.setItem("grok.remote.tabToken:default", oldToken);
-        w.sessionStorage.setItem("grok.remote.tabOwner:default", "dead-renderer");
-        w.sessionStorage.setItem("grok.remote.tabSession:default", JSON.stringify(remembered));
-      },
-    });
-
-    await expect((window as any).__grokTabTokenReady).resolves.toBe(oldToken);
-    expect(window.sessionStorage.getItem("grok.remote.tabToken:default")).toBe(oldToken);
-    expect(window.sessionStorage.getItem("grok.remote.tabSession:default")).toBe(JSON.stringify(remembered));
-
-    dispatch(window, { type: "initialState", cwd: "/work/repo-a" });
-    expect(posted).toContainEqual({ type: "selectRepo", cwd: "/work/repo-b" });
-    expect(posted).toContainEqual({
-      type: "resumeSession",
-      id: "discarded-session",
-      cwd: "/work/repo-b",
-    });
-  });
-
-  it("keeps tab identity and remembered conversation across an ordinary reload", async () => {
-    const FakeBroadcastChannel = broadcastChannelFixture();
-    const remembered = {
-      id: "reload-session",
-      repoCwd: "/work/repo-b",
-      cwd: "/work/repo-b",
-    };
-    const priorPage = bootWebview({
-      remote: true,
-      beforeScripts: (w) => {
-        (w as any).BroadcastChannel = FakeBroadcastChannel;
-        w.sessionStorage.setItem("grok.remote.tabSession:default", JSON.stringify(remembered));
-      },
-    });
-    await vi.waitFor(() => (priorPage.window as any).__grokTabTokenReady);
-    const token = priorPage.window.sessionStorage.getItem("grok.remote.tabToken:default");
-    priorPage.window.dispatchEvent(new priorPage.window.Event("pagehide"));
-
-    const reloaded = bootWebview({
-      remote: true,
-      beforeScripts: (w) => {
-        (w as any).BroadcastChannel = FakeBroadcastChannel;
-        w.sessionStorage.setItem("grok.remote.tabToken:default", token!);
-        w.sessionStorage.setItem("grok.remote.tabSession:default", JSON.stringify(remembered));
-      },
-    });
-    await vi.waitFor(() => (reloaded.window as any).__grokTabTokenReady);
-
-    expect(reloaded.window.sessionStorage.getItem("grok.remote.tabToken:default")).toBe(token);
-    dispatch(reloaded.window, { type: "initialState", cwd: "/work/repo-a" });
-    expect(reloaded.posted).toContainEqual({ type: "selectRepo", cwd: "/work/repo-b" });
-    expect(reloaded.posted).toContainEqual({
-      type: "resumeSession",
-      id: "reload-session",
-      cwd: "/work/repo-b",
-    });
-  });
-
-  it("reasserts the tab's remembered repository and session on a fresh host snapshot", () => {
-    const remembered = {
-      id: "session-tab-a",
-      repoCwd: "/work/repo-b",
-      cwd: "/work/repo-b",
-    };
-    const { window, posted } = bootWebview({
-      remote: true,
-      beforeScripts: (w) => {
-        w.sessionStorage.setItem("grok.remote.tabSession:default", JSON.stringify(remembered));
-      },
-    });
-
-    dispatch(window, { type: "initialState", cwd: "/work/repo-a" });
-
-    expect(posted).toEqual([
-      { type: "selectRepo", cwd: "/work/repo-b" },
-      { type: "resumeSession", id: "session-tab-a", cwd: "/work/repo-b" },
-    ]);
-  });
-
-  it("stores the active session in tab-scoped storage and clears it only on explicit New", () => {
-    const { window, doc } = bootWebview({ remote: true });
-    dispatch(window, {
-      type: "repos",
-      entries: [{ cwd: "/work/repo-b", label: "repo-b", available: true }],
-      selectedCwd: "/work/repo-b",
-      activeCwd: "/work/repo-b",
-    });
-    dispatch(window, {
-      type: "sessions",
-      entries: [{ id: "session-tab-b", cwd: "/work/repo-b" }],
-      activeId: "session-tab-b",
-    });
-
-    expect(JSON.parse(window.sessionStorage.getItem("grok.remote.tabSession:default")!)).toEqual({
-      id: "session-tab-b",
-      repoCwd: "/work/repo-b",
-      cwd: "/work/repo-b",
-    });
-
-    click(window, $(doc, "new-btn"));
-    expect(window.sessionStorage.getItem("grok.remote.tabSession:default")).toBeNull();
-  });
-
-  it("does not replace reconnect identity until the host accepts a history selection", () => {
-    const { window, posted, doc } = bootWebview({ remote: true });
-    dispatch(window, {
-      type: "repos",
-      entries: [{ cwd: "/work/repo-b", label: "repo-b", available: true }],
-      selectedCwd: "/work/repo-b",
-      activeCwd: "/work/repo-b",
-    });
-    dispatch(window, {
-      type: "sessions",
-      entries: [
-        { id: "current", cwd: "/work/repo-b", displayName: "Current" },
-        { id: "rejected", cwd: "/work/repo-b", displayName: "Rejected" },
-      ],
-      activeId: "current",
-    });
-    click(window, $(doc, "history-btn"));
-    posted.length = 0;
-
-    const rejected = [...doc.querySelectorAll(".history-row")]
-      .find((row) => row.textContent?.includes("Rejected")) as HTMLElement;
-    click(window, rejected);
-
-    expect(posted).toContainEqual({
-      type: "resumeSession",
-      id: "rejected",
-      cwd: "/work/repo-b",
-      claim: true,
-    });
-    expect(JSON.parse(window.sessionStorage.getItem("grok.remote.tabSession:default")!))
-      .toMatchObject({ id: "current", repoCwd: "/work/repo-b" });
-
-    dispatch(window, {
-      type: "sessions",
-      entries: [{ id: "current", cwd: "/work/repo-b", displayName: "Current" }],
-      activeId: "current",
-    });
-    expect(JSON.parse(window.sessionStorage.getItem("grok.remote.tabSession:default")!))
-      .toMatchObject({ id: "current", repoCwd: "/work/repo-b" });
-  });
-
-  it("clears a stale reconnect identity when the host authoritatively reports no active session", () => {
-    const { window } = bootWebview({
-      remote: true,
-      beforeScripts: (w) => {
-        w.sessionStorage.setItem("grok.remote.tabSession:default", JSON.stringify({
-          id: "stale",
-          repoCwd: "/work/repo-b",
-          cwd: "/work/repo-b",
-        }));
-      },
-    });
-
-    dispatch(window, { type: "sessions", entries: [], activeId: null });
-
-    expect(window.sessionStorage.getItem("grok.remote.tabSession:default")).toBeNull();
   });
 });

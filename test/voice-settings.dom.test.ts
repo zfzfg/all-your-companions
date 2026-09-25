@@ -18,7 +18,7 @@ describe("voice Settings on every surface", () => {
     const row = api.ROWS.find((r: any) => r.id === "voiceBackend");
     expect(row.localOnly).toBeUndefined();
     expect(row.message("openai")).toEqual({ type: "setVoiceBackend", value: "openai" });
-    for (const env of [{}, { isDesktop: true }, { isRemote: true }]) {
+    for (const env of [{}, { isDesktop: true }]) {
       expect(api.visibleRows({}, env).some((r: any) => r.id === "voiceBackend")).toBe(false);
       expect(api.visibleRows({ voiceBackendState: backendState }, env).some((r: any) => r.id === "voiceBackend")).toBe(true);
     }
@@ -30,7 +30,7 @@ describe("voice Settings on every surface", () => {
     surface.update({ voiceBackendState: { ...backendState, preference: "xai" } });
     expect((root.querySelector('[data-id="voiceBackend"] select') as any).value).toBe("xai");
     expect(root.textContent).toContain("Codex / ChatGPT sign-in does not include transcription API access");
-    surface.dispose(); w.happyDOM.abort();
+    surface.dispose(); void w.happyDOM.abort();
   });
 
   it("an explicit missing backend displays setup even with another credential present", () => {
@@ -40,6 +40,6 @@ describe("voice Settings on every surface", () => {
     const mic = h.doc.getElementById("mic-btn")!;
     expect(mic.classList.contains("needs-setup")).toBe(true);
     click(h.window, mic); expect(h.posted).toContainEqual({ type: "voiceStart" });
-    expect(h.doc.querySelector(".confirm-overlay")).toBeNull(); h.window.happyDOM.abort();
+    expect(h.doc.querySelector(".confirm-overlay")).toBeNull(); void h.window.happyDOM.abort();
   });
 });

@@ -392,7 +392,7 @@ async function main() {
   assert(selected.length === 0 || (selected.length === 1 && /^--provider=(codex|claude)$/.test(selected[0])), "usage: npm run smoke:acp [-- --provider=codex|claude]");
   const rpcMs = timeoutMs(process.env.ACP_SMOKE_RPC_TIMEOUT_MS, 90_000);
   const turnMs = timeoutMs(process.env.ACP_SMOKE_TURN_TIMEOUT_MS, 180_000);
-  // `smoke:acp` compiles src first, exactly like smoke:live. No stale bundles,
+  // `smoke:acp` compiles src first. No stale bundles,
   // TS loader, copied spawn implementation, or adapter-path override.
   const { CodexBackend, normalizeCodexUpdate, normalizeCodexPermissionParams } = require("../out/codex-backend.js");
   const { ClaudeBackend } = require("../out/claude-backend.js");

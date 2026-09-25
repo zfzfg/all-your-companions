@@ -3,7 +3,7 @@
  * fault-injection on every file step. A failed snapshot must never throw.
  */
 import { describe, expect, it } from "vitest";
-import { CheckpointStore, type CheckpointStoreFs } from "../src/checkpoint-store";
+import { CheckpointStore, sanitizeCheckpointSegment, type CheckpointStoreFs } from "../src/checkpoint-store";
 import {
   CHECKPOINT_RETENTION_BYTES,
   CHECKPOINT_RETENTION_TURNS,
@@ -357,5 +357,47 @@ describe("loadFrom", () => {
     expect(loaded.map((c) => c.turnId)).toEqual(["2", "3"]);
     expect(loaded[0].disabled).toBe(true);
     expect(loaded[1].disabled).toBeFalsy();
+  });
+});
+
+describe("ids never leave the store root", () => {
+  it("maps dot-only segments to a plain name", () => {
+    expect(sanitizeCheckpointSegment("..")).toBe("x");
+    expect(sanitizeCheckpointSegment(".")).toBe("x");
+    expect(sanitizeCheckpointSegment("...")).toBe("x");
+  });
+
+  it("flattens a traversal attempt into one segment", () => {
+    const seg = sanitizeCheckpointSegment("../../etc");
+    expect(seg).not.toMatch(/^\./);
+    expect(seg).not.toContain("/");
+    expect(seg).toBe("etc");
+  });
+
+  it("leaves real session and turn ids exactly as they were", () => {
+    // Existing checkpoints on disk are found by these names.
+    const uuid = "3f2b8c1e-9a4d-4e2b-8f1a-0c6d5e7b9a21";
+    expect(sanitizeCheckpointSegment(uuid)).toBe(uuid);
+    expect(sanitizeCheckpointSegment("turn-12")).toBe("turn-12");
+    expect(sanitizeCheckpointSegment("7")).toBe("7");
+  });
+
+  it("writes a `..` session under the root, not beside it", () => {
+    const fs = new MemoryFs();
+    const s = store(fs);
+    expect(s.save(makeCp("1", [file("a.ts", "a")], { sessionId: ".." }))).toEqual({ ok: true });
+    for (const written of fs.files.keys()) expect(written.startsWith("/gs/checkpoints/")).toBe(true);
+    expect(s.load("..", "1")?.files[0].blob).toBe("a");
+  });
+
+  it("refuses a blob name from meta that points outside the turn", () => {
+    const fs = new MemoryFs();
+    const s = store(fs);
+    s.save(makeCp("1", [file("a.ts", "a")]));
+    const metaKey = [...fs.files.keys()].find((k) => k.endsWith("/meta.json"))!;
+    const meta = JSON.parse(Buffer.from(fs.files.get(metaKey)!).toString("utf8"));
+    meta.files[0].blobSha256 = "../../../../outside";
+    fs.files.set(metaKey, Buffer.from(JSON.stringify(meta), "utf8"));
+    expect(s.load("sess", "1")).toBeNull();
   });
 });

@@ -450,6 +450,7 @@ describe("Claude native sessions and options", () => {
       cwd: "C:\\repo",
       backend,
       env: {},
+      log: () => {},
     });
 
     (client as any).request = async (method: string, params: any) => {

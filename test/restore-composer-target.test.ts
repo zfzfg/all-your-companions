@@ -4,23 +4,17 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 /**
- * A rewound message goes back to the surface that asked for it, and no other.
+ * A rewound message goes back to the conversation it came from, and no other.
  *
  * `restoreComposer` APPENDS to whatever is already typed (media/chat.js case
  * "restoreComposer") — deliberately, because silently destroying a draft is the
- * bug Edit exists to fix. Sent through `emit` it reaches the focused desk
- * webview AND every remote holder of the session, so once rewind/edit became
- * reachable from a remote, a phone tapping Edit would paste its message on top
- * of an unsent draft at the computer and steal focus there. Nobody at that desk
- * asked for it, and appending text to someone's draft is the "duplicating the
- * user's work" case the usage model rules out.
- *
- * Found by the independent review of the widening, and the same narrowing fixes
- * the desk-to-phone mirror, which was always possible.
+ * bug Edit exists to fix. The rewind RPC is asynchronous, so by the time it
+ * returns the view may show another conversation; pasting there would put
+ * conversation A's text into conversation B's composer.
  *
  * A source-shape guard, and honest about it: it proves the rewind and edit
- * paths route through the requester-aware helper rather than the session-wide
- * emit, not that a frame reaches one client and not another.
+ * paths route through the focus-checking helper rather than the session-wide
+ * emit, not that a frame reaches one view and not another.
  */
 const src = readFileSync(
   path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "sidebar.ts"),
@@ -35,23 +29,18 @@ function methodBody(signature: string): string {
 }
 
 describe("who receives a rewound message", () => {
-  it("delivers to the requester, or to the desk when there is none", () => {
+  it("delivers to the webview when it still shows the conversation", () => {
     const body = methodBody("private restoreComposerFor(");
-    expect(body).toContain("this.resolveRemoteRequester(requester)");
-    expect(body).toContain("this.sendRemoteClient(clientId, message)");
     expect(body).toContain("this.postLocal(message)");
   });
 
   /**
-   * The half a first attempt dropped, caught by review. `emit` delivered
-   * locally only while the session was focused and remotely only to clients
-   * still holding it; "send to whoever asked" without that check pastes
-   * conversation A's message into conversation B — a different repository's —
-   * when the user switches conversation while the rewind RPC is still running.
+   * Without the focus check, conversation A's message lands in conversation
+   * B — a different repository's — when the user switches conversation while
+   * the rewind RPC is still running.
    */
-  it("refuses to deliver to a surface that has moved to another conversation", () => {
+  it("refuses to deliver to a view that has moved to another conversation", () => {
     const body = methodBody("private restoreComposerFor(");
-    expect(body).toContain("this.remoteClients.active(clientId) === session");
     expect(body).toContain("this.focused === session");
   });
 
@@ -91,7 +80,7 @@ describe("who receives a rewound message", () => {
    * promise, kept.
    */
   it("does not hand a parked draft back on re-focus, because that path broadcasts", () => {
-    for (const signature of ["private focusRemoteSession(", "private focusSession("]) {
+    for (const signature of ["private focusSession("]) {
       expect(methodBody(signature), signature).not.toContain("this.restorePersistedDraft(session)");
     }
   });
@@ -101,7 +90,7 @@ describe("who receives a rewound message", () => {
       const body = methodBody(signature);
       // The session travels with it: the helper refuses a surface that has
       // since moved to another conversation, and cannot check that without it.
-      expect(body, signature).toContain("this.restoreComposerFor(session, requester,");
+      expect(body, signature).toContain("this.restoreComposerFor(session,");
       // The session-wide emit is what pasted into a bystander's composer.
       expect(body, signature).not.toContain('emit(session, { type: "restoreComposer"');
     }

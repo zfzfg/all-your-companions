@@ -2,7 +2,6 @@ import { supportsSessionDeletion } from "./acp-backend";
 import { ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { createInterface, Interface } from "node:readline";
 import { EventEmitter } from "node:events";
-import * as path from "node:path";
 import { claudeSubscriptionWindows, grokSubscriptionWindows, type SubscriptionWindow } from "./subscription-usage";
 import {
   collectToolImages,
@@ -45,7 +44,7 @@ import { compareVersionTuple, parseGrokVersion } from "./cli-locator";
 import { resolvedTerminalShellDialect } from "./terminal-manager";
 import type { AcpBackend, AcpProvider, BackendSessionListResult, BackendSteeringCapabilities } from "./acp-backend";
 import { providerCapability } from "./provider-capabilities";
-import { buildGrokAgentArgs, grokBackend } from "./grok-backend";
+import { grokBackend } from "./grok-backend";
 import {
   parseWorktreeApply,
   parseWorktreeCreate,
@@ -79,11 +78,8 @@ import {
   type ThumbsRating,
 } from "./feedback";
 
-export type EffortLevel = "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultracode";
-
-export type PromptContentBlock =
-  | { type: "text"; text: string }
-  | { type: "image"; mimeType: string; data: string; path?: string };
+import type { EffortLevel, PromptContentBlock } from "./acp-types";
+export type { EffortLevel, PromptContentBlock } from "./acp-types";
 
 export { buildInterjectParams, cliHonorsInterjectContent, GROK_INTERJECT_CONTENT_MIN_VERSION } from "./grok-backend";
 
@@ -1264,7 +1260,7 @@ export class AcpClient extends EventEmitter {
       this.pending.set(id, entry);
       if (!this.writeLine(makeRequest(id, method, params))) {
         this.pending.delete(id);
-        reject(new Error(`Grok process is not running (${method})`));
+        reject(new Error(`${this.backend.processName} is not running (${method})`));
         return;
       }
       // Tracked on the pending entry so the response/exit paths can clear it.

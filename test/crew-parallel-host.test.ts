@@ -121,7 +121,7 @@ describe("parallel crew roles", () => {
     sidebar.focused = caller;
     pool.add(caller);
 
-    const consumed = await sidebar.handleCrewCommand("/crew fast", caller, "local");
+    const consumed = await sidebar.handleCrewCommand("/crew fast", caller);
     expect(consumed).toBe(true);
     expect(sent).toHaveLength(2);
     expect(new Set(sent.map((s) => s.cwd)).size).toBe(2);

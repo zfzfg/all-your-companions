@@ -388,47 +388,11 @@ describe("in-chat confirm round-trip", () => {
   });
 });
 
-/**
- * The compatibility contract, in the one place this release forgot it.
- *
- * The relay serves the web client, so the browser is always as new as the last
- * deploy while the extension is whatever the user installed — and the release
- * order makes the relay FIRST. Rewind and Edit are host-local on every host
- * built before 4.1.0, which drops them without a reply: no error, no refusal,
- * nothing. Offering the buttons anyway gives every not-yet-updated user two
- * controls that quietly do nothing, which is worse than not having them.
- *
- * The sign-in work got this right (`remoteAgentSignIn`, `remoteGithubSignIn`);
- * rewind shipped without it. Found by the unsteered review round before 4.1.0.
- */
-describe("Rewind and Edit are capability-gated for remotes (4.1.0)", () => {
+describe("Rewind and Edit visibility", () => {
   const caps = (window: any, capabilities: Record<string, unknown>) =>
     dispatch(window, { type: "initialState", cwd: "/proj", capabilities } as never);
 
-  it("hides both against a host that never advertises remoteRewind", () => {
-    const { window, doc } = bootWebview({ remote: true });
-    caps(window, {});
-    send(window, "first");
-    send(window, "second");
-
-    const users = userBubbles(doc);
-    expect(users.map((el) => rewindBtn(el).hidden)).toEqual([true, true]);
-    expect(users.map((el) => editBtn(el).hidden)).toEqual([true, true]);
-  });
-
-  it("shows them once the host says it accepts them", () => {
-    const { window, doc } = bootWebview({ remote: true });
-    caps(window, { remoteRewind: true });
-    send(window, "first");
-    send(window, "second");
-
-    const users = userBubbles(doc);
-    // Same complement as at the desk: Rewind on the older, Edit on the tip.
-    expect(users.map((el) => rewindBtn(el).hidden)).toEqual([false, true]);
-    expect(users.map((el) => editBtn(el).hidden)).toEqual([true, false]);
-  });
-
-  it("never gates the desk, which does not go through the relay at all", () => {
+  it("needs no host capability: Rewind on the older bubble, Edit on the tip", () => {
     const { window, doc } = bootWebview();
     caps(window, {});
     send(window, "first");

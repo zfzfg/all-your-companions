@@ -24,8 +24,8 @@ export interface McpServerView {
   source?: string;
   /**
    * Basename of the user-level config file that declared this server
-   * (`config.toml`, `mcp.json`). Desk-only — omitted from the remote
-   * allowlist. Managed rows and host-injected echoes have none.
+   * (`config.toml`, `mcp.json`). Managed rows and host-injected echoes have
+   * none.
    */
   configFile?: string;
   status?: string;
@@ -37,27 +37,6 @@ export interface McpServerView {
   toolCount?: number;
   error?: string;
 }
-
-/**
- * Page fields a remote may see. Launch recipes (`command`/`args`/`url`),
- * per-server `error` (it can quote those recipes), and `tools` (arbitrary
- * provider JSON, including `inputSchema`) stay on the desk. This array is
- * the allowlist — the remote type and the copier both derive from it.
- */
-export const MCP_REMOTE_SERVER_KEYS = [
-  "name",
-  "displayName",
-  "enabled",
-  "source",
-  "type",
-  "managed",
-  "scope",
-  "scopeName",
-  "status",
-  "toolCount",
-] as const satisfies ReadonlyArray<keyof McpServerView>;
-
-export type McpServerRemoteView = Pick<McpServerView, typeof MCP_REMOTE_SERVER_KEYS[number]>;
 
 function record(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -153,8 +132,7 @@ function listFromPayload(parsed: unknown): unknown[] | undefined {
 /**
  * Parse `_x.ai/mcp/list`, accepting a bare array and `{ servers: [] }`.
  * Allowlisted desk view only — env/headers/token/apiKey never reach the
- * catalog. Launch recipes stay for the local panel; remotes go through
- * {@link projectMcpServerForRemote}.
+ * catalog. Launch recipes stay for the local panel.
  */
 export function parseMcpListResponse(value: unknown): McpServerView[] {
   const list = listFromPayload(value);
@@ -163,48 +141,6 @@ export function parseMcpListResponse(value: unknown): McpServerView[] {
     .map(parseServer)
     .filter((server): server is McpServerView => !!server)
     .sort((a, b) => (a.displayName || a.name).localeCompare(b.displayName || b.name));
-}
-
-/** Copy only {@link MCP_REMOTE_SERVER_KEYS}. Does not mutate `server`. */
-export function projectMcpServerForRemote(server: McpServerView): McpServerRemoteView {
-  const out: Partial<McpServerRemoteView> = {};
-  for (const key of MCP_REMOTE_SERVER_KEYS) {
-    const value = server[key];
-    if (value !== undefined) Object.assign(out, { [key]: value });
-  }
-  // What must not cross is the error TEXT — it can quote a launch recipe. The
-  // FACT of the failure has to, or the remote reads better news than the desk:
-  // `status` and `error` arrive from the CLI as independent optionals, so a
-  // server can carry an error and no status at all, and dropping the error
-  // alone leaves the row with nothing negative left to render. It then paints
-  // green on the phone while the same server is red at the desk. Collapsing it
-  // to `unavailable` here reproduces exactly what the desk shows, and keeps
-  // the judgement in the projection — the one place desk truth becomes remote
-  // truth — rather than asking every renderer to remember this.
-  if (server.error) out.status = "unavailable";
-  return { name: server.name, enabled: server.enabled, ...out };
-}
-
-export function projectMcpServersMessageForRemote(msg: {
-  type: "mcpServers";
-  servers: readonly McpServerView[];
-  warning: string;
-  loading?: boolean;
-  error?: string;
-}): {
-  type: "mcpServers";
-  servers: McpServerRemoteView[];
-  warning: string;
-  loading?: boolean;
-  error?: string;
-} {
-  return {
-    type: "mcpServers",
-    servers: msg.servers.map(projectMcpServerForRemote),
-    warning: msg.warning,
-    ...(msg.loading !== undefined ? { loading: msg.loading } : {}),
-    ...(msg.error !== undefined ? { error: msg.error } : {}),
-  };
 }
 
 /**

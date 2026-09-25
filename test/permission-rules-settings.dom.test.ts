@@ -29,7 +29,7 @@ function boot(opts: {
   const root = doc.createElement("div");
   doc.body.appendChild(root);
   const posted: Array<Record<string, unknown>> = [];
-  const env = api.defaultEnv({ isRemote: false, isDesktop: true, providersKnown: true });
+  const env = api.defaultEnv({ isDesktop: true, providersKnown: true });
   const snapshot = api.defaultSnapshot({
     permissionRules: opts.permissionRules === undefined ? null : opts.permissionRules,
     permissionRulesOrderCopy: opts.permissionRulesOrderCopy || PERMISSION_RULES_ORDER_COPY,

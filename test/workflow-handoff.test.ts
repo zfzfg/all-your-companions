@@ -147,7 +147,7 @@ describe("briefingFromContract", () => {
       packets,
       userNotes: "keep the public API stable",
     });
-    const joined = [...brief.decisions, ...(brief.provenance ?? [])].join("\n");
+    const joined = [...(brief.decisions ?? []), ...(brief.provenance ?? [])].join("\n");
     expect(brief.goal).toBe("Ship it");
     expect(joined).toMatch(/keep the public API stable/);
     expect(joined).toMatch(/Do the thing/);
