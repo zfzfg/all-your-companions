@@ -139,9 +139,7 @@ export function locateCodexCli(options: CodexLocatorOptions = {}): string | unde
     if (fs.isFile(managed)) return managed;
     // The install directory carries the pinned tag, so moving the pin renames
     // it out from under someone who installed Codex through us: their working
-    // binary is still on disk and simply stops counting. On a cloud machine
-    // that is unrecoverable — `installCodex` is host-local, so the phone gets
-    // "Codex is missing at the desk" and no button — and Codex would appear to
+    // binary is still on disk and simply stops counting. Codex would appear to
     // vanish on an update. So an install WE made still resolves.
     //
     // Ranking between leftovers does not matter: a successful install prunes

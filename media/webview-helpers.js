@@ -344,8 +344,8 @@
     const ext = m[1].toLowerCase();
     if (!FILE_EXTS.has(ext)) return false;
     // "I'll list the main `.md` files" — a bare extension names a TYPE. There is
-    // no file behind it, so the link fails: the desk opens an editor on a
-    // missing path and the phone asks the host for a file it hasn't got. A link
+    // no file behind it, so the link fails: the host opens an editor on a
+    // missing path. A link
     // that leads nowhere is worse than a missing one, because it teaches people
     // not to trust the ones that work.
     //

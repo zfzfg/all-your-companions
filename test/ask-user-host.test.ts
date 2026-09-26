@@ -16,6 +16,7 @@
 //     there is a CLI blocked inside `tools/call` for the rest of its life.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { GrokSidebar } from "../src/sidebar";
+import { QuestionHost } from "../src/question-host";
 import { Session, type QuestionResponder } from "../src/session";
 import type { QuestionRequest } from "../src/acp";
 
@@ -37,9 +38,23 @@ function harness(): Harness {
   };
   sidebar.emit = (_session: Session, message: unknown) => { posted.push(message); };
   sidebar.setStatus = vi.fn();
-  sidebar.noteAnswered = vi.fn();
   sidebar.touch = vi.fn();
   sidebar.refreshKeepAwake = vi.fn();
+  // Question cards live on QuestionHost; the sidebar methods are delegators.
+  sidebar.questionHost = new QuestionHost({
+    get host() { return sidebar.host; },
+    emit: (session, message) => sidebar.emit(session, message),
+    setStatus: (session, status) => sidebar.setStatus(session, status),
+    get hostPipeMux() { return sidebar.hostPipeMux; },
+    set hostPipeMux(value) { sidebar.hostPipeMux = value; },
+    get askUserChannel() { return sidebar.askUserChannel; },
+    set askUserChannel(value) { sidebar.askUserChannel = value; },
+    get context() { return sidebar.context; },
+    get pool() { return sidebar.pool; },
+    reservedMcpIdentityFor: (session) => sidebar.reservedMcpIdentityFor(session),
+    touch: (session) => sidebar.touch(session),
+  });
+  vi.spyOn(sidebar.questionHost, "noteAnswered");
   const session = new Session();
   return {
     sidebar,
@@ -189,7 +204,7 @@ describe("companions.askTimeout", () => {
 
     expect(responder.calls).toEqual(["cancel:auto"]);
     expect(h.posted.at(-1)).toEqual({ type: "questionResolved", requestId: 1, auto: true });
-    expect(h.sidebar.noteAnswered).toHaveBeenCalled();
+    expect(h.sidebar.questionHost.noteAnswered).toHaveBeenCalled();
   });
 
   it("sends a COMPLETE draft rather than throwing the user's marks away", () => {
@@ -239,15 +254,16 @@ describe("the sidebar source keeps the AP-05 wiring", () => {
   // Cheap structural pins for the paths a unit test cannot reach without a live
   // ACP process, all of which are "if this is missing, something hangs".
   const source = require("node:fs").readFileSync(new URL("../src/sidebar.ts", import.meta.url), "utf8") as string;
+  const questionHost = require("node:fs").readFileSync(new URL("../src/question-host.ts", import.meta.url), "utf8") as string;
 
   it("withholds the MCP question tool from grok, which has its own RPC", () => {
-    const method = source.slice(source.indexOf("private async askUserMcpServer("));
-    expect(method.slice(0, 400)).toContain('if (session.provider === "grok") return undefined;');
+    const method = questionHost.slice(questionHost.indexOf("async askUserMcpServer("));
+    expect(method.slice(0, 500)).toContain('if (session.provider === "grok") return undefined;');
   });
 
   it("skips our server when the provider already loads one by that name", () => {
-    const method = source.slice(source.indexOf("private async askUserMcpServer("));
-    expect(method.slice(0, 900)).toContain("normalizeMcpName(name) === ASK_USER_SERVER_NAME");
+    const method = questionHost.slice(questionHost.indexOf("async askUserMcpServer("));
+    expect(method.slice(0, 1000)).toContain("normalizeMcpName(name) === ASK_USER_SERVER_NAME");
   });
 
   it("closes the pipe and drops every card on dispose", () => {

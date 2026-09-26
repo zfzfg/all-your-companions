@@ -85,10 +85,8 @@ export function buildKillPlan(pid: number, platform: NodeJS.Platform = process.p
   }
   // The whole GROUP, not the shell. `sh -c 'node build.js & wait'` is one
   // wrapper and one long-lived child; signalling the wrapper alone leaves the
-  // child running with nothing tracking it — and since a running command is
-  // what keeps a cloud machine awake, we would stop paying for a machine that
-  // is still working, then freeze it. Spawned detached so the negative pid
-  // names the group.
+  // child running with nothing tracking it. Spawned detached so the negative
+  // pid names the group.
   return { kind: "group", signal: "SIGTERM", pid };
 }
 
@@ -748,11 +746,9 @@ export class TerminalManager {
   /**
    * Is any command still running?
    *
-   * Asked by the keep-awake rules, and it is the only HONEST answer to "is this
-   * machine still doing something". Session status cannot answer it: the agent
-   * can start a twenty-five-minute build and then ask a question, at which
-   * point the session says it is waiting for a person while the build carries
-   * on. On a cloud machine, believing the status there freezes the build.
+   * Whether a spawned command is still running. Session status cannot answer
+   * it: the agent can start a long build and then ask a question, so the
+   * session looks idle while the process carries on.
    *
    * `exitCode === null` is precisely "has not exited". A released terminal has
    * already left the map.

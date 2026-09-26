@@ -3,7 +3,7 @@
  *
  * The tip CATALOGUE — copy, link targets, and the eligibility rule — lives in
  * `media/webview-helpers.js`, because every fact it reads is client state and
- * the two clients (chat webview, remote browser) are the ones that render it.
+ * the chat webview is what renders it.
  * This module is deliberately the other half: it knows nothing about which tips
  * exist, only how to keep a bounded set of ids on disk.
  *

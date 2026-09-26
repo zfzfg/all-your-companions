@@ -72,17 +72,14 @@
   /**
    * How tall the composer may grow, in lines (owner, 2026-09-04).
    *
-   * A phone stops sooner than a desktop, because there the composer is not the
-   * only thing competing for the screen: the keyboard already owns the bottom
-   * half, and a box that grows to nine lines on top of it leaves nothing of the
-   * conversation to read while you write about it. That is the same reason the
-   * box grows at all (#144) — being able to see what you are writing — applied
-   * to the other side of the trade.
+   * A touch screen stops sooner than a mouse, because the on-screen keyboard
+   * already owns the bottom half, and a box that grows to nine lines on top
+   * of it leaves nothing of the conversation to read while you write. That is
+   * the same reason the box grows at all (#144) — being able to see what you
+   * are writing — applied to the other side of the trade.
    *
-   * Coarse pointer AND no hover, the signal the add-project form already uses:
-   * a touchscreen laptop still has a mouse and is not a phone. Not gated on
-   * IS_REMOTE, because a phone is a phone whether it reached us through the
-   * relay or the native shell.
+   * Coarse pointer or no hover, the signal the add-project form already uses:
+   * a touchscreen laptop still has a mouse and keeps the taller box.
    */
   const COMPOSER_MAX_LINES_TOUCH = 6;
   const COMPOSER_MAX_LINES_DESK = 10;
@@ -192,8 +189,8 @@
   const addPopover = $("add-popover");
   const historyPopover = $("history-popover");
   const scrollBottomBtn = $("scroll-bottom-btn");
-  // Agent step checklist (AP-02). Absent in shells that predate it (the relay
-  // serves its own page), so every use is null-guarded rather than assumed.
+  // Agent step checklist (AP-02). Absent in shells that predate it, so every
+  // use is null-guarded rather than assumed.
   const todoRail = $("todo-rail");
   const todoRailHead = $("todo-rail-head");
   const todoRailCount = $("todo-rail-count");
@@ -326,7 +323,7 @@
     // Voice-input button: "idle" | "listening" | "transcribing" (see nextMicState).
     mic: "idle",
     // Whether the host found a voice API key. Optimistic until the host says
-    // otherwise; remote clients cannot configure the host themselves.
+    // otherwise; the webview cannot configure the host itself.
     voiceConfigured: true,
     // Dictation insertion point: text before and after the selection that was
     // active when the mic started. Live partials replace only the text between
@@ -458,7 +455,7 @@
     repoSwitchTarget: "",
     selectedRepoCwd: "",
     activeRepoCwd: "",
-    // Projects rail (browser client only). `repoPreviews` caches one page of
+    // Projects rail. `repoPreviews` caches one page of
     // rows per NON-selected repo — the selected one always reads the live
     // `sessions` list instead. `repoPreviewsSupported` latches on the first
     // `repoSessions` frame: until a host has answered once, the rail probes with
@@ -1545,8 +1542,8 @@
   }
 
   // Brief green-check acknowledgement on an action button (mirrors the copy
-  // buttons' feedback) — on a phone the browser's own download chrome is easy
-  // to miss, so confirm the tap registered.
+  // buttons' feedback). The webview has no browser download chrome, so
+  // confirm the tap registered.
   function ackBtn(btn) {
     if (!btn) return;
     const prev = btn.innerHTML;
@@ -2384,8 +2381,7 @@
 
   // Promise<boolean> confirm dialog rendered in-page (chat.css .confirm-*).
   // Replaces the host's native modals for chat-triggered destructive actions,
-  // so they confirm identically on desktop and in the browser client — where a
-  // host-side modal would stall invisibly on the desk's screen.
+  // so they confirm in the webview rather than with a host modal.
   function uiChoice(opts) {
     return new Promise((resolve) => {
       const overlay = document.createElement("div");
@@ -2951,8 +2947,8 @@
       post: (msg) => {
         // A refused save never reaches the host, so the host never answers and
         // the Routines page would sit there looking like the button did
-        // nothing. Remember that one is outstanding; the relay's refusal below
-        // is its answer.
+        // nothing. Remember that one is outstanding; a host error below is
+        // its answer.
         if (msg && msg.type === "saveRoutine") state.routineSavePending = true;
         vscode.postMessage(msg);
       },
@@ -3154,8 +3150,7 @@
     // contains exactly the two portable continuation/export actions.
     if (railGearLive()) return;
     // Worktree Apply/Remove only while already in a worktree (Coding or not —
-    // you're already in one, so the controls must stay reachable). Never from a
-    // remote: the host acts on its own focused session, not the requester's.
+    // you're already in one, so the controls must stay reachable).
     if (state.isWorktree) {
       addSection("Session");
       addGearItem(`<span class="gear-lead">${ICON.gitBranch}<span>Apply worktree</span></span>`, () => {
@@ -3289,10 +3284,10 @@
         description: "Continue from here in the current checkout",
       },
     ];
-    // Desk-only: the host creates a worktree against its own workspace root
-    // rather than the session that asked, so a remote tab working in another
-    // repo would get a checkout somewhere it never chose. Offering the option
-    // here would promise a placement the host does not honour.
+    // The host creates a worktree against its own workspace root rather than
+    // a session in some other checkout. Offering the option where that would
+    // land somewhere the reader did not choose would promise a placement the
+    // host does not honour.
     if (isCodingPurpose() && state.worktreeSupported && !state.isWorktree) {
       dests.push({
         id: "worktree",
@@ -3393,9 +3388,8 @@
     };
     // A provider that cannot answer is simply not in this list. It used to get
     // a heading and a "Sign in to load models" row, which put an agent you
-    // cannot pick in the middle of the menu for picking one — and on a phone it
-    // could not even be actioned, since the host refuses runGrokLogin from a
-    // remote. Manage providers at the bottom is the way back for all three
+    // cannot pick in the middle of the menu for picking one. Manage providers
+    // at the bottom is the way back for all three
     // (owner, 2026-08-17: "Not connected => Not visible").
     const renderModelRow = (m) => {
       const modelProvider = m.provider || state.activeProvider;
@@ -3541,10 +3535,8 @@
       btn.className = "rail-icon-btn";
       btn.title = "Settings";
       btn.setAttribute("aria-label", "Settings");
-      // Leftmost in the footer on BOTH hosts. Anchoring it to the theme toggle
-      // instead only worked on desktop — the browser client's toggle carries no
-      // id, so the gear was appended and landed on the opposite side. First
-      // child needs nothing to look up.
+      // Leftmost in the footer. First child, so placement does not depend on
+      // a sibling's id.
       foot.insertBefore(btn, foot.firstChild);
     }
     if (!btn.dataset.railGearWired) {
@@ -3665,13 +3657,9 @@
   // ---------- draggable rail edge ----------
   //
   // The rail's own border, made draggable. Mounted here rather than in either
-  // host's markup so desktop and the browser client get it by construction —
-  // the same argument that put the gear in the rail. Inert in VS Code, which
-  // has no rail mount at all.
-  //
-  // The phone drawer is excluded by CSS, not by JS: web/chat.html owns the
-  // breakpoint that decides drawer-vs-docked, and that is the only place that
-  // knows. One definition of "is this a phone", not two.
+  // host's markup so every rail host gets it by construction — the same
+  // argument that put the gear in the rail. Inert in VS Code, which has no
+  // rail mount at all.
   // Width cap for the rail-anchored gear popover. Menu items and the About
   // panel's version lines both live in here, so it has to fit "Grok Build for
   // VS Code (Community)" wrapped without becoming a full-width sheet.
@@ -3994,8 +3982,8 @@
     return state.providersKnown && state.providers.filter((provider) => provider.connected).length > 1;
   }
 
-  /** Desktop host signature via capabilities — not IS_REMOTE, not body.desk
-   *  (VS Code also sets body.desk). relocateView + showOutput both false. */
+  /** Desktop host signature via capabilities — not body.desk (VS Code also
+   *  sets body.desk). relocateView + showOutput both false. */
   function isDesktopHostCaps() {
     return !!(state.hostCaps &&
       state.hostCaps.relocateView === false &&
@@ -4520,9 +4508,7 @@
       renameBtn.innerHTML = ICON.pencil;
       // A worktree session's name IS the worktree name (baked into the checkout
       // path), so renaming it would decouple the display from the real checkout.
-      // Disable rename there; delete still works. The browser client allows the
-      // rename (it only sets the display name; the branch icon keeps carrying
-      // the real checkout name).
+      // Disable rename there; delete still works.
       if (s.worktreeLabel) {
         renameBtn.disabled = true;
         renameBtn.classList.add("disabled");
@@ -4577,19 +4563,19 @@
 
   // ---------- projects rail ----------
   //
-  // A persistent left rail: every open project (or every repo with Grok history
-  // on remote), each showing its newest few sessions.
+  // A persistent left rail: every open project, each showing its newest few
+  // sessions.
   //
-  // Gate (capability, not IS_REMOTE / not a host flag):
-  //   1. The host shipped a `#projects-rail` mount (desktop getHtml / AFK Pilot
-  //      page). VS Code getHtml does not — that absence alone keeps the extension
+  // Gate (capability, not a host flag):
+  //   1. The host shipped a `#projects-rail` mount (desktop getHtml). VS Code
+  //      getHtml does not — that absence alone keeps the extension
   //      single-column even when a `repos` frame arrives for clear-all naming.
   //   2. The host has sent a `repos` frame (`state.reposKnown`). An older host
   //      that never sends one gets the plain chat, not an empty sidebar.
   // Desktop is the exception: renderer and host ship together, so there is no
   // version skew. `body.desk` + the rail mount paints the layout chrome from
-  // the first frame; catalog data fills in when it arrives. Remotes keep the
-  // wait. VS Code never mounts the rail.
+  // the first frame; catalog data fills in when it arrives. VS Code never
+  // mounts the rail.
   //
   // Rows for a repo the client is NOT currently in arrive on `repoSessions`, a
   // frame older hosts never send. When it never arrives the rail still works:
@@ -4633,8 +4619,7 @@
 
   /**
    * Desktop large layout: the host baked `body.desk` and shipped the rail
-   * mount. VS Code also uses body.desk but never mounts the rail. Remote
-   * mounts the rail without body.desk and still waits for `repos`.
+   * mount. VS Code also uses body.desk but never mounts the rail.
    */
   function desktopLargeLayout() {
     return document.body.classList.contains("desk") && !!railMount();
@@ -4644,10 +4629,9 @@
    * May this surface paint the rail chrome BEFORE the catalog arrives?
    *
    * Only where there is no host version skew to protect against. Desktop
-   * qualifies because renderer and host ship together; a cloud machine
-   * qualifies because the relay installed that host itself. Everything else
-   * waits for a `repos` frame, since an extension older than v2.0.5 never
-   * sends one and an empty sidebar is worse than a plain column.
+   * qualifies because renderer and host ship together. Everything else waits
+   * for a `repos` frame, since an extension older than v2.0.5 never sends one
+   * and an empty sidebar is worse than a plain column.
    */
   function railChromeBeforeCatalog() {
     return desktopLargeLayout() || false;
@@ -4655,7 +4639,7 @@
 
   /**
    * Rail is live when the mount exists AND (desktop first-frame chrome, or the
-   * host has proven it feeds a multi-repo catalog). Never gated on IS_REMOTE.
+   * host has proven it feeds a multi-repo catalog).
    */
   function railAvailable() {
     return !!railMount() && (railChromeBeforeCatalog() || state.reposKnown);
@@ -4791,9 +4775,8 @@
    *
    *  Hover-capable pointers only. On touch a long-press synthesises
    *  `contextmenu`, so wiring it there would hijack the gesture the browser
-   *  already uses for selection — and on a phone the rail is a drawer where the
-   *  ⋯ buttons are permanently visible anyway (see the `hover: none` rules in
-   *  chat.css), so there is nothing to reveal. */
+   *  already uses for selection — and without hover the ⋯ buttons stay visible
+   *  (see the `hover: none` rules in chat.css), so there is nothing to reveal. */
   function wireRailRowContextMenu(row, getAnchor, items, menuKey) {
     if (!row || !window.matchMedia || !window.matchMedia("(hover: hover)").matches) return;
     row.addEventListener("contextmenu", (e) => {
@@ -4937,7 +4920,7 @@
     railMenuEl = menu;
 
     // Flip up / pull left rather than run off the viewport — the rail sits at the
-    // left edge on desktop and the drawer covers the screen on a phone.
+    // left edge when the rail is docked.
     // Body `zoom` scales visual rects; fixed style top/left are layout px.
     placeRailPopover(menu, anchor, at);
     const first = menu.querySelector(".rail-menu-item:not(:disabled)");
@@ -4946,7 +4929,7 @@
   openRailMenu.seq = 0;
 
   // Rail menus are fixed-position under <body>; close on outside click / Esc /
-  // resize regardless of remote vs desktop once a rail mount exists (or may).
+  // resize once a rail mount exists (or may).
   document.addEventListener("click", (e) => {
     if (railColorPickerEl) {
       if (railColorPickerEl.contains(e.target)) return;
@@ -4998,11 +4981,8 @@
   // ---------- remembered rail shape ----------
   //
   // Which projects are folded, and which have been expanded past their preview,
-  // are answers to "how do I like my sidebar", not facts about the session — so
-  // they outlive the tab. Kept in localStorage rather than the host: this is the
-  // BROWSER's view of a catalog it merely reads, and two tabs on two machines
-  // are entitled to different shapes. Keyed by device so a second device's rail
-  // does not inherit the first one's folds.
+  // are this view's layout, not facts about the session — so they outlive the
+  // tab. Kept in localStorage rather than the host.
   const RAIL_SHAPE_KEY = "grok.remote.railShape";
 
   function railShapeKey() {
@@ -5901,8 +5881,8 @@
         root.appendChild(list);
         // Full-width target under the list, not only the small "+" in the group
         // head. With one project or none the rail is mostly empty space and the
-        // header glyph is easy to miss — and on a phone, easy to miss AND hard
-        // to hit. Same control, said where there is room to say it.
+        // header glyph is easy to miss and hard to hit. Same control, said
+        // where there is room to say it.
         if (canAddProjectFolder() && !q) root.appendChild(railAddProjectWide());
       }
       shownAnything = true;
@@ -6022,12 +6002,10 @@
 
   /**
    * "Add project" — capability, not a host flag. Three ways in now, and they do
-   * not all have the same reach: opening the native picker is host-local (a
-   * dialog on the desk that a phone could not see or answer), while naming a
-   * new project or cloning a URL are things a remote CAN do, because the host
-   * derives the destination rather than being handed one. So the control shows
-   * wherever at least one entry is available, and the menu carries whichever
-   * ones are.
+   * not all have the same reach: opening the native picker is host-local,
+   * while naming a new project or cloning a URL lets the host derive the
+   * destination rather than being handed one. So the control shows wherever
+   * at least one entry is available, and the menu carries whichever ones are.
    *
    * VS Code answers these messages too, but this rail is not where it lands:
    * `railAvailable()` needs a rail MOUNT and the VS Code chat view has none —
@@ -6078,11 +6056,10 @@
   /**
    * What this host offers as ways into a project.
    *
-   * Importing needs a native picker, so it stays desk-only exactly as it always
-   * was. Creating and cloning take a NAME and a URL — the host derives the
-   * destination inside its own root — so they work from a phone, which is the
-   * whole reason they exist as separate messages rather than as arguments to
-   * `addProjectFolder`.
+   * Importing needs a native picker, so it stays where the host can open one.
+   * Creating and cloning take a NAME and a URL — the host derives the
+   * destination inside its own root — which is why they are separate messages
+   * rather than arguments to `addProjectFolder`.
    */
   function addProjectCaps() {
     const caps = state.hostCaps || {};
@@ -6097,14 +6074,11 @@
   /**
    * May this surface put a project away?
    *
-   * NOT canAddProjectFolder(), and the difference is the whole bug. That helper
-   * used to mean "the native picker is here" — false on every remote, so Hide
-   * never drew there and gate and action agreed. Then create and clone shipped
-   * as remote-capable ways IN, the helper started answering true on a remote,
-   * and Hide came with it: drawn, posted, and dropped by the host's policy
-   * without a word. The owner found it on a cloud machine.
+   * NOT canAddProjectFolder(). That flag answers "the native picker is here",
+   * not "this list may drop a row". Tying Hide to it drew a control the host
+   * then dropped in silence.
    *
-   * Its own capability now, advertised only where the action can be honoured.
+   * Its own capability, advertised only where the action can be honoured.
    */
   function canRemoveProjectFolder() {
     const caps = state.hostCaps || {};
@@ -6326,9 +6300,7 @@
   //
   // Where the rail exists, the app-wide toolbar does not: the controls that
   // belong to a PROJECT moved into the rail, and what is left belongs to the
-  // conversation you are reading, so it lives with the conversation. On a phone
-  // this same header also carries the drawer handle and New, which is why it is
-  // one component and not two.
+  // conversation you are reading, so it lives with the conversation.
 
   /** The active session's record, wherever we happen to hold it. `railSelectedRows`
    *  first: it is the only list guaranteed to be an unfiltered page of the repo
@@ -6509,8 +6481,8 @@
     }
   }
 
-  /** VS Code's compact top-bar overflow. Desktop and remote keep the richer
-   *  session menu they already render through `#session-head-actions`. */
+  /** VS Code's compact top-bar overflow. Desktop keeps the richer session
+   *  menu it renders through `#session-head-actions`. */
   function fillVsCodeSessionActions() {
     const menuSlot = document.getElementById("vscode-session-actions");
     if (!menuSlot) return;
@@ -6540,11 +6512,10 @@
   }
 
   /**
-   * Conversation overflow (⋯) in the top-right cluster (after Remote, History, New).
-   * Present only when the host shipped `#session-head-actions` (desktop getHtml /
-   * AFK Pilot page). VS Code's smaller two-item menu uses its own slot so this
-   * richer desktop/remote menu stays unchanged. Capability = the slot exists,
-   * not a host flag.
+   * Conversation overflow (⋯) in the top-right cluster (after History, New).
+   * Present only when the host shipped `#session-head-actions` (desktop
+   * getHtml). VS Code's smaller menu uses its own slot so this richer menu
+   * stays unchanged. Capability = the slot exists, not a host flag.
    */
   function fillSessionHeadActions() {
     fillVsCodeSessionActions();
@@ -6766,12 +6737,11 @@
 
     // New session in ANY project, selected or not. The host only ever creates in
     // the repo it currently has selected, so for another one this is really
-    // "switch there, then start fresh" — a two-step intent the page has to own,
-    // because the browser client arms its own "open this repo's newest session"
-    // bridge on every outbound `selectRepo` and would otherwise land the tab on
-    // an existing conversation. `__grokRailNewIntent` tells that bridge which
-    // intent this particular switch carries. The title says so out loud: this
-    // button moves the whole tab, and that should never be a surprise.
+    // "switch there, then start fresh" — a two-step intent the page has to own.
+    // `__grokRailNewIntent` records which project the "+" asked for, so the
+    // catalog echo can post newSession once the switch lands. The title says
+    // so out loud: this button moves the whole view, and that should never be
+    // a surprise.
     const add = document.createElement("button");
     add.type = "button";
     add.className = "rail-action-btn";
@@ -6862,15 +6832,13 @@
         title:
           "Take this project out of the list. Nothing is deleted — the folder " +
           "stays on disk, and + adds it back.",
-        // Confirmed, like every other rail act that reaches other surfaces. The
-        // VS Code rail has always asked; this one posted bare, so one gesture was
-        // guarded on one surface and not the other. It also takes the row off
-        // every linked device at once, which is worth saying out loud.
+        // Confirmed, like the VS Code rail, so one gesture is not silent here
+        // and guarded there.
         onSelect: () => {
           const repoLabel = repo.label || cwdLeaf(repo.cwd);
           uiConfirm({
             title: `Hide “${repoLabel}”?`,
-            body: `Takes this project out of the list on every linked device:\n${repo.cwd}`
+            body: `Takes this project out of the list:\n${repo.cwd}`
               + "\n\nNothing is deleted — the folder stays on disk, and Add project brings it back.",
             confirmLabel: "Hide",
           }).then((ok) => {
@@ -7186,13 +7154,6 @@
       });
       // Worktree upkeep rides along for the same reason, and only while you are
       // in one — you cannot apply a checkout you are not standing in.
-      //
-      // Not from a remote, though. The host runs apply/remove against ITS
-      // focused session, not the one that asked, so a phone in repo B would
-      // remove the worktree the desk was standing in — and Remove discards
-      // unapplied edits. Hidden rather than shown-and-dropped: the host now
-      // refuses these from remote, and a control that silently does nothing is
-      // worse than one that isn't there.
       if (state.isWorktree) {
         items.push({
           label: "Apply worktree",
@@ -7476,8 +7437,8 @@
     tip.id = "welcome-tip";
     tip.className = "welcome-tip muted";
     tip.dataset.tip = "moveView";
-    // Built here rather than in the host's HTML skeleton, so the relay's mirror
-    // of that skeleton cannot drift out of sync over an element it never shows.
+    // Built here rather than in the host's HTML skeleton, so a static empty
+    // state cannot drift from a hint the host decides at runtime.
     // Two steps, because the second cannot be done for the user. The host's
     // picker command does NOT wait for the pick — it opens the quickpick and
     // resolves immediately — so a reveal issued after it steals focus and
@@ -7549,12 +7510,8 @@
       worktreeSupported: state.worktreeSupported !== false,
       inWorktree: !!state.isWorktree,
       altAgentConnected: !state.providersKnown || altConnected,
-      // A cloud machine can connect agents from here and cannot connect Claude
-      // Code at all; both change what the providers tip should say and whether
-      // it may be shown.
       routineCount: host.routineCount,
       connectorCount: host.connectorCount,
-      // A phone's read-aloud is its own client-side preference, not the desk's.
       readRepliesAloud: !!state.readRepliesAloud,
       voiceConfigured: !!state.voiceConfigured,
       // Host list plus anything retired here. The union, so the control works
@@ -7811,10 +7768,8 @@
    * the deferred transcript wipe. Every other caller is a repaint.
    */
   function renderWelcomeTip(advance) {
-    // Never in the browser client. The capability is mirrored to remotes with
-    // the rest of initialState, but where the chat sits is a property of the
-    // machine running the extension - `moveView` is host-local and the relay
-    // drops it, so a phone would get advice it cannot take.
+    // Where the chat sits is a property of this window. `moveView` is
+    // host-local, so the hint is shown only when the host asked for it.
     if (state.hostCaps && state.hostCaps.moveViewHint === true) {
       const existing = $("welcome-tip");
       if (existing && existing.dataset.tip !== "moveView") existing.remove();
@@ -7886,8 +7841,8 @@
     const welcome = $("welcome");
     if (!welcome || !welcome.hidden) return false;
     // A painted conversation, whether already marked pending-clear or not.
-    // Remote snapshots send initialState first; local sends clearMessages first.
-    // Keying the hold on the mark made the phone's order stamp the empty state.
+    // Keying the hold on the pending-clear mark missed a transcript that had
+    // not been marked yet and stamped the empty state over it.
     for (const child of messagesEl.children) {
       if (child.id === "welcome") continue;
       if (isPendingClearNode(child)) return true;
@@ -7981,8 +7936,8 @@
   }
 
   // Last N counted user bubbles render on open; earlier turns prepend on scroll
-  // (#102). 80 is several screens even on a phone, 8× the remote snapshot of 10,
-  // and small conversations fall through unchanged. Tests may shrink it via
+  // (#102). 80 is several screens in a narrow column, and small conversations
+  // fall through unchanged. Tests may shrink it via
   // `window.__grokHistoryWindow`.
   const HISTORY_WINDOW_USER_TURNS = 80;
   const HISTORY_PREPEND_USER_TURNS = 40;
@@ -10116,11 +10071,9 @@
       // Rewind sits next to Copy on user bubbles only (P2-9). Latest message
       // has nothing after it to discard — hidden via refreshUserRewindButtons.
       //
-      // Built for every client since 2026-09-01: remote clients used to be
-      // excluded here because the host's rewind flow ran native VS Code UI, and
-      // that stopped being true when the confirmation moved in-chat. Visibility
-      // is decided in refreshUserRewindButtons, which also owns the provider
-      // gate — so a session that switches provider does not need re-rendering.
+      // Visibility is decided in refreshUserRewindButtons, which also owns the
+      // provider gate — so a session that switches provider does not need
+      // re-rendering.
       if (role === "user") {
         const rewindBtn = document.createElement("button");
         rewindBtn.className = "msg-action-btn msg-rewind-btn";
@@ -10586,8 +10539,8 @@
   //             selection, so the click opens the in-app preview: the whole
   //             file, numbered, with the agent's lines marked (falls back to
   //             the excerpt when the file can't be fetched).
-  //   "inline"  a remote. `openFile` is host-local in remote-policy, so a phone
-  //             can only reveal the text already on the wire.
+  //   "inline"  no editor and no in-app preview: the click can only reveal
+  //             the text already on the wire.
   function readLinkMode() {
     if (hostPreviewsInApp()) return "overlay";
     return "file";
@@ -12328,9 +12281,8 @@
   }
 
   // Does this surface open files in a host editor tab? Opt-out polarity on
-  // capabilities.openInEditor (absent/true = yes). Remote always answers no:
-  // the caps a phone receives are the DESK machine's, and a tap must never
-  // open an editor 200 km away.
+  // capabilities.openInEditor (absent/true = yes). false keeps the click in
+  // the webview.
   function hostOpensInEditor() {
     return !(state.hostCaps && state.hostCaps.openInEditor === false);
   }
@@ -14390,8 +14342,8 @@
   // Pinned readers get re-pinned (growth otherwise leaves a blank strip
   // below); scrolled-up readers keep their top line exactly where it was —
   // the resize must never be the thing that yanks the view to the bottom
-  // (tapping a toolbar button on a phone collapses the keyboard, and that
-  // used to jump the whole message area).
+  // (a toolbar tap that collapses the on-screen keyboard must not jump the
+  // message area).
   let lastScrollportHeight = messagesEl.clientHeight;
   new ResizeObserver(() => {
     const h = messagesEl.clientHeight;
@@ -15178,7 +15130,7 @@
             // The composer's rule, verbatim, so one convention covers both:
             // Ctrl/Cmd+Enter when the user has chosen that, otherwise Enter —
             // except on a touch composer, where Enter has to make a newline
-            // because a phone keyboard has no other way to.
+            // because the on-screen keyboard has no other way to.
             const sendKey = state.useCtrlEnter
               ? e.key === "Enter" && (e.metaKey || e.ctrlKey)
               : e.key === "Enter" && !e.shiftKey;
@@ -15594,12 +15546,12 @@
           else reject(new Error("Image preview closed"));
         }, reject);
       };
-      // Old hosts/relays ignore the additive request; never fall back to pixels
+      // Old hosts ignore the additive request; never fall back to pixels
       // from imageFull, whose contract permits a resized preview.
       job.timer = setTimeout(() => reject(new Error("Original image unavailable")), 20000);
     });
     // WebKit requires write() in the click, with a promised Blob for async work.
-    // Waiting for the host first loses the gesture on a phone.
+    // Waiting for the host first loses the gesture.
     blob.catch(() => {});
     let write;
     try {
@@ -15725,9 +15677,8 @@
     span.textContent = contextChipLabel(chip);
     el.appendChild(span);
     el.onclick = () => {
-      // The panel the chip stands for. Host-local commands, so a remote tab
-      // (which has neither panel) simply gets nothing — the same as today's
-      // file chips, which do not open an editor on a phone either.
+      // The panel the chip stands for. Host-local: the webview asks, the host
+      // opens it.
       vscode.postMessage({ type: "openContextChipSource", source: chip.kind === "terminal" ? "terminal" : "problems" });
     };
     const rm = document.createElement("button");
@@ -16420,7 +16371,7 @@
   // More than the original 5 (#144): a longer answer could not be read back
   // while writing it. A drag handle was considered and rejected — a maximum you
   // have to re-drag every time you want the history back is worse than one that
-  // is simply large enough. See composerMaxLines for why a phone gets fewer.
+  // is simply large enough. See composerMaxLines for why a touch screen gets fewer.
   function autosizeInput() {
     const cs = window.getComputedStyle(input);
     const line = parseFloat(cs.lineHeight) || 20;
@@ -16639,9 +16590,9 @@
   }
 
   // ---------- find in conversation (#99) ----------
-  // One in-webview find serves VS Code, desktop, and the browser client.
+  // One in-webview find serves VS Code and desktop.
   // VS Code's enableFindWidget is a createWebviewPanel API and does not exist
-  // on WebviewView; even if it did it would do nothing for desktop or AFK Pilot.
+  // on WebviewView; even if it did it would do nothing for desktop.
   //
   // Paint uses CSS.highlights + Range. Wrapping matches in <mark> would force
   // a full re-layout of a multi-megabyte transcript and detach the click
@@ -17006,11 +16957,11 @@
     updateScrollBtn();
     const range = rangeForFindMatch(m);
     // Centre the MATCH, not the element containing it. scrollIntoView centres
-    // the BLOCK, and a message body wraps to well over a screen on a phone —
-    // measured at 1017px inside a 727px viewport. Centring that block puts the
+    // the BLOCK, and a message body wraps to well over a screen in a narrow
+    // column — measured at 1017px inside a 727px viewport. Centring that block puts the
     // phrase off the TOP when it sits near the block's start and off the BOTTOM
     // when it sits near the end, so stepping next/prev showed some hits and
-    // scrolled past others. Both directions reproduced under Pixel-5 emulation.
+    // scrolled past others. Both directions show it.
     const scroller = messagesEl;
     const rect = range && typeof range.getBoundingClientRect === "function"
       ? range.getBoundingClientRect()
@@ -17606,9 +17557,8 @@
         // waiting for is now connected, without clearing or replaying messages.
         {
           // What the card is ASKING FOR, not which button it happens to draw.
-          // Keying on the recovery button meant a device-code card — the only
-          // way to connect from a phone or a cloud machine — was never
-          // dismissed by its own success (owner, 2026-08-31).
+          // Keying on one button missed a card that asks for a re-check and
+          // was never dismissed by its own success.
           const onboardingProvider = $("welcome-onboarding")?.querySelector(
             '[data-act="recheckProvider"][data-provider], [data-act="recheck"][data-provider]',
           )?.dataset?.provider
@@ -17616,10 +17566,9 @@
               ? (state.onboardingInfo && state.onboardingInfo.provider) || ""
               : "");
           // "Connected" is the configured account; one the host says still
-          // needs a sign-in has not answered a card that asks for one. A fresh
-          // cloud machine posts connect-agent and then broadcasts providerState
-          // with grok connected + needsLogin behind it, and this dismissal
-          // blanked the first attach until a reload (owner, 2026-09-05).
+          // needs a sign-in has not answered a card that asks for one. A
+          // providerState with the account connected and needsLogin set must
+          // not dismiss that card.
           const usable = (provider) => !!provider.connected && provider.needsLogin !== true;
           const anyConnected = state.providers.some(usable);
           const askedForConnected = onboardingProvider && state.providers.some((provider) =>
@@ -18168,10 +18117,8 @@
         break;
       case "voiceSubmit": {
         if (state.voiceDiscarded) break;
-        // The webview is the submission boundary for local and remote voice.
-        // In AFK Pilot this makes the spoken prompt cross the relay as the same
-        // send/queueSend frame as typed input, so relay metering and busy-turn
-        // queueing apply before the host can prompt the agent.
+        // Spoken text takes the same send/queueSend path as typed input, so
+        // busy-turn queueing applies before the host prompts the agent.
         const composed = state.voiceInsertionActive
           ? composeVoiceInsertion(state.voiceBefore, msg.text || "", state.voiceAfter).value
           : (msg.text || "");
@@ -19056,7 +19003,7 @@
         // Keeping that id meant the next reload asked for the same dead
         // session, drew the same error, and re-armed itself — the owner could
         // only escape by clicking New session (2026-08-31).
-        // The relay bounces a quota-refused frame as a plain error, which
+        // A quota-refused frame arrives as a plain error, which
         // renders in the transcript — behind the settings overlay the reader is
         // looking at. At the paywall that made Create appear to do nothing, at
         // exactly the moment being clear matters most. Attribute it to the save
@@ -19303,10 +19250,8 @@
           // an empty session already open it reads as nothing happening at all.
           //
           // Single-shot, and coordinated through the flag itself rather than a
-          // host check: the browser page consumes __grokRailNewIntent as it
-          // forwards the selectRepo, so there it is already null here and this
-          // cannot fire twice. Where nothing consumed it — the desktop — it is
-          // still set, and this is the only place that acts on it.
+          // host check. Where the flag is still set, this is the place that
+          // posts newSession.
           if (window.__grokRailNewIntent && sameCwd(window.__grokRailNewIntent, state.selectedRepoCwd)) {
             window.__grokRailNewIntent = null;
             // Advance the optimistic new-transition (if any) before posting so
@@ -19388,11 +19333,9 @@
   }
   newBtn.onclick = () => beginNewSession();
   fillSessionHeadActions();
-  // Desktop and cloud ship the rail mount in the first HTML frame. Paint the
+  // Desktop ships the rail mount in the first HTML frame. Paint the
   // skeleton before catalog frames arrive so the window never starts
-  // panel-less — on a cloud machine that gap is however long the host takes to
-  // wake, and what showed instead was the layout this product had before it
-  // had a rail (owner, 2026-08-31).
+  // panel-less.
   if (railChromeBeforeCatalog()) renderRail();
   modeBtn.onclick = (e) => { e.stopPropagation(); if (state.busyLocked) return; openModePopover(); };
   gearBtn.onclick = (e) => { e.stopPropagation(); openGearPopover(); };
@@ -19569,12 +19512,9 @@
     closePopovers();
     const a = e.target.closest("a[href]");
     if (!a) return;
-    // The browser client is a real web page with real navigation in its chrome:
-    // the AFK Pilot brand in the top bar, the same brand in the rail, and the
-    // "Pick another device" link in a connection notice. All of them point at
-    // `/`, and this handler swallowed every one — preventDefault, then an
-    // openFile for a path named "/" that the host correctly refused. Clicking
-    // the logo did nothing and logged a policy drop.
+    // Chrome anchors that are real navigation (the brand links) point at `/`.
+    // This handler would preventDefault and then ask the host to open a path
+    // named "/", which it refuses. Clicking the logo would do nothing.
     //
     // The page marks those anchors. Deliberately an explicit opt-out rather
     // than a rule about what the href looks like: a plan link is `/home/…` and

@@ -28,7 +28,7 @@ export function locateMuseCli(options: {
 /**
  * The version out of `muse --version`.
  *
- * MEASURED against the 1.3.0 launcher installed on a cloud host, not assumed:
+ * MEASURED against the 1.3.0 launcher, not assumed:
  * it prints `Muse Code 1.3.0 (1.3.0-R3401.1)` -- the short version, then the
  * build it came from in parentheses. So the output carries TWO version-like
  * tokens, the second of which is the specific one, and the parenthesis is not

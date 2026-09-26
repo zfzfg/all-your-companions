@@ -62,9 +62,9 @@ describe("/crew async boundary (source pin)", () => {
   });
 
   it("walks independent steps with Promise.all when the preset is parallel", () => {
-    const src = readFileSync(join(root, "..", "src", "sidebar.ts"), "utf8");
-    const from = src.indexOf("private async handleCrewCommand");
-    const body = src.slice(from, src.indexOf("private async askCrewAssignment", from));
+    const src = readFileSync(join(root, "..", "src", "workflow-stage-runner.ts"), "utf8");
+    const from = src.indexOf("async handleCrewCommand");
+    const body = src.slice(from, src.indexOf("async askCrewAssignment", from));
     expect(body).toContain("nextIndependentSteps");
     expect(body).toContain("Promise.all(prepared.map(runOne))");
     expect(body).toContain("createCrewWorktree");

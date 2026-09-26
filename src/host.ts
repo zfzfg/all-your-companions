@@ -487,7 +487,7 @@ export interface HostProgressOptions {
   cancellable?: boolean;
 }
 
-/** Cancellation surface for long-running host progress (e.g. device-link poll). */
+/** Cancellation surface for long-running host progress. */
 export interface HostCancellationToken {
   readonly isCancellationRequested: boolean;
 }
@@ -824,9 +824,7 @@ export interface Host {
    * sibling click-to-enlarge path) should open a host editor tab via
    * `openFile`. Wired into `initialState.capabilities.openInEditor`. Opt-out
    * polarity on the wire: absent/true = editor host (VS Code); false =
-   * no editor (desktop — open the in-app lightbox instead). Remote clients
-   * force the lightbox regardless: the caps they receive are the desk
-   * machine's, and a phone must never open a desk editor.
+   * no editor (desktop — open the in-app lightbox instead).
    */
   readonly canOpenInEditor: boolean;
   /**

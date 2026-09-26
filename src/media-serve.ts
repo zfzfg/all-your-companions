@@ -64,7 +64,7 @@ export function isRefusedMediaPath(
 
 /**
  * Decoded byte length of a base64 payload (padding-aware). Used to gate
- * ACP-inline media before it is emitted into the webview / relay.
+ * ACP-inline media before it is emitted into the webview.
  */
 export function base64DecodedByteLength(b64: string): number {
   if (!b64 || typeof b64 !== "string") return 0;

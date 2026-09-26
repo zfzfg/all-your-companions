@@ -14,9 +14,9 @@
  * {@link renderSteps}'s rendering of them, so the two cannot drift. The
  * rendering goes to the HOST LOG, not to the person: the view's confirmation
  * surface is the button's own label, which promises the outcome in plain
- * language ("Commit and push") rather than reciting a command line. Somebody
- * committing from a phone is not auditing argv, and a card full of flags would
- * be exactly the duplicated information this view is built to avoid. The log
+ * language ("Commit and push") rather than reciting a command line. The
+ * person is not auditing argv, and a card full of flags would be exactly the
+ * duplicated information this view is built to avoid. The log
  * line is what makes an operation reconstructable afterwards.
  *
  * **Nothing user-supplied becomes an argument without passing a validator

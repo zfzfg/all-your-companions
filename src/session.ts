@@ -1006,7 +1006,7 @@ export function sessionUiSnapshot(
   }
   messages.push({ type: "modeChanged", modeId });
   // AP-15. Replacing state like the mode badge beside it: the webview needs it
-  // back after a focus switch, a reload or a remote attach, and the `locked`
+  // back after a focus switch or a reload, and the `locked`
   // flag is what decides between the segmented control and the read-only badge.
   {
     // `sessionId` is empty until the CLI names the session. That is exactly the

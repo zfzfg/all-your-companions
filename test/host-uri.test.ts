@@ -187,9 +187,9 @@ describe("closeDiffTabs URI comparison symmetry (regression #2)", () => {
     expect(closeFn).not.toMatch(/input\.original\.toString\(\)\s*===\s*original\b/);
     expect(closeFn).not.toMatch(/input\.modified\.toString\(\)\s*===\s*modified\b/);
 
-    const sidebar = readFileSync(path.join(root, "src", "sidebar.ts"), "utf8");
-    expect(sidebar).toMatch(/closeDiffTabs\(\s*uris\.left\s*,\s*uris\.right\s*\)/);
-    expect(sidebar).not.toMatch(/closeDiffTabs\([^)]*\.toString\(\)/);
+    const review = readFileSync(path.join(root, "src", "review-host.ts"), "utf8");
+    expect(review).toMatch(/closeDiffTabs\(\s*uris\.left\s*,\s*uris\.right\s*\)/);
+    expect(review).not.toMatch(/closeDiffTabs\([^)]*\.toString\(\)/);
   });
 
   it("portable Uri percent-encodes space/#/? for same-encoder keys", () => {
@@ -242,14 +242,16 @@ describe("typed Host command surface (design #5)", () => {
 
   it("sidebar uses typed methods and never executeCommand", () => {
     const sidebar = readFileSync(path.join(root, "src", "sidebar.ts"), "utf8");
-    expect(sidebar).not.toMatch(/\.executeCommand\s*\(/);
-    expect(sidebar).not.toMatch(/executeCommand\(\s*["']vscode\.open["']/);
-    expect(sidebar).not.toMatch(/executeCommand\(\s*["']vscode\.diff["']/);
-    expect(sidebar).not.toMatch(/executeCommand\(\s*["']setContext["']/);
-    expect(sidebar).not.toMatch(/executeCommand\(\s*["']vscode\.moveViews["']/);
-    expect(sidebar).not.toMatch(/executeCommand\(\s*["']workbench\.action\.openSettings["']/);
-    expect(sidebar).not.toMatch(/executeCommand\(\s*["']grok\.(link|unlink)Remote["']/);
-    expect(sidebar).toMatch(/\.openDiff\(/);
+    const review = readFileSync(path.join(root, "src", "review-host.ts"), "utf8");
+    const hostCode = `${sidebar}\n${review}`;
+    expect(hostCode).not.toMatch(/\.executeCommand\s*\(/);
+    expect(hostCode).not.toMatch(/executeCommand\(\s*["']vscode\.open["']/);
+    expect(hostCode).not.toMatch(/executeCommand\(\s*["']vscode\.diff["']/);
+    expect(hostCode).not.toMatch(/executeCommand\(\s*["']setContext["']/);
+    expect(hostCode).not.toMatch(/executeCommand\(\s*["']vscode\.moveViews["']/);
+    expect(hostCode).not.toMatch(/executeCommand\(\s*["']workbench\.action\.openSettings["']/);
+    expect(hostCode).not.toMatch(/executeCommand\(\s*["']grok\.(link|unlink)Remote["']/);
+    expect(hostCode).toMatch(/\.openDiff\(/);
     expect(sidebar).toMatch(/\.openResource\(/);
     expect(sidebar).toMatch(/\.openGlobalConfig\(/);
     expect(sidebar).toMatch(/\.openProjectConfig\(/);
@@ -337,19 +339,25 @@ describe("URI identity at the Host boundary (remote-safe class fix)", () => {
   });
 
   it("getHtml and localResourceRoots join under extensionUri (not path.join of extensionPath)", () => {
-    const src = sidebar();
-    expect(src).toMatch(
+    const html = readFileSync(path.join(root, "src", "webview-html.ts"), "utf8");
+    const host = sidebar();
+    expect(html).toMatch(
       /asWebviewUri\(\s*Uri\.joinPath\(\s*this\.context\.extensionUri\s*,\s*["']media["']/,
     );
-    expect(src).toMatch(
+    expect(html).toMatch(
+      /Uri\.joinPath\(\s*this\.context\.extensionUri\s*,\s*["']resources["']/,
+    );
+    expect(host).toMatch(
       /Uri\.joinPath\(\s*this\.context\.extensionUri\s*,\s*["']media["']\s*\)/,
     );
-    expect(src).toMatch(
+    expect(host).toMatch(
       /Uri\.joinPath\(\s*this\.context\.extensionUri\s*,\s*["']resources["']\s*\)/,
     );
     // Flattened form that blanked remote webviews.
-    expect(src).not.toMatch(/this\.context\.extensionPath/);
-    expect(src).not.toMatch(/asWebviewUri\(\s*path\.join\(\s*this\.context/);
+    for (const src of [html, host]) {
+      expect(src).not.toMatch(/this\.context\.extensionPath/);
+      expect(src).not.toMatch(/asWebviewUri\(\s*path\.join\(\s*this\.context/);
+    }
   });
 
   it("plan-review storage joins under globalStorageUri (not path.join of globalStoragePath)", () => {

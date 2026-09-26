@@ -7,6 +7,7 @@ import { ClaudeBackend } from "../src/claude-backend";
 import { CodexBackend } from "../src/codex-backend";
 import { GrokSidebar } from "../src/sidebar";
 import { Session } from "../src/session";
+import { wireExtractedHosts } from "./host-delegates";
 
 function makeSidebar(session: Session): any {
   const sidebar = Object.create(GrokSidebar.prototype) as any;
@@ -22,7 +23,9 @@ function makeSidebar(session: Session): any {
     showErrorMessage: vi.fn(async () => undefined),
     showWarningMessage: vi.fn(async () => undefined),
     showInformationMessage: vi.fn(async () => undefined),
+    appendLine: () => {},
   };
+  wireExtractedHosts(sidebar);
   return sidebar;
 }
 

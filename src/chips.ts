@@ -14,15 +14,14 @@ export interface FileChip {
    *  the staged copy). Absent for clipboard pastes, which have no origin file. */
   originRelPath?: string;
   /** Opaque browser-generated correlation id for a pasted image preview. The
-   *  bytes stay in the browser; only this id crosses the relay and comes back. */
+   *  bytes stay in the webview; only this id is posted to the host and comes back. */
   previewId?: string;
-  /** Local-webview-only URI for the staged file. Never stored on Session and
-   *  never sent to a remote browser. */
+  /** Local-webview-only URI for the staged file. Never stored on Session. */
   previewSrc?: string;
-  /** Opaque HOST-issued handle letting a remote ask for a full-size render of
-   *  this image. Attached on the way out to a remote, never stored on Session.
-   *  A handle rather than a path, so a phone can only ask for pictures the host
-   *  already chose to show it. */
+  /** Opaque host-issued handle for a full-size render of this image.
+   *  Attached when the image is shown, never stored on Session.
+   *  A handle rather than a path, so the webview can only ask for pictures
+   *  the host already chose to show. */
   fullId?: string;
 }
 

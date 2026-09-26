@@ -66,7 +66,7 @@ const EVENT_LABEL: Record<string, string> = {
  * A wire name as a person would read it. Known names get their label (possibly
  * empty, meaning "the detail speaks for itself"); an unknown one is
  * sentence-cased, so a future `verification_failed` reads "Verification
- * failed" instead of shipping a Rust identifier to a phone.
+ * failed" instead of shipping a raw identifier into the transcript.
  */
 function eventLabel(name: string): string {
   if (Object.prototype.hasOwnProperty.call(EVENT_LABEL, name)) return EVENT_LABEL[name];

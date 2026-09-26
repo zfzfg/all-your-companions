@@ -180,8 +180,7 @@ html, body {
 }
 .rail-add-project svg { width: 20px; height: 20px; }
 
-/* The rail had NO touch sizing of any kind, which is why its controls stayed
-   desk-sized on a phone while the rest of the app grew. */
+/* Touch sizing, matching the rest of the coarse-pointer controls. */
 @media (hover: none), (pointer: coarse) {
   .rail-add-project { width: 36px; height: 36px; right: 6px; }
 }
@@ -268,8 +267,7 @@ html, body {
    the next project's first.
 
    `projects-rail.css` is loaded by the VS Code view alone (src/sidebar.ts), so
-   none of this reaches the desktop app or the browser client — whose rails are
-   wider, and which on a phone need bigger targets, not tighter ones. */
+   none of this reaches the desktop app, whose rail is wider. */
 .rail-pinned,
 .rail-recent { gap: 2px; }
 .rail-repo { min-width: 0; border-radius: 6px; }
@@ -848,7 +846,7 @@ html, body {
   display: flex;
   flex-direction: column;
   /* Five compact rows. Fixed, not max, so filtering cannot change the
-     dialog's height. flex-shrink lets a short phone keep Clone on screen. */
+     dialog's height. flex-shrink lets a short viewport keep Clone on screen. */
   height: 13.75rem;
   max-height: 13.75rem;
   min-height: 5.5rem;

@@ -1375,7 +1375,7 @@
     return null;
   }
 
-  /** Focus plus whether the phone category <select> is the live control.
+  /** Focus plus whether the narrow-layout category <select> is the live control.
    *  Destroying that node while its native picker is open closes the picker. */
   function describeChrome(container) {
     const doc = container.ownerDocument;
@@ -1867,8 +1867,8 @@
    *  observe that terminal finishing, so the row offers Re-check connection
    *  instead of guessing. */
   const PROVIDER_TERMINAL = { id: "" };
-  /** Longer than the host's own 30s CLI timeout plus a relay round trip, so in
-   *  every case this covers, the real answer arrives first. */
+  /** Longer than the host's own 30s CLI timeout, so in every case this
+   *  covers, the real answer arrives first. */
   const PROVIDER_PENDING_MS = 45000;
 
   function clearProviderPending() {
@@ -2193,8 +2193,8 @@
     );
 
     // An id-less error belongs to whichever form is open. The host names the
-    // routine it refused; a relay bounce cannot, because it never reached the
-    // host — and only one form is open at a time, so the open one is the asker.
+    // routine it refused when it can. Only one form is open at a time, so the
+    // open one is the asker.
     const errorId = snapshot.routineErrorId || "";
     if (snapshot.routineError && (!errorId || errorId === (draft.id || ""))) {
       const err = document.createElement("div");
@@ -2245,8 +2245,7 @@
    *
    * "a window is open" named nothing the reader controls. It is also not simply
    * "this IDE": routines fire if ANY host on the machine is running, so an
-   * editor-only sentence would be wrong whenever the desktop app is up, and on
-   * a phone — which never runs them — it would be wrong always.
+   * editor-only sentence would be wrong whenever the desktop app is up.
    */
   function routinesHostNote(env) {
     if (env && env.isDesktop) {
@@ -6254,7 +6253,7 @@
     document.addEventListener("keydown", onKey, true);
     // A deferred paint used to wait for exactly one event: the nav select
     // losing focus. But `navMenuOpen` is true whenever that select merely HAS
-    // focus, and picking a category leaves it focused — so on a phone every
+    // focus, and picking a category leaves it focused — so on a narrow layout every
     // frame that arrived afterwards was deferred and nothing flushed it. The
     // page sat on "Loading routines…" (and "Loading Grok connectors…" before
     // that) until the reader touched the screen for an unrelated reason.
@@ -6318,7 +6317,7 @@
         if (nextSnapshot && Object.prototype.hasOwnProperty.call(nextSnapshot, "githubState")) {
           // A githubState frame is not "the terminal finished". Desk sign-in
           // cannot be observed, so keep the Re-check row until the account
-          // is actually connected or a live device-code card takes over.
+          // is actually connected.
           if (githubConnectedNow(snapshot)) githubCliStarted = false;
         }
         // Before the key: the answer this was waiting for is usually IN this

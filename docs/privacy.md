@@ -1,6 +1,6 @@
 # Privacy
 
-**Privacy by design.** The extension sends **no** background data about you or your code — the only thing it reports on its own is an anonymous usage count, with no content and no identity, and you can turn even that off. Data leaves your machine only at your request: **voice input** (you send audio to SpaceXAI to transcribe it), optional **spoken-reply summarization** (you send one reply to SpaceXAI to shorten what is spoken), optional **thumbs on a Grok turn** (you send a rating to SpaceXAI), and **Remote Control** (you link this machine to [AFK Pilot](https://afkpilot.com) so your own devices can reach it) — all disclosed in full below, separate from telemetry.
+**Privacy by design.** The extension sends **no** background data about you or your code — the only thing it reports on its own is an anonymous usage count, with no content and no identity, and you can turn even that off. Data leaves your machine only at your request: **voice input** (you send audio to SpaceXAI to transcribe it), optional **spoken-reply summarization** (you send one reply to SpaceXAI to shorten what is spoken), and optional **thumbs on a Grok turn** (you send a rating to SpaceXAI) — all disclosed in full below, separate from telemetry.
 
 ## Telemetry — what is sent
 
@@ -20,8 +20,7 @@ The event carries:
 | **Connector count** | `connectorCount: 0` … `10` | how many Tier-1 MCP connectors are connected on this machine (a count, never the id list) |
 | **Worktree session** | `worktree: false` | whether this session was started in an isolated git worktree |
 | **Returning install** | `returningInstall: true` / `false` | `true` when this machine already had its anonymous install id stored; `false` on the first `session_start` that also creates that id |
-| **AFK Pilot UI preferences** (when reported by a connected browser) | `remoteFontScale: 140`, `remoteReadRepliesAloud: true` | whether remote users adjust text size or enable spoken replies; omitted when no browser reports them |
-| **Session origin / client device** | `sessionOrigin: remote`, `clientDevice: mobile` | whether the first message came from the desk host or AFK Pilot, and whether that client was a desktop browser or looked touch/mobile; local desk sessions are always desktop |
+| **Session origin / client device** | `sessionOrigin: local`, `clientDevice: desktop` | local editor execution; fields kept for schema compatibility |
 | **Host kind** | `hostKind: vscode` / `desktop` | whether the session ran in a VS Code-compatible editor or the standalone desktop client |
 | **Host app** | `host: Visual Studio Code`, `Cursor`, `Antigravity IDE`, `Grok Build Desktop` | `vscode.env.appName` after a length / character / path check; omitted when missing or malformed. Product names we have not seen yet are forwarded — vocabulary is not allowlisted |
 | **OS name** | `Windows`, `macOS`, `Linux` | coarse platform label (`systemProps.osName`) |
@@ -75,10 +74,9 @@ Separate from telemetry: when **Thumbs feedback to SpaceXAI** is on (`grok.thumb
 Separate from telemetry: **voice input** sends data to one transcription vendor —
 **SpaceXAI** (formerly xAI) or **OpenAI** — but only when you use it. It is
 **opt-in per use**: nothing is captured until you click the microphone button. In
-VS Code and on the desktop, ffmpeg captures locally in the extension host. In AFK
-Pilot, the browser sends ephemeral raw PCM through the linked relay connection to
-that same host; it is never persisted or content-logged. Explicit local batch mode
-writes a temporary WAV and removes it after transcription.
+VS Code and on the desktop, ffmpeg captures locally in the extension host.
+Explicit local batch mode writes a temporary WAV and removes it after
+transcription.
 
 The host then sends the following to the selected backend — SpaceXAI's
 Speech-to-Text endpoint (`api.x.ai/v1/stt`) or OpenAI's realtime transcription
@@ -100,13 +98,11 @@ endpoint (`api.openai.com/v1/realtime`) — to produce the transcript:
   entries from `grok.voiceKeyterms`. These can include project vocabulary, so
   treat the setting as data sent to whichever vendor is selected.
 
-The STT credential stays in the extension host and is never sent to AFK Pilot, the
-browser, or the availability frames the chat and remote clients read. Remote
-microphone audio necessarily crosses AFK Pilot on its way back to your linked
-host; the host-to-vendor STT request is otherwise the same as local voice. Voice
-connection diagnostics log the endpoint and query-parameter names, but redact all
-query values, including language and vocabulary. If you never use voice, none of
-this happens.
+The STT credential stays in the extension host and is never sent to the
+browser or the availability frames the chat reads. Voice connection
+diagnostics log the endpoint and query-parameter names, but redact all query
+values, including language and vocabulary. If you never use voice, none of this
+happens.
 
 **To avoid sending your `grok login` token to SpaceXAI specifically, set a
 dedicated `grok.voiceApiKey`** — or pick the OpenAI backend, which never has a
@@ -122,16 +118,10 @@ hands-free restarts and errors. Setup + details:
 
 ## Read simplified summaries
 
-Separate from both telemetry and Voice input: **Read simplified summaries** is on by default. VS Code and each AFK Pilot browser keep independent preferences; AFK Pilot stores its choice in that browser's local storage. The switch is disabled and forced off whenever that device's **Read replies aloud** switch is off. When both are enabled, the extension sends only the already-cleaned spoken text (after thinking and fenced code have been removed) to SpaceXAI's Responses API. Each spoken reply costs an extra SpaceXAI call and adds network delay; SpaceXAI returns a short, speech-friendly version, and the visible chat reply is never changed.
+Separate from both telemetry and Voice input: **Read simplified summaries** is on by default. The switch is disabled and forced off whenever **Read replies aloud** is off. When both are enabled, the extension sends only the already-cleaned spoken text (after thinking and fenced code have been removed) to SpaceXAI's Responses API. Each spoken reply costs an extra SpaceXAI call and adds network delay; SpaceXAI returns a short, speech-friendly version, and the visible chat reply is never changed.
 
-Each spoken reply costs an extra billed SpaceXAI API call and adds network delay. The request uses `grok-4.3` with reasoning disabled and server-side response storage disabled (`store: false`). It reuses the Voice credential order (`grok.voiceApiKey` → `GROK_VOICE_API_KEY` → `XAI_API_KEY` → the token from `grok login`); the key remains in the extension host and is never sent to the webview or AFK Pilot. For AFK Pilot, the browser sends the cleaned reply through the linked relay to the host, and only the shortened text returns to that requesting browser. Its preference follows the browser tab across conversation switches. With no usable key, or on timeout, refusal, unsupported-host, network, rate-limit, or response failure, the browser speaks the retained original cleaned text instead and ignores any summary that arrives after that fallback.
+Each spoken reply costs an extra billed SpaceXAI API call and adds network delay. The request uses `grok-4.3` with reasoning disabled and server-side response storage disabled (`store: false`). It reuses the Voice credential order (`grok.voiceApiKey` → `GROK_VOICE_API_KEY` → `XAI_API_KEY` → the token from `grok login`); the key remains in the extension host and is never sent to the webview. With no usable key, or on timeout, refusal, unsupported-host, network, rate-limit, or response failure, the browser speaks the retained original cleaned text instead and ignores any summary that arrives after that fallback.
 
 ## MCP connector credentials
 
-Settings → Connectors on this computer. OAuth apps open a browser; those tokens stay in `~/.mcp-auth` (`mcp-remote`), never in this extension's store. GitHub uses a personal access token you paste here. That token is stored in the platform secret store (VS Code Secret Storage; on the desktop app, OS-encrypted `HostSecrets`) and is passed to `mcp-remote` through an environment variable, not the process command line. It is not written to `~/.grok/client-state/`, not shadowed into VS Code `globalState`, and never sent to AFK Pilot or a phone. A remote client can see that GitHub is connected and cannot set, read, or clear the token.
-
-## Remote Control (AFK Pilot)
-
-Also separate from telemetry, and **entirely opt-in**: nothing runs until you explicitly link this machine (gear → *Remote Control* → **Sign in**). Once linked, the extension keeps an outbound connection to the [AFK Pilot](https://afkpilot.com) service so *your own* paired devices (your phone, another browser) can see and drive this workspace's chat. Live messages, replies, tool activity, and generated images flow through the service while a device is linked; a reconnect snapshot contains only the last 10 user messages and the events within that retained window, while the desk webview keeps its full buffer. The machine introduces itself by **hostname + OS** (e.g. "Dell (Windows 11)") — your workspace path is deliberately not part of it.
-
-**Unlink this device** (`AFK Pilot: Unlink this device` in the Command Palette) removes the device token locally and revokes it on your account — after that, nothing connects. If you never link a device, none of this exists. AFK Pilot's own data handling is covered by its policies at [afkpilot.com](https://afkpilot.com).
+Settings → Connectors on this computer. OAuth apps open a browser; those tokens stay in `~/.mcp-auth` (`mcp-remote`), never in this extension's store. GitHub uses a personal access token you paste here. That token is stored in the platform secret store (VS Code Secret Storage; on the desktop app, OS-encrypted `HostSecrets`) and is passed to `mcp-remote` through an environment variable, not the process command line. It is not written to `~/.grok/client-state/` and not shadowed into VS Code `globalState`.

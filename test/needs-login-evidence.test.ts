@@ -25,6 +25,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 
 const source = readFileSync(new URL("../src/sidebar.ts", import.meta.url), "utf8");
+const providerSetupSource = readFileSync(new URL("../src/provider-setup.ts", import.meta.url), "utf8");
 const between = (from: string, to: string) => {
   const start = source.indexOf(from);
   expect(start).toBeGreaterThan(-1);
@@ -37,7 +38,10 @@ describe("only an accepted credential says an account works", () => {
   // A process that started and replayed a transcript has proved that a binary
   // runs and that a file is readable. Neither is the account.
   it("a session that starts is not an account that authenticates", () => {
-    const startSession = between("this.reapPool();", "this.emit(session, { type: \"setBusy\", value: false });");
+    const startSession = between(
+      "this.reapPool(); // enforce the LRU cap",
+      "this.emit(session, { type: \"setBusy\", value: false });",
+    );
     expect(startSession).not.toContain("setProviderNeedsLogin(session.provider, false)");
   });
 
@@ -69,7 +73,11 @@ describe("only an accepted credential says an account works", () => {
   // The explicit probe keeps its clear: it exists to observe a credential and
   // is what makes a completed sign-in visible without sending anything (#146).
   it("the explicit re-probe still gets to say so", () => {
-    const probe = between("private async reprobeProviderCredentials", "private providerCredentialFilePresent");
+    const start = providerSetupSource.indexOf("async reprobeProviderCredentials");
+    expect(start).toBeGreaterThan(-1);
+    const end = providerSetupSource.indexOf("providerCredentialFilePresent", start);
+    expect(end).toBeGreaterThan(start);
+    const probe = providerSetupSource.slice(start, end);
     expect(probe).toContain("this.setProviderNeedsLogin(\"grok\", false)");
   });
 });

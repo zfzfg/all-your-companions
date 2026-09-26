@@ -1,5 +1,5 @@
-/* Shared project-file panel. Keep selectors component-scoped and low-specificity:
-   the relay intentionally loads touch affordances after the vendored media. */
+/* Shared project-file panel. Keep selectors component-scoped and low-specificity
+   so a later stylesheet can still override a touch affordance. */
 body.desk-with-ft:not(.has-rail) { display: flex; flex-direction: column; }
 body.desk-with-ft.has-rail { display: flex; flex-direction: row; align-items: stretch; }
 body.desk-with-ft .top-bar {
@@ -96,7 +96,7 @@ body.desk-rail-collapsed .desk-rail-open-btn { display: inline-flex; }
    panel occupies the same band the docked version does. `--gfp-overlay-top` is
    set by whichever page has a bar above the app; it defaults to 0, which is the
    desktop's behaviour, where the panel docks and this rule never applies.
-   Without it the phone's panel painted over the top bar — including the button
+   Without it the overlay painted over the top bar — including the button
    that had just opened it. */
 .gfp-panel.gfp-overlay {
   position: fixed;
@@ -133,7 +133,7 @@ body.desk-rail-collapsed .desk-rail-open-btn { display: inline-flex; }
   flex: 0 0 auto;
   align-items: stretch;
   min-width: 0;
-  /* 44px everywhere - small tap targets hurt, not only on phones. The
+  /* 44px everywhere - small tap targets hurt. The
      overlay bumps this to match the central header's scale (asserted). */
   min-height: 44px;
   overflow: hidden;
@@ -311,8 +311,8 @@ body.desk-rail-collapsed .desk-rail-open-btn { display: inline-flex; }
 }
 .gfp-tab-icon-only .gfp-tab-name { display: none; }
 .gfp-tab-icon-only .gfp-tab-dirty:empty { display: none; }
-/* Fingers need a wider target than a 16px glyph + padding gives (the relay's
-   touch gate floors tappables at 36px). The planner measures the DOM, so the
+/* Fingers need a wider target than a 16px glyph + padding gives (the touch
+   floor for tappables is 36px). The planner measures the DOM, so the
    wider tabs feed straight back into the A/B/C decision on touch. */
 @media (pointer: coarse) {
   .gfp-tab-icon-only { justify-content: center; min-width: 40px; }
@@ -561,8 +561,7 @@ body.desk-ft-maximized .gfp-panel {
 .gfp-row:focus-visible .gfp-row-actions,
 .gfp-row:has(:focus-visible) .gfp-row-actions,
 .gfp-row.gfp-menu-open .gfp-row-actions { display: flex; }
-/* No actions, no fade. A host that supplies none — the browser client, where
-   Open-in-app and Reveal are host-local and cannot travel — still hovered up a
+/* No actions, no fade. A row whose action slot is empty still hovered up a
    gradient with nothing in it, which reads as a shadow smeared over the row. */
 .gfp-row-actions:empty { display: none !important; }
 
@@ -706,8 +705,7 @@ body.desk-ft-maximized .gfp-panel {
 /* Token palette — VS Code's own Dark+/Light+ token colours, so a file looks the
    way the same file looks in the editor next to it. Dark is the default and
    light overrides on the VS Code body class, matching the inline-diff palette
-   in chat.css. A remote browser without that class gets the dark set, which is
-   also what the relay client's own chrome uses. */
+   in chat.css. Without that class the dark set is the default. */
 :root {
   --hl-com: #6a9955;
   --hl-str: #ce9178;
@@ -803,7 +801,7 @@ body.vscode-light {
 
 .gfp-menu {
   position: fixed;
-  /* Above the phone's full-screen panel overlay (1200) and the rail (1100):
+  /* Above the full-screen panel overlay (1200) and the rail (1100):
      these menus mount on document.body, and at 1000 the chip's dropdown and
      the viewer's More-actions opened UNDERNEATH the overlay — tapping "…"
      on mobile presented nothing (owner-caught, 2026-08-15). */
@@ -921,13 +919,8 @@ body.vscode-light {
    the box is not merely useless there — it invites typing that does nothing. */
 .gfp-panel.gfp-viewing .gfp-filter { display: none; }
 
-/* 899, not 640, and the number is not arbitrary: it is the width at which the
-   browser client stops giving the panel a third column to dock into
-   (`#file-panel-dock` in web/chat.html flips at 900). Below that the panel is an
-   overlay, and an overlay that is neither docked nor full-screen is the worst of
-   both — it floated over the middle of the chat with the rail visible behind it.
-   Tying this to the SAME breakpoint means there is no width where the panel is
-   in between. */
+/* 899, not 640. Below that the panel is an overlay, and an overlay that is
+   neither docked nor full-screen floats over the middle of the chat. */
 @media (max-width: 899px) {
   /* The panel takes the WHOLE screen, host chrome included — the same thing the
      projects rail does. A file browser squeezed under a session header is the
@@ -953,14 +946,14 @@ body.vscode-light {
   /* The per-tab X used to be hidden here ("you leave the panel, you don't
      close files") — that rationale died with the overflow strip: only the
      ACTIVE tab carries an X now, so there is exactly one, and the owner's
-     invariant is that the active tab's X is always visible, phone included.
+     invariant is that the active tab's X is always visible.
      The header's own ✕ still closes the PANEL. */
 }
 
 @media (hover: none) and (pointer: coarse) {
   .gfp-panel { font-size: 15px; }
   .gfp-viewer-name { font-size: 14px; }
-  /* Reader prose — 12px on a phone was the worst text in the app. 1.55 matches .desk-ft-md. */
+  /* Reader prose. 1.55 matches .desk-ft-md. */
   .gfp-markdown { font-size: 15px; line-height: 1.55; }
   /* Mirrors --rail-row-min-height for any mount that loads this file without chat.css. */
   .gfp-row { min-height: 36px; }
@@ -980,7 +973,7 @@ body.vscode-light {
     min-width: 36px;
     min-height: 36px;
   }
-  /* Finger-sized close on the active tab (the relay's tap floor is 36px).
+  /* Finger-sized close on the active tab (the tap floor is 36px).
      Glyph stays 15 — in-tab affordance, not the 20px bar scale. */
   .gfp-tab-close { width: 36px; height: 36px; }
   .gfp-tab-close svg { width: 15px; height: 15px; }

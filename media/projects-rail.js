@@ -1334,13 +1334,11 @@
           onSelect: async () => {
             const ok = await railDialog({
               title: `Hide “${repo.label || leaf(repo.cwd)}”?`,
-              // The row vanishes from every linked device at once, and a phone
-              // editing a file in it loses the route back to its unsaved text.
-              // The desk cannot see whether that is happening, so say it first.
+              // Confirmed before the row leaves the list. Unsaved edits in an
+              // open copy of the project are called out in the body.
               body:
                 "Nothing is deleted — the folder stays on disk and Add project brings "
-                + "it back. Any conversation still working in it ends. If a linked "
-                + "device has this project open, unsaved file edits there are lost.",
+                + "it back. Any conversation still working in it ends.",
               confirmLabel: "Hide",
               danger: true,
             });
@@ -1855,8 +1853,8 @@
   };
 
   // Coming back to the rail is a refresh. Conversations move up the Recent list
-  // whenever a turn finishes — including turns driven from a phone, which this
-  // view never sees — so a rail restored after being hidden is showing an order
+  // whenever a turn finishes — including turns this view was not showing —
+  // so a rail restored after being hidden is showing an order
   // that stopped being true while it was away. `ready` is the same push the view
   // does on boot: catalog, then previews for every project.
   //
@@ -1866,7 +1864,7 @@
     if (document.visibilityState !== "visible") return;
     // THIS is where other projects get re-read, and the only place. Recent ranks
     // by transcript mtime, which moves whenever a turn finishes anywhere —
-    // including turns driven from a phone this view never sees — so a rail
+    // including turns this view was not showing — so a rail
     // coming back from hidden is showing a stale order and has earned the
     // rescan. Dropping the asked-set makes the `repos` answer to this `ready`
     // re-probe every project.

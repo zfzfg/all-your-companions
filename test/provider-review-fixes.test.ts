@@ -9,6 +9,7 @@ import { sessionsDirFor, type SessionListEntry } from "../src/sessions";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const sidebar = fs.readFileSync(path.join(root, "src", "sidebar.ts"), "utf8").replace(/\r\n/g, "\n");
+const providerSetupSrc = fs.readFileSync(path.join(root, "src", "provider-setup.ts"), "utf8").replace(/\r\n/g, "\n");
 
 function methodBody(signature: string): string {
   const start = sidebar.indexOf(signature);
@@ -86,12 +87,15 @@ describe("multi-provider review regressions", () => {
   });
 
   it("routes every sidebar Codex discovery through the class-owned locator", () => {
-    expect(sidebar.match(/locateCodexCli\(/g)).toHaveLength(1);
+    expect(providerSetupSrc.match(/locateCodexCli\(/g)).toHaveLength(1);
     const start = methodBody("private async startSessionBody(");
     expect(start).toContain("this.locateProvider(session.provider)");
     expect(start).not.toContain("locateCodexCli(");
-    const owner = methodBody("private locateProvider(");
-    expect(owner).toContain("managedStorageRoot: this.context.globalStorageUri.fsPath");
+    const owner = providerSetupSrc.slice(
+      providerSetupSrc.indexOf("locateProvider(provider: AcpProvider):"),
+      providerSetupSrc.indexOf("locatedProviders():"),
+    );
+    expect(owner).toContain("managedStorageRoot: this.context?.globalStorageUri?.fsPath");
     expect(owner).toContain("arch: process.arch");
   });
 
@@ -124,10 +128,16 @@ describe("multi-provider review regressions", () => {
   });
 
   it("routes Re-check through the provider credential probe without allowing Codex warm-up failure to escape", () => {
-    const warm = methodBody("private async warmConnectedCodexModels(");
+    const warmStart = providerSetupSrc.indexOf("async warmConnectedCodexModels(");
+    expect(warmStart).toBeGreaterThan(-1);
+    const warmEnd = providerSetupSrc.indexOf("\n  async warmConnectedClaudeModels(", warmStart);
+    const warm = providerSetupSrc.slice(warmStart, warmEnd > 0 ? warmEnd : undefined);
     expect(warm).toContain("await warmCodexModelCache(");
     expect(warm).toContain("model-cache warm-up failed");
-    const reprobe = methodBody("private async reprobeProviderCredentials(");
+    const reprobeStart = providerSetupSrc.indexOf("async reprobeProviderCredentials(");
+    expect(reprobeStart).toBeGreaterThan(-1);
+    const reprobeEnd = providerSetupSrc.indexOf("\n  private providerCredentialFilePresent(", reprobeStart);
+    const reprobe = providerSetupSrc.slice(reprobeStart, reprobeEnd > 0 ? reprobeEnd : undefined);
     expect(reprobe).toContain('if (provider === "codex")');
     expect(reprobe).toContain("this.warmConnectedCodexModels()");
     const recheck = sidebar.slice(sidebar.indexOf('case "recheckConnection":'), sidebar.indexOf('case "logout":'));

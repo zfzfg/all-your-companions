@@ -1,10 +1,10 @@
 // A small, dependency-free syntax highlighter for the file panel.
 //
 // WHY HAND-ROLLED. Everything this renders runs under a strict CSP — the VS
-// Code webview, the Electron app, and the relay's browser client all forbid
-// remote script. A CDN highlighter is simply not loadable, and vendoring
-// Prism/highlight.js would put ~200KB of someone else's parser inside the vsix
-// and inside every phone page load, to colour files people are mostly skimming.
+// Code webview and the Electron app both forbid remote script. A CDN
+// highlighter is simply not loadable, and vendoring Prism/highlight.js would
+// put ~200KB of someone else's parser inside the vsix, to colour files people
+// are mostly skimming.
 // This is deliberately a SCANNABILITY tool, not a compiler: it wants comments
 // to recede and strings/keywords to separate, and it accepts being approximate
 // at the edges (a regex in JS, a nested template literal, SQL inside a string).
@@ -26,7 +26,7 @@
 
   /** Files above this are painted as plain text. The panel already caps a
    *  preview at 2MB; running seven alternating regexes over that much source on
-   *  the UI thread is what a phone would feel, so the highlighter opts out long
+   *  the UI thread is what a long file would feel, so the highlighter opts out long
    *  before the viewer does. */
   const MAX_HIGHLIGHT_BYTES = 256 * 1024;
 

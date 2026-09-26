@@ -272,7 +272,7 @@ describe("nodeGitRunner spawn flags", () => {
 
 describe("sidebar provider choice (source pin)", () => {
   it("uses the local git path when no live Grok session exists, and never starts Grok just to create", () => {
-    const src = readFileSync(join(root, "..", "src", "sidebar.ts"), "utf8");
+    const src = readFileSync(join(root, "..", "src", "worktree-host.ts"), "utf8");
     expect(src).toContain("using local git (linked worktree; clone mode is Grok-only)");
     expect(src).toContain("using Grok RPC (clone mode available)");
     expect(src).toContain("liveGrokWorktreeClient");

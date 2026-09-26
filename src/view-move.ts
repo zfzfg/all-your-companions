@@ -190,8 +190,8 @@ export function withAttempt(
  *
  * Decided by CAPABILITY, never by `env.appName`: any fork adopting the same
  * restriction is handled without naming it, and a Cursor build that lifts the
- * restriction stops triggering this with no change here. Same reasoning as the
- * relay's rule — gate on the thing being present, not on a version or a brand.
+ * restriction stops triggering this with no change here. Gate on the thing
+ * being present, not on a version or a brand.
  *
  * **Target is the PANEL, not the activity bar.** A panel docked right occupies
  * the same screen position and the same tall, narrow shape the chat was designed

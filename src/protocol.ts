@@ -310,8 +310,7 @@ export type HostUiCapabilities = {
    * Whether a generated-image click opens a host editor tab (`openFile`).
    * Opt-out: absent/true = yes (older VS Code hosts never sent this flag but
    * always opened editors); false = no editor — the webview uses the in-app
-   * lightbox instead (desktop). Remote clients force the lightbox regardless
-   * of this flag: the capabilities a phone receives are the desk machine's.
+   * lightbox instead (desktop).
    */
   openInEditor?: boolean;
   /**
@@ -322,14 +321,13 @@ export type HostUiCapabilities = {
   /**
    * Open View-all text and proposed diffs in the shared in-app preview
    * overlay instead of a host editor or bare window. OPT-IN: absent/false
-   * keeps the current path (VS Code tabs, older desktop windows, remote
-   * inline expand). Desktop advertises this; remotes never receive it.
+   * keeps the current path (VS Code tabs, older desktop windows). Desktop
+   * advertises this.
    */
   previewInApp?: boolean;
   /**
    * Gear → Settings opens a VS Code editor-area tab instead of the
-   * in-page overlay. OPT-IN: absent/false = overlay (desktop, remote, older
-   * hosts). Remotes never receive it — a phone cannot open a desk editor tab.
+   * in-page overlay. OPT-IN: absent/false = overlay (desktop, older hosts).
    */
   settingsEditor?: boolean;
   /**
@@ -340,9 +338,8 @@ export type HostUiCapabilities = {
   addProjectFolder?: boolean;
   /** May this surface take a project back OUT of the list?
    *  Separate from addProjectFolder on purpose: that one answers "is the
-   *  native picker here", which is false on every remote, and Hide rode on it
-   *  until create/clone made it true on remotes and produced a control that
-   *  rendered, posted, and was dropped in silence. */
+   *  native picker here", not "may this list drop a row". Tying Hide to the
+   *  picker flag showed a control that posted and was dropped in silence. */
   removeProjectFolder?: boolean;
   /**
    * Add project can also MAKE one: a typed name becomes a folder in the host's
@@ -544,14 +541,12 @@ export type HostMsg =
       /** VS Code language id for command View all, from the host shell dialect.
        *  Absent on older hosts — View all then omits language. */
       commandLanguage?: string;
-      /** Which GUI is on the other end. A phone is looking at neither the
-       *  extension nor the desktop app, so it cannot infer this, and its
-       *  About page has to name what it is connected to. Optional and
-       *  additive: absent means an older host, and the page keeps the local
-       *  panel rather than inventing an answer. */
+      /** Which GUI is on the other end. Optional and additive: absent means
+       *  an older host, and the page keeps the local panel rather than
+       *  inventing an answer. */
       hostKind?: "extension" | "desktop";
-      /** Product telemetry opt-out. Absent on older hosts; remotes treat that
-       *  as unknown and show the explanation without an on/off claim. */
+      /** Product telemetry opt-out. Absent on older hosts; the page treats
+       *  that as unknown and shows the explanation without an on/off claim. */
       telemetryEnabled?: boolean;
       /**
        * Settings → General "Thumbs feedback to SpaceXAI" (`grok.thumbsFeedback`).
@@ -599,11 +594,9 @@ export type HostMsg =
    * the same form with a different field, and splitting them would be two
    * registries to keep in step for no gain.
    *
-   * `root` is the DISPLAY form (`~/Grok Build`), never a home path — the client
-   * only needs it to show where the folder will land, and a remote has no
-   * business learning the desk's home directory. Nothing here carries the
-   * created path either: the repo catalog delivers that, already filtered to
-   * what the receiving client may reach.
+   * `root` is the DISPLAY form (`~/Grok Build`), never a home path — the
+   * webview only needs it to show where the folder will land. Nothing here
+   * carries the created path either: the repo catalog delivers that.
    */
   | {
       type: "projectSetup";
@@ -634,7 +627,7 @@ export type HostMsg =
   | { type: "githubState"; github: GithubState }
   /**
    * One page of repositories for the clone combobox. Fetched on form open,
-   * filtered on the client — a keystroke must not cross the relay.
+   * filtered on the client — a keystroke must not round-trip to the host.
    */
   | { type: "githubRepos"; repos: GithubRepoView[]; truncated?: boolean; error?: string }
   /** Connected agents plus host-observed, view-only version facts. Version
@@ -697,9 +690,8 @@ export type HostMsg =
   /**
    * The Routines page, whole. Carries its own pickers rather than leaning on
    * the chat state, because the VS Code settings TAB loads settings.js and
-   * nothing else — and because `projects` is then filtered by the same
-   * authorization pass that filters `entries`, so a remote cannot be offered a
-   * project it may not reach.
+   * nothing else — and because `projects` is filtered by the same
+   * authorization pass that filters `entries`.
    *
    * `error` is the last save/delete refusal, cleared by the next successful
    * write. Folded in here rather than given its own type, matching `mcpServers`.
@@ -714,8 +706,7 @@ export type HostMsg =
     }
   | { type: "codexInstallProgress"; phase: "downloading" | "verifying" | "installing" | "idle"; receivedBytes?: number; totalBytes?: number; reason?: string }
   /** AP-04 rule/instruction-file panel (Settings → Advanced). Host-local: it
-   *  names the local home directory, so it never crosses to a remote client
-   *  (see OUTBOUND_DISPOSITION). Always the FULL candidate list, never a delta. */
+   *  names the local home directory. Always the FULL candidate list, never a delta. */
   | { type: "ruleFiles"; files: RuleFile[] }
   /**
    * Settings → Agents & Crew, whole (AP-10/AP-12).
@@ -1436,8 +1427,7 @@ export type WebviewMsg =
   // `cwd` names the project to start in, for a client that can SEE which project
   // it is asking for — the VS Code rail's per-project "+". Optional and additive:
   // omitted, the host starts in its own scope exactly as before. The host
-  // resolves it through the catalog and ignores anything unknown, and a remote's
-  // value is discarded outright (`newRemoteSession` starts in that tab's repo).
+  // resolves it through the catalog and ignores anything unknown.
   | { type: "newSession"; cwd?: string }
   | { type: "cancel" }
   | { type: "pickModel" }
@@ -1756,10 +1746,9 @@ export type WebviewMsg =
   /**
    * Make a project folder called `name` inside the host's one project root.
    *
-   * A NAME, never a path — which is the entire reason this can be reachable
-   * from a phone when `addProjectFolder` never could. The client says what to
-   * call it; the host decides where it goes and refuses anything that resolves
-   * outside the root. See src/project-create.ts.
+   * A NAME, never a path. The client says what to call it; the host decides
+   * where it goes and refuses anything that resolves outside the root. See
+   * src/project-create.ts.
    */
   | { type: "createProject"; name: string }
   /**
@@ -1779,22 +1768,19 @@ export type WebviewMsg =
   | { type: "setupGithubCli"; action: "install" | "auth"; surface?: "settings" }
   /**
    * List this account's repositories for the clone combobox. Host runs
-   * `gh repo list --limit 200` once; the client filters. A remote may send
-   * this: the picker is how a phone clones, and it reveals nothing a clone
-   * of those URLs would not already reach.
+   * `gh repo list --limit 200` once; the client filters. It reveals nothing a
+   * clone of those URLs would not already reach.
    */
   | { type: "listGithubRepos" }
   /**
-   * Sign out of GitHub on this machine. Same class as agent `logout`: desk
-   * remotes must not revoke a credential every surface shares; a cloud
-   * machine has no other surface, so CLOUD_DISPOSITION admits it there.
+   * Sign out of GitHub on this machine. Same class as agent `logout`: it
+   * revokes a credential every surface on this machine shares.
    */
   | { type: "githubSignOut" }
   /**
    * Store a pasted GitHub token via `gh auth login --with-token`. The token
    * is a secret: the host must never echo it, log it, or put it in state the
-   * webview can read. A remote may send this — a cloud machine is exactly
-   * where a fine-grained token is the narrower credential to be holding.
+   * webview can read.
    */
   | { type: "githubLoginWithToken"; token: string }
   // `panel-right` / `panel-bottom` dock the panel on that edge before revealing;
@@ -1886,8 +1872,7 @@ export type WebviewMsg =
   | { type: "listSessions"; offset?: number; limit?: number; providerCursor?: { grokOffset: number; codexHighWater?: { updatedAt: number; id: string } }; query?: string }
   // Preview rows for a repo the client is NOT currently in — the projects rail
   // shows a few sessions per repo without switching to it. `cwd` is matched
-  // against the repo catalog and dropped when it isn't a row, so this never
-  // widens what a remote can read beyond the repos it is already shown.
+  // against the repo catalog and dropped when it isn't a row.
   | { type: "listRepoSessions"; cwd: string; limit?: number }
   // `cwd` names the session's own checkout so the host can find it without
   // assuming it lives in the repo the tab happens to be in — pinning is offered
@@ -1895,16 +1880,15 @@ export type WebviewMsg =
   | { type: "toggleSessionPin"; id: string; cwd?: string; pinned: boolean }
   | { type: "selectRepo"; cwd: string }
   | { type: "toggleRepoPin"; cwd: string; pinned: boolean }
-  // Where a project sits in the remote client's rail. Both answers are sent:
+  // Where a project sits in the rail. Both answers are sent:
   // `archived: false` means "hold this one in view", which is a different claim
-  // from never having said anything (see RepoArchiveChoice). Purely a remote
-  // affordance — the VS Code repo picker neither offers it nor reads it.
+  // from never having said anything (see RepoArchiveChoice). The VS Code repo
+  // picker neither offers it nor reads it.
   | { type: "setRepoArchived"; cwd: string; archived: boolean }
   // Folder-icon colour for a project in the conversation rail. `color` is one of
   // the host's palette ids, or "" for none (the default). Host-persisted and
-  // pushed on every `repos` row — same capability pattern as setRepoArchived —
-  // so the choice follows the user to a phone rather than living in browser
-  // localStorage. Purely a rail affordance; the VS Code repo picker ignores it.
+  // pushed on every `repos` row — same capability pattern as setRepoArchived.
+  // The VS Code repo picker ignores it.
   | { type: "setRepoColor"; cwd: string; color: string }
   // cwd is required to reopen a worktree-isolated session (sessions are keyed
   // by cwd on disk). Omitted → host resolves from meta / workspace root.
@@ -1920,8 +1904,8 @@ export type WebviewMsg =
    * Coordinates, deliberately NOT a path. The artefacts live under
    * globalStorage, outside every authorized workspace root, so
    * `resolveChatOpenFilePath` would rightly refuse them — and widening that
-   * gate for this card would hand every renderer (including a remote one) a
-   * way to name a file outside the project. The host builds the path from its
+   * gate for this card would hand the webview a way to name a file outside
+   * the project. The host builds the path from its
    * own run-store root instead, so the only thing crossing the wire is which
    * step of which run.
    */
@@ -1975,7 +1959,7 @@ export type WebviewMsg =
    */
   | { type: "addContextChip"; source: ContextSourceId }
   /** Clicking a diagnostics / terminal chip: bring the panel it stands for on
-   *  screen. Host-local — a remote tab has neither panel to show. */
+   *  screen. Host-local. */
   | { type: "openContextChipSource"; source: ContextSourceId }
   | { type: "pasteImage"; mimeType: string; data: string; previewId?: string }
   | { type: "voiceStart" }
@@ -2027,11 +2011,8 @@ export type WebviewMsg =
   /** Edit-and-resend (#56): rewind past this (latest) user message and hand its
    *  text back to the composer. `text` is the bubble's own cleaned copy text. */
   | { type: "editLastMessage"; userBubbleIndex: number; text: string; totalUserBubbles?: number }
-  /** Reply to `uiConfirmRequest`. Answerable by whichever client was shown the
-   *  dialog, remote included, since 2026-09-01: the confirm moved in-chat in
-   *  2.0.0, so `host-local` here did not buy a more careful check — it meant a
-   *  remote could be shown a dialog it could never answer, leaving the rewind
-   *  pending forever. See remote-policy.ts on rewindSession. */
+  /** Reply to `uiConfirmRequest`. The confirm lives in the chat, so the
+   *  webview that was shown the dialog is the one that answers it. */
   | { type: "uiConfirmAnswer"; id: string; ok: boolean }
   // Workflow card controls (P2-10): pause / resume / stop by display name.
   | { type: "workflowControl"; action: "pause" | "resume" | "stop"; displayName: string }
@@ -2039,8 +2020,7 @@ export type WebviewMsg =
   | { type: "refreshContextDetails" }
   /** The context popover opened: re-read account capacity (60 s minimum). */
   | { type: "refreshSubscriptionUsage" }
-  /** Open the desktop release page from the update notice. Host-local — a phone
-   *  cannot update the desk. */
+  /** Open the release page from the update notice. Host-local. */
   | { type: "openUpdateRelease"; url: string }
   /** Quit and install a downloaded desktop update. Host-local. */
   | { type: "restartToUpdate" };

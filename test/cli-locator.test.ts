@@ -73,15 +73,19 @@ describe("locateGrokCli", () => {
 
   it("returns undefined when nothing found", () => {
     const originalPath = process.env.PATH;
+    const originalPathWin = process.env.Path;
     const originalHome = process.env.HOME;
     const originalUserProfile = process.env.USERPROFILE;
     process.env.PATH = "";
+    process.env.Path = "";
     process.env.HOME = tmpDir;
     process.env.USERPROFILE = tmpDir;
     try {
       expect(locateGrokCli("")).toBeUndefined();
     } finally {
       process.env.PATH = originalPath;
+      if (originalPathWin === undefined) delete process.env.Path;
+      else process.env.Path = originalPathWin;
       if (originalHome) process.env.HOME = originalHome;
       if (originalUserProfile) process.env.USERPROFILE = originalUserProfile;
     }

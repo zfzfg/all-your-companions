@@ -450,8 +450,8 @@ export function routineSessionName(title: string): string {
 
 /* ------------------------------------------------------------------- wire */
 
-/** A project the form may target. Built from the repo catalog, and on a remote
- *  filtered to what that connection is authorized for. */
+/** A project the form may target. Built from the repo catalog, filtered to
+ *  what this session is authorized for. */
 export interface RoutineProjectOption {
   cwd: string;
   label: string;
@@ -462,9 +462,9 @@ export interface RoutineProjectOption {
    * whichever model the catalog happened to list first.
    */
   defaultProvider?: AcpProvider;
-  /** Archived projects stay selectable at the desk — the rail hides them, and
-   *  a routine is not the rail. They never reach a remote at all, because the
-   *  authorized set already excludes them. */
+  /** Archived projects stay selectable here — the rail hides them, and a
+   *  routine is not the rail. The authorized set already excludes projects
+   *  this session may not reach. */
   archived?: boolean;
 }
 

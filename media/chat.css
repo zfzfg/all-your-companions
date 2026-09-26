@@ -40,12 +40,10 @@
 }
 
 /* The VS Code panel is a narrow column, and the same gutter that reads as
-   comfortable across a browser tab eats a visible slice of every line there ÔÇö
-   the two surfaces want different numbers, not one compromise. `desk` is set on
-   the body by getHtml and never by the browser client, so the client keeps the
-   roomier value (and its own phone bump on top of it). The conversation name
-   loses its chip inset here too, so it starts on the same line as the messages
-   below it rather than floating in from the left. */
+   comfortable across a wide window eats a visible slice of every line there.
+   `desk` is set on the body by getHtml. The conversation name loses its chip
+   inset here too, so it starts on the same line as the messages below it
+   rather than floating in from the left. */
 body.desk { --pad: 4px; }
 body.desk .top-bar { padding-left: var(--pad); padding-right: var(--pad); }
 body.desk .session-name-chip { padding-left: 0; }
@@ -88,10 +86,9 @@ html, body {
   background: var(--vscode-sideBar-background);
 }
 
-/* Touch keeps 16px, which is the whole point of scoping this to the fallback:
-   the phone pass raised prose deliberately, and inputs want 16px because iOS
-   Safari zoom-lurches on focus below it. A host-defined token still wins here,
-   so a touch-screen VS Code is unaffected — only a phone browser sees this. */
+/* Touch keeps 16px on the fallback: inputs want 16px because iOS Safari
+   zoom-lurches on focus below it. A host-defined token still wins, so a
+   touch-screen VS Code that sets --vscode-font-size is unaffected. */
 @media (hover: none), (pointer: coarse) {
   html, body {
     font-size: var(--vscode-font-size, 16px);
@@ -102,10 +99,8 @@ html {
   height: 100%;
 }
 
-/* Desktop + VS Code only (`body.desk` comes from getHtml; the phone client
-   never sets it): pin the document scroller so a taller-than-window first
-   frame cannot stick. The phone page keeps document overflow — URL-bar
-   hide-on-scroll and keyboard pans rely on it. */
+/* `body.desk` comes from getHtml. Pin the document scroller so a
+   taller-than-window first frame cannot stick. */
 html:has(body.desk) {
   overflow: hidden;
 }
@@ -183,8 +178,8 @@ body.has-rail .app-main {
   /* Fixed default, not viewport-relative. `min(260px, 38vw)` meant that until
      you dragged the rail its width tracked the window: widening the window
      widened the rail, and the extra space went there instead of to the
-     conversation. The vw term was protecting narrow viewports, which the phone
-     drawer rules in the relay page already handle on their own. */
+     conversation. Narrow viewports are handled in JS (distributeSidePanelWidths),
+     not by tying the default width to the viewport. */
   width: var(--rail-width, 260px);
   /* Rigid ÔÇö see the desktop file panel for why a shrinkable panel makes drags
      fight each other. A narrowing window is handled in JS instead
@@ -211,9 +206,8 @@ body.has-rail .app-main {
    border. It occupies exactly the 1px a static border would, paints nothing of
    its own, and only changes colour on hover/drag. The grab area is widened
    invisibly by ::after so a 1px target is still easy to hit.
-   Mounted next to the rail by chat.js, so both rail hosts get it by
-   construction. The phone drawer hides it ÔÇö see web/chat.html, which owns the
-   drawer breakpoint. */
+   Mounted next to the rail by chat.js, so every rail host gets it by
+   construction. */
 .rail-resizer {
   display: none;
   box-sizing: border-box;
@@ -221,10 +215,8 @@ body.has-rail .app-main {
   width: 1px;
   /* Sits ON the rail's own border rather than next to it: 1px wide pulled 1px
      left contributes zero width, so the layout is byte-identical to having no
-     handle at all. Deliberately NOT `border-right: none` on the rail ÔÇö that
-     rule would also strip the phone drawer's border through the cascade, and
-     chat.css loads after the pages' own styles. Adding no width beats
-     subtracting one elsewhere. */
+     handle at all. Deliberately NOT `border-right: none` on the rail: adding
+     no width beats subtracting a border the rail still paints. */
   margin: 0 0 0 -1px;
   align-self: stretch;
   padding: 0;
@@ -642,8 +634,7 @@ body.rail-resizing * {
   z-index: 2;
   display: flex;
   flex: none;
-  /* 4px, the file panel's value. At 1px the + and the ... read as one blob,
-     which is what the owner saw on a phone. */
+  /* 4px, the file panel's value. At 1px the + and the ... read as one blob. */
   gap: 4px;
   opacity: 0;
   pointer-events: none;
@@ -693,11 +684,11 @@ body.rail-resizing * {
     var(--vscode-list-activeSelectionBackground) 28%
   );
 }
-/* Conversation overflow (⋯) in the top-right cluster: Remote, History, New, ⋯,
+/* Conversation overflow (⋯) in the top-right cluster: History, New, ⋯,
    then (desktop only) a separator + Panel. Only rail hosts render the slot —
    VS Code has no session header, so its gear still carries the Session group.
-   The separator lives on the Panel toggle (desktop inject), not here: a remote
-   client has no panel, so a trailing rule after ⋯ would be a dangling divider. */
+   The separator lives on the Panel toggle (desktop inject), not here: a
+   trailing rule after ⋯ would be a dangling divider where there is no panel. */
 #session-head-actions {
   display: flex;
   flex: 0 0 auto;
@@ -706,7 +697,7 @@ body.rail-resizing * {
      controls above the messages touched while the explorer's breathed. */
   gap: 4px;
 }
-/* DESKTOP + REMOTE TIER: 28x28 box, 16px glyph, 4px apart.
+/* 28x28 box, 16px glyph, 4px apart.
    Two in-row controls sat side by side in one app at wildly different sizes —
    the file explorer's row was a 20px glyph, the rail's was 13px, and the owner
    asked why. They are the same kind of control and now read as one. The
@@ -746,8 +737,8 @@ body.rail-resizing * {
 }
 .rail-add-project-wide:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
 .rail-add-project-wide-plus { font-size: 14px; line-height: 1; opacity: 0.9; }
-/* The 36px floor every other control here uses; 44 on a phone, where this is
-   the primary way to add a project. */
+/* The 36px floor every other control here uses; 44 on a coarse pointer, where
+   this is the primary way to add a project. */
 @media (hover: none), (pointer: coarse) {
   .rail-add-project-wide { min-height: 44px; font-size: 13.5px; }
 }
@@ -768,7 +759,6 @@ body.rail-resizing * {
 .rail-action-btn svg { width: 16px; height: 16px; }
 /* Header ⋯ is a bar-icon (20×20 in an invisible 28 box). Rail *rows* keep
    the 13px in-row affordance above — they are not this primitive. */
-#session-head .rail-action-btn,
 #session-head-actions .rail-action-btn,
 #vscode-session-actions .rail-action-btn {
   width: 28px;
@@ -777,19 +767,10 @@ body.rail-resizing * {
   min-height: 28px;
   border-radius: 8px;
 }
-#session-head .rail-action-btn svg,
 #session-head-actions .rail-action-btn svg,
 #vscode-session-actions .rail-action-btn svg { width: 16px; height: 16px; }
-/* The rest of that same bar. On the remote surface session-history and
-   session-new are `.icon-btn`, not `.rail-action-btn`, so sizing by CLASS left
-   two 20px glyphs beside a 16px one INSIDE ONE BAR — a worse mismatch than the
-   one being fixed, and the relay's own screens gate is what caught it. The bar
-   is a region, so it is scoped as one. The composer's `.icon-btn` keeps 20:
-   different bar, opposite end of the screen. */
-#session-head .icon-btn svg { width: 16px; height: 16px; }
-/* The same bar on Desktop and VS Code, which build a different document:
-   `<header class="top-bar">` with #history-btn / #new-btn rather than
-   #session-head with #session-history / #session-new. */
+/* The same bar on Desktop and VS Code: `<header class="top-bar">` with
+   #history-btn / #new-btn. */
 .top-bar .icon-btn svg,
 .top-bar .rail-icon-btn svg,
 .desk-rail-open-btn svg { width: 16px; height: 16px; }
@@ -1012,27 +993,23 @@ body.desk:not(.desk-with-ft) .rail-action-btn { width: 24px; height: 24px; }
     margin: -4px;
   }
   /* GLYPH size, not the tap target — the tap target was already 36px here and
-     that was never the complaint. The owner, on a phone: "why size is smaller
-     than in files explorer?" Because these were 13px and 12px against the file
+     that was never the complaint. These were 13px and 12px against the file
      panel's 20px, so a 36px button held an icon under two thirds its size and
      read as a different, lesser control.
-     20px is not a new number: `#session-head .rail-action-btn svg` in chat.css
-     has used it all along, and it is exactly what .gfp-icon-button uses. In a
-     36px box it leaves 8px of breathing room each side. */
+     20px is what .gfp-icon-button uses. In a 36px box it leaves 8px of
+     breathing room each side. */
   .rail-action-btn svg,
   .rail-session-actions .rail-action-btn svg,
   .rail-repo-actions .rail-action-btn svg,
-  #session-head .icon-btn svg,
   .top-bar .icon-btn svg,
   .rail-icon-btn svg,
   /* Id-scoped, because the desk rules for these are id-scoped too and a
      class-only selector in here loses the specificity contest silently — the
      tablet render kept a lone 16px glyph in a bar of 20s. */
-  #session-head .rail-action-btn svg,
   #session-head-actions .rail-action-btn svg,
   #vscode-session-actions .rail-action-btn svg { width: 20px; height: 20px; }
   .top-bar { gap: 0 6px; }
-  /* 6px on a phone: the desktop's 4px between two 36px targets still reads as
+  /* 6px on a coarse pointer: 4px between two 36px targets still reads as
      one blob at arm's length. */
   .rail-repo-actions,
   .rail-session-actions { gap: 6px; }
@@ -1191,8 +1168,7 @@ a:hover {
    .icon-btn and the tallest thing in the chip's first row, so removing it let
    the row collapse to the input's 21px and the top bar lost 7px on every
    rename. `visibility` keeps the space and still takes the button out of the
-   tab order and the a11y tree, which `opacity: 0` alone would not. Applies to
-   the browser client's pencil too — same class, added by the same code path. */
+   tab order and the a11y tree, which `opacity: 0` alone would not. */
 .session-name-edit-editing { visibility: hidden; }
 /* The chip is content-sized (`flex: 0 1 auto`), so while it holds the input the
    input's `width: 100%` would resolve against a parent that has already
@@ -1214,17 +1190,11 @@ a:hover {
   font: inherit;
   font-size: 12px;
 }
-/* The browser client owns its header's layout and type ÔÇö it only borrows the
-   reveal behaviour, so the pencil appears there on the same terms as here. */
-.session-name-edit-remote { opacity: 0; }
-#session-head:hover .session-name-edit-remote,
-.session-name-edit-remote:focus-visible { opacity: 1; }
 /* A touch screen has no hover, so a pencil that waits for one is a control that
    never exists. Tapping the name is the rename gesture there; the pencil is
    shown outright so it reads as one. */
 @media (hover: none) {
-  .session-name-edit,
-  .session-name-edit-remote { opacity: 1; }
+  .session-name-edit { opacity: 1; }
 }
 /* ---- toolbar popovers ---- */
 
@@ -1240,7 +1210,7 @@ a:hover {
   z-index: 50;
 }
 /* Shrink-to-fit otherwise takes the fineprint as one line (Claude/Codex
-   "Last prompt" copy is long). 350px still reads on the phone profile. */
+   "Last prompt" copy is long). 350px still reads in a narrow column. */
 #context-popover {
   max-width: 350px;
   box-sizing: border-box;
@@ -1338,7 +1308,7 @@ a:hover {
 
 /* ---- find in conversation (#99) ----
    Sits under the top bar and pushes the transcript down. Not an overlay:
-   on a phone an overlay covers the hits. Highlight paint uses the CSS
+   on a narrow column an overlay covers the hits. Highlight paint uses the CSS
    Custom Highlight API (no <mark> wrappers — those would re-layout a
    multi-megabyte transcript and detach tool-row handlers). */
 .find-bar {
@@ -1458,12 +1428,6 @@ a:hover {
 body.thinking-hidden .msg.thinking.find-reveal { display: block; }
 
 .welcome {
-  /* The RELAY's half of the pair above, and it cannot be folded into it: the
-     web client hides `.welcome` rather than the body in its own inline
-     critical style (web/chat.html), and an element's own `visibility: hidden`
-     is not undone by making an ancestor visible. Deleting this line leaves
-     the phone's welcome screen invisible forever -- with nothing in this repo
-     to notice, which is why grok-remote pins the pair in a test of its own. */
   visibility: visible;
   display: flex;
   flex-direction: column;
@@ -1637,8 +1601,7 @@ body.thinking-hidden .msg.thinking.find-reveal { display: block; }
 }
 /* A row, not a block with a button floated on top of it. As a block the code
    sat 7px high in its own field and the copy button — absolutely positioned at
-   top: 4px — was 2px off centre; both were measured on a phone (owner,
-   2026-08-31). Centring is structural here: the field centres its children,
+   top: 4px — was 2px off centre. Centring is structural here: the field centres its children,
    so a taller code string or a different icon size cannot re-break it. */
 .onb-cmd {
   display: flex;
@@ -1657,17 +1620,6 @@ body.thinking-hidden .msg.thinking.find-reveal { display: block; }
   padding: 0;
   color: var(--vscode-foreground);
   font-size: 12px;
-}
-.onb-code-input {
-  flex: 1 1 auto;
-  min-width: 0;
-  border: none;
-  background: transparent;
-  color: var(--vscode-foreground);
-  font-family: inherit;
-  font-size: 12px;
-  padding: 4px 0;
-  outline: none;
 }
 .onb-copy {
   /* A flex item beside the code, pushed to the end — the absolute position it
@@ -1706,8 +1658,8 @@ body.thinking-hidden .msg.thinking.find-reveal { display: block; }
   font-size: 12px;
   cursor: pointer;
   /* Centre the label in the box rather than leaving it to line-height: these
-     are <a> and <button> with the same class, and on a phone the text sat
-     visibly high in both (owner, 2026-08-31). */
+     are <a> and <button> with the same class, and line-height left the text
+     visibly high in both. */
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1725,20 +1677,10 @@ body.thinking-hidden .msg.thinking.find-reveal { display: block; }
   color: inherit;
 }
 .onb-action:hover { background: var(--vscode-button-hoverBackground); }
-.onb-code-entry .onb-action {
-  flex: 0 0 auto;
-  min-height: 28px;
-  padding: 4px 10px;
-}
-/* The remote sign-in panel's "Open the sign-in page" is a real link, because on
-   a phone it has to open a real browser tab. It still has to look like the
-   buttons above and below it.
-
+/* An <a class="onb-action"> has to look like the buttons beside it.
    `color` is repeated here deliberately, not inherited from .onb-action: the
    global `a { color: var(--vscode-textLink-foreground) }` above wins over the
-   class, and this shipped for one screenshot as link-blue text on the blue
-   button fill — 1.12:1, an effectively blank button that every DOM assertion
-   was happy with. scripts/remote-signin-check.mjs now measures the contrast. */
+   class, and link-blue text on the blue button fill is about 1.12:1. */
 a.onb-action {
   /* flex, not block: this element has the same class as the <button> beside
      it and must look identical. `display: block` here beat the class's own
@@ -3231,10 +3173,10 @@ blockquote {
    VS Code themes define toolbar-hoverBackground as a translucent wash (Dark+:
    rgba(90,93,94,0.31)) meant to tint an opaque toolbar — used as the whole
    background it left this button see-through, with the conversation reading
-   through the label. The browser client happens to define the same token as
-   opaque hex, which is why it only ever looked wrong on the desk. */
+   through the label. Some themes define that token as opaque hex and some as
+   a wash, which is why the tint has to be layered over the button's own fill. */
 /* Hover only where a pointer can actually LEAVE. A tap applies :hover and
-   leaves it applied until something else is tapped, so on a phone the circle
+   leaves it applied until something else is tapped, so on a touch screen the circle
    stayed lit after every jump - reported as "it stays focused after the
    click". The scroll pill has always had the same rule and nobody ever saw it,
    because that one disappears the instant it is used; this one is built to be
@@ -3312,8 +3254,8 @@ blockquote {
    VS Code themes define toolbar-hoverBackground as a translucent wash (Dark+:
    rgba(90,93,94,0.31)) meant to tint an opaque toolbar ÔÇö used as the whole
    background it left this button see-through, with the conversation reading
-   through the label. The browser client happens to define the same token as
-   opaque hex, which is why it only ever looked wrong on the desk. */
+   through the label. Some themes define that token as opaque hex and some as
+   a wash, which is why the tint has to be layered over the button's own fill. */
 .scroll-bottom-btn:hover {
   background:
     linear-gradient(var(--vscode-toolbar-hoverBackground), var(--vscode-toolbar-hoverBackground)),
@@ -3552,8 +3494,7 @@ textarea#input {
 .icon-btn[hidden] { display: none; }
 /* Exception: the rename pencil is an inline title adornment — glyph 16, not
    the 20px bar scale — but it still uses the color-hover / no-box rules. */
-.session-name-edit svg,
-#session-head-edit svg { width: 16px; height: 16px; }
+.session-name-edit svg { width: 16px; height: 16px; }
 .icon-btn:hover {
   color: var(--vscode-foreground);
   background: transparent;
@@ -3842,7 +3783,7 @@ textarea#input {
 }
 /* The label ellipsizes and .attachment-remove is flex:0 0 auto, but the leading
    icon had neither ÔÇö so in a chip too narrow for its filename (a long name in
-   the phone client, or a narrow sidebar) the SVG was the only child left able
+   a narrow sidebar) the SVG was the only child left able
    to absorb the squeeze, and it rendered ~6px wide instead of 11. Sizing it
    explicitly keeps the icon a constant while the text does the shrinking. */
 .attachment > svg {
@@ -4021,7 +3962,7 @@ textarea#input {
   left: var(--pad);
   /* Hug the widest row instead of spanning the composer — on a wide desktop
      window an edge-to-edge box over three short rows read as broken. Narrow
-     composers (phone) still get the full width via the min() cap. */
+     composers still get the full width via the min() cap. */
   width: max-content;
   max-width: min(480px, calc(100% - var(--pad) * 2));
   max-height: 200px;
@@ -4520,10 +4461,8 @@ body.session-superseded .msg-edit-btn {
   opacity: 0.35;
   pointer-events: none;
 }
-/* On a phone this card IS the screen's answer to "why can't I type", and that
-   is where it was too small to register. It lives here rather than in the
-   relay's own stylesheet because chat.css loads last and would otherwise win
-   on load order — the override never applied at all when it was over there. */
+/* On a coarse pointer this card is the screen's answer to "why can't I type",
+   and that is where it was too small to register. */
 @media (hover: none) and (pointer: coarse) {
   .session-superseded-banner { padding: 16px; gap: 10px; }
   .session-superseded-title { font-size: 17px; }
@@ -4895,7 +4834,7 @@ mjx-container[display="true"] {
 
 /* Touch devices have no hover to reveal these corner overlays, so the
    copy/download actions on images, math, and mermaid diagrams were unreachable
-   by tap (remote phone clients especially). Show them persistently wherever a
+   by tap. Show them persistently wherever a
    pointer can't hover. */
 @media (hover: none) {
   .generated-image .generated-media-actions,
@@ -4907,7 +4846,7 @@ mjx-container[display="true"] {
 
 /* ---------- in-page confirm dialog (uiConfirm) ---------- */
 /* Replaces native host modals for chat-triggered destructive actions so they
-   confirm identically in the VS Code webview and the browser client. */
+   confirm identically in the webview. */
 .confirm-overlay {
   position: fixed;
   inset: 0;
@@ -4923,33 +4862,6 @@ mjx-container[display="true"] {
   padding: 24px;
   background: rgba(0, 0, 0, 0.45);
 }
-/* The connect wizard reuses the dialog chrome but carries far more than a
-   confirmation: a heading, a security note, a code to read across the room,
-   two links and a set of steps. At the confirm dialog's 340px that stack ran
-   to 600px tall and the code wrapped awkwardly. Wider, and scrollable rather
-   than clipped on a short phone screen. */
-
-.confirm-panel.connect-wizard-panel {
-  width: min(460px, 100%);
-  max-height: min(88vh, 760px);
-  display: flex;
-  flex-direction: column;
-}
-.connect-wizard-body {
-  overflow-y: auto;
-  min-height: 0;
-}
-/* The panel is the container now, so the card inside it stops imposing the
-   width and the top margin it needs when it sits in the welcome screen —
-   widening the dialog did nothing while this capped the content at 320px. */
-.connect-wizard-body .onb {
-  max-width: none;
-  margin-top: 0;
-}
-/* The panel's own actions already read as the flow's controls; the dialog's
-   footer button is the way OUT of the window, so it stays quiet and last. */
-.connect-wizard-panel .confirm-actions { margin-top: 10px; }
-
 .confirm-panel {
   background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
   border: 1px solid var(--vscode-editorWidget-border);
@@ -5171,62 +5083,6 @@ body.vscode-light .preview-overlay {
   font-size: 12px;
   line-height: 1.45;
 }
-.remote-explainer-panel {
-  position: relative;
-}
-.remote-explainer-close {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  padding: 0;
-  border: 0;
-  border-radius: 4px;
-  color: var(--vscode-descriptionForeground);
-  background: transparent;
-  cursor: pointer;
-}
-.remote-explainer-close:hover {
-  color: var(--vscode-foreground);
-  background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground));
-}
-.remote-explainer-body ol {
-  margin: 10px 0 0;
-  padding-left: 22px;
-}
-.remote-explainer-body li + li {
-  margin-top: 7px;
-}
-.remote-explainer-body p {
-  margin: 12px 0 0;
-}
-.remote-url-copy {
-  display: inline;
-  padding: 0;
-  border: 0;
-  color: var(--vscode-textLink-foreground);
-  background: transparent;
-  font: inherit;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  cursor: pointer;
-}
-.remote-url-copy:hover {
-  color: var(--vscode-textLink-activeForeground, var(--vscode-textLink-foreground));
-}
-.remote-url-copy.copied {
-  color: var(--vscode-charts-green, #4ec9b0);
-}
-.remote-url-copied {
-  margin-left: 5px;
-  color: var(--vscode-charts-green, #4ec9b0);
-  font-size: 11px;
-}
-
 /* Touch devices have no hover: keep the history-row actions visible. Besides
    discoverability, iOS Safari treats a tap on an element whose :hover REVEALS
    content as "apply hover" and swallows the click ÔÇö the first tap on a session
@@ -5235,8 +5091,8 @@ body.vscode-light .preview-overlay {
   .history-row-actions { opacity: 1; }
 }
 
-/* Touch devices: the 28px control row was drawn for a mouse ÔÇö give phones
-   real tap targets (36px). Glyphs are already 20 on every resolution; this
+/* Touch devices: the 28px control row was drawn for a mouse. Give coarse
+   pointers real tap targets (36px). Glyphs are already 20 on every resolution; this
    only grows the invisible hit box. Scoped to hover-less/coarse pointers,
    so desktop VS Code and desktop browsers keep the dense layout. */
 @media (hover: none), (pointer: coarse) {
@@ -5250,8 +5106,8 @@ body.vscode-light .preview-overlay {
 
 /* Touch devices, continued: the composer's mode button glyph and the context
    donut were sized for the desktop's 28px row ÔÇö scale them with the 36px
-   targets, and drop the donut's % label (the arc alone reads fine at phone
-   sizes; the number is in the context popover). */
+   targets, and drop the donut's % label (the arc alone reads fine at that
+   size; the number is in the context popover). */
 @media (hover: none), (pointer: coarse) {
   .toolbar-btn svg { width: 18px; height: 18px; }
   .context-donut svg { width: 22px; height: 22px; }
@@ -5273,20 +5129,7 @@ body.vscode-light .preview-overlay {
   .card-actions button.danger { margin-top: 16px; }
 }
 
-.remote-font-row {
-  cursor: default;
-  gap: 8px;
-}
-.remote-font-row label { flex: none; }
-.remote-font-row input { min-width: 80px; flex: 1; }
-.remote-font-row output {
-  min-width: 38px;
-  color: var(--vscode-descriptionForeground);
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-
-/* Phones: "Last turn" is billing diagnostics ÔÇö hide it in the donut's context
+/* "Last turn" is billing diagnostics — hide it on a coarse pointer in the donut's context
    popover (the Session total above it is the number that matters). */
 @media (hover: none), (pointer: coarse) {
   #context-popover .popover-section-toggle,
@@ -5320,7 +5163,7 @@ body.vscode-light .preview-overlay {
    explicit `width`/`height` in the cascade — so this is a floor over the whole
    set instead of six separate edits that the next new button would not inherit.
 
-   36 is the number the owner picked after comparing against real phone apps.
+   36 is the number picked for a finger on a dense tool.
    It clears the WCAG 2.5.8 AA floor (24px) with room; it is deliberately below
    Apple's 44 and Material's 48, which measured as excessive for a dense
    developer tool. `npm run e2e:screens` asserts it from a real browser. */
@@ -5337,7 +5180,6 @@ body.vscode-light .preview-overlay {
   }
   /* Header ⋯ is ID-scoped at 28 for the mouse layout; that specificity
      beats the class floor above, so restating it here keeps the tap target. */
-  #session-head .rail-action-btn,
   #session-head-actions .rail-action-btn,
   #vscode-session-actions .rail-action-btn {
     width: 36px;
@@ -5362,11 +5204,10 @@ body.vscode-light .preview-overlay {
 }
 
 
-/* Mobile overlay: the rail's top row rides the central header's scale — the
-   8px margins read cramped beside the chat's own 51px header row (owner,
-   2026-08-15; the relay's phone gate asserts the parity). Lives HERE, not in
-   projects-rail.css: that file styles the VS Code sidebar view, whose webview
-   viewport is always narrow, so a max-width media query would always fire. */
+/* Narrow overlay: the rail's top row rides the central header's scale — the
+   8px margins read cramped beside the chat's own 51px header row. Lives HERE,
+   not in projects-rail.css: that file styles the VS Code sidebar view, whose
+   webview viewport is always narrow, so a max-width media query would always fire. */
 @media (max-width: 899px) {
   .rail-search-wrap { margin: 12px 12px; }
   .rail-search { padding-top: 9px; padding-bottom: 9px; }
@@ -5376,7 +5217,7 @@ body.vscode-light .preview-overlay {
    order decides): the 16px search input (the iOS no-zoom floor) is taller than
    the 13px input those 12px margins were sized for, and the row measured 59px
    against the central header's 51. Trim the block margins by the difference;
-   inline margins stay 12 for edge alignment. The phone gate asserts the parity. */
+   inline margins stay 12 for edge alignment. */
 @media (hover: none) and (pointer: coarse) and (max-width: 899px) {
   .rail-search-wrap { margin-block: 8px; }
 }
@@ -5457,7 +5298,7 @@ body.vscode-light .preview-overlay {
   display: flex;
   flex-direction: column;
   /* Five compact rows. Fixed, not max, so filtering cannot change the
-     dialog's height. flex-shrink lets a short phone keep Clone on screen. */
+     dialog's height. flex-shrink lets a short viewport keep Clone on screen. */
   height: 13.75rem;
   max-height: 13.75rem;
   min-height: 5.5rem;

@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const sidebar = readFileSync(new URL("../src/sidebar.ts", import.meta.url), "utf8");
+const reviewHost = readFileSync(new URL("../src/review-host.ts", import.meta.url), "utf8");
 const session = readFileSync(new URL("../src/session.ts", import.meta.url), "utf8");
 const primer = readFileSync(new URL("../src/grok-primer.ts", import.meta.url), "utf8");
 const acp = readFileSync(new URL("../src/acp.ts", import.meta.url), "utf8");
@@ -13,9 +14,9 @@ const abandonStart = handleExitPlan.indexOf('    if (verdict === "abandoned") {'
 const abandonEnd = handleExitPlan.indexOf("    // Calling the async method", abandonStart);
 const abandonVerdict = handleExitPlan.slice(abandonStart, abandonEnd);
 const nativeVerdicts = handleExitPlan.slice(abandonEnd);
-const postStart = sidebar.indexOf("  private async postExitPlanRequest(");
-const postEnd = sidebar.indexOf("  private async withPlanReviewPaths", postStart);
-const postExitPlanRequest = sidebar.slice(postStart, postEnd);
+const postStart = reviewHost.indexOf("async postExitPlanRequest(");
+const postEnd = reviewHost.indexOf("async withPlanReviewPaths", postStart);
+const postExitPlanRequest = reviewHost.slice(postStart, postEnd);
 const sessionStart = sidebar.indexOf("  private async startSession(");
 const sessionStartEnd = sidebar.indexOf("    // Worktree sessions pin cwd", sessionStart);
 const startSessionSetup = sidebar.slice(sessionStart, sessionStartEnd);

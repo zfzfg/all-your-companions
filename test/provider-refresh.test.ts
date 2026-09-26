@@ -179,14 +179,14 @@ describe("Settings → Providers refresh", () => {
  */
 describe("Grok credential probe does not leave a project-catalog shell", () => {
   const src = readFileSync(
-    path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "sidebar.ts"),
+    path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "provider-setup.ts"),
     "utf8",
   );
 
   const reprobe = (() => {
-    const start = src.indexOf("private async reprobeProviderCredentials(");
+    const start = src.indexOf("async reprobeProviderCredentials(");
     expect(start).toBeGreaterThan(-1);
-    const end = src.indexOf("\n  private ", start + 1);
+    const end = src.indexOf("\n  providerCredentialFilePresent(", start + 1);
     return src.slice(start, end);
   })();
 

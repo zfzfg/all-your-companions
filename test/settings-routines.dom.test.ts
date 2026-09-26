@@ -425,6 +425,10 @@ describe("the surfaces this page has to reach", () => {
     fileURLToPath(new URL("../src/sidebar.ts", import.meta.url)),
     "utf8",
   );
+  const htmlSrc = readFileSync(
+    fileURLToPath(new URL("../src/webview-html.ts", import.meta.url)),
+    "utf8",
+  );
 
   function block(marker: string, terminator = "]);"): string {
     const start = sidebarSrc.indexOf(marker);
@@ -440,15 +444,15 @@ describe("the surfaces this page has to reach", () => {
     // inline listener; a type missing there is received and silently dropped, so
     // the page sat on "Loading routines…" for ever. Pre-existing — before the
     // loading state it defaulted to [] and merely lied about having none.
-    const start = sidebarSrc.indexOf('window.addEventListener("message"');
+    const start = htmlSrc.indexOf('window.addEventListener("message"');
     expect(start).toBeGreaterThan(-1);
-    const listener = sidebarSrc.slice(start, sidebarSrc.indexOf("settingsCategory", start) + 40);
+    const listener = htmlSrc.slice(start, htmlSrc.indexOf("settingsCategory", start) + 40);
     // The EXACT conditional, not just the string: a dead branch such as
     // `false && msg.type === "routines"` still contains the substring.
     expect(listener).toContain('if (msg.type === "routines") {');
     expect(listener).toContain("routineProjects");
     expect(listener).toContain("routineModels");
-    // And the relay's quota bounce, which is the only answer a refused save gets.
+    // A refused save is answered with an error frame and nothing else.
     expect(listener).toContain('if (msg.type === "error") {');
   });
 

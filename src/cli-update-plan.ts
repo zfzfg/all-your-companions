@@ -6,10 +6,9 @@
  * package does not sit under npm's CONFIGURED prefix, because codex's updater
  * shells out to `npm install -g` and npm resolves that prefix for itself.
  *
- * Measured on our own cloud machines: codex lives in `~/.local`, while `npm
- * config get prefix` reports a root-owned nvm directory. The update dies with
- * EACCES renaming a file the user does not own — on the one surface where a
- * phone is the only screen and there is no shell to drop to.
+ * Measured where codex lives in `~/.local`, while `npm config get prefix`
+ * reports a root-owned nvm directory. The update dies with EACCES renaming a
+ * file the user does not own.
  *
  * So derive the prefix from where the binary ACTUALLY is and hand it to npm.
  */
@@ -75,8 +74,7 @@ export function cliUpdatePlan(input: {
    * The version we want to be on. The product already NAMES one: Settings shows
    * `latestCliVersion` as the pin and computes "update available" against it, so
    * fetching `@latest` here installs something other than the number the person
-   * was just shown — and on a cloud machine that is how the same build ends up
-   * running three different CLI versions. Omitted only where nothing pins one.
+   * was just shown. Omitted only where nothing pins one.
    */
   targetVersion?: string;
 }): CliUpdatePlan {

@@ -1,5 +1,9 @@
 # Remote session claim
 
+> **Historical Reference Notice:** This document is retained for historical context only.
+> Remote tab claiming, external relay sessions, and associated coordination mechanisms
+> were removed in maintainability refactor W-14 to focus exclusively on local-first editor operation.
+
 Remote tabs are mutually exclusive for one conversation. The newest tab that
 **explicitly** asks for it wins; the previous holder is told and can take it
 back by asking again.

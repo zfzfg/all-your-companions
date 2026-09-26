@@ -118,8 +118,9 @@ describe("snapshot before grant — one path per provider", () => {
       order.push("grant");
       return origRespond(id, optionId);
     };
-    const origSnap = h.sidebar.snapshotAbsPaths.bind(h.sidebar);
-    h.sidebar.snapshotAbsPaths = (session: Session, paths: string[]) => {
+    const snapHost = h.sidebar.reviewHost;
+    const origSnap = snapHost.snapshotAbsPaths.bind(snapHost);
+    snapHost.snapshotAbsPaths = (session: Session, paths: string[]) => {
       order.push("snapshot");
       origSnap(session, paths);
     };
@@ -224,8 +225,9 @@ describe("fault injection does not abort the turn", () => {
     // non-files as skip, so instead wrap snapshotFromBytes... we stub
     // snapshotAbsPaths's fs by making the file unreadable: on Windows EACCES
     // is hard, so call disable from a thrown non-ENOENT.
-    const orig = h.sidebar.snapshotAbsPaths.bind(h.sidebar);
-    h.sidebar.snapshotAbsPaths = (session: Session, paths: string[]) => {
+    const snapHost = h.sidebar.reviewHost;
+    const orig = snapHost.snapshotAbsPaths.bind(snapHost);
+    snapHost.snapshotAbsPaths = (session: Session, paths: string[]) => {
       h.sidebar.disableCheckpointTurn(session, `read src/a.ts: EACCES`);
       void orig;
       void paths;

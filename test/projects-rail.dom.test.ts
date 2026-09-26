@@ -2554,9 +2554,8 @@ describe("rail overflow menus toggle", () => {
     const hide = menuItem(openMenu(h.window, beta), "Hide project");
     expect(hide).toBeTruthy();
     click(h.window, hide as HTMLElement);
-    // It ASKS now, like the VS Code rail always has. Nothing is posted on the
-    // click alone — the row leaves every linked device at once, and one
-    // surface guarding that gesture while the other did not was the drift.
+    // It asks before the row leaves the list. Nothing is posted on the click
+    // alone, so one surface cannot hide a project while the other does not.
     expect(h.posted.filter((p) => p.type === "removeProjectFolder")).toEqual([]);
     click(h.window, h.doc.querySelector(".confirm-btn.confirm-primary") as HTMLElement);
     await Promise.resolve();

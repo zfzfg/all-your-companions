@@ -132,7 +132,7 @@ describe("parseGitWorktreeListPorcelain", () => {
 
 describe("sidebar create path validates before cache (source)", () => {
   it("create worktree calls worktreePathAuthorizedForRepo before cache push", () => {
-    const src = fs.readFileSync(path.join(root, "src", "sidebar.ts"), "utf8");
+    const src = fs.readFileSync(path.join(root, "src", "worktree-host.ts"), "utf8");
     expect(src).toContain("worktreePathAuthorizedForRepo");
     expect(src).toContain("listAuthoritativeWorktreePaths");
     expect(src).toContain("listGitWorktreePaths");
@@ -282,7 +282,7 @@ describe("worktree validation reads git first", () => {
     // agent's list verbatim whenever it had any attributed row, and consulted
     // git only when that list was EMPTY. The guard's whole job is to confirm the
     // agent's claim, and it was satisfied by the claim.
-    const src = fs.readFileSync(path.join(root, "src", "sidebar.ts"), "utf8");
+    const src = fs.readFileSync(path.join(root, "src", "worktree-host.ts"), "utf8");
     const start = src.indexOf("private async listAuthoritativeWorktreePaths");
     expect(start).toBeGreaterThan(-1);
     const body = src.slice(start, src.indexOf("\n  private ", start + 40));
@@ -299,7 +299,7 @@ describe("worktree validation reads git first", () => {
     // waitForWorktreeReady used to fall back to `existsSync(worktreePath)` on
     // timeout, so an empty folder counted as a checkout and grok was spawned in
     // it. That is the `grok exited with code 1` in the owner's log.
-    const src = fs.readFileSync(path.join(root, "src", "sidebar.ts"), "utf8");
+    const src = fs.readFileSync(path.join(root, "src", "worktree-host.ts"), "utf8");
     const start = src.indexOf("private async waitForWorktreeReady");
     const body = src.slice(start, src.indexOf("\n  }", start) + 4);
     expect(body).toContain('path.join(worktreePath, ".git")');
@@ -311,7 +311,7 @@ describe("worktree validation reads git first", () => {
     // delete, so the fence is worth pinning: grok's own root, never an open
     // folder or the source repo, and then either nothing-to-lose (gone or
     // empty) or a marker naming this repo.
-    const src = fs.readFileSync(path.join(root, "src", "sidebar.ts"), "utf8");
+    const src = fs.readFileSync(path.join(root, "src", "worktree-host.ts"), "utf8");
     const start = src.indexOf("private canSelfRemoveWorktree");
     expect(start).toBeGreaterThan(-1);
     const body = src.slice(start, src.indexOf("\n  /**", start));
@@ -331,7 +331,7 @@ describe("worktree validation reads git first", () => {
   it("refusals carry a reason, and the reason reaches the user", () => {
     // "Remove worktree failed: Internal error" with nothing after it is what
     // this round cost. A refusal has to say what it refused on.
-    const src = fs.readFileSync(path.join(root, "src", "sidebar.ts"), "utf8");
+    const src = fs.readFileSync(path.join(root, "src", "worktree-host.ts"), "utf8");
     const start = src.indexOf("private canSelfRemoveWorktree");
     const body = src.slice(start, src.indexOf("\n  /**", start));
     expect(body).toContain(": string | undefined {");
@@ -349,7 +349,7 @@ describe("worktree validation reads git first", () => {
     // persisted on the session, and the path in the trusted-cwd set a linked
     // remote may target. Location has to come first, canonically, or a symlink
     // planted inside the root satisfies a textual prefix check.
-    const src = fs.readFileSync(path.join(root, "src", "sidebar.ts"), "utf8");
+    const src = fs.readFileSync(path.join(root, "src", "worktree-host.ts"), "utf8");
     const start = src.indexOf("private cloneWorktreeBelongsTo");
     expect(start).toBeGreaterThan(-1);
     const body = src.slice(start, src.indexOf("\n  }", start));
@@ -365,7 +365,7 @@ describe("worktree validation reads git first", () => {
     // the root to query AND handed back as the claim to compare against, so it
     // always matched. A response naming repository B could hand back a genuine
     // worktree OF B, have git truthfully list it, and be filed under A.
-    const src = fs.readFileSync(path.join(root, "src", "sidebar.ts"), "utf8");
+    const src = fs.readFileSync(path.join(root, "src", "worktree-host.ts"), "utf8");
     const start = src.indexOf("Creating git worktree");
     const region = src.slice(start, src.indexOf("this.worktreeCache.push", start));
     expect(region).toContain("const sourceGitRoot = gitRootForPath(sourcePath, defaultFs) || sourcePath;");
@@ -383,7 +383,7 @@ describe("worktree validation reads git first", () => {
     // otherwise. Starting a throwaway grok.exe just to `git worktree add` is
     // the lock AP-13a removes — and it is what made "Could not start Grok to
     // create a worktree" the only answer on a Claude-only install.
-    const src = fs.readFileSync(path.join(root, "src", "sidebar.ts"), "utf8");
+    const src = fs.readFileSync(path.join(root, "src", "worktree-host.ts"), "utf8");
     const start = src.indexOf("Creating git worktree");
     expect(start).toBeGreaterThan(-1);
     const region = src.slice(start, src.indexOf("private watchWorktreeCreate", start));
@@ -401,7 +401,7 @@ describe("worktree validation reads git first", () => {
     // Every SIBLING passes the first test, so a response naming one would take
     // over a checkout somebody else is working in — and Apply and Remove would
     // then act on it.
-    const src = fs.readFileSync(path.join(root, "src", "sidebar.ts"), "utf8");
+    const src = fs.readFileSync(path.join(root, "src", "worktree-host.ts"), "utf8");
     const start = src.indexOf("using Grok RPC (clone mode available)");
     expect(start).toBeGreaterThan(-1);
     const region = src.slice(start, src.indexOf("this.worktreeCache.push", start));
@@ -417,7 +417,7 @@ describe("worktree validation reads git first", () => {
     // creates on one client interleave their notifications. Taking the first
     // terminal event let one create's completion release another's wait — and
     // that other flow would then start in a checkout still being copied.
-    const src = fs.readFileSync(path.join(root, "src", "sidebar.ts"), "utf8");
+    const src = fs.readFileSync(path.join(root, "src", "worktree-host.ts"), "utf8");
     const start = src.indexOf("private watchWorktreeCreate");
     expect(start).toBeGreaterThan(-1);
     const body = src.slice(start, src.indexOf("\n  private worktreeCreatesInFlight", start));
@@ -439,7 +439,7 @@ describe("worktree validation reads git first", () => {
     // checkout, because registration lands before the files do. It widened the
     // unsafe window from "copies over two minutes" to "copies over five
     // seconds".
-    const src = fs.readFileSync(path.join(root, "src", "sidebar.ts"), "utf8");
+    const src = fs.readFileSync(path.join(root, "src", "worktree-host.ts"), "utf8");
     const watch = src.slice(src.indexOf("private watchWorktreeCreate"));
     const body = watch.slice(0, watch.indexOf("\n  private worktreeCreatesInFlight"));
     expect(body).toContain('finish(capable() ? "stalled" : "silent")');
@@ -465,7 +465,7 @@ describe("worktree validation reads git first", () => {
     // A stalled create is one we STOPPED WAITING FOR, not one that ended — the
     // CLI may still be copying. Releasing the slot would let the next create
     // believe it is alone and trust pathless progress belonging to this one.
-    const src = fs.readFileSync(path.join(root, "src", "sidebar.ts"), "utf8");
+    const src = fs.readFileSync(path.join(root, "src", "worktree-host.ts"), "utf8");
     const start = src.indexOf("private watchWorktreeCreate");
     const body = src.slice(start, src.indexOf("\n  private worktreeCreatesInFlight", start));
     expect(body).toContain('detach({ keepSlot: outcome === "stalled" });');
@@ -491,7 +491,7 @@ describe("worktree validation reads git first", () => {
     // would time out looking exactly like an old build — and fall through to
     // the disk checks. But the retained slot exists BECAUSE this client
     // reports, so "old build" is provably wrong there.
-    const src = fs.readFileSync(path.join(root, "src", "sidebar.ts"), "utf8");
+    const src = fs.readFileSync(path.join(root, "src", "worktree-host.ts"), "utf8");
     const start = src.indexOf("private watchWorktreeCreate");
     const body = src.slice(start, src.indexOf("\n  private worktreeCreatesInFlight", start));
     expect(body).toContain("this.worktreeStatusCapableClients.add(client);");
@@ -504,7 +504,7 @@ describe("worktree validation reads git first", () => {
     // terminal one does — so two overlapping creates on one reused client
     // produce events that cannot be told apart. Serialising is the honest fix;
     // correlating uncorrelatable events is not.
-    const src = fs.readFileSync(path.join(root, "src", "sidebar.ts"), "utf8");
+    const src = fs.readFileSync(path.join(root, "src", "worktree-host.ts"), "utf8");
     const start = src.indexOf("async newWorktreeSession");
     const body = src.slice(start, src.indexOf("private worktreeCreateInFlight", start));
     expect(body).toContain("if (this.worktreeCreateInFlight) {");
@@ -548,7 +548,7 @@ describe("worktree validation reads git first", () => {
     // `this.focused` back afterwards wrote this worktree's name, path and
     // source root onto some other conversation — and a cold restore later
     // treats that saved binding as authoritative.
-    const src = fs.readFileSync(path.join(root, "src", "sidebar.ts"), "utf8");
+    const src = fs.readFileSync(path.join(root, "src", "worktree-host.ts"), "utf8");
     const create = src.slice(src.indexOf("Creating git worktree"));
     const region = create.slice(0, create.indexOf("Worktree session ready"));
     expect(region).toContain("await this.startSession(undefined, wtSession);");
@@ -562,7 +562,7 @@ describe("worktree validation reads git first", () => {
     // Linked worktrees have no marker BY DESIGN. Running the check on them
     // logged "no clone provenance" for perfectly valid checkouts — which is
     // exactly the alarming line the owner reported for a worktree that worked.
-    const src = fs.readFileSync(path.join(root, "src", "sidebar.ts"), "utf8");
+    const src = fs.readFileSync(path.join(root, "src", "worktree-host.ts"), "utf8");
     const start = src.indexOf("private async listAuthoritativeWorktreePaths");
     const body = src.slice(start, src.indexOf("\n  private ", start + 40));
     expect(body).toContain("if (authorized.some((p) => pathsEqual(p, row.path))) continue;");

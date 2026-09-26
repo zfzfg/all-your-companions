@@ -271,9 +271,8 @@ export function mergeMcpNotification(
   // states a status and reports no error supersedes it, so the old text must
   // not survive into the new state — nothing else ever cleared it, and a
   // server that failed once kept its error for the life of the session. Both
-  // renderers short-circuit on `error`, so a recovered server stayed red at
-  // the desk, and once a failure is projected to the phone as `unavailable`
-  // it stayed red there too. If the fresh status is itself a failure it still
+  // renderers short-circuit on `error`, so a recovered server stayed red.
+  // If the fresh status is itself a failure it still
   // renders as one; it just does it on the current status rather than on a
   // sentence about something that has already stopped being true.
   if (status && !error) update.error = undefined;

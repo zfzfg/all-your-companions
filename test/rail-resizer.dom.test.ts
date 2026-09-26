@@ -249,12 +249,12 @@ describe("rail resize handle (DOM)", () => {
 
 describe("desktop boot rail width (computed layout)", () => {
   function firstFrameLayoutCss(): string {
-    const sidebar = fs.readFileSync(
-      path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "sidebar.ts"),
+    const html = fs.readFileSync(
+      path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "webview-html.ts"),
       "utf8",
     );
-    const start = sidebar.indexOf("const firstFrameLayout");
-    const block = sidebar.slice(start, sidebar.indexOf("const filePanelStyle", start));
+    const start = html.indexOf("const firstFrameLayout");
+    const block = html.slice(start, html.indexOf("const filePanelStyle", start));
     const m = block.match(/`([\s\S]*?)`/);
     if (!m) throw new Error("firstFrameLayout CSS missing");
     return m[1];

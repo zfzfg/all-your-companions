@@ -1,7 +1,6 @@
 /**
- * Pure workspace file-tree helpers: path containment, directory listing, and
- * read-only preview. Shared by the desktop panel IPC and remote (phone) file
- * browse — no Electron, no vscode.
+ * Pure workspace file-tree helpers: path containment and read-only preview.
+ * No Electron, no vscode.
  *
  * Containment is **canonical**, not merely lexical: after the path is resolved
  * under the workspace root we `realpath` both the root and the candidate and
@@ -50,24 +49,8 @@ export function nearestExistingAncestor(
   return undefined;
 }
 
-/** Cap per directory so a huge folder cannot freeze the panel. */
-export const FILE_TREE_MAX_ENTRIES = 2000;
-
-export type TreeEntryKind = "file" | "dir";
-
-export interface TreeEntry {
-  name: string;
-  kind: TreeEntryKind;
-  /** Workspace-relative POSIX path ("" for root children is just the name). */
-  relPath: string;
-}
-
 export type ResolveTreePathResult =
   | { ok: true; absPath: string; relPath: string }
-  | { ok: false; reason: string };
-
-export type ListTreeResult =
-  | { ok: true; entries: TreeEntry[]; truncated: boolean }
   | { ok: false; reason: string };
 
 /** Injectable FS surface so tests can simulate symlink realpath without OS privileges. */
@@ -253,84 +236,6 @@ export function resolveTreePath(
   return { ok: true, absPath, relPath: rel };
 }
 
-function entrySort(a: TreeEntry, b: TreeEntry): number {
-  if (a.kind !== b.kind) return a.kind === "dir" ? -1 : 1;
-  return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
-}
-
-/**
- * List one directory under the workspace. Directories first, then files,
- * case-insensitive name order. Caps at {@link FILE_TREE_MAX_ENTRIES}.
- * Entries whose real path leaves the workspace (outbound symlink/junction)
- * are omitted — they must not be expandable or openable.
- */
-export function listTreeDir(
-  root: string,
-  relPath: string,
-  maxEntries: number = FILE_TREE_MAX_ENTRIES,
-  platform: NodeJS.Platform = process.platform,
-  pathFs: TreePathFs = defaultTreeFs,
-): ListTreeResult {
-  const resolved = resolveTreePath(root, relPath, platform, pathFs);
-  if (!resolved.ok) return resolved;
-
-  let stat: fs.Stats;
-  try {
-    // lstat-first so a symlink-to-dir at this path is still a directory listing
-    // only when the *canonical* target is inside the root (already checked).
-    stat = pathFs.statSync(resolved.absPath);
-  } catch {
-    return { ok: false, reason: "not found" };
-  }
-  if (!stat.isDirectory()) {
-    return { ok: false, reason: "not a directory" };
-  }
-
-  let dirents: fs.Dirent[];
-  try {
-    dirents = pathFs.readdirSync(resolved.absPath, { withFileTypes: true });
-  } catch (e) {
-    return { ok: false, reason: (e as Error).message || "unreadable" };
-  }
-
-  const hostPath = platform === process.platform ? path : platform === "win32" ? path.win32 : path.posix;
-  const entries: TreeEntry[] = [];
-  let truncated = false;
-  for (const ent of dirents) {
-    const childAbs = hostPath.join(resolved.absPath, ent.name);
-    // Drop anything whose real target leaves the workspace before classifying.
-    if (!isCanonicallyInsideRoot(root, childAbs, platform, pathFs)) {
-      continue;
-    }
-
-    let kind: TreeEntryKind | null = null;
-    if (ent.isDirectory()) kind = "dir";
-    else if (ent.isFile()) kind = "file";
-    else if (ent.isSymbolicLink()) {
-      try {
-        const s = pathFs.statSync(childAbs);
-        if (s.isDirectory()) kind = "dir";
-        else if (s.isFile()) kind = "file";
-      } catch {
-        kind = null;
-      }
-    }
-    if (!kind) continue;
-
-    if (entries.length >= maxEntries) {
-      truncated = true;
-      break;
-    }
-    const childRel = resolved.relPath
-      ? `${resolved.relPath}/${ent.name}`
-      : ent.name;
-    entries.push({ name: ent.name, kind, relPath: childRel });
-  }
-
-  entries.sort(entrySort);
-  return { ok: true, entries, truncated };
-}
-
 /** In-panel preview kinds (read-only). Everything else hands off to the OS. */
 export type FilePreviewKind = "markdown" | "json" | "image" | "text" | "external";
 
@@ -374,10 +279,9 @@ const PREVIEW_TEXT_EXT = new Set([
   ".jsonc",
   ".mdx",
   ".svg",
-  // Added alongside syntax highlighting (2026-08-12). Each of these was handed
-  // to the OS before, which from a phone means it could not be opened at all —
-  // and each is a file people read far more often than they edit. `.sql` was
-  // asked for by name.
+  // Added alongside syntax highlighting. Each of these used to be handed to
+  // the OS, so the preview could not open them, and each is a file people
+  // read far more often than they edit. `.sql` was asked for by name.
   ".sql",
   ".scss",
   ".sass",

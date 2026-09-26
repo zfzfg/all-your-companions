@@ -1,3 +1,16 @@
+import { WorktreeHost, SESSION_META_KEY } from "./worktree-host";
+import { ProviderSetup } from "./provider-setup";
+import { WebviewHtml } from "./webview-html";
+import { QuestionHost } from "./question-host";
+import { ReviewHost } from "./review-host";
+import { WorkflowStageRunner } from "./workflow-stage-runner";
+import {
+  SubagentHost,
+  createSubagentHost,
+  type SubagentHostDeps,
+  type SubagentState,
+  SUBAGENT_INDEX_KEY,
+} from "./subagent-host";
 import type {
   Host,
   HostContext,
@@ -9,7 +22,6 @@ import type {
   HostEditorWebview,
 } from "./host";
 import { Uri, disposeAll, shouldRehydrateOnWebviewReady } from "./host";
-import { isCanonicallyInsideRoot } from "./file-tree";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -18,16 +30,9 @@ import { AcpClient, EffortLevel, ExitPlanRequest, PermissionRequest, QuestionReq
 import type { AcpProvider } from "./acp-backend";
 import { isAdapterProvider, isAcpProvider, ACP_PROVIDERS } from "./acp-backend";
 import { allProviderCapabilities, providerCapability } from "./provider-capabilities";
-import { parsePlanEntries } from "./plan-entries";
 import {
-  completedBlocksForPath,
-  dropReviewPath,
   dropReviewTurnsAfter,
   filesForScope,
-  ingestReviewToolCall,
-  normalizeReviewPath,
-  planDiscardAll,
-  planFileRevert,
   reviewCenterSnapshot,
   type ReviewScope,
 } from "./review-center";
@@ -49,7 +54,6 @@ import {
   createRule,
   decidePermission,
   extractPermissionFacts,
-  normalizePermissionKind,
   pathMatchesGlob,
   globalRulesToMap,
   loadWorkspaceRulesFile,
@@ -67,21 +71,13 @@ import {
   type PermissionRulesFs,
   type PermissionRuleView,
 } from "./permission-rules";
-import { CODEX_ACP_ADAPTER_VERSION, CodexBackend, isCodexCredentialError } from "./codex-backend";
-import { locateCodexCli, resolveCodexHome } from "./codex-cli-locator";
-import { CODEX_MANAGED_VERSION, installManagedCodex } from "./codex-managed-installer";
-import { warmCodexModelCache } from "./codex-model-cache";
-import { CLAUDE_ACP_ADAPTER_VERSION, ClaudeBackend, isClaudeCredentialError } from "./claude-backend";
-import { locateClaudeCli, parseClaudeVersionOutput } from "./claude-cli-locator";
-import { warmClaudeModelCache } from "./claude-model-cache";
-import { GeminiBackend, isGeminiCredentialError } from "./gemini-backend";
-import { hasAntigravityCredentials, isAntigravityCli, locateGeminiCli, parseGeminiVersionOutput } from "./gemini-cli-locator";
-import { warmGeminiModelCache } from "./gemini-model-cache";
+import { CODEX_MANAGED_VERSION } from "./codex-managed-installer";
+import { resolveCodexHome } from "./codex-cli-locator";
+import { parseClaudeVersionOutput } from "./claude-cli-locator";
+import { parseGeminiVersionOutput } from "./gemini-cli-locator";
 import {
   adapterEntriesEligibleForClear,
   adapterListEntry,
-  connectedProviderIds,
-  usableProviderIds,
   findCachedAdapterSession,
   mergeProviderHistoryPage,
   mergeProviderSessionEntries,
@@ -90,10 +86,8 @@ import {
   parseCodexVersionOutput,
   projectProviderKey,
   providerDisplayName,
-  PROVIDER_ORDER,
   providerLoginState,
-  versionIsOlder,
-  type ProjectProviderDefaults,
+  PROVIDER_ORDER,
   type ProviderConnections,
   type ProviderModelCache,
   type ProviderModelInfo,
@@ -112,19 +106,6 @@ import {
   type RoutineRun,
 } from "./routines";
 import { RoutineRunStore } from "./routine-store";
-import {
-  CHECKPOINT_MAX_FILE_BYTES,
-  checkpointId,
-  checkpointRelPath,
-  mergeCheckpoints,
-  planRestoreDetailed,
-  previewUserMessage,
-  restoreActions,
-  sha256Bytes,
-  snapshotFromBytes,
-  survivingAfterClientRewind,
-  type Checkpoint,
-} from "./checkpoints";
 import { CheckpointStore, nodeCheckpointFs } from "./checkpoint-store";
 import { PersistedState } from "./persisted-state";
 import {
@@ -160,10 +141,10 @@ import type { PromptResultMeta, PromptUsage, SessionInfoContext } from "./acp-di
 import { DEFAULT_COMPACT_THRESHOLD, GROK_COMPACT_ENV, compactEventKind, compactSummaryPreview, compactThresholdMismatch, compactThresholdMismatchNotice, grokCompactThresholdEnv, normalizeCompactThreshold, shouldOfferNearFull } from "./grok-compaction";
 import { renderFreshSessionPrompt } from "./handoff";
 import { ChildRelayTable, childNeedsYouNotice, childScopedSuggestions, relayOriginLabel, relayScopeWord, type ChildKind, type RelayKind, type RelayOrigin } from "./child-relay";
-import { NUDGE_TEXT, PausableDeadline, normalizeStallWarningSec, stageStallState } from "./child-watch";
+import { PausableDeadline, normalizeStallWarningSec, stageStallState } from "./child-watch";
 import { subagentTurnSummary } from "./companion-subagents";
 import { bothDelegationsHint, grokSubagentEnv } from "./grok-subagent-env";
-import { stageChildStatus, subagentChildStatus } from "./child-status";
+import { subagentChildStatus } from "./child-status";
 import type { ChildStatusView } from "./protocol";
 import { ACTIVITY_FLUSH_MS, activityItemFromHostMsg, activityLastLine, coalesceActivity } from "./child-activity";
 import { MediaRef, adapterCompactSignal, adapterContextOccupancy, agentTimestampMsFromMeta, autoCompactStartedNote, childStreamFromRoute, commandOutputForToolCall, commandOutputFromLiveTerminal, contextUsedFromCompactNotification, enforceCompleteSessionCost, errorDetail, gateZeroTokenMeta, isAuthErrorText, isCredentialError, isIncompatibleAgentError, isResumeNotFound, isSubagentLifecycleUpdate, occupancyFromAdapterTurn, parseSessionInfoContext, permissionOutcomeFor, promptErrorText, rateLimitNoticeText, replayedTurnDuration, sessionInfoCacheFresh, sumUsage, summarizeBackgroundCommand, turnStatusFromPromptResult, usageIsRealMeasurement, type TurnEndStatus, type UpdateRoute } from "./acp-dispatch";
@@ -206,10 +187,9 @@ import { readCodexSubscriptionWindows } from "./codex-usage";
 import { providerConfigFiles, type ProviderConfigFile } from "./provider-config";
 import { CLI_NPM_PACKAGE, cliUpdatePlan, selfUpdateArgs } from "./cli-update-plan";
 import { readWorkflowCompletion } from "./workflow-state";
-import { MuseBackend } from "./muse-backend";
-import { locateMuseCli, parseMuseVersionOutput } from "./muse-cli-locator";
+import { parseMuseVersionOutput } from "./muse-cli-locator";
 import { supportsClientMcpServers, supportsModeSwitching } from "./acp-backend";
-import { captureGitTurnBaseline, GitRunGate, readGitTurnFileBefore, runGit, type GitTurnBaseline } from "./git-run";
+import { GitRunGate, type GitTurnBaseline } from "./git-run";
 import {
   GITHUB_CLI_DOWNLOAD,
   classifyCloneFailure,
@@ -249,10 +229,8 @@ import {
 } from "./telemetry";
 import { randomUUID } from "node:crypto";
 import { execGrokCli } from "./cli-process";
-import { listGitWorktreePaths } from "./git-worktree-list";
-import { LocalGitWorktrees, nodeGitRunner, nodeWorktreeFs } from "./worktree-local";
+import type { LocalGitWorktrees } from "./worktree-local";
 import {
-  locateGrokCli,
   extensionWasUpgraded,
   isStdioBrokenGrokVersion,
   parseGrokVersion,
@@ -324,38 +302,16 @@ import {
 
 import { EXTENSION_HOST_SLASH_COMMANDS, matchSlashCommand, parseAgentCommand, parseCrewCommand, parseHandoffCommand, parseSubagentsCommand } from "./slash-filter";
 import {
-  applyStepOutcome,
-  assignStepRole,
   cancelCrewRun,
-  crewProgress,
-  insertCrewStep,
-  makeCrewRun,
-  setCrewStatus,
-  startCrewStep,
-  stepsFromPlan,
-  type CrewStep,
 } from "./crew";
-import { assignStep } from "./crew-assign";
 import {
   CREW_PRESETS_DIR,
-  findCrewPreset,
   loadCrewPresets,
-  presetReviewRole,
-  presetRoles,
   presetToStageGraph,
   type CrewPresetSet,
 } from "./crew-preset";
 import {
-  applyMaxFixerPasses,
   findStage,
-  IDEA_TO_DONE,
-  isReservedTarget,
-  isWriteProfile,
-  stageContinues,
-  stageRunMode,
-  type WorkflowStage,
-  workflowSnapshotHash,
-  workflowSnapshotPayload,
   workflowToMermaid,
   type WorkflowDefinition,
 } from "./workflow";
@@ -378,43 +334,19 @@ import {
   type GeneratorState,
 } from "./workflow-generator";
 import {
-  appendGateNotes,
   applyGateAction,
-  applySnapshotDrift,
-  applyStaleness,
-  applyStageOutcome,
   bindStageSession,
   historySubtitle,
-  makeWorkflowRun,
-  markExhausted,
-  observedFilesHash,
-  parseGateMessage,
-  resumeStaleness,
-  snapshotDrift,
-  startStage as startWorkflowStage,
-  toWorkflowView,
-  withSnapshotHash,
-  WorkflowRunStore,
-  anotherRoundLabel,
-  applyLineupToDefinition,
-  autonomyFromSettings,
   isTerminalRunStatus,
-  sanitizePlanEdit,
+  WorkflowRunStore,
   type Autonomy,
-  type GateAction,
   type RunLineupEntry,
   type WorkflowRun,
 } from "./workflow-run";
 import {
-  briefingFromContract,
-  buildHandoffPacket,
-  capHandoffPacket,
-  resolveStageScope,
   type HandoffPacket,
   type HandoffPlanStep,
-  type StageScope,
 } from "./workflow-handoff";
-import { applyReviewCadence, briefingForCrewStep, fixerTitle, verifyInsertsFixer } from "./crew-run";
 import {
   presetToDraft,
   roleToDraft,
@@ -424,9 +356,7 @@ import {
   type CrewFlowDraft,
   type RoleScope,
 } from "./agent-role-write";
-import { nextIndependentSteps } from "./crew-parallel";
 import { FileClaimStore } from "./file-claims";
-import { checkBudget, countUnreapable, nextFailoverProvider, parallelSlotCap, repeatedFailingTool } from "./crew-budget";
 import {
   AGENT_ROLES_DIR,
   findAgentRole,
@@ -488,7 +418,6 @@ import {
   stagedUploadDirectory,
   unreferencedUploadsForRemovedSessions,
 } from "./file-upload";
-import { MAX_DIFF_EXPAND_BYTES, expandDiffToWholeFile, planEditRevert } from "./diff-view";
 import { applyAgentModeToHostPlan, effectivePlanActive, isPlanReviewPermission, permissionAnswerAllowed, permissionOptionsForPlan, pickRejectOption, planReviewVerdictForOption, planTextFromPermissionToolCall, shouldRejectPermission } from "./plan-gate";
 import { appendPlanEntry, planRestoreSource, truncateResolvedAfter, countsAsUserBubble, decideRestoreState, isInterjectionText } from "./plan-restore";
 import {
@@ -497,11 +426,7 @@ import {
 } from "./plan-review";
 import { isPrimerText } from "./grok-primer";
 import { AsyncSerialQueue } from "./async-serial";
-import { HOST_CAPABILITIES, HostMsg, INTERRUPTED_SEND_CODE, WebviewMsg, type GithubState, type CrewStartOptions, type WorkflowLineupView, type WorkflowPickerItem, type WorkflowRunView } from "./protocol";
-import { formatDurationShort, formatTokenCount, renderRunReport, runTableRows, runTotalsLine, targetText } from "./workflow-report";
-import { compareLabel, preselectGateTarget, proposeLineup, suggestVerifyCommands, type RoleTemplateInfo } from "./workflow-target";
-import { mergeReviewPackets, panelTargets } from "./workflow-panel";
-import { stallWarningText } from "./child-watch";
+import { HOST_CAPABILITIES, HostMsg, INTERRUPTED_SEND_CODE, WebviewMsg, type GithubState, type WorkflowLineupView } from "./protocol";
 import { withoutArchiveFields } from "./project-discovery";
 import { SessionRequestState } from "./session-request-state";
 import { historyImagePreviews } from "./image-history";
@@ -627,27 +552,15 @@ import {
   type FfmpegResolution,
 } from "./ffmpeg-locate";
 import {
-  CLONE_WORKTREE_SOURCE_MARKER,
-  cloneWorktreeSourceMatches,
-  filterWorktreesForSourceRepo,
-  gitRootForPath,
-  isGitRepo,
+        gitRootForPath,
   matchWorktreeForCwd,
   mergeSessionIndexes,
-  mergeWorktreeRefresh,
   normalizeFsPath,
   pathsEqual,
-  sanitizeWorktreeLabel,
-  WorktreeCreateSlots,
-  type WorktreeCreateOutcome,
-  worktreeStatusIsForCreate,
-  worktreeStatusVerdict,
-  worktreePathAuthorizedForRepo,
-  type WorktreeParentRef,
+              type WorktreeParentRef,
   type WorktreeRecord,
   worktreeCwdsForRepo,
-  worktreeDisplayName,
-  worktreesForRepo,
+    worktreesForRepo,
 } from "./worktree";
 import {
   authorizedListCwd,
@@ -723,7 +636,6 @@ import {
   type ReservedMcpIdentity,
   type AcpMcpStdioServer,
 } from "./mcp-connectors";
-import { ASK_USER_SERVER_NAME, askTimeoutMs } from "./ask-user-protocol";
 import { AskUserServer } from "./ask-user-server";
 import {
   authorizeMcpRemote,
@@ -737,13 +649,10 @@ import {
 // src/protocol.ts now — the single source of truth for the message contract,
 // imported above. See that file for why.
 
-const SESSION_META_KEY = "grok.sessionMeta";
 // Older booleans included silent credential-probe promotions (#171), so they
 // carry no provenance and are never imported: a v2 key starts clean. Only the
 // connection flags reset; no credential is touched.
-const PROVIDER_CONNECTIONS_KEY = "grok.providerConnections.v2";
 const PROVIDER_MODEL_CACHE_KEY = "grok.providerModelCache";
-const PROJECT_PROVIDER_DEFAULTS_KEY = "grok.projectProviderDefaults";
 const REPO_PINS_KEY = "grok.repoPins";
 /** Timestamped archive choices, stored under ~/.grok/client-state rather than
  *  per-client so the choice follows you to a phone and survives a cleared
@@ -996,21 +905,34 @@ export class GrokSidebar {
    * (it's just a read cache, never a source of truth).
    */
   private sessionCache = new Map<string, { mtimeMs: number; entry: SessionListEntry }>();
-  /** Adapter catalogs come from ACP session/list rather than Grok's disk index. */
-  private codexSessionCache = new Map<string, SessionListEntry[]>();
-  private codexSessionCacheAt = new Map<string, number>();
-  private codexSessionRefresh = new Map<string, Promise<void>>();
-  private claudeSessionCache = new Map<string, SessionListEntry[]>();
-  private claudeSessionCacheAt = new Map<string, number>();
-  private claudeSessionRefresh = new Map<string, Promise<void>>();
-  private geminiSessionCache = new Map<string, SessionListEntry[]>();
-  private geminiSessionCacheAt = new Map<string, number>();
-  private geminiSessionRefresh = new Map<string, Promise<void>>();
-  private museSessionCache = new Map<string, SessionListEntry[]>();
-  private museSessionCacheAt = new Map<string, number>();
-  private museSessionRefresh = new Map<string, Promise<void>>();
-  private codexInstallAbort?: AbortController;
-  private providerConnectionState: ProviderConnections = {};
+  get codexSessionCache(): Map<string, SessionListEntry[]> { return this.providerSetup.codexSessionCache; }
+  set codexSessionCache(v: Map<string, SessionListEntry[]>) { this.providerSetup.codexSessionCache = v; }
+  get codexSessionCacheAt(): Map<string, number> { return this.providerSetup.codexSessionCacheAt; }
+  set codexSessionCacheAt(v: Map<string, number>) { this.providerSetup.codexSessionCacheAt = v; }
+  get codexSessionRefresh(): Map<string, Promise<void>> { return this.providerSetup.codexSessionRefresh; }
+  set codexSessionRefresh(v: Map<string, Promise<void>>) { this.providerSetup.codexSessionRefresh = v; }
+  get claudeSessionCache(): Map<string, SessionListEntry[]> { return this.providerSetup.claudeSessionCache; }
+  set claudeSessionCache(v: Map<string, SessionListEntry[]>) { this.providerSetup.claudeSessionCache = v; }
+  get claudeSessionCacheAt(): Map<string, number> { return this.providerSetup.claudeSessionCacheAt; }
+  set claudeSessionCacheAt(v: Map<string, number>) { this.providerSetup.claudeSessionCacheAt = v; }
+  get claudeSessionRefresh(): Map<string, Promise<void>> { return this.providerSetup.claudeSessionRefresh; }
+  set claudeSessionRefresh(v: Map<string, Promise<void>>) { this.providerSetup.claudeSessionRefresh = v; }
+  get geminiSessionCache(): Map<string, SessionListEntry[]> { return this.providerSetup.geminiSessionCache; }
+  set geminiSessionCache(v: Map<string, SessionListEntry[]>) { this.providerSetup.geminiSessionCache = v; }
+  get geminiSessionCacheAt(): Map<string, number> { return this.providerSetup.geminiSessionCacheAt; }
+  set geminiSessionCacheAt(v: Map<string, number>) { this.providerSetup.geminiSessionCacheAt = v; }
+  get geminiSessionRefresh(): Map<string, Promise<void>> { return this.providerSetup.geminiSessionRefresh; }
+  set geminiSessionRefresh(v: Map<string, Promise<void>>) { this.providerSetup.geminiSessionRefresh = v; }
+  get museSessionCache(): Map<string, SessionListEntry[]> { return this.providerSetup.museSessionCache; }
+  set museSessionCache(v: Map<string, SessionListEntry[]>) { this.providerSetup.museSessionCache = v; }
+  get museSessionCacheAt(): Map<string, number> { return this.providerSetup.museSessionCacheAt; }
+  set museSessionCacheAt(v: Map<string, number>) { this.providerSetup.museSessionCacheAt = v; }
+  get museSessionRefresh(): Map<string, Promise<void>> { return this.providerSetup.museSessionRefresh; }
+  set museSessionRefresh(v: Map<string, Promise<void>>) { this.providerSetup.museSessionRefresh = v; }
+  get codexInstallAbort(): AbortController | undefined { return this.providerSetup.codexInstallAbort; }
+  set codexInstallAbort(v: AbortController | undefined) { this.providerSetup.codexInstallAbort = v; }
+  get providerConnectionState(): ProviderConnections { return this.providerSetup.providerConnectionState; }
+  set providerConnectionState(v: ProviderConnections) { this.providerSetup.providerConnectionState = v; }
   /**
    * Bounds on the live-session pool (see session-pool.ts). A backgrounded session
    * idle past {@link IDLE_TTL_MS}, or beyond the {@link MAX_LIVE_SESSIONS} LRU cap,
@@ -1107,25 +1029,30 @@ export class GrokSidebar {
    * path (provisionFakeGrok). Config and PATH are not searched, so a developer
    * box cannot silently pick up a real CLI. Production never sets this.
    */
-  private testForceMissingGrokCli = false;
+  get testForceMissingGrokCli(): boolean { return !!this.providerSetup.testForceMissingGrokCli; }
+  set testForceMissingGrokCli(v: boolean) { this.providerSetup.testForceMissingGrokCli = v; }
   /** First full boot pass — repo catalog AND the deferred session-list — finished. */
   private firstBootScanStarted = false;
   private firstBootScanCompleted = false;
-  private cliPath?: string;
-  private codexCliPath?: string;
-  private claudeCliPath?: string;
-  private geminiCliPath?: string;
-  private museCliPath?: string;
+  get cliPath(): string | undefined { return this.providerSetup.cliPath; }
+  set cliPath(v: string | undefined) { this.providerSetup.cliPath = v; }
+  get codexCliPath(): string | undefined { return this.providerSetup.codexCliPath; }
+  set codexCliPath(v: string | undefined) { this.providerSetup.codexCliPath = v; }
+  get claudeCliPath(): string | undefined { return this.providerSetup.claudeCliPath; }
+  set claudeCliPath(v: string | undefined) { this.providerSetup.claudeCliPath = v; }
+  get geminiCliPath(): string | undefined { return this.providerSetup.geminiCliPath; }
+  set geminiCliPath(v: string | undefined) { this.providerSetup.geminiCliPath = v; }
+  get museCliPath(): string | undefined { return this.providerSetup.museCliPath; }
+  set museCliPath(v: string | undefined) { this.providerSetup.museCliPath = v; }
   private readonly providerCliVersions: Partial<Record<AcpProvider, string>> = {};
-  /** Accounts that are configured but answered an auth-shaped failure. Not the
-   *  same as disconnected: the CLI is installed and the user meant to use it,
-   *  so the answer is a sign-in action, not hiding the agent. */
-  private providerNeedsLogin: Partial<Record<AcpProvider, boolean>> = {};
-  /** Last `providerState` refresh. `reportSessionStart` reads these flags; it
-   *  never rediscovers CLIs on the first-send path. Null until the first
-   *  refresh so an unsnapshotted send OMITS the flags instead of reporting a
-   *  constructor default as a measurement. */
-  private lastProviderConnected: { grok: boolean; codex: boolean; claude: boolean; gemini: boolean } | null = null;
+  get providerNeedsLogin(): Partial<Record<AcpProvider, boolean>> { return this.providerSetup.providerNeedsLogin; }
+  set providerNeedsLogin(v: Partial<Record<AcpProvider, boolean>>) { this.providerSetup.providerNeedsLogin = v; }
+  get lastProviderConnected(): { grok: boolean; codex: boolean; claude: boolean; gemini: boolean } | null { return this.providerSetup.lastProviderConnected; }
+  set lastProviderConnected(v: { grok: boolean; codex: boolean; claude: boolean; gemini: boolean } | null) { this.providerSetup.lastProviderConnected = v; }
+  get providerRefreshInFlight(): boolean { return this.providerSetup.providerRefreshInFlight; }
+  set providerRefreshInFlight(v: boolean) { this.providerSetup.providerRefreshInFlight = v; }
+  get loginReprobeTimers(): Map<AcpProvider, NodeJS.Timeout> { return this.providerSetup.loginReprobeTimers; }
+  set loginReprobeTimers(v: Map<AcpProvider, NodeJS.Timeout>) { this.providerSetup.loginReprobeTimers = v; }
   /** Last `postVoiceConfigured` result per normalized cwd. Same send-path
    *  rule: a cwd with no entry is unknown and the field is omitted, never
    *  coerced to false. Rebuilt on each refresh so removed keys cannot serve
@@ -1219,14 +1146,8 @@ export class GrokSidebar {
     "checkGrokUpdate",
     "updateGrok",
   ]);
-  private readonly loginReprobeTimers = new Map<AcpProvider, ReturnType<typeof setTimeout>>();
   /** Last `gh api user` snapshot. Refreshed after connect / sign-out. */
   private githubConnection?: GithubAuthState;
-  /** A Settings → Providers refresh in flight. Reported on `providerState` so
-   *  the button can say it is working, and guards re-entry: a second click (or
-   *  the page's own open-refresh landing on top of a click) must not start a
-   *  second round of CLI probes. */
-  private providerRefreshInFlight = false;
   /** Complete Grok inventory from the last `_x.ai/mcp/list`. Unfiltered — `hostMcpServers` dedup still needs project servers. */
   private mcpServers: McpServerView[] = [];
   /**
@@ -1333,11 +1254,213 @@ export class GrokSidebar {
   private readonly routinesInFlight = new Set<string>();
   private routineError?: { id?: string; message: string };
 
+  private hostPipeMux?: HostPipeMux;
+  private askUserChannel?: AskUserServer;
+
+  private _questionHost?: QuestionHost;
+  private _reviewHost?: ReviewHost;
+  private _webviewHtml?: WebviewHtml;
+  private _worktreeHost?: WorktreeHost;
+  private _providerSetup?: ProviderSetup;
+  private _workflowStageRunner?: WorkflowStageRunner;
+
+  /** Real instances set these in the constructor. Prototype stubs used by tests
+   *  never run it, so the first delegating call builds the collaborator. */
+  get webviewHtml(): WebviewHtml {
+    return this._webviewHtml ??= this.createWebviewHtml();
+  }
+  set webviewHtml(value: WebviewHtml) { this._webviewHtml = value; }
+  get questionHost(): QuestionHost {
+    return this._questionHost ??= this.createQuestionHost();
+  }
+  set questionHost(value: QuestionHost) { this._questionHost = value; }
+  get reviewHost(): ReviewHost {
+    return this._reviewHost ??= this.createReviewHost();
+  }
+  set reviewHost(value: ReviewHost) { this._reviewHost = value; }
+  get worktreeHost(): WorktreeHost {
+    return this._worktreeHost ??= this.createWorktreeHost();
+  }
+  set worktreeHost(value: WorktreeHost) { this._worktreeHost = value; }
+  get providerSetup(): ProviderSetup {
+    return this._providerSetup ??= this.createProviderSetup();
+  }
+  set providerSetup(value: ProviderSetup) { this._providerSetup = value; }
+  get workflowStageRunner(): WorkflowStageRunner {
+    return this._workflowStageRunner ??= this.createWorkflowStageRunner();
+  }
+  set workflowStageRunner(value: WorkflowStageRunner) { this._workflowStageRunner = value; }
+
+  private createReviewHost(): ReviewHost {
+    const self = this;
+    return new ReviewHost({
+      get diffSeq() { return self.diffSeq; },
+      set diffSeq(value) { self.diffSeq = value; },
+      get diffProvider() { return self.diffProvider; },
+      get openDiffsByRequest() { return self.openDiffsByRequest; },
+      get host() { return self.host; },
+      sessionCwd: (...args) => self.sessionCwd(...args),
+      emit: (...args) => self.emit(...args),
+      get checkpointStore() { return self.checkpointStore; },
+      confirmInChat: (...args) => self.confirmInChat(...args),
+      createPlanReviewSnapshot: (...args) => self.createPlanReviewSnapshot(...args),
+      syncHumanWait: (...args) => self.syncHumanWait(...args),
+      setStatus: (...args) => self.setStatus(...args),
+      get turnGitBaselines() { return self.turnGitBaselines; },
+      get gitRunGate() { return self.gitRunGate; },
+      notifyUser: (...args) => self.notifyUser(...args),
+      truncateSessionCardsAfterRewind: (...args) => self.truncateSessionCardsAfterRewind(...args),
+      applyRewindToView: (...args) => self.applyRewindToView(...args),
+      restoreComposerFor: (...args) => self.restoreComposerFor(...args),
+    });
+  }
+
+  private createQuestionHost(): QuestionHost {
+    const self = this;
+    return new QuestionHost({
+      get host() { return self.host; },
+      emit: (...args) => self.emit(...args),
+      setStatus: (...args) => self.setStatus(...args),
+      get hostPipeMux() { return self.hostPipeMux; },
+      set hostPipeMux(value) { self.hostPipeMux = value; },
+      get askUserChannel() { return self.askUserChannel; },
+      set askUserChannel(value) { self.askUserChannel = value; },
+      get context() { return self.context; },
+      get pool() { return self.pool; },
+      reservedMcpIdentityFor: (...args) => self.reservedMcpIdentityFor(...args),
+      touch: (...args) => self.touch(...args),
+    });
+  }
+
+  private createWebviewHtml(): WebviewHtml {
+    const self = this;
+    return new WebviewHtml({
+      get context() { return self.context; },
+      get host() { return self.host; },
+      appPurpose: () => self.appPurpose(),
+      chatFontScale: () => self.chatFontScale(),
+      voiceBackendState: (cwd, provider) => self.voiceBackendState(cwd, provider),
+      sessionCwd: (session) => self.sessionCwd(session),
+      get focused() { return self.focused; },
+      voiceSetting: (cwd, key, fallback) => self.voiceSetting(cwd, key, fallback),
+      providerStateMessage: () => self.providerStateMessage(),
+      get providerRefreshInFlight() { return self.providerRefreshInFlight; },
+      githubStatePayload: () => self.githubStatePayload(),
+      get providerCliVersions() { return self.providerCliVersions; },
+      get mcpServersView() { return self.mcpServersView; },
+      mcpConnectorsMessage: () => self.mcpConnectorsMessage(),
+      showThinking: () => self.showThinking(),
+    });
+  }
+
+  private createWorktreeHost(): WorktreeHost {
+    const self = this;
+    return new WorktreeHost({
+      get host() { return self.host; },
+      get focused() { return self.focused; },
+      set focused(value) { self.focused = value; },
+      get pool() { return self.pool; },
+      get state() { return self.state; },
+      get sessionCache() { return self.sessionCache; },
+      workspaceRoot: () => self.workspaceRoot(),
+      sessionCwd: (...args) => self.sessionCwd(...args),
+      historyCwdFor: () => self.historyCwdFor(),
+      openWorkspaceFolders: () => self.openWorkspaceFolders(),
+      resolveLocalRepoTarget: (...args) => self.resolveLocalRepoTarget(...args),
+      newLocalSession: (...args) => self.newLocalSession(...args),
+      parkFocused: () => self.parkFocused(),
+      startSession: (...args) => self.startSession(...args),
+      postSessionsList: () => self.postSessionsList(),
+      removeSessionFromDisk: (...args) => self.removeSessionFromDisk(...args),
+      confirmInChat: (...args) => self.confirmInChat(...args),
+      detachClient: (...args) => self.detachClient(...args),
+    });
+  }
+
+  private createProviderSetup(): ProviderSetup {
+    const self = this;
+    return new ProviderSetup({
+      get host() { return self.host; },
+      get context() { return self.context; },
+      get state() { return self.state; },
+      get providerCliVersions() { return self.providerCliVersions; },
+      workspaceRoot: () => self.workspaceRoot(),
+      post: (msg) => self.post(msg),
+      postLocal: (msg) => self.postLocal(msg),
+      postToSettingsEditor: (msg) => { void self.settingsEditor?.webview.postMessage(msg); },
+      cacheProviderModels: (...args) => self.cacheProviderModels(...args),
+      probeProviderVersion: (...args) => self.probeProviderVersion(...args),
+      invalidateSubscriptionUsage: (...args) => self.invalidateSubscriptionUsage(...args),
+      rearmAuthRecovery: (provider) => {
+        const rearm = (session: Session | undefined) => {
+          if (session?.provider === provider) session.authRecoveryTried = false;
+        };
+        rearm(self.focused);
+        for (const session of self.pool ?? []) rearm(session);
+      },
+      refreshGithubState: () => self.refreshGithubState(),
+      buildEnv: (...args) => self.buildEnv(...args),
+      removeSessionFromDisk: (...args) => self.removeSessionFromDisk(...args),
+      getOverride: (name: string) => {
+        if (Object.prototype.hasOwnProperty.call(self, name)) {
+          return (self as any)[name];
+        }
+        return undefined;
+      },
+    });
+  }
+
+  private createWorkflowStageRunner(): WorkflowStageRunner {
+    const self = this;
+    return new WorkflowStageRunner({
+      get host() { return self.host; },
+      get context() { return self.context; },
+      get state() { return self.state; },
+      get agentRuns() { return self.agentRuns; },
+      get checkpointStore() { return self.checkpointStore; },
+      get worktreeHost() { return self.worktreeHost; },
+      get providerSetup() { return self.providerSetup; },
+      get pool() { return self.pool; },
+      get focused() { return self.focused; },
+      sessionCwd: (session?: Session) => self.sessionCwd(session),
+      emit: (session: Session, msg: HostMsg) => self.emit(session, msg),
+      agentNotice: (session: Session, level: "info" | "warning" | "error", text: string) => self.agentNotice(session, level === "error" ? "warning" : level, text),
+      confirmInChat: (session: Session, opts: any) => self.confirmInChat(session, opts),
+      showQuestion: (session: Session, question: any, handlers: any) => self.showQuestion(session, question, handlers),
+      newFocusedSession: async () => {
+        await self.newFocusedSession();
+        return self.focused;
+      },
+      setStatus: (session: Session, status: Session["status"]) => self.setStatus(session, status),
+      runAgentRole: (...args) => self.runAgentRole(...args),
+      resolveRoleProvider: (...args) => self.resolveRoleProvider(...args),
+      agentRoleSet: (cwd: string) => self.agentRoleSet(cwd),
+      crewPresetSet: (cwd: string) => self.crewPresetSet(cwd),
+      crewEligibilityInput: (session: Session) => self.crewEligibilityInput(session),
+      steerSend: (text: string, session: Session) => self.steerSend(text, session),
+      emitReviewCenter: (session: Session) => self.emitReviewCenter(session),
+      persistSessionType: (session: Session) => self.persistSessionType(session),
+      childWaitsForYou: (child: Session | undefined) => self.childWaitsForYou(child),
+      getOverride: (name: string) => {
+        if (Object.prototype.hasOwnProperty.call(self, name)) {
+          return (self as any)[name];
+        }
+        return undefined;
+      },
+    });
+  }
+
   constructor(
     private context: HostContext,
     /** Effectful host surface — VS Code supplies createVsCodeHost; a desktop app injects its own. */
     private readonly host: Host,
   ) {
+    this._reviewHost = this.createReviewHost();
+    this._questionHost = this.createQuestionHost();
+    this._webviewHtml = this.createWebviewHtml();
+    this._worktreeHost = this.createWorktreeHost();
+    this._providerSetup = this.createProviderSetup();
+    this._workflowStageRunner = this.createWorkflowStageRunner();
     // Before anything can read it: the loss case is an empty read followed by a
     // write, so this must not be deferred to an async init.
     this.state = new PersistedState(
@@ -2296,34 +2419,18 @@ export class GrokSidebar {
   // this is the glue: persistence, `runAgentRole` with `coords.stage`, the
   // gate's target picker, and the D8 `/crew` intercept.
 
-  private workflowState?: {
-    store: WorkflowRunStore;
-    packets: Map<string, HandoffPacket>;
-    defs: Map<string, WorkflowDefinition>;
-  };
-
-  private workflowStore(): NonNullable<GrokSidebar["workflowState"]> {
-    if (!this.workflowState) {
-      this.workflowState = {
-        store: new WorkflowRunStore({
-          root: path.join(this.context.globalStorageUri.fsPath, "runs"),
-          fs: {
-            mkdirSync: (dir, options) => { fs.mkdirSync(dir, options); },
-            writeFileSync: (file, data) => fs.writeFileSync(file, data, "utf8"),
-            readFileSync: (file, encoding) => fs.readFileSync(file, encoding),
-            renameSync: (from, to) => fs.renameSync(from, to),
-            existsSync: (target) => fs.existsSync(target),
-          },
-          join: (...parts) => path.join(...parts),
-        }),
-        packets: new Map(),
-        defs: new Map(),
-      };
-    }
-    return this.workflowState;
+  get workflowState(): { store: WorkflowRunStore; packets: Map<string, HandoffPacket>; defs: Map<string, WorkflowDefinition> } | undefined {
+    return this.workflowStageRunner.workflowState;
+  }
+  set workflowState(v) {
+    this.workflowStageRunner.workflowState = v;
   }
 
-  private workflowRuns(): WorkflowRunStore { return this.workflowStore().store; }
+  private workflowStore(): NonNullable<GrokSidebar["workflowState"]> {
+    return this.workflowStageRunner.workflowStore();
+  }
+
+  private workflowRuns(): WorkflowRunStore { return this.workflowStageRunner.workflowRuns(); }
 
   private generatorState?: {
     requestId: string;
@@ -2356,1622 +2463,264 @@ export class GrokSidebar {
     void this.settingsEditor?.webview.postMessage(message);
   }
 
-  private inThreadCrewCommand(): boolean {
-    try {
-      return this.host.getConfiguration("companions").get<boolean>("crew.inThreadCommand", false) === true;
-    } catch {
-      return false;
+  private handleGeneratorTool(session: Session, call: CompanionsCall): void {
+    const hidden = session.pendingHiddenChild?.hiddenReason
+      ?? this.sessionTypeMetaFor(session)?.hiddenReason;
+    if (hidden !== "workflow-generator") {
+      call.fail("This tool is only available while generating a workflow.");
+      return;
     }
+    const store = this.generatorStore();
+    const ctx = this.workflowValidateContext({
+      generated: true,
+      allowWrite: store.state.options.allowWrite,
+      maxStages: store.state.options.maxStages,
+    });
+    switch (call.tool) {
+      case COMPANIONS_WORKFLOW_SCHEMA_TOOL:
+        call.resolve({ guide: WORKFLOW_AUTHORING_GUIDE });
+        return;
+      case COMPANIONS_LIST_ROLES_TOOL:
+        call.resolve({
+          roles: this.agentRoleSet(this.sessionCwd()).roles.map((role) => ({
+            name: role.name,
+            whenToUse: role.whenToUse,
+            provider: role.source === "builtin" ? undefined : role.provider,
+            ...(role.model ? { model: role.model } : {}),
+            source: role.source,
+          })),
+        });
+        return;
+      case COMPANIONS_LIST_TOOL:
+        call.resolve(this.subagentHost.companionsList(session, normalizeListArguments(call.args)));
+        return;
+      case COMPANIONS_LIST_WORKFLOWS_TOOL:
+        call.resolve({
+          workflows: this.crewPresetSet(this.sessionCwd()).presets.map((preset) => ({
+            name: preset.name,
+            title: preset.title || preset.name,
+            whenToUse: preset.whenToUse || "",
+            source: preset.source,
+          })),
+        });
+        return;
+      case COMPANIONS_VALIDATE_WORKFLOW_TOOL: {
+        const raw = workflowArg(call.args);
+        const validation = validateWorkflowRaw(raw, ctx);
+        store.state = recordValidation(store.state, raw, validation);
+        call.resolve(validation);
+        return;
+      }
+      case COMPANIONS_SUBMIT_WORKFLOW_TOOL: {
+        const raw = workflowArg(call.args);
+        const accepted = acceptSubmission(raw, ctx, store.compiler);
+        store.submitted = accepted;
+        if (accepted.ok) {
+          call.resolve({ ok: true, name: accepted.workflow.name, warnings: accepted.validation.warnings });
+        } else {
+          call.resolve({
+            ok: false,
+            error: accepted.error,
+            ...(accepted.validation
+              ? { errors: accepted.validation.errors, warnings: accepted.validation.warnings }
+              : {}),
+          });
+        }
+        return;
+      }
+      default:
+        call.fail(`Unknown tool: ${call.tool}`);
+    }
+  }
+
+  get fileClaims(): FileClaimStore | undefined {
+    return (this.workflowStageRunner as any).fileClaims;
+  }
+  set fileClaims(v: FileClaimStore | undefined) {
+    (this.workflowStageRunner as any).fileClaims = v;
+  }
+
+  private inThreadCrewCommand(): boolean {
+    return this.workflowStageRunner.inThreadCrewCommand();
   }
 
   private defaultWorkflowName(): string {
-    try {
-      const name = this.host.getConfiguration("companions").get<string>("crew.defaultWorkflow", "idea-to-done");
-      return (name ?? "idea-to-done").trim() || "idea-to-done";
-    } catch {
-      return "idea-to-done";
-    }
+    return this.workflowStageRunner.defaultWorkflowName();
   }
 
   private autoStartNextStage(): boolean {
-    try {
-      return this.host.getConfiguration("companions").get<boolean>("crew.autoStartNextStage", false) === true;
-    } catch {
-      return false;
-    }
+    return this.workflowStageRunner.autoStartNextStage();
   }
 
   private maxFixerPasses(): number {
-    try {
-      const n = this.host.getConfiguration("companions").get<number>("crew.maxFixerPasses", 2);
-      return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 2;
-    } catch {
-      return 2;
-    }
+    return this.workflowStageRunner.maxFixerPasses();
   }
 
   private resolveWorkflow(session: Session, name?: string): WorkflowDefinition {
-    const cwd = this.sessionCwd(session);
-    const presets = this.crewPresetSet(cwd);
-    const wanted = (name ?? this.defaultWorkflowName()).trim() || this.defaultWorkflowName();
-    const preset = findCrewPreset(presets, wanted);
-    if (preset.name === "idea-to-done" && !preset.stages && wanted === "idea-to-done") {
-      return applyMaxFixerPasses(IDEA_TO_DONE, this.maxFixerPasses());
-    }
-    const named = presets.presets.find((p) => p.name === wanted) ?? preset;
-    return applyMaxFixerPasses(presetToStageGraph(named), this.maxFixerPasses());
+    return this.workflowStageRunner.resolveWorkflow(session, name);
   }
 
   private postWorkflowList(session: Session, preferred?: string): void {
-    try {
-      let cwd = session.cwd || "";
-      try {
-        if (!cwd) cwd = this.sessionCwd(session);
-      } catch {
-        cwd = "";
-      }
-      const presets = this.crewPresetSet(cwd);
-      const defaultName = preferred || this.defaultWorkflowName();
-      const workflows = presets.presets.map((preset) => {
-        let extra: Partial<WorkflowPickerItem> = {};
-        try {
-          const def = this.resolveWorkflow(session, preset.name);
-          const capped = def.stages.find((s) => s.maxVisits);
-          extra = {
-            stages: def.stages.filter((s) => s.enabled).map((s) => s.title),
-            lineup: this.lineupForRun(session, undefined, def),
-            ...(findStage(def, "implement") && def.stages.some((s) => s.role === "fixer") ? { hasFix: true } : {}),
-            ...(capped?.maxVisits ? { maxFixRounds: capped.maxVisits } : {}),
-          };
-        } catch { /* a broken workflow still lists; the start path reports it */ }
-        return {
-          name: preset.name,
-          title: preset.title || preset.name,
-          whenToUse: preset.whenToUse || "",
-          source: preset.source,
-          ...(preset.stages === undefined && preset.name !== "idea-to-done" ? { defaultGraph: true } : {}),
-          ...extra,
-        };
-      });
-      this.emit(session, {
-        type: "workflowList",
-        workflows,
-        defaultWorkflow: defaultName,
-        verifySuggestions: this.verifySuggestions(cwd),
-        defaultAutonomy: this.workflowAutonomy({ } as WorkflowRun),
-      });
-    } catch (error) {
-      this.emit(session, {
-        type: "workflowList",
-        workflows: [{
-          name: IDEA_TO_DONE.name,
-          title: IDEA_TO_DONE.title,
-          whenToUse: IDEA_TO_DONE.whenToUse,
-          source: "builtin",
-        }],
-        defaultWorkflow: "idea-to-done",
-      });
-      this.host.appendLine?.(`[workflow] could not list workflows: ${(error as Error).message}`);
-    }
+    this.workflowStageRunner.postWorkflowList(session, preferred);
   }
 
   private emitWorkflowRun(session: Session, extra?: { staleDetails?: string[]; missing?: string[] }): void {
-    const run = session.workflowRun;
-    if (!run) {
-      session.workflowView = undefined;
-      this.emit(session, { type: "workflowRun", run: null });
-      return;
-    }
-    const def = this.workflowStore().defs.get(run.runId) ?? this.resolveWorkflow(session, run.workflowName);
-    this.workflowStore().defs.set(run.runId, def);
-    const packets = this.packetsFor(run.runId);
-    const last = [...packets].sort((a, b) => b.stageOrdinal - a.stageOrdinal)[0];
-    // F-06: every eligible provider carries its models and efforts, so the
-    // gate can offer model and effort for whichever companion is picked (D6).
-    const listing = listEligibleTargets(this.crewEligibilityInput(session), { includeIneligible: true, expand: "all" });
-    const view = toWorkflowView({
-      run,
-      def,
-      lastPacket: last,
-      listing: {
-        targets: listing.targets.map((t) => ({
-          provider: t.provider,
-          displayName: t.displayName,
-          ...(t.defaultModel ? { defaultModel: t.defaultModel } : {}),
-          ...(t.defaultEffort ? { defaultEffort: t.defaultEffort } : {}),
-          ...(t.models ? { models: t.models } : {}),
-        })),
-        ineligible: listing.ineligible.map((row) => ({ provider: row.provider, message: row.message })),
-      },
-      ...(extra?.staleDetails ? { staleDetails: extra.staleDetails } : {}),
-      ...(extra?.missing ? { missing: extra.missing } : {}),
-      waitingForYou: (session.crewLive ?? []).some((live) => this.childWaitsForYou(live.roleSession)),
-      scope: this.nextStageScope(run, def),
-    });
-    session.workflowView = this.decorateWorkflowView(session, view, run, def, packets, last);
-    this.emit(session, { type: "workflowRun", run: session.workflowView });
+    this.workflowStageRunner.emitWorkflowRun(session, extra);
   }
 
-  /**
-   * Everything the run view carries beyond the pure core: honest numbers
-   * (X-05), the run table (C-17), autonomy (C-05), the stall warning (X-04),
-   * and on the gate the preselected target with its comparison (C-03), the
-   * editable plan (C-06), the clarifier's questions (C-15), finding selection
-   * (C-09), the limit choices (C-16) and the lineup at gate 0 (C-04).
-   */
-  private decorateWorkflowView(
-    session: Session,
-    view: WorkflowRunView,
-    run: WorkflowRun,
-    def: WorkflowDefinition,
-    packets: HandoffPacket[],
-    last: HandoffPacket | undefined,
-  ): WorkflowRunView {
-    const rows = runTableRows(run, def, packets);
-    const reverted = new Set(run.reverted ?? []);
-    const table = rows.map((row) => {
-      const stage = findStage(def, row.stageId);
-      return {
-        ordinal: row.ordinal,
-        stageId: row.stageId,
-        title: row.title,
-        role: row.role,
-        target: row.target,
-        status: reverted.has(row.ordinal) ? "reverted" : row.status,
-        ...(row.durationMs ? { duration: formatDurationShort(row.durationMs) } : {}),
-        ...(typeof row.tokens === "number" ? { tokens: formatTokenCount(row.tokens) } : {}),
-        files: row.files,
-        ...(row.sessionId ? { sessionId: row.sessionId } : {}),
-        ...(stage && isWriteProfile(stage.profile) && row.status === "done" && row.sessionId && !reverted.has(row.ordinal)
-          ? { revertible: true }
-          : {}),
-      };
-    });
-    const metaFor = (stageId: string): string | undefined => {
-      const row = [...rows].reverse().find((r) => r.stageId === stageId);
-      if (!row) return undefined;
-      return [row.target, formatDurationShort(row.durationMs), typeof row.tokens === "number" ? `${formatTokenCount(row.tokens)} tokens` : ""]
-        .filter(Boolean).join(" · ") || undefined;
-    };
-    const live = this.runningStageSession(session);
-    const stalled = live?.stalled && run.current && live.lastChildActivityAt
-      ? { stageId: run.current.stageId, text: stallWarningText(Date.now() - live.lastChildActivityAt) }
-      : undefined;
-    const reportPath = this.workflowReportPath(run.runId);
-    const out: WorkflowRunView = {
-      ...view,
-      stages: view.stages.map((s) => {
-        const meta = metaFor(s.id);
-        const runningHere = run.current?.stageId === s.id;
-        const status = runningHere && stalled && s.status !== "needs-you" ? "stalled" : s.status;
-        return {
-          ...s,
-          childStatus: stageChildStatus(status),
-          ...(meta ? { meta } : {}),
-          ...(runningHere && run.current?.sessionId && !s.sessionId ? { sessionId: run.current.sessionId } : {}),
-          ...(runningHere && stalled ? { status: s.status === "needs-you" ? s.status : "stalled" } : {}),
-          ...(runningHere && this.stageStepProgress.get(run.runId) ? { substep: this.stageStepProgress.get(run.runId) } : {}),
-        };
-      }),
-      ...(rows.length ? { totals: runTotalsLine(rows) } : {}),
-      table,
-      autonomy: this.workflowAutonomy(run),
-      ...(run.pauseAfterCurrent ? { pauseAfterCurrent: true } : {}),
-      ...(stalled ? { stalled } : {}),
-      ...(run.acknowledged ? { acknowledged: true } : {}),
-      ...(reportPath && fs.existsSync(reportPath) ? { reportAvailable: true } : {}),
-      ...(run.verify ? { verify: run.verify } : {}),
-    };
-    if (!view.gate || !run.gate) return out;
-    const gate = { ...view.gate };
-    const nextId = run.gate.nextStageId ?? run.gate.proposedNext[0];
-    const nextStage = nextId && !isReservedTarget(nextId) ? findStage(def, nextId) : undefined;
-    if (last && run.gate.kind !== "gate-0") {
-      const meta = [targetText(last.target), formatDurationShort(last.durationMs), typeof last.tokens === "number" ? `${formatTokenCount(last.tokens)} tokens` : ""]
-        .filter(Boolean).join(" · ");
-      if (meta) gate.headerMeta = meta;
-    }
-    if (run.gate.preselectedTarget) {
-      gate.preselected = {
-        provider: run.gate.preselectedTarget.provider,
-        ...(run.gate.preselectedTarget.model ? { model: run.gate.preselectedTarget.model } : {}),
-        ...(run.gate.preselectedTarget.effort ? { effort: run.gate.preselectedTarget.effort } : {}),
-      };
-    }
-    if (run.gate.compare) {
-      gate.compare = compareLabel(run.gate.compare);
-      gate.compareSame = run.gate.compare.same;
-    }
-    if (nextStage) {
-      const who = gate.preselected ? providerDisplayName(gate.preselected.provider) : "";
-      gate.primaryLabel = `Start ${nextStage.title}${who ? ` on ${who}` : ""}`;
-    }
-    if (run.gate.kind === "fixer-limit") gate.anotherRoundLabel = anotherRoundLabel(run, def);
-    if (gate.findings?.length) {
-      const ignored = new Set(run.ignoredFindings ?? []);
-      gate.findings = gate.findings.map((f) => ({ ...f, selected: !ignored.has(f.id) }));
-      gate.panelSize = last?.panel?.length;
-    }
-    // C-06: the plan is editable at the gate right after the stage that made it.
-    if (last?.planSteps?.length && nextStage && last.stageId === run.executed[run.executed.length - 1]?.stageId) {
-      gate.planSteps = last.planSteps.map((s) => ({ ...s, ...(s.files ? { files: [...s.files] } : {}) }));
-      if (last.editedByUser) gate.planEdited = true;
-    }
-    // C-15: the clarifier's questions as a form.
-    if (last?.questions?.length && nextStage) gate.questions = [...last.questions];
-    if (run.gate.kind === "limit" && run.gate.limitProvider) {
-      const exhausted = new Set(run.exhausted);
-      gate.limit = {
-        provider: run.gate.limitProvider,
-        providerName: providerDisplayName(run.gate.limitProvider),
-        alternatives: (view.gate.eligible ?? [])
-          .filter((t) => t.provider !== run.gate!.limitProvider && !exhausted.has(t.provider))
-          .map((t) => ({ provider: t.provider, displayName: t.displayName })),
-      };
-    }
-    if (run.gate.switchedFrom) gate.switchedFrom = providerDisplayName(run.gate.switchedFrom);
-    if (gate.kind === "gate-0") {
-      out.lineup = this.lineupForRun(session, run, def);
-      out.verifySuggestions = this.verifySuggestions(run.cwd);
-    }
-    out.gate = gate;
-    return out;
-  }
-
-  /** C-05: this run's autonomy — its own choice, else the settings default. */
   private workflowAutonomy(run: WorkflowRun): Autonomy {
-    if (run.autonomy) return run.autonomy;
-    const configured = this.companionsSetting<string>("crew.defaultAutonomy", "step");
-    const legacy = this.autoStartNextStage();
-    return configured === "step" && legacy ? "stop-on-problems" : autonomyFromSettings(configured, legacy);
+    return this.workflowStageRunner.workflowAutonomy(run);
   }
-
-  /** X-04 / C-12: "step 2/5" of a running per-plan-step stage, by run id. */
-  private readonly stageStepProgress = new Map<string, string>();
 
   private workflowReportPath(runId: string): string | undefined {
-    try {
-      return path.join(this.workflowRuns().runDir(runId), "run-report.md");
-    } catch {
-      return undefined;
-    }
+    return this.workflowStageRunner.workflowReportPath(runId);
   }
 
-  /** The lineup as the gate-0 / start panel shows it (C-04). */
   private lineupForRun(session: Session, run: WorkflowRun | undefined, def: WorkflowDefinition): WorkflowLineupView[] {
-    const input = this.crewEligibilityInput(session);
-    const eligible = listEligibleTargets(input, {}).targets.map((t) => t.provider);
-    const roles = this.agentRoleSet(this.sessionCwd(session));
-    const roleInfo: Record<string, RoleTemplateInfo | undefined> = {};
-    for (const [key, ref] of Object.entries(def.roles)) {
-      const named = "ref" in ref ? ref.ref : key;
-      const role = findAgentRole(roles, named);
-      roleInfo[key] = role
-        ? {
-            provider: role.provider,
-            ...(role.model ? { model: role.model } : {}),
-            ...(role.effort ? { effort: role.effort } : {}),
-            builtin: role.source === "builtin",
-            ...(role.preferDifferentProvider ? { preferDifferentProvider: true } : {}),
-          }
-        : undefined;
-    }
-    const remembered = run?.lineup ?? this.rememberedLineup(this.sessionCwd(session), def.name);
-    return proposeLineup({ def, eligible, remembered, roles: roleInfo }).map((entry) => ({
-      ...entry,
-      providerName: providerDisplayName(entry.provider),
-    }));
+    return this.workflowStageRunner.lineupForRun(session, run, def);
   }
-
-  private static readonly LINEUP_KEY = "companions.crew.lineups";
 
   private rememberedLineup(cwd: string, workflow: string): Record<string, RunLineupEntry> | undefined {
-    const all = this.state.get<Record<string, Record<string, RunLineupEntry>>>(GrokSidebar.LINEUP_KEY, {});
-    return all[`${cwd}::${workflow}`];
+    return this.workflowStageRunner.rememberedLineup(cwd, workflow);
   }
 
   private async rememberLineup(cwd: string, workflow: string, lineup: Record<string, RunLineupEntry>): Promise<void> {
-    const all = { ...this.state.get<Record<string, Record<string, RunLineupEntry>>>(GrokSidebar.LINEUP_KEY, {}) };
-    all[`${cwd}::${workflow}`] = lineup;
-    await this.state.update(GrokSidebar.LINEUP_KEY, all);
+    return this.workflowStageRunner.rememberLineup(cwd, workflow, lineup);
   }
 
-  /** C-04: verify commands worth proposing — only proposed, never run unasked. */
   private verifySuggestions(cwd: string): string[] {
-    try {
-      const read = (name: string) => {
-        try { return fs.readFileSync(path.join(cwd, name), "utf8"); } catch { return undefined; }
-      };
-      const pkgText = read("package.json");
-      let packageJson: { scripts?: Record<string, unknown> } | undefined;
-      try { packageJson = pkgText ? JSON.parse(pkgText) : undefined; } catch { packageJson = undefined; }
-      const packageManager = fs.existsSync(path.join(cwd, "pnpm-lock.yaml")) ? "pnpm" as const
-        : fs.existsSync(path.join(cwd, "yarn.lock")) ? "yarn" as const : "npm" as const;
-      return suggestVerifyCommands({
-        packageJson,
-        packageManager,
-        hasCargo: fs.existsSync(path.join(cwd, "Cargo.toml")),
-        hasPyproject: fs.existsSync(path.join(cwd, "pyproject.toml")),
-        hasGoMod: fs.existsSync(path.join(cwd, "go.mod")),
-      });
-    } catch {
-      return [];
-    }
+    return this.workflowStageRunner.verifySuggestions(cwd);
   }
 
-  /**
-   * C-03 / F-05: decide the next stage's companion before the gate shows,
-   * and remember it on the gate (so an auto-proceed uses it too).
-   */
   private withGatePreselection(session: Session, run: WorkflowRun, def: WorkflowDefinition): WorkflowRun {
-    if (!run.gate) return run;
-    const nextId = run.gate.nextStageId ?? run.gate.proposedNext[0];
-    const stage = nextId && !isReservedTarget(nextId) ? findStage(def, nextId) : undefined;
-    if (!stage) return run;
-    const input = this.crewEligibilityInput(session);
-    const eligible = listEligibleTargets(input, {}).targets.map((t) => t.provider);
-    const roleRef = def.roles[stage.role];
-    const named = roleRef && "ref" in roleRef ? roleRef.ref : stage.role;
-    const role = findAgentRole(this.agentRoleSet(this.sessionCwd(session)), named);
-    const packets = this.packetMap(run.runId);
-    const lastPacket = this.packetsFor(run.runId).slice(-1)[0];
-    const lineup = run.lineup?.[stage.id];
-    const pick = preselectGateTarget({
-      stage,
-      def,
-      eligible,
-      packets,
-      ...(lineup ? { lineup: { provider: lineup.provider, ...(lineup.model ? { model: lineup.model } : {}), ...(lineup.effort ? { effort: lineup.effort } : {}) } } : {}),
-      ...(role
-        ? {
-            role: {
-              provider: role.provider,
-              ...(role.model ? { model: role.model } : {}),
-              ...(role.effort ? { effort: role.effort } : {}),
-              builtin: role.source === "builtin",
-              ...(role.preferDifferentProvider ? { preferDifferentProvider: true } : {}),
-            },
-          }
-        : {}),
-      ...(lastPacket ? { lastProvider: lastPacket.target.provider } : {}),
-    });
-    if (!pick.target) return run;
-    return {
-      ...run,
-      gate: {
-        ...run.gate,
-        preselectedTarget: {
-          provider: pick.target.provider,
-          ...(pick.target.model ? { model: pick.target.model } : {}),
-          ...(pick.target.effort && isEffortLevel(pick.target.effort) ? { effort: pick.target.effort } : {}),
-        },
-        ...(pick.compare ? { compare: { stageTitle: pick.compare.stageTitle, same: pick.compare.same } } : {}),
-      },
-    };
+    return this.workflowStageRunner.withGatePreselection(session, run, def);
   }
 
-  /** C-01: what the next write stage may edit without asking, for the gate. */
   private nextStageScope(run: WorkflowRun, def: WorkflowDefinition): { globs: string[]; note?: string } | undefined {
-    if (!run.gate) return undefined;
-    const id = run.gate.nextStageId ?? run.gate.proposedNext[0];
-    const stage = id && !isReservedTarget(id) ? findStage(def, id) : undefined;
-    if (!stage || stage.profile !== "scoped-edit") return undefined;
-    const scope = resolveStageScope(stage, this.packetMap(run.runId), run.attachedFiles);
-    return scope.empty
-      ? { globs: [], note: `The plan names no files — ${stage.title} will ask before editing anything.` }
-      : { globs: scope.globs };
+    return this.workflowStageRunner.nextStageScope(run, def);
   }
 
   private persistWorkflowRun(session: Session): void {
-    const run = session.workflowRun;
-    if (!run) return;
-    try {
-      this.workflowRuns().writeRun(run);
-    } catch (error) {
-      this.host.appendLine(`[workflow] could not write run.json: ${(error as Error).message}`);
-    }
-    this.persistSessionType(session);
+    this.workflowStageRunner.persistWorkflowRun(session);
   }
 
   private crewEligibilityInput(session: Session): EligibilityInput {
-    const base = this.eligibilityInput(session, this.currentTurnId(session));
-    const overrides = this.companionsSetting<Record<string, { enabled?: boolean }>>("crew.providers", {});
-    const roster = { ...base.roster };
-    for (const provider of ACP_PROVIDERS) {
-      const enabled = overrides?.[provider]?.enabled;
-      if (typeof enabled !== "boolean") continue;
-      roster[provider] = { ...(roster[provider] ?? { enabled: true, allowedModels: [], allowWrite: true }), enabled };
-    }
-    return {
-      ...base,
-      purpose: "crew-stage",
-      parent: undefined,
-      roster,
-      exhausted: new Set(session.workflowRun?.exhausted ?? []),
-      subagentsEnabled: true,
-      forbiddenThisTurn: false,
-    };
+    return this.workflowStageRunner.crewEligibilityInput(session);
   }
 
-  /**
-   * Bring a Crew run back after a reload (C-02). The run object is set at
-   * once, so a message typed during the async part still finds it; the
-   * packets are read from disk before staleness is judged, because the
-   * observed-file hash is computed over the files those packets name.
-   */
   private async restoreWorkflowRun(session: Session, runId: string): Promise<void> {
-    const run = this.workflowRuns().readRun(runId);
-    if (!run) return;
-    session.workflowRun = run;
-    const snap = this.workflowRuns().readSnapshot(runId);
-    if (snap) {
-      try {
-        const parsed = JSON.parse(snap);
-        const fromSnap = presetToStageGraph({
-          name: run.workflowName,
-          roles: [],
-          body: "",
-          source: "builtin",
-          stages: parsed,
-        });
-        this.workflowStore().defs.set(runId, fromSnap);
-      } catch {
-        this.workflowStore().defs.set(runId, this.resolveWorkflow(session, run.workflowName));
-      }
-    } else {
-      this.workflowStore().defs.set(runId, this.resolveWorkflow(session, run.workflowName));
-    }
-    const missing = this.loadWorkflowPackets(run);
-    const liveHash = workflowSnapshotHash(this.resolveWorkflow(session, run.workflowName));
-    let next = run;
-    const stale = resumeStaleness(run.pausedAt, await this.currentWorkspaceStamp(run));
-    if (session.workflowRun !== run) return;
-    if (!stale.ok) next = applyStaleness(next, stale);
-    if (snapshotDrift(next, liveHash)) next = applySnapshotDrift(next);
-    session.workflowRun = next;
-    this.emitWorkflowRun(session, {
-      ...(!stale.ok && stale.code === "stale" ? { staleDetails: stale.details } : {}),
-      ...(missing.length ? { missing } : {}),
-    });
+    return this.workflowStageRunner.restoreWorkflowRun(session, runId);
   }
 
-  /** Read every executed stage's packet back into memory. Returns the
-   *  "Stage N result is missing on disk" lines for the gate. */
   private loadWorkflowPackets(run: WorkflowRun): string[] {
-    const missing: string[] = [];
-    const def = this.workflowStore().defs.get(run.runId);
-    for (const entry of run.executed) {
-      if (entry.status === "skipped") continue;
-      const key = `${run.runId}:${entry.ordinal}`;
-      if (this.workflowStore().packets.has(key)) continue;
-      // C-06: a plan the person edited at the gate wins over the original.
-      const packet = this.workflowRuns().readUserEdit(run.runId, entry.ordinal)
-        ?? this.workflowRuns().readHandoffAt(entry.packetPath)
-        ?? this.workflowRuns().readHandoff(run.runId, entry.ordinal);
-      if (packet) {
-        this.workflowStore().packets.set(key, packet);
-        continue;
-      }
-      const title = def ? findStage(def, entry.stageId)?.title ?? entry.stageId : entry.stageId;
-      missing.push(`Stage ${entry.ordinal} (${title}) result is missing on disk.`);
-    }
-    return missing;
+    return this.workflowStageRunner.loadWorkflowPackets(run);
   }
 
-  /** HEAD, observed-file hash and worktree existence — async, with a timeout,
-   *  so a slow repository never freezes the extension host (F-20). */
   private async currentWorkspaceStamp(run: WorkflowRun): Promise<{
     gitHead?: string;
     observedHash?: string;
     worktreeExists?: boolean;
     worktree?: string;
   }> {
-    const cwd = run.worktree || run.cwd;
-    let gitHead: string | undefined;
-    try {
-      if (fs.existsSync(path.join(cwd, ".git"))) {
-        const head = await runGit(cwd, ["rev-parse", "HEAD"], { timeoutMs: 5000 });
-        if (head.ok) gitHead = head.stdout.trim() || undefined;
-      }
-    } catch { /* not a git checkout, or git missing — staleness then relies on file hashes */ }
-    const packets = [...this.workflowStore().packets.values()].filter((p) => p.runId === run.runId);
-    const files = [...new Set(packets.flatMap((p) => p.filesObserved))];
-    const hashed = await Promise.all(files.map(async (file) => {
-      const abs = path.isAbsolute(file) ? file : path.join(cwd, file);
-      try {
-        const buf = await fs.promises.readFile(abs);
-        let h = 0x811c9dc5;
-        for (let i = 0; i < buf.length; i += 1) {
-          h ^= buf[i]!;
-          h = Math.imul(h, 0x01000193);
-        }
-        return { path: file, hash: (h >>> 0).toString(16) };
-      } catch {
-        return { path: file, hash: "missing" };
-      }
-    }));
-    return {
-      ...(gitHead ? { gitHead } : {}),
-      ...(hashed.length ? { observedHash: observedFilesHash(hashed) } : {}),
-      ...(run.worktree ? { worktree: run.worktree, worktreeExists: fs.existsSync(run.worktree) } : {}),
-    };
+    return this.workflowStageRunner.currentWorkspaceStamp(run);
   }
 
   private async startWorkflowRun(
     session: Session,
     idea: string,
     workflowName: string,
-    options?: CrewStartOptions,
+    options?: any,
   ): Promise<void> {
-    const trimmed = idea.trim();
-    this.lockSessionTypeNow(session);
-    if (!trimmed) {
-      this.emit(session, { type: "hostNotice", level: "warning", text: "Idea required." });
-      return;
-    }
-    await this.waitForSessionStart(session);
-    // C-04: the lineup may switch optional stages on (Clarify first), set a
-    // stage's gate, and cap the fix rounds — on this run's snapshot only.
-    const def = applyLineupToDefinition(
-      options?.maxFixRounds ? applyMaxFixerPasses(this.resolveWorkflow(session, workflowName), options.maxFixRounds) : this.resolveWorkflow(session, workflowName),
-      options?.lineup,
-    );
-    const check = validateWorkflowDefinition(def, this.workflowValidateContext());
-    if (!check.valid) {
-      const first = check.errors[0];
-      this.emit(session, {
-        type: "hostNotice",
-        level: "warning",
-        text: first
-          ? `This workflow is not valid (${first.pointer || "/"}): ${first.message}`
-          : "This workflow is not valid.",
-      });
-      return;
-    }
-    const runId = this.agentRuns.newRunId();
-    const cwd = this.sessionCwd(session);
-    let worktree: string | undefined;
-    if (options?.worktree) {
-      const created = await this.createCrewWorktree(cwd, `crew-${runId}`);
-      if ("error" in created) {
-        this.agentNotice(session, "warning", created.error);
-      } else {
-        worktree = created.path;
-      }
-    }
-    const verify = options?.verify ?? def.defaults.verify;
-    let run = makeWorkflowRun({
-      runId,
-      sessionId: session.activeSessionId ?? "",
-      workflow: def,
-      idea: trimmed,
-      cwd,
-      ...(worktree ? { worktree } : {}),
-      ...(verify ? { verify } : {}),
-      checkpointTurnId: String(session.userMessageCount),
-      attachedFiles: explicitVisibleChips(session.chips).filter((c) => "path" in c).map((c) => (c as { path: string }).path),
-      ...(options?.firstTarget ? { firstTarget: { provider: options.firstTarget.provider, ...(options.firstTarget.model ? { model: options.firstTarget.model } : {}), ...(options.firstTarget.effort ? { effort: options.firstTarget.effort as never } : {}) } } : {}),
-    });
-    const hash = workflowSnapshotHash(def);
-    run = withSnapshotHash(run, hash);
-    if (options?.lineup && Object.keys(options.lineup).length) {
-      run = { ...run, lineup: options.lineup };
-      void this.rememberLineup(cwd, def.name, options.lineup);
-    }
-    if (options?.autonomy) run = { ...run, autonomy: options.autonomy };
-    if (options?.fixInSession && findStage(def, "implement")) run = { ...run, fixInSession: "implement" };
-    this.workflowStore().defs.set(runId, def);
-    try {
-      this.workflowRuns().writeSnapshot(runId, workflowSnapshotPayload(def));
-    } catch (error) {
-      this.host.appendLine(`[workflow] could not write snapshot: ${(error as Error).message}`);
-    }
-    session.workflowRun = options?.firstTarget ? run : this.withGatePreselection(session, run, def);
-    session.firstUserMessageForTitle = trimmed;
-    this.emit(session, { type: "userMessage", text: trimmed, chips: [] });
-    this.persistWorkflowRun(session);
-    this.emitWorkflowRun(session);
-    const first = options?.firstTarget ?? (options?.startNow ? session.workflowRun.gate?.preselectedTarget : undefined);
-    if (first) {
-      await this.handleWorkflowGateAction(session, {
-        type: "start",
-        nextStageId: session.workflowRun.gate?.nextStageId,
-        target: first as never,
-      });
-    }
-  }
-
-  private async handleWorkflowGateAction(
-    session: Session,
-    action: GateAction,
-  ): Promise<void> {
-    const run = session.workflowRun;
-    if (!run) return;
-    const def = this.workflowStore().defs.get(run.runId) ?? this.resolveWorkflow(session, run.workflowName);
-    if (action.type === "revertAll") {
-      await this.revertWorkflowRun(session);
-      return;
-    }
-    if (action.type === "keepChanges") {
-      // C-18: on a finished run this only acknowledges it; before that it
-      // ends the run and keeps whatever the stages changed.
-      session.workflowRun = run.status === "done"
-        ? applyGateAction(run, def, action, Date.now())
-        : applyGateAction(run, def, { type: "cancel", reason: "Cancelled, changes kept." }, Date.now());
-      this.persistWorkflowRun(session);
-      this.emitWorkflowRun(session);
-      return;
-    }
-    if (action.type === "changeWorkflow") {
-      this.postWorkflowList(session);
-      return;
-    }
-    if (action.type === "pause") {
-      const stamp = await this.currentWorkspaceStamp(run);
-      session.workflowRun = applyGateAction(run, def, {
-        type: "pause",
-        at: Date.now(),
-        ...(stamp.gitHead ? { gitHead: stamp.gitHead } : {}),
-        ...(stamp.observedHash ? { observedHash: stamp.observedHash } : {}),
-        ...(stamp.worktree ? { worktree: stamp.worktree } : {}),
-      }, Date.now());
-      this.persistWorkflowRun(session);
-      this.emitWorkflowRun(session);
-      return;
-    }
-    if (action.type === "setAutonomy" || action.type === "pauseAfterStage" || action.type === "selectFindings") {
-      // Run state, changeable at any time — also while a stage runs.
-      session.workflowRun = applyGateAction(run, def, action, Date.now());
-      this.persistWorkflowRun(session);
-      this.emitWorkflowRun(session);
-      return;
-    }
-    if (action.type === "start" || action.type === "restart" || action.type === "rerun" || action.type === "anotherRound") {
-      // C-03: without an explicit choice, the gate's preselection runs.
-      const target = action.target ?? run.gate?.preselectedTarget;
-      const next = applyGateAction(run, def, target ? { ...action, target } as GateAction : action, Date.now());
-      session.workflowRun = next;
-      this.persistWorkflowRun(session);
-      this.emitWorkflowRun(session);
-      if (next.status === "running" && next.current) {
-        await this.executeWorkflowStage(session, def, next, target);
-      } else if (next.status === "done") {
-        this.finishWorkflowRun(session, def);
-      }
-      return;
-    }
-    session.workflowRun = applyGateAction(run, def, action, Date.now());
-    this.persistWorkflowRun(session);
-    this.emitWorkflowRun(session);
-    if (session.workflowRun.status === "done") this.finishWorkflowRun(session, def);
-  }
-
-  /**
-   * C-06: the plan as edited at the gate becomes a derived packet
-   * (`editedByUser`); the original stays as `stage-NN.handoff.json`, the edit
-   * is `stage-NN.user-edit.json`. Briefings and the next stage's scope read
-   * the edited one.
-   */
-  private applyWorkflowPlanEdit(
-    session: Session,
-    msg: { runId: string; steps: Array<{ id: string; title: string; acceptance?: string; files?: string[] }> },
-  ): void {
-    const run = session.workflowRun;
-    if (!run || run.runId !== msg.runId || run.status === "running") return;
-    const planPacket = [...this.packetsFor(run.runId)].reverse().find((p) => p.planSteps?.length);
-    if (!planPacket) return;
-    const steps = sanitizePlanEdit(msg.steps);
-    const edited: HandoffPacket = { ...planPacket, planSteps: steps, editedByUser: true };
-    try {
-      this.workflowRuns().writeUserEdit(run.runId, planPacket.stageOrdinal, edited);
-    } catch (error) {
-      this.host.appendLine(`[workflow] could not write the plan edit: ${(error as Error).message}`);
-    }
-    this.workflowStore().packets.set(`${run.runId}:${planPacket.stageOrdinal}`, edited);
-    this.emitWorkflowRun(session);
-  }
-
-  /** C-18 / C-17: a finished run opens the Review panel and writes its report. */
-  private finishWorkflowRun(session: Session, def: WorkflowDefinition): void {
-    this.emitReviewCenter(session);
-    this.writeWorkflowReport(session, def);
-    this.emitWorkflowRun(session);
-  }
-
-  private writeWorkflowReport(session: Session, def: WorkflowDefinition): string | undefined {
-    const run = session.workflowRun;
-    const target = run ? this.workflowReportPath(run.runId) : undefined;
-    if (!run || !target) return undefined;
-    try {
-      fs.mkdirSync(path.dirname(target), { recursive: true });
-      fs.writeFileSync(target, renderRunReport({ run, def, packets: this.packetsFor(run.runId), ignoredFindings: run.ignoredFindings }), "utf8");
-      return target;
-    } catch (error) {
-      this.host.appendLine(`[workflow] could not write the run report: ${(error as Error).message}`);
-      return undefined;
-    }
-  }
-
-  /**
-   * Host-only gate actions (they need I/O the pure state machine cannot do):
-   * revise (C-07), revert one stage (C-10), wait and retry after a limit
-   * (C-16), nudge / stop a stalled stage (X-04), open / copy the report (C-17).
-   * Returns true when the message was one of these.
-   */
-  private async handleHostGateAction(
-    session: Session,
-    msg: Extract<WebviewMsg, { type: "workflowGateAction" }>,
-  ): Promise<boolean> {
-    const run = session.workflowRun;
-    if (!run || msg.runId !== run.runId) return false;
-    const def = this.workflowStore().defs.get(run.runId) ?? this.resolveWorkflow(session, run.workflowName);
-    switch (msg.action) {
-      case "revise": {
-        const message = String(msg.message ?? "").trim();
-        const lastEntry = run.executed[run.executed.length - 1];
-        if (!message || !lastEntry || run.status === "running") return true;
-        await this.reviseWorkflowStage(session, def, lastEntry.stageId, lastEntry.sessionId, message);
-        return true;
-      }
-      case "revertStage": {
-        await this.revertWorkflowStage(session, def, Number(msg.ordinal));
-        return true;
-      }
-      case "waitRetry": {
-        const provider = run.gate?.limitProvider;
-        const stageId = run.gate?.nextStageId ?? run.gate?.proposedNext[0];
-        if (!provider || !stageId) return true;
-        // The person asked to try the exhausted companion again: allow it for
-        // this run once more, and run the same stage on it.
-        session.workflowRun = { ...run, exhausted: run.exhausted.filter((p) => p !== provider) };
-        await this.handleWorkflowGateAction(session, { type: "start", nextStageId: stageId, target: { provider } });
-        return true;
-      }
-      case "nudge": {
-        const child = this.runningStageSession(session);
-        if (!child) return true;
-        this.agentNotice(session, "info", "→ nudged the running stage");
-        child.lastChildActivityAt = Date.now();
-        child.stalled = false;
-        this.emitWorkflowRun(session);
-        await this.steerSend(NUDGE_TEXT, child);
-        return true;
-      }
-      case "stopStage": {
-        for (const live of session.crewLive ?? []) {
-          live.cancelled = true;
-          void live.roleSession.client?.cancel("user stopped the crew stage");
-        }
-        return true;
-      }
-      case "openReport":
-      case "copyReport": {
-        const file = this.writeWorkflowReport(session, def);
-        if (!file) return true;
-        if (msg.action === "openReport") void this.host.openResource(file);
-        else {
-          try {
-            await this.host.writeClipboard?.(fs.readFileSync(file, "utf8"));
-            this.agentNotice(session, "info", "Run report copied as Markdown.");
-          } catch (error) {
-            this.agentNotice(session, "warning", `Could not copy the report: ${(error as Error).message}`);
-          }
-        }
-        this.emitWorkflowRun(session);
-        return true;
-      }
-      default:
-        return false;
-    }
-  }
-
-  /**
-   * C-07: send feedback as a second turn into the stage's own session (its
-   * context stays), then rebuild the packet as a new visit of the same stage
-   * and judge the gate again. The old packet stays on disk.
-   */
-  private async reviseWorkflowStage(
-    session: Session,
-    def: WorkflowDefinition,
-    stageId: string,
-    stageSessionId: string | undefined,
-    message: string,
-  ): Promise<void> {
-    const run = session.workflowRun;
-    if (!run) return;
-    const next = startWorkflowStage(run, stageId, Date.now(), {
-      ...(run.gate?.preselectedTarget ? {} : {}),
-    });
-    session.workflowRun = next;
-    this.persistWorkflowRun(session);
-    this.emit(session, { type: "userMessage", text: message, chips: [] });
-    this.emitWorkflowRun(session);
-    await this.executeWorkflowStage(session, def, next, undefined, {
-      continue: stageSessionId ? { sessionId: stageSessionId, message: `Revise your result with this feedback, then give the result block again.\n\n${message}` } : undefined,
-    });
-  }
-
-  private poolSessionById(sessionId: string | undefined): Session | undefined {
-    if (!sessionId) return undefined;
-    return [...this.pool].find((s) => s.activeSessionId === sessionId);
-  }
-
-  private async executeWorkflowStage(
-    session: Session,
-    def: WorkflowDefinition,
-    run: WorkflowRun,
-    targetHint?: { provider: AcpProvider; model?: string; effort?: string },
-    opts?: { continue?: { sessionId: string; message: string } },
-  ): Promise<void> {
-    const current = run.current;
-    if (!current) return;
-    const stage = findStage(def, current.stageId);
-    if (!stage) return;
-    const hint = targetHint ?? current.target;
-    if (!opts?.continue && stage.fanOut && stage.fanOut.count > 1 && stage.profile === "read-only") {
-      await this.executePanelStage(session, def, run, stage, hint);
-      return;
-    }
-    if (!opts?.continue && stage.strategy === "per-plan-step" && this.planStepsFor(run).length) {
-      await this.executePerPlanStepStage(session, def, run, stage, hint);
-      return;
-    }
-    const prepared = this.prepareStageRun(session, def, run, stage, hint);
-    if ("error" in prepared) {
-      this.emit(session, { type: "hostNotice", level: "warning", text: prepared.error });
-      await this.finishWorkflowStage(session, def, buildHandoffPacket({
-        runId: run.runId,
-        stageId: stage.id,
-        stageOrdinal: current.ordinal,
-        visit: current.visit,
-        role: stage.role,
-        target: { provider: prepared.provider, modelVerified: false },
-        status: "failed",
-        rawReply: prepared.error,
-        durationMs: 0,
-        resultPath: this.agentRuns.resultPath(run.runId, current.ordinal, "stage"),
-      }));
-      return;
-    }
-    // C-08: a stage that continues another stage's session (or the run's
-    // "fix in the implementer's session" choice) sends its brief as a turn.
-    const continuesId = stageContinues(stage) ?? (stage.role === "fixer" && run.fixInSession ? run.fixInSession : undefined);
-    const continueSession = opts?.continue
-      ? this.poolSessionById(opts.continue.sessionId)
-      : continuesId
-        ? this.poolSessionById(run.executed.filter((e) => e.stageId === continuesId).slice(-1)[0]?.sessionId)
-        : undefined;
-    const continueMessage = opts?.continue?.message
-      ?? (continueSession ? renderBriefing(makeBriefing({ ...prepared.brief, runId: run.runId, step: current.ordinal }), prepared.role) : undefined);
-    if ((opts?.continue || continuesId) && !continueSession) {
-      this.host.appendLine(`[workflow] ${stage.id}: the session to continue is gone; starting a fresh one`);
-    }
-    this.setStatus(session, "working");
-    const started = Date.now();
-    let role = prepared.role;
-    let switchedFrom: AcpProvider | undefined;
-    let outcome = await this.runStageRole(session, run, stage, current, role, prepared, continueSession, continueMessage);
-    // C-16 / F-08: a usage limit never switches silently.
-    const limitKind = outcome.outcome === "failed" ? classifyLimitError(role.provider, outcome.detail || "") : null;
-    if (limitKind === "quota" || limitKind === "rate") {
-      const exhaustedRun = markExhausted(session.workflowRun ?? run, role.provider);
-      session.workflowRun = { ...exhaustedRun, exhaustedAt: { ...(exhaustedRun.exhaustedAt ?? {}), [role.provider]: Date.now() } };
-      const onLimit = this.companionsSetting<string>("crew.onLimit", "ask") === "switch" ? "switch" : "ask";
-      const next = onLimit === "switch" ? nextFailoverProvider(session.workflowRun.exhausted, this.usableProviders()) : undefined;
-      if (next) {
-        const text = `${stage.title} ran on ${providerDisplayName(next)} after ${providerDisplayName(role.provider)} hit its usage limit.`;
-        this.emit(session, { type: "hostNotice", level: "warning", text });
-        switchedFrom = role.provider;
-        role = { ...role, provider: next, model: undefined, effort: role.effort };
-        outcome = await this.runStageRole(session, run, stage, current, role, prepared, undefined, undefined);
-      } else {
-        await this.stopAtLimitGate(session, def, run, stage, current, role.provider, outcome);
-        return;
-      }
-    }
-    const live = session.workflowRun ?? run;
-    if (outcome.sessionId) session.workflowRun = bindStageSession(live, outcome.sessionId);
-    let verify: { command: string; exitCode: number; output: string } | undefined;
-    if (run.verify && isWriteProfile(stage.profile) && outcome.outcome === "completed") {
-      const result = await this.runCrewVerify(run.verify, run.worktree ?? run.cwd);
-      verify = { command: run.verify, exitCode: result.code, output: result.output };
-    }
-    const status = outcome.outcome === "cancelled" ? "interrupted" as const
-      : outcome.outcome === "failed" ? "failed" as const
-        : "done" as const;
-    const packet = buildHandoffPacket({
-      runId: run.runId,
-      stageId: stage.id,
-      stageOrdinal: current.ordinal,
-      visit: current.visit,
-      role: stage.role,
-      target: {
-        provider: role.provider,
-        ...(role.model ? { model: role.model } : {}),
-        ...(role.effort ? { effort: role.effort } : {}),
-        modelVerified: switchedFrom ? false : prepared.modelVerified,
-      },
-      status,
-      rawReply: outcome.rawReply ?? outcome.summary,
-      filesReported: outcome.filesReported,
-      filesObserved: outcome.filesObserved,
-      reconciliation: outcome.reconciliation,
-      ...(verify ? { verify } : {}),
-      userNotes: current.userNotes,
-      tokens: outcome.totalTokens,
-      durationMs: outcome.durationMs || (Date.now() - started),
-      resultPath: this.agentRuns.resultPath(run.runId, current.ordinal, "stage"),
-      contract: def.contracts[stage.contract],
-    });
-    await this.finishWorkflowStage(session, def, switchedFrom ? { ...packet, switchedFrom } : packet);
-  }
-
-  /** Resolve who runs a stage and build its brief and overlay (C-01, C-03). */
-  private prepareStageRun(
-    session: Session,
-    def: WorkflowDefinition,
-    run: WorkflowRun,
-    stage: WorkflowStage,
-    hint: { provider: AcpProvider; model?: string; effort?: string } | undefined,
-    overrides?: { scopeGlobs?: string[]; task?: string; title?: string },
-  ): { role: AgentRole; brief: BriefingInput; scope: StageScope; modelVerified: boolean } | { error: string; provider: AcpProvider } {
-    const current = run.current!;
-    const roles = this.agentRoleSet(this.sessionCwd(session));
-    const roleRef = def.roles[stage.role];
-    const named = roleRef && "ref" in roleRef ? roleRef.ref : stage.role;
-    const inline = roleRef && "inline" in roleRef ? roleRef.inline : undefined;
-    const template = findAgentRole(roles, named);
-    const lineup = run.lineup?.[stage.id];
-    const requested = {
-      provider: hint?.provider ?? stage.target?.provider ?? lineup?.provider ?? template?.provider ?? session.provider,
-      ...(hint?.model || stage.target?.model || lineup?.model || template?.model
-        ? { model: hint?.model ?? stage.target?.model ?? lineup?.model ?? template?.model }
-        : {}),
-      ...(hint?.effort || stage.target?.effort || lineup?.effort || template?.effort
-        ? { effort: (hint?.effort ?? stage.target?.effort ?? lineup?.effort ?? template?.effort) as never }
-        : {}),
-      profile: stage.profile,
-      runMode: stageRunMode(stage),
-    };
-    const verdict = resolveTarget(requested, this.crewEligibilityInput(session));
-    if (!verdict.ok) return { error: verdict.message, provider: requested.provider };
-    const role: AgentRole = {
-      ...(template ?? {
-        name: stage.role,
-        whenToUse: inline?.whenToUse ?? stage.title,
-        ...(inline?.systemPreamble ? { systemPreamble: inline.systemPreamble } : {}),
-        source: "builtin" as const,
-      }),
-      name: stage.role,
-      provider: verdict.target.provider,
-      ...(verdict.target.model ? { model: verdict.target.model } : {}),
-      ...(verdict.target.effort ? { effort: verdict.target.effort } : {}),
-      mode: stageRunMode(stage),
-    };
-    const packets = this.packetMap(run.runId);
-    // C-01 / D15: the stage's profile and scope are enforced by an overlay on
-    // the stage session, after the role's own lines (last match wins; deny and
-    // the safety floor still win). Read-only is the deny overlay, not a prompt.
-    const resolved = resolveStageScope(stage, packets, run.attachedFiles);
-    const scope: StageScope = overrides?.scopeGlobs
-      ? { globs: overrides.scopeGlobs, sources: ["plan step"], empty: overrides.scopeGlobs.length === 0 }
-      : resolved;
-    const overlay = stage.profile === "scoped-edit" && current.allowAnywhere
-      ? []
-      : subagentPermissionOverlay(stage.profile, scope.globs, this.companionsSetting<string[]>("subagents.readOnlyCommandAllowList", []));
-    role.permissions = [...(role.permissions ?? []), ...overlay];
-    if (stage.profile === "scoped-edit") {
-      this.host.appendLine(
-        `[workflow] ${stage.id}: scope ${current.allowAnywhere ? "anywhere (allowed at the gate)" : scope.globs.length ? scope.globs.join(", ") : "empty — every edit asks"}`,
-      );
-    }
-    const brief = briefingFromContract({
-      runId: run.runId,
-      step: current.ordinal,
-      idea: run.idea,
-      stage,
-      def,
-      packets,
-      userNotes: current.userNotes,
-      attachedFiles: run.attachedFiles,
-      verifyCommand: run.verify,
-      ignoredFindings: run.ignoredFindings,
-    });
-    const finalBrief: BriefingInput = overrides?.task
-      ? { ...brief, task: `${overrides.task}\n\n${brief.task}`, ...(overrides.scopeGlobs ? { files: [...new Set([...overrides.scopeGlobs, ...(brief.files ?? [])])] } : {}) }
-      : brief;
-    return { role, brief: finalBrief, scope, modelVerified: verdict.modelVerified };
-  }
-
-  /** One runAgentRole for a stage (or a step / panel member of it). */
-  private runStageRole(
-    session: Session,
-    run: WorkflowRun,
-    stage: WorkflowStage,
-    current: NonNullable<WorkflowRun["current"]>,
-    role: AgentRole,
-    prepared: { scope: StageScope; brief: BriefingInput },
-    continueSession: Session | undefined,
-    continueMessage: string | undefined,
-    sub?: { step: number; cwd?: string },
-  ): ReturnType<GrokSidebar["runAgentRole"]> {
-    return this.runAgentRole(role, prepared.brief, "workflow-stage", session, {
-      runId: run.runId,
-      step: sub?.step ?? current.ordinal,
-      cwd: sub?.cwd ?? run.worktree ?? run.cwd,
-      stage: {
-        stageId: stage.id,
-        allowSubagents: stage.allowSubagents === true,
-        ...(stage.profile === "scoped-edit" && !current.allowAnywhere ? { scope: prepared.scope.globs } : {}),
-        ...(sub ? { subStep: true } : {}),
-      },
-      ...(continueSession && continueMessage ? { continueSession, continueMessage } : {}),
-    });
-  }
-
-  /**
-   * Record a stage's packet, move the run, and preselect who runs next.
-   * Auto-proceeds only where the run's autonomy allows it (C-05, D6).
-   */
-  private async finishWorkflowStage(session: Session, def: WorkflowDefinition, packet: HandoffPacket): Promise<void> {
-    const live = session.workflowRun;
-    if (!live) return;
-    try {
-      this.workflowRuns().writeHandoff(live.runId, packet.stageOrdinal, packet);
-    } catch (error) {
-      this.host.appendLine(`[workflow] could not write handoff: ${(error as Error).message}`);
-    }
-    this.workflowStore().packets.set(`${live.runId}:${packet.stageOrdinal}`, packet);
-    this.stageStepProgress.delete(live.runId);
-    const after = applyStageOutcome(live, def, packet, this.packetsFor(live.runId), {
-      autoStartNextStage: false,
-      autonomy: this.workflowAutonomy(live),
-    });
-    session.workflowRun = this.withGatePreselection(session, after, def);
-    this.persistWorkflowRun(session);
-    this.emitWorkflowRun(session);
-    if (session.workflowRun.status === "done") this.finishWorkflowRun(session, def);
-    const gate = session.workflowRun.gate;
-    if (gate?.autoProceed && session.workflowRun.status === "at-gate" && gate.nextStageId && !isReservedTarget(gate.nextStageId)) {
-      await this.handleWorkflowGateAction(session, {
-        type: "start",
-        nextStageId: gate.nextStageId,
-        ...(gate.preselectedTarget ? { target: gate.preselectedTarget } : {}),
-      });
-    }
-  }
-
-  /** C-16 (`onLimit: "ask"`): stop the run at a limit gate with the choices. */
-  private async stopAtLimitGate(
-    session: Session,
-    def: WorkflowDefinition,
-    run: WorkflowRun,
-    stage: WorkflowStage,
-    current: NonNullable<WorkflowRun["current"]>,
-    provider: AcpProvider,
-    outcome: Awaited<ReturnType<GrokSidebar["runAgentRole"]>>,
-  ): Promise<void> {
-    const live = session.workflowRun ?? run;
-    const next: WorkflowRun = {
-      ...live,
-      status: "at-gate",
-      gate: {
-        proposedNext: [stage.id, "$pause", "$cancel"],
-        nextStageId: stage.id,
-        reason: `${providerDisplayName(provider)} hit its usage limit during ${stage.title}.`,
-        kind: "limit",
-        forcedManual: ["limit"],
-        limitProvider: provider,
-      },
-    };
-    delete next.current;
-    this.host.appendLine(`[workflow] ${stage.id} stopped at the limit gate (${provider}): ${outcome.detail ?? ""}`);
-    session.workflowRun = this.withGatePreselection(session, next, def);
-    this.persistWorkflowRun(session);
-    this.emitWorkflowRun(session);
-    void current;
-  }
-
-  /** The plan steps a per-plan-step stage walks: the latest plan packet's (edited, if edited). */
-  private planStepsFor(run: WorkflowRun): HandoffPlanStep[] {
-    const withSteps = this.packetsFor(run.runId).filter((p) => p.planSteps?.length);
-    return withSteps.length ? withSteps[withSteps.length - 1]!.planSteps! : [];
-  }
-
-  /**
-   * C-12: the stage runs once per plan step, each with a brief that holds
-   * only that step (the whole plan stays as context) and a scope of that
-   * step's files. Sequential by default; with `parallel: true` independent
-   * steps (disjoint files) share a wave, each in its own worktree, applied
-   * file-by-file afterwards.
-   */
-  private async executePerPlanStepStage(
-    session: Session,
-    def: WorkflowDefinition,
-    run: WorkflowRun,
-    stage: WorkflowStage,
-    hint: { provider: AcpProvider; model?: string; effort?: string } | undefined,
-  ): Promise<void> {
-    const current = run.current!;
-    const steps = this.planStepsFor(run);
-    const started = Date.now();
-    let walker = makeCrewRun({
-      runId: run.runId,
-      goal: run.idea,
-      cwd: run.worktree ?? run.cwd,
-      steps: steps.map((s, i) => ({
-        index: i + 1,
-        title: s.title,
-        planEntryHint: s.id,
-        role: stage.role,
-        status: "pending" as const,
-        filesReported: [...(s.files ?? [])],
-        filesObserved: [],
-      })),
-      parallel: stage.parallel === true,
-    });
-    walker = setCrewStatus(walker, "running");
-    const results: Array<{ step: HandoffPlanStep; outcome: Awaited<ReturnType<GrokSidebar["runAgentRole"]>>; verify?: { command: string; exitCode: number; output: string } }> = [];
-    let failed = false;
-    let role: AgentRole | undefined;
-    let modelVerified = false;
-    while (walker.status === "running") {
-      const cap = parallelSlotCap({ maxLive: GrokSidebar.MAX_LIVE_SESSIONS, unreapable: this.crewUnreapableCount() });
-      const wave = nextIndependentSteps(walker, { parallel: stage.parallel === true, cap });
-      if (!wave.length) break;
-      const doneCount = walker.steps.filter((s) => s.status === "done").length;
-      this.stageStepProgress.set(run.runId, `step ${doneCount + 1}/${steps.length}`);
-      this.emitWorkflowRun(session);
-      const runOne = async (crewStep: typeof wave[number]) => {
-        const planStep = steps[crewStep.index - 1]!;
-        const prepared = this.prepareStageRun(session, def, run, stage, hint, {
-          scopeGlobs: planStep.files ?? [],
-          task: `Do ONLY plan step ${planStep.id}: ${planStep.title}.${planStep.acceptance ? ` Done when: ${planStep.acceptance}.` : ""} `
-            + "The whole plan is below for context; the other steps are someone else's.",
-        });
-        if ("error" in prepared) return { crewStep, planStep, error: prepared.error };
-        role = prepared.role;
-        modelVerified = prepared.modelVerified;
-        let stepCwd = run.worktree ?? run.cwd;
-        let wt: { path: string; label: string; sourceGitRoot: string } | undefined;
-        if (stage.parallel && wave.length > 1) {
-          const made = await this.createCrewWorktree(stepCwd, `crew-${run.runId.slice(-8)}-${current.ordinal}-${crewStep.index}`);
-          if (!("error" in made)) {
-            wt = made;
-            stepCwd = made.path;
-          }
-        }
-        const outcome = await this.runStageRole(session, run, stage, current, prepared.role, prepared, undefined, undefined, {
-          step: current.ordinal * 100 + crewStep.index,
-          cwd: stepCwd,
-        });
-        if (wt) await this.applyCrewWorktree(session, wt);
-        let verify: { command: string; exitCode: number; output: string } | undefined;
-        if (run.verify && stage.verifyEach && outcome.outcome === "completed") {
-          const r = await this.runCrewVerify(run.verify, run.worktree ?? run.cwd);
-          verify = { command: run.verify, exitCode: r.code, output: r.output };
-        }
-        return { crewStep, planStep, outcome, verify };
-      };
-      for (const s of wave) walker = startCrewStep(walker, s.index);
-      const settled = await Promise.all(wave.map(runOne));
-      for (const r of settled) {
-        if ("error" in r && r.error) {
-          walker = applyStepOutcome(walker, r.crewStep.index, { status: "failed", detail: r.error });
-          failed = true;
-          continue;
-        }
-        const outcome = (r as { outcome: Awaited<ReturnType<GrokSidebar["runAgentRole"]>> }).outcome;
-        const verify = (r as { verify?: { command: string; exitCode: number; output: string } }).verify;
-        results.push({ step: r.planStep, outcome, ...(verify ? { verify } : {}) });
-        const ok = outcome.outcome === "completed" && (!verify || verify.exitCode === 0);
-        walker = applyStepOutcome(walker, r.crewStep.index, {
-          status: ok ? "done" : outcome.outcome === "cancelled" ? "cancelled" : "failed",
-          filesReported: outcome.filesReported,
-          filesObserved: outcome.filesObserved,
-          durationMs: outcome.durationMs,
-          ...(outcome.sessionId ? { sessionId: outcome.sessionId } : {}),
-        });
-        if (!ok) failed = true;
-      }
-      if (failed) break;
-    }
-    const lastVerify = [...results].reverse().find((r) => r.verify)?.verify;
-    let finalVerify = lastVerify;
-    if (!failed && run.verify && !stage.verifyEach) {
-      const r = await this.runCrewVerify(run.verify, run.worktree ?? run.cwd);
-      finalVerify = { command: run.verify, exitCode: r.code, output: r.output };
-    }
-    const cancelled = results.some((r) => r.outcome.outcome === "cancelled");
-    const union = (pick: (o: Awaited<ReturnType<GrokSidebar["runAgentRole"]>>) => readonly string[]) =>
-      [...new Set(results.flatMap((r) => pick(r.outcome)))];
-    const doneSteps = walker.steps.filter((s) => s.status === "done").length;
-    const summary = [
-      `${doneSteps}/${steps.length} plan steps done${failed ? `; stopped at step ${walker.steps.find((s) => s.status === "failed")?.index ?? "?"}` : ""}.`,
-      ...results.map((r) => `- ${r.step.id} ${r.step.title}: ${r.outcome.summary || r.outcome.outcome}`),
-    ].join("\n");
-    const tokens = results.every((r) => typeof r.outcome.totalTokens === "number")
-      ? results.reduce((sum, r) => sum + (r.outcome.totalTokens ?? 0), 0)
-      : undefined;
-    const reconciliation = {
-      touched: union((o) => o.reconciliation?.touched ?? []),
-      unreported: union((o) => o.reconciliation?.unreported ?? []),
-      claimedOnly: union((o) => o.reconciliation?.claimedOnly ?? []),
-    };
-    const packet = buildHandoffPacket({
-      runId: run.runId,
-      stageId: stage.id,
-      stageOrdinal: current.ordinal,
-      visit: current.visit,
-      role: stage.role,
-      target: {
-        provider: role?.provider ?? hint?.provider ?? session.provider,
-        ...(role?.model ? { model: role.model } : {}),
-        ...(role?.effort ? { effort: role.effort } : {}),
-        modelVerified,
-      },
-      status: cancelled ? "interrupted" : failed ? "failed" : "done",
-      rawReply: [
-        summary,
-        "```companions-result",
-        JSON.stringify({ summary, filesChanged: union((o) => o.filesReported) }),
-        "```",
-      ].join("\n"),
-      filesReported: union((o) => o.filesReported),
-      filesObserved: union((o) => o.filesObserved),
-      reconciliation,
-      ...(finalVerify ? { verify: finalVerify } : {}),
-      userNotes: current.userNotes,
-      ...(typeof tokens === "number" ? { tokens } : {}),
-      durationMs: Date.now() - started,
-      resultPath: this.agentRuns.resultPath(run.runId, current.ordinal, "stage"),
-      contract: def.contracts[stage.contract],
-    });
-    const stepsRecord = walker.steps.map((s) => ({
-      id: steps[s.index - 1]?.id ?? String(s.index),
-      title: s.title,
-      status: (s.status === "done" ? "done" : s.status === "failed" ? "failed" : "skipped") as HandoffPacket["status"],
-      files: [...s.filesObserved],
-    }));
-    try {
-      this.agentRuns.writeResult(run.runId, current.ordinal, `${summary}\n`, "stage");
-    } catch { /* the per-step results are on disk; the summary is a convenience */ }
-    await this.finishWorkflowStage(session, def, { ...packet, steps: stepsRecord });
-  }
-
-  /**
-   * C-13: a review panel — N read-only sessions with the same brief, in
-   * parallel, merged deterministically (strictest verdict, de-duplicated
-   * findings that remember who reported them).
-   */
-  private async executePanelStage(
-    session: Session,
-    def: WorkflowDefinition,
-    run: WorkflowRun,
-    stage: WorkflowStage,
-    hint: { provider: AcpProvider; model?: string; effort?: string } | undefined,
-  ): Promise<void> {
-    const current = run.current!;
-    const fan = stage.fanOut!;
-    const first = this.prepareStageRun(session, def, run, stage, hint);
-    if ("error" in first) {
-      this.emit(session, { type: "hostNotice", level: "warning", text: first.error });
-      await this.finishWorkflowStage(session, def, buildHandoffPacket({
-        runId: run.runId, stageId: stage.id, stageOrdinal: current.ordinal, visit: current.visit, role: stage.role,
-        target: { provider: first.provider, modelVerified: false }, status: "failed", rawReply: first.error, durationMs: 0,
-        resultPath: this.agentRuns.resultPath(run.runId, current.ordinal, "stage"),
-      }));
-      return;
-    }
-    const eligible = listEligibleTargets(this.crewEligibilityInput(session), {}).targets.map((t) => ({ provider: t.provider }));
-    const cap = Math.max(1, parallelSlotCap({ maxLive: GrokSidebar.MAX_LIVE_SESSIONS, unreapable: this.crewUnreapableCount() }));
-    const targets = panelTargets({ provider: first.role.provider }, eligible, Math.min(fan.count, cap), fan.distinctProviders);
-    if (targets.length < fan.count) {
-      this.agentNotice(session, "info", `${stage.title}: ${targets.length} of ${fan.count} reviewers can run (companions or free sessions are short).`);
-    }
-    this.setStatus(session, "working");
-    const started = Date.now();
-    const members = await Promise.all(targets.map(async (target, i) => {
-      const prepared = i === 0 ? first : this.prepareStageRun(session, def, run, stage, target);
-      if ("error" in prepared) return undefined;
-      const outcome = await this.runStageRole(session, run, stage, current, prepared.role, prepared, undefined, undefined, {
-        step: current.ordinal * 100 + i + 1,
-      });
-      return { role: prepared.role, outcome, modelVerified: prepared.modelVerified };
-    }));
-    const ran = members.filter((m): m is NonNullable<typeof m> => !!m);
-    const packets = ran.map((m, i) => buildHandoffPacket({
-      runId: run.runId,
-      stageId: stage.id,
-      stageOrdinal: current.ordinal,
-      visit: current.visit,
-      role: stage.role,
-      target: {
-        provider: m.role.provider,
-        ...(m.role.model ? { model: m.role.model } : {}),
-        ...(m.role.effort ? { effort: m.role.effort } : {}),
-        modelVerified: m.modelVerified,
-      },
-      status: m.outcome.outcome === "cancelled" ? "interrupted" : m.outcome.outcome === "failed" ? "failed" : "done",
-      rawReply: m.outcome.rawReply ?? m.outcome.summary,
-      filesReported: m.outcome.filesReported,
-      filesObserved: m.outcome.filesObserved,
-      reconciliation: m.outcome.reconciliation,
-      userNotes: current.userNotes,
-      tokens: m.outcome.totalTokens,
-      durationMs: m.outcome.durationMs,
-      resultPath: this.agentRuns.resultPath(run.runId, current.ordinal * 100 + i + 1, "step"),
-      contract: def.contracts[stage.contract],
-    }));
-    if (!packets.length) {
-      await this.finishWorkflowStage(session, def, buildHandoffPacket({
-        runId: run.runId, stageId: stage.id, stageOrdinal: current.ordinal, visit: current.visit, role: stage.role,
-        target: { provider: first.role.provider, modelVerified: false }, status: "failed", rawReply: "No reviewer could run.",
-        durationMs: Date.now() - started, resultPath: this.agentRuns.resultPath(run.runId, current.ordinal, "stage"),
-      }));
-      return;
-    }
-    const reviewers = ran.map((m) => `${providerDisplayName(m.role.provider)}${m.role.model ? ` ${m.role.model}` : ""}`);
-    const merged = mergeReviewPackets(packets, reviewers);
-    const packet = capHandoffPacket({ ...merged, resultPath: this.agentRuns.resultPath(run.runId, current.ordinal, "stage") });
-    try {
-      this.agentRuns.writeResult(run.runId, current.ordinal, `${packet.summary}\n`, "stage");
-    } catch { /* members' results are on disk */ }
-    await this.finishWorkflowStage(session, def, packet);
-  }
-
-  private packetMap(runId: string): Map<string, HandoffPacket> {
-    const map = new Map<string, HandoffPacket>();
-    for (const packet of this.packetsFor(runId)) map.set(packet.stageId, packet);
-    return map;
-  }
-
-  private packetsFor(runId: string): HandoffPacket[] {
-    return [...this.workflowStore().packets.values()]
-      .filter((p) => p.runId === runId)
-      .sort((a, b) => a.stageOrdinal - b.stageOrdinal);
-  }
-
-  /**
-   * "Revert all" for a Crew run: every writing stage, newest first, each from
-   * its own session's checkpoints (the stages wrote in their sessions, not in
-   * the Crew session). Same conflict rule as everywhere: a file changed since
-   * is asked about, never overwritten silently.
-   */
-  private async revertWorkflowRun(session: Session): Promise<void> {
-    const run = session.workflowRun;
-    if (!run) return;
-    const def = this.workflowStore().defs.get(run.runId) ?? IDEA_TO_DONE;
-    const writing = [...run.executed]
-      .filter((e) => {
-        const stage = findStage(def, e.stageId);
-        return stage && isWriteProfile(stage.profile) && e.sessionId && !(run.reverted ?? []).includes(e.ordinal);
-      })
-      .sort((a, b) => b.ordinal - a.ordinal);
-    const reverted: number[] = [];
-    for (const entry of writing) {
-      const ok = await this.revertStageCheckpoints(session, entry.sessionId!, run.worktree ?? run.cwd,
-        `${findStage(def, entry.stageId)?.title ?? entry.stageId} (stage ${entry.ordinal})`);
-      if (ok === "cancelled") break;
-      if (ok === "reverted") reverted.push(entry.ordinal);
-    }
-    const base = session.workflowRun ?? run;
-    session.workflowRun = applyGateAction(
-      { ...base, reverted: [...new Set([...(base.reverted ?? []), ...reverted])] },
-      def,
-      { type: "cancel", reason: "Cancelled; changes reverted." },
-      Date.now(),
-    );
-    this.persistWorkflowRun(session);
-    this.emitWorkflowRun(session);
-  }
-
-  /** C-10: roll back one stage; the gate then offers to run it again. */
-  private async revertWorkflowStage(session: Session, def: WorkflowDefinition, ordinal: number): Promise<void> {
-    const run = session.workflowRun;
-    if (!run || run.status === "running") return;
-    const entry = run.executed.find((e) => e.ordinal === ordinal);
-    const stage = entry ? findStage(def, entry.stageId) : undefined;
-    if (!entry || !stage || !entry.sessionId || !isWriteProfile(stage.profile)) {
-      this.agentNotice(session, "warning", "That stage changed no files that can be reverted.");
-      return;
-    }
-    const later = run.executed.filter((e) => e.ordinal > ordinal && e.sessionId && !(run.reverted ?? []).includes(e.ordinal))
-      .filter((e) => { const s = findStage(def, e.stageId); return s && isWriteProfile(s.profile); });
-    if (later.length) {
-      const ok = await this.confirmInChat(session, {
-        title: `Revert ${stage.title}?`,
-        body: `${later.length} later stage(s) also changed files and may build on it. Their files are only restored where they did not change since — anything else is asked about.`,
-        confirmLabel: `Revert ${stage.title}`,
-        danger: true,
-      });
-      if (!ok) return;
-    }
-    const result = await this.revertStageCheckpoints(session, entry.sessionId, run.worktree ?? run.cwd, `${stage.title} (stage ${ordinal})`);
-    if (result !== "reverted") return;
-    const base = session.workflowRun ?? run;
-    session.workflowRun = {
-      ...base,
-      reverted: [...new Set([...(base.reverted ?? []), ordinal])],
-      status: base.status === "done" ? "at-gate" : base.status,
-      gate: {
-        proposedNext: [stage.id, "$done", "$cancel"],
-        nextStageId: stage.id,
-        reason: `${stage.title} was reverted. Rerun it, finish, or cancel.`,
-        kind: "normal",
-      },
-    };
-    session.workflowRun = this.withGatePreselection(session, session.workflowRun, def);
-    this.persistWorkflowRun(session);
-    this.emitWorkflowRun(session);
-  }
-
-  /**
-   * Restore the files one stage session changed, from that session's AP-08
-   * checkpoints. Dialogs appear in `ui` (the Crew session). Works whether or
-   * not the stage session is still live — the checkpoints are keyed by id.
-   */
-  private async revertStageCheckpoints(
-    ui: Session,
-    sessionId: string,
-    cwd: string,
-    label: string,
-  ): Promise<"reverted" | "nothing" | "cancelled" | "failed"> {
-    if (!this.checkpointStore) {
-      this.agentNotice(ui, "warning", `Can't revert ${label} — checkpoints are unavailable.`);
-      return "failed";
-    }
-    const checkpoints = this.checkpointStore.loadFrom(sessionId, 0);
-    if (!checkpoints.length) {
-      this.agentNotice(ui, "warning", `Can't revert ${label} — there is no checkpoint for it.`);
-      return "failed";
-    }
-    const merged = mergeCheckpoints(checkpoints);
-    const current = new Map<string, string | null>();
-    for (const file of merged.files) {
-      try {
-        current.set(file.relPath, fs.readFileSync(path.join(cwd, file.relPath), "utf8"));
-      } catch {
-        current.set(file.relPath, null);
-      }
-    }
-    const restore = planRestoreDetailed(merged, current);
-    const wouldTouch = restore.writes.length + restore.deletes.length + restore.conflicts.length;
-    if (wouldTouch === 0) {
-      this.agentNotice(ui, "info", `Nothing to revert for ${label} — files already match.`);
-      return "nothing";
-    }
-    let overwrite = false;
-    if (restore.conflicts.length) {
-      const ok = await this.confirmInChat(ui, {
-        title: "Files changed since this stage",
-        body: `${label}: these files were modified after the stage wrote them. Overwrite them?\n${restore.conflicts.map((f) => `• ${f}`).join("\n")}`,
-        confirmLabel: "Overwrite",
-        danger: true,
-      });
-      if (!ok) return "cancelled";
-      overwrite = true;
-    }
-    const actions = restoreActions(restore, overwrite, merged);
-    const failed: string[] = [];
-    let restored = 0;
-    for (const w of actions.writes) {
-      try {
-        const abs = path.join(cwd, w.relPath);
-        fs.mkdirSync(path.dirname(abs), { recursive: true });
-        fs.writeFileSync(abs, Buffer.from(w.blob, "utf8"));
-        restored += 1;
-      } catch (e) {
-        failed.push(`${w.relPath}: ${(e as Error).message}`);
-      }
-    }
-    for (const rel of actions.deletes) {
-      try {
-        fs.unlinkSync(path.join(cwd, rel));
-        restored += 1;
-      } catch (e) {
-        if ((e as NodeJS.ErrnoException).code !== "ENOENT") failed.push(`${rel}: ${(e as Error).message}`);
-      }
-    }
-    const live = this.poolSessionById(sessionId);
-    if (live && !failed.length) {
-      live.reviewBlocks = [];
-      this.emitReviewCenter(live);
-    }
-    if (failed.length) {
-      this.agentNotice(ui, "warning", `Reverted ${label} partly; ${failed.length} file(s) could not be restored:\n${failed.join("\n")}`);
-      return "failed";
-    }
-    this.agentNotice(ui, "info", `Reverted ${label}: ${restored} file(s) restored.`);
-    return "reverted";
-  }
-
-  private async handleCrewSessionInput(text: string, session: Session): Promise<void> {
-    const run = session.workflowRun;
-    if (!run || run.status === "done" || run.status === "cancelled" || run.status === "failed") {
-      const name = this.defaultWorkflowName();
-      await this.startWorkflowRun(session, text, name);
-      return;
-    }
-    if (run.status === "running") {
-      // X-03 / F-09: never silently into the hidden stage. The webview asks
-      // "send to the stage, or keep as a note"; a client that did not ask
-      // steers, and says so in the transcript.
-      await this.sendToRunningStage(session, text, "steer");
-      return;
-    }
-    const parsed = parseGateMessage(text);
-    if (parsed.kind === "command") {
-      const map: Record<string, GateAction> = {
-        pause: { type: "pause", at: Date.now() },
-        cancel: { type: "cancel" },
-        skip: { type: "skip" },
-        rerun: { type: "rerun" },
-        restart: { type: "restart" },
-        continueAnyway: { type: "continueAnyway" },
-        start: { type: "start" },
-      };
-      const action = map[parsed.command];
-      if (action) await this.handleWorkflowGateAction(session, action);
-      return;
-    }
-    session.workflowRun = appendGateNotes(run, parsed.text);
-    this.persistWorkflowRun(session);
-    this.emitWorkflowRun(session);
-  }
-
-  private gateActionFromMsg(msg: {
-    action: string;
-    nextStageId?: string;
-    target?: { provider: AcpProvider; model?: string; effort?: string };
-    notes?: string;
-    allowAnywhere?: boolean;
-    autonomy?: string;
-    value?: boolean;
-    findings?: string[];
-  }): GateAction | undefined {
-    if (msg.action === "pause") return { type: "pause", at: Date.now() };
-    if (msg.action === "cancel") return { type: "cancel" };
-    if (msg.action === "skip") return { type: "skip", ...(msg.notes ? { notes: msg.notes } : {}) };
-    if (msg.action === "rerun") return { type: "rerun", ...(msg.target ? { target: msg.target as never } : {}) };
-    if (msg.action === "restart") return { type: "restart", ...(msg.target ? { target: msg.target as never } : {}) };
-    if (msg.action === "finish") return { type: "finish" };
-    if (msg.action === "continueAnyway") return { type: "continueAnyway" };
-    if (msg.action === "acceptAsIs") return { type: "acceptAsIs" };
-    if (msg.action === "anotherRound") return { type: "anotherRound", ...(msg.target ? { target: msg.target as never } : {}) };
-    if (msg.action === "changeWorkflow") return { type: "changeWorkflow" };
-    if (msg.action === "revertAll") return { type: "revertAll" };
-    if (msg.action === "keepChanges") return { type: "keepChanges" };
-    if (msg.action === "setAutonomy" && (msg.autonomy === "step" || msg.autonomy === "stop-on-problems" || msg.autonomy === "autopilot")) {
-      return { type: "setAutonomy", autonomy: msg.autonomy };
-    }
-    if (msg.action === "pauseAfterStage") return { type: "pauseAfterStage", value: msg.value !== false };
-    if (msg.action === "selectFindings") return { type: "selectFindings", keep: Array.isArray(msg.findings) ? msg.findings.map(String) : [] };
-    if (msg.action === "start") {
-      return {
-        type: "start",
-        ...(msg.nextStageId ? { nextStageId: msg.nextStageId } : {}),
-        ...(msg.target ? { target: msg.target as never } : {}),
-        ...(msg.notes ? { notes: msg.notes } : {}),
-        ...(msg.allowAnywhere === true ? { allowAnywhere: true } : {}),
-      };
-    }
-    return undefined;
+    return this.workflowStageRunner.startWorkflowRun(session, idea, workflowName, options);
   }
 
   private async openNewCrewSession(
     idea: string,
     workflowName: string,
-    options?: CrewStartOptions,
+    options?: any,
   ): Promise<void> {
-    await this.newFocusedSession();
-    this.focused.sessionType = "crew";
-    this.persistSessionType(this.focused);
-    this.postSessionType(this.focused);
-    this.postWorkflowList(this.focused, workflowName);
-    if (idea.trim()) {
-      await this.startWorkflowRun(this.focused, idea, workflowName, options);
-    }
+    return this.workflowStageRunner.openNewCrewSession(idea, workflowName, options);
+  }
+
+  private applyWorkflowPlanEdit(
+    session: Session,
+    edit: any,
+  ): void {
+    this.workflowStageRunner.applyWorkflowPlanEdit(session, edit);
+  }
+
+  private async handleHostGateAction(
+    session: Session,
+    action: any,
+  ): Promise<boolean> {
+    return this.workflowStageRunner.handleHostGateAction(session, action);
+  }
+
+  private gateActionFromMsg(
+    msg: any,
+  ): any {
+    return this.workflowStageRunner.gateActionFromMsg(msg);
+  }
+
+  private async handleWorkflowGateAction(
+    session: Session,
+    action: any,
+  ): Promise<void> {
+    return this.workflowStageRunner.handleWorkflowGateAction(session, action);
+  }
+
+  private async createCrewWorktree(
+    sourcePath: string,
+    label: string,
+  ): Promise<{ path: string; label: string; sourceGitRoot: string } | { error: string }> {
+    return this.workflowStageRunner.createCrewWorktree(sourcePath, label);
+  }
+
+  private async applyCrewWorktree(
+    session: Session,
+    wt: { path: string; label: string; sourceGitRoot: string },
+  ): Promise<void> {
+    return this.workflowStageRunner.applyCrewWorktree(session, wt);
+  }
+
+  private finishWorkflowRun(session: Session, def: WorkflowDefinition): void {
+    this.workflowStageRunner.finishWorkflowRun(session, def);
+  }
+
+  private writeWorkflowReport(session: Session, def: WorkflowDefinition): string | undefined {
+    return this.workflowStageRunner.writeWorkflowReport(session, def);
+  }
+
+  private poolSessionById(sessionId: string | undefined): Session | undefined {
+    return this.workflowStageRunner.poolSessionById(sessionId);
+  }
+
+  private async finishWorkflowStage(session: Session, def: WorkflowDefinition, packet: HandoffPacket): Promise<void> {
+    return this.workflowStageRunner.finishWorkflowStage(session, def, packet);
+  }
+
+  private planStepsFor(run: WorkflowRun): HandoffPlanStep[] {
+    return this.workflowStageRunner.planStepsFor(run);
+  }
+
+  private packetMap(runId: string): Map<string, HandoffPacket> {
+    return this.workflowStageRunner.packetMap(runId);
+  }
+
+  private packetsFor(runId: string): HandoffPacket[] {
+    return this.workflowStageRunner.packetsFor(runId);
+  }
+
+  private async revertWorkflowRun(session: Session): Promise<void> {
+    return this.workflowStageRunner.revertWorkflowRun(session);
+  }
+
+  private async revertWorkflowStage(session: Session, def: WorkflowDefinition, ordinal: number): Promise<void> {
+    return this.workflowStageRunner.revertWorkflowStage(session, def, ordinal);
+  }
+
+  private async handleCrewSessionInput(text: string, session: Session): Promise<void> {
+    return this.workflowStageRunner.handleCrewSessionInput(text, session);
   }
 
   private crewPresetSet(cwd: string): CrewPresetSet {
@@ -3981,549 +2730,34 @@ export class GrokSidebar {
     ]);
   }
 
-  /**
-   * `/crew [preset] [goal]` — walk a plan as a chain of roles (AP-12/13).
-   * Sequential is the default. `parallel: true` on the preset runs independent
-   * writers in one wave, each in its own worktree.
-   *
-   * Parsed synchronously at both intercept points, awaited only on a hit —
-   * the same rule as `/agent` (Erkenntnis 14). Stop holds the RUN, not just
-   * the step. Grok as planner is refused: an empty entries list is not "a
-   * plan with zero steps".
-   */
+  private async executeWorkflowStage(
+    session: Session,
+    def: WorkflowDefinition,
+    run: WorkflowRun,
+    targetHint?: any,
+    opts?: any,
+  ): Promise<void> {
+    return this.workflowStageRunner.executeWorkflowStage(session, def, run, targetHint, opts);
+  }
+
   private async handleCrewCommand(text: string, session: Session): Promise<boolean> {
-    const parsed = parseCrewCommand(text);
-    if (parsed.kind === "none") return false;
-    if (parsed.kind === "error") {
-      this.agentNotice(session, "warning", parsed.message);
-      return true;
-    }
-    // D8: `/crew` in an Agent session is not the in-thread chain unless the
-    // user turned that legacy path back on. A Crew session does not run `/crew`
-    // at all — the session IS the run.
-    if (session.sessionType === "crew") {
-      this.agentNotice(session, "warning", "This is already a Crew session. Describe the idea in the composer, or use the gate.");
-      return true;
-    }
-    if (!this.inThreadCrewCommand()) {
-      const goal = parsed.kind === "run" ? parsed.goal : undefined;
-      this.emit(session, {
-        type: "hostNotice",
-        level: "warning",
-        text: "Crew runs live in their own session.",
-        action: {
-          id: "openCrewWithGoal",
-          label: "Open a new Crew session with this goal",
-          ...(goal ? { goal } : {}),
-        },
-      });
-      return true;
-    }
-    if (session.crewRun && (session.crewRun.status === "running" || session.crewRun.status === "assigning" || session.crewRun.status === "planning")) {
-      this.agentNotice(session, "warning", "A crew is already running in this conversation. Stop it first.");
-      return true;
-    }
-    if (this.runningRoleName(session)) {
-      this.agentNotice(session, "warning", "A role is already running in this conversation.");
-      return true;
-    }
-
-    this.emit(session, { type: "userMessage", text, chips: [] });
-
-    const cwd = this.sessionCwd(session);
-    const presets = this.crewPresetSet(cwd);
-    const preset = findCrewPreset(presets, parsed.preset);
-    const roles = this.agentRoleSet(cwd);
-    const goal = parsed.goal || this.lastUserMessageText(session) || "Carry out the current plan.";
-
-    let entries = session.planEntries.filter((e) => e.content.trim());
-    if (!entries.length) {
-      const planner = findAgentRole(roles, "planner");
-      if (!planner) {
-        this.agentNotice(session, "warning", "No `planner` role is loaded, so a crew cannot invent a step list.");
-        return true;
-      }
-      const resolved = this.resolveRoleProvider(planner, session);
-      if ("error" in resolved) {
-        this.agentNotice(session, "warning", resolved.error);
-        return true;
-      }
-      const plannerCap = providerCapability(resolved.provider, "structuredPlan");
-      if (plannerCap.state === "no") {
-        this.agentNotice(
-          session,
-          "warning",
-          `Planner would run on ${providerDisplayName(resolved.provider)}, which reports plans as prose, not as a step list. `
-          + `Give the planner a companion that speaks structured plans, or start from an existing checklist.`,
-        );
-        return true;
-      }
-      const runId = this.agentRuns.newRunId();
-      session.crewRun = makeCrewRun({ runId, goal, cwd, steps: [], preset: preset.name, verify: preset.verify });
-      session.crewRun = setCrewStatus(session.crewRun, "planning");
-      this.emitCrewRun(session);
-      const planned = await this.runAgentRole(
-        { ...planner, provider: resolved.provider },
-        {
-          goal,
-          task: "Produce an ordered checklist of concrete steps for this goal. Do not edit any file.",
-          acceptance: "A structured step list the host can walk, one step per item.",
-          files: [],
-          decisions: [],
-          forbidden: ["Do not edit any file."],
-          provenance: [`Crew ${runId} asked the planner for a step list.`],
-        },
-        "crew-step",
-        session,
-        { runId, step: 1 },
-      );
-      entries = planned.planEntries.filter((e) => e.content.trim());
-      if (!entries.length) {
-        this.agentNotice(session, "warning", "The planner did not report a step list, so the crew did not start.");
-        session.crewRun = setCrewStatus(session.crewRun, "failed", "planner produced no steps");
-        this.emitCrewRun(session);
-        return true;
-      }
-    }
-
-    const steps = stepsFromPlan(entries);
-    const runId = session.crewRun?.runId ?? this.agentRuns.newRunId();
-    let run = makeCrewRun({
-      runId,
-      goal,
-      cwd,
-      steps,
-      preset: preset.name,
-      verify: preset.verify,
-      checkpointTurnId: String(session.userMessageCount),
-      ...(preset.parallel ? { parallel: true } : {}),
-    });
-    this.logAgentRun({
-      at: Date.now(),
-      runId,
-      step: 0,
-      role: "crew",
-      provider: session.provider,
-      event: "started",
-      detail: `preset=${preset.name} steps=${steps.length}`,
-    });
-
-    // The flow's `roles:` is the candidate POOL, in the flow's own order —
-    // until now it was parsed and ignored, so a flow saying
-    // `roles: [planner, implementer]` still let a `researcher` take a step.
-    // A name that resolves to nothing is reported rather than dropped.
-    const pool = presetRoles(preset, roles);
-    for (const problem of pool.problems) this.agentNotice(session, "warning", problem.message);
-
-    for (const step of run.steps) {
-      const assignment = assignStep({ title: step.title, files: [] }, pool.roles);
-      if (assignment.kind === "assigned") {
-        run = assignStepRole(run, step.index, assignment.role, assignment.why);
-        this.logAgentRun({
-          at: Date.now(), runId, step: step.index, role: assignment.role,
-          provider: session.provider, event: "briefed", detail: assignment.why,
-        });
-      } else {
-        const candidates = assignment.kind === "ambiguous" ? assignment.candidates : pool.roles.map((r) => r.name);
-        const picked = await this.askCrewAssignment(session, step.title, candidates, assignment.why);
-        if (!picked) {
-          run = cancelCrewRun(run, "Assignment cancelled.");
-          session.crewRun = run;
-          this.emitCrewRun(session);
-          return true;
-        }
-        run = assignStepRole(run, step.index, picked, `user chose ${picked} (${assignment.why})`);
-        this.logAgentRun({
-          at: Date.now(), runId, step: step.index, role: picked,
-          provider: session.provider, event: "briefed", detail: `user chose ${picked}`,
-        });
-      }
-    }
-
-    // `review_every:` was the other decorative field: a flow asking to be
-    // reviewed every two steps was reviewed only at the end, which finds a
-    // wrong decision from step 2 after step 9 has been built on it. Applied
-    // AFTER assignment so the cadence counts the steps that actually write.
-    if (preset.reviewEvery) {
-      const reviewRole = presetReviewRole(preset, roles);
-      if (reviewRole) {
-        const before = run.steps.length;
-        run = applyReviewCadence(run, preset.reviewEvery, reviewRole);
-        if (run.steps.length !== before) {
-          this.logAgentRun({
-            at: Date.now(), runId, step: 0, role: reviewRole, provider: session.provider,
-            event: "briefed", detail: `review cadence every ${preset.reviewEvery} inserted ${run.steps.length - before} step(s)`,
-          });
-        }
-      } else {
-        this.agentNotice(
-          session,
-          "warning",
-          `Crew flow \`${preset.name}\` asks for a review every ${preset.reviewEvery} steps, but no review role is loaded.`,
-        );
-      }
-    }
-
-    run = setCrewStatus(run, "running");
-    session.crewRun = run;
-    this.emitCrewRun(session);
-    if (preset.parallel) {
-      this.setStatus(session, "working");
-      this.emit(session, { type: "setBusy", value: true });
-    }
-
-    const worktrees: { path: string; label: string; sourceGitRoot: string }[] = [];
-    let previous: { summary: string; filesReported: string[]; filesObserved: string[]; verify?: string } | undefined;
-    while (session.crewRun && session.crewRun.status === "running") {
-      const cap = parallelSlotCap({
-        maxLive: GrokSidebar.MAX_LIVE_SESSIONS,
-        unreapable: this.crewUnreapableCount(),
-      });
-      const wave = nextIndependentSteps(session.crewRun, { parallel: !!preset.parallel, cap });
-      if (!wave.length) {
-        session.crewRun = setCrewStatus(session.crewRun, "review");
-        this.emitCrewRun(session);
-        break;
-      }
-
-      type Prepared = { step: CrewStep; role: AgentRole; brief: ReturnType<typeof briefingForCrewStep>; stepCwd: string };
-      const prepared: Prepared[] = [];
-      for (const step of wave) {
-        if (!session.crewRun || session.crewRun.status !== "running") break;
-        const roleName = step.role;
-        const role = roleName ? findAgentRole(roles, roleName) : undefined;
-        if (!role) {
-          session.crewRun = applyStepOutcome(session.crewRun, step.index, {
-            status: "failed",
-            detail: `No role named ${roleName ?? "(unassigned)"} is loaded.`,
-          });
-          this.emitCrewRun(session);
-          break;
-        }
-        const resolved = this.resolveRoleProvider(role, session);
-        if ("error" in resolved) {
-          session.crewRun = applyStepOutcome(session.crewRun, step.index, { status: "failed", detail: resolved.error });
-          this.emitCrewRun(session);
-          break;
-        }
-        let stepCwd = cwd;
-        if (preset.parallel) {
-          const wt = await this.createCrewWorktree(cwd, `crew-${runId.slice(-8)}-s${step.index}`);
-          if ("error" in wt) {
-            session.crewRun = applyStepOutcome(session.crewRun, step.index, { status: "failed", detail: wt.error });
-            this.emitCrewRun(session);
-            break;
-          }
-          worktrees.push(wt);
-          stepCwd = wt.path;
-        }
-        session.crewRun = startCrewStep(session.crewRun, step.index);
-        prepared.push({
-          step,
-          role: { ...role, provider: resolved.provider },
-          brief: briefingForCrewStep({ run: session.crewRun, step, previous }),
-          stepCwd,
-        });
-      }
-      this.emitCrewRun(session);
-      if (!prepared.length || !session.crewRun || session.crewRun.status !== "running") break;
-
-      const runOne = (p: Prepared) => this.executeCrewRole(p, session, runId, !!preset.parallel);
-      const results = prepared.length > 1
-        ? await Promise.all(prepared.map(runOne))
-        : [await runOne(prepared[0]!)];
-
-      const summaries: NonNullable<typeof previous>[] = [];
-      for (let i = 0; i < prepared.length; i++) {
-        const p = prepared[i]!;
-        const result = results[i]!;
-        const settled = await this.settleCrewStep({
-          session, roles, runId, cwd: p.stepCwd, step: p.step, role: p.role, result,
-        });
-        if (settled.previous) summaries.push(settled.previous);
-        if (!session.crewRun || session.crewRun.status !== "running") break;
-      }
-      if (summaries.length) {
-        previous = {
-          summary: summaries.map((s) => s.summary).filter(Boolean).join(" | "),
-          filesReported: this.uniqueCrewPaths(summaries.flatMap((s) => s.filesReported)),
-          filesObserved: this.uniqueCrewPaths(summaries.flatMap((s) => s.filesObserved)),
-          ...(summaries.some((s) => s.verify)
-            ? { verify: summaries.map((s) => s.verify).filter(Boolean).join(" ") }
-            : {}),
-        };
-      }
-    }
-
-    for (const wt of worktrees) {
-      await this.applyCrewWorktree(session, wt);
-    }
-    if (preset.parallel) {
-      this.emit(session, { type: "setBusy", value: false });
-      if (session.status === "working") this.setStatus(session, "done");
-    }
-
-    if (session.crewRun && session.crewRun.status === "review") {
-      this.emitReviewCenter(session);
-      session.crewRun = setCrewStatus(session.crewRun, "done");
-      this.emitCrewRun(session);
-      const progress = crewProgress(session.crewRun);
-      this.agentNotice(
-        session,
-        "info",
-        `Crew ${session.crewRun.runId} finished: ${progress.done}/${progress.total} steps`
-        + ". Review the combined diffs in the Review panel.",
-      );
-    }
-    try { this.crewFileClaims().releaseRun(runId); } catch { /* claims are a lock, not the run */ }
-    return true;
-  }
-
-  private async executeCrewRole(
-    prepared: { step: CrewStep; role: AgentRole; brief: ReturnType<typeof briefingForCrewStep>; stepCwd: string },
-    session: Session,
-    runId: string,
-    live: boolean,
-  ) {
-    const { step, role, brief, stepCwd } = prepared;
-    const coords = { runId, step: step.index, cwd: stepCwd, ...(live ? { live: true as const } : {}) };
-    const exhausted: AcpProvider[] = [];
-    let provider: AcpProvider = role.provider;
-    let result = await this.runAgentRole({ ...role, provider }, brief, "crew-step", session, coords);
-    while (
-      result.outcome === "failed"
-      && (() => {
-        const kind = classifyLimitError(provider, result.detail || "");
-        return kind === "quota" || kind === "rate";
-      })()
-      && session.crewRun
-    ) {
-      exhausted.push(provider);
-      const next = nextFailoverProvider(exhausted, this.usableProviders());
-      if (!next) break;
-      this.logAgentRun({
-        at: Date.now(), runId, step: step.index, role: role.name, provider: next,
-        event: "started", detail: `failover from ${provider} (limit)`,
-      });
-      provider = next;
-      result = await this.runAgentRole({ ...role, provider }, brief, "crew-step", session, coords);
-    }
-    return result;
-  }
-
-  private async settleCrewStep(opts: {
-    session: Session;
-    roles: AgentRoleSet;
-    runId: string;
-    cwd: string;
-    step: CrewStep;
-    role: AgentRole;
-    result: Awaited<ReturnType<GrokSidebar["executeCrewRole"]>>;
-  }): Promise<{ previous?: { summary: string; filesReported: string[]; filesObserved: string[]; verify?: string } }> {
-    const { session, roles, runId, cwd, step, role, result } = opts;
-    if (!session.crewRun) return {};
-    for (const file of result.filesObserved) {
-      const claim = this.crewFileClaims().tryClaim({
-        path: file, runId, step: step.index, role: role.name, at: Date.now(),
-      });
-      if (!claim.ok) {
-        const keep = await this.confirmInChat(session, {
-          title: "File already claimed",
-          body: `${file} is held by ${claim.heldBy.role} (step ${claim.heldBy.step}). Overwrite anyway?`,
-          confirmLabel: "Overwrite",
-          danger: true,
-        });
-        if (!keep) {
-          session.crewRun = applyStepOutcome(session.crewRun, step.index, {
-            status: "failed",
-            detail: `${file} is claimed by ${claim.heldBy.role}`,
-            filesObserved: result.filesObserved,
-          });
-          this.emitCrewRun(session);
-          return {};
-        }
-      }
-    }
-    if (session.crewRun.status !== "running") return {};
-
-    const budget = checkBudget(
-      { toolCalls: 0, tokens: result.totalTokens ?? 0, usdTicks: result.costUsdTicks ?? 0 },
-      role.budget,
-    );
-    if (!budget.ok) {
-      const keep = await this.confirmInChat(session, {
-        title: "Budget reached",
-        body: `${role.name} hit its ${budget.limit} cap (${budget.used} / ${budget.cap}). Continue, or stop the crew?`,
-        confirmLabel: "Continue",
-      });
-      if (!keep) {
-        session.crewRun = cancelCrewRun(session.crewRun, `${role.name} hit ${budget.limit}`);
-        this.emitCrewRun(session);
-        return {};
-      }
-    }
-
-    const failCalls = result.filesReported.length
-      ? []
-      : (result.detail ? [{ tool: result.detail, ok: false as const }] : []);
-    if (repeatedFailingTool(failCalls)) {
-      const keep = await this.confirmInChat(session, {
-        title: "Repeated failing tool",
-        body: `${role.name} retried the same failing call. Continue, or stop the crew?`,
-        confirmLabel: "Continue",
-      });
-      if (!keep) {
-        session.crewRun = cancelCrewRun(session.crewRun, `${role.name} repeated a failing tool`);
-        this.emitCrewRun(session);
-        return {};
-      }
-    }
-
-    session.crewRun = applyStepOutcome(session.crewRun, step.index, {
-      status: result.outcome === "completed" ? "done" : result.outcome === "cancelled" ? "cancelled" : "failed",
-      filesReported: result.filesReported,
-      filesObserved: result.filesObserved,
-      costUsdTicks: result.costUsdTicks,
-      durationMs: result.durationMs,
-      sessionId: result.sessionId,
-      detail: result.detail,
-    });
-    this.emitCrewRun(session);
-    if (result.outcome !== "completed") return {};
-
-    const previous: { summary: string; filesReported: string[]; filesObserved: string[]; verify?: string } = {
-      summary: result.summary,
-      filesReported: result.filesReported,
-      filesObserved: result.filesObserved,
-    };
-    if (session.crewRun.verify && role.name !== "reviewer" && role.name !== "planner") {
-      const verify = await this.runCrewVerify(session.crewRun.verify, cwd);
-      previous.verify = verify.code === 0
-        ? `\`${session.crewRun.verify}\` passed.`
-        : `\`${session.crewRun.verify}\` failed (exit ${verify.code}).`;
-      if (verifyInsertsFixer(verify)) {
-        const fixer = findAgentRole(roles, "fixer");
-        if (fixer) {
-          session.crewRun = insertCrewStep(session.crewRun, step.index, {
-            title: fixerTitle({ command: session.crewRun.verify, output: verify.output }),
-            role: "fixer",
-            assignWhy: `verify \`${session.crewRun.verify}\` exited ${verify.code}`,
-          });
-          this.emitCrewRun(session);
-        }
-      }
-    }
-    return { previous };
-  }
-
-  private async askCrewAssignment(
-    session: Session,
-    title: string,
-    candidates: string[],
-    why: string,
-  ): Promise<string | undefined> {
-    const options = candidates.map((name) => ({ label: name }));
-    if (!options.length) return undefined;
-    return new Promise((resolve) => {
-      let settled = false;
-      const finish = (value: string | undefined) => {
-        if (settled) return;
-        settled = true;
-        resolve(value);
-      };
-      this.showQuestion(session, {
-        id: `crew-assign-${Date.now()}`,
-        sessionId: session.activeSessionId || "crew",
-        questions: [{
-          question: `Which role should handle: ${title}?\n${why}`,
-          options,
-        }],
-      }, {
-        answer: (answers) => {
-          const first = Object.values(answers)[0];
-          finish(typeof first === "string" && candidates.includes(first) ? first : candidates[0]);
-          return true;
-        },
-        cancel: () => { finish(undefined); return true; },
-        abandon: () => { finish(undefined); },
-      });
-    });
+    return this.workflowStageRunner.handleCrewCommand(text, session);
   }
 
   private async runCrewVerify(command: string, cwd: string): Promise<{ code: number; output: string }> {
-    const runner = this.crewVerifyRunner;
-    if (runner) return runner(command, cwd);
-    // Host-side verify is opt-in via the preset. A missing command is a skip,
-    // not a red check — we do not invent a test runner.
-    return { code: 0, output: "" };
+    return this.workflowStageRunner.runCrewVerify(command, cwd);
   }
-
-  /** Tests inject a verify runner so `npm test` never starts a real one. */
-  crewVerifyRunner?: (command: string, cwd: string) => Promise<{ code: number; output: string }>;
-  /** Tests inject worktree create/apply so `npm test` never starts git. */
-  crewWorktreeCreate?: (sourcePath: string, label: string) => Promise<{ path: string; label: string; sourceGitRoot: string } | { error: string }>;
-  crewWorktreeApply?: (wt: { path: string; label: string; sourceGitRoot: string }) => Promise<void>;
 
   private uniqueCrewPaths(paths: readonly string[]): string[] {
-    const seen = new Set<string>();
-    const out: string[] = [];
-    for (const p of paths) {
-      const n = String(p ?? "").replace(/\\/g, "/");
-      if (!n || seen.has(n)) continue;
-      seen.add(n);
-      out.push(n);
-    }
-    return out;
-  }
-
-  private async createCrewWorktree(
-    sourcePath: string,
-    label: string,
-  ): Promise<{ path: string; label: string; sourceGitRoot: string } | { error: string }> {
-    if (this.crewWorktreeCreate) return this.crewWorktreeCreate(sourcePath, label);
-    const sourceGitRoot = gitRootForPath(sourcePath, defaultFs) || sourcePath;
-    const root = path.join(resolveGrokHome(), "worktrees");
-    const created = await this.worktreeLocal().create({ sourcePath, label, root });
-    if ("error" in created) return created;
-    return {
-      path: created.worktreePath,
-      label: label || path.basename(created.worktreePath),
-      sourceGitRoot: created.sourceGitRoot || sourceGitRoot,
-    };
-  }
-
-  private async applyCrewWorktree(
-    session: Session,
-    wt: { path: string; label: string; sourceGitRoot: string },
-  ): Promise<void> {
-    if (this.crewWorktreeApply) return this.crewWorktreeApply(wt);
-    await this.applyWorktreeViaLocalGit(session, wt.path, wt.sourceGitRoot, wt.label);
+    return this.workflowStageRunner.uniqueCrewPaths(paths);
   }
 
   private crewUnreapableCount(): number {
-    try {
-      return countUnreapable(this.pool, this.focused);
-    } catch {
-      return 1;
-    }
+    return this.workflowStageRunner.crewUnreapableCount();
   }
 
-  private fileClaims?: FileClaimStore;
-
   private crewFileClaims(): FileClaimStore {
-    return this.fileClaims ?? (this.fileClaims = new FileClaimStore({
-      dir: path.join(this.context.globalStorageUri.fsPath, "file-claims").replace(/\\/g, "/"),
-      fs: {
-        mkdirSync: (p, o) => fs.mkdirSync(p, o),
-        writeFileSync: (p, data, o) => fs.writeFileSync(p, data, o),
-        readFileSync: (p, enc) => fs.readFileSync(p, enc),
-        readdirSync: (p) => fs.readdirSync(p),
-        existsSync: (p) => fs.existsSync(p),
-        unlinkSync: (p) => fs.unlinkSync(p),
-        rmSync: (p, o) => fs.rmSync(p, o),
-      },
-      now: () => Date.now(),
-    }));
+    return this.workflowStageRunner.crewFileClaims();
   }
 
   private logAgentRun(entry: Parameters<AgentRunStore["appendLog"]>[0]): void {
@@ -4992,6 +3226,14 @@ export class GrokSidebar {
     }
     if (caller && usable.includes(caller)) return caller;
     return usable[0]!;
+  }
+
+  public companionsSetting<T>(key: string, fallback: T): T {
+    try {
+      return this.host.getConfiguration("companions").get<T>(key, fallback) ?? fallback;
+    } catch {
+      return fallback;
+    }
   }
 
   /** Local webview + the settings TAB, like `postRoutines`. Never crosses to a
@@ -5516,638 +3758,123 @@ export class GrokSidebar {
   }
 
   private providerConnections(): ProviderConnections {
-    return this.providerConnectionState;
+    return this.providerSetup.providerConnections();
   }
 
-  /**
-   * Whether the person has CONNECTED this agent (#171, upstream 4444697).
-   *
-   * Connection is a fact stated by pressing Connect/Sign in, read from storage
-   * and never discovered: nothing here may run a vendor's binary for an agent
-   * that is not connected — no credential probe, model catalog, version read
-   * or history listing. Finding the CLI on disk is a filesystem check and
-   * still runs, because Connect cannot be offered for something not seen.
-   */
   private hasProviderConsent(provider: AcpProvider): boolean {
-    return this.providerConnections()?.[provider] === true;
+    return this.providerSetup.hasProviderConsent(provider);
   }
 
-  /** Session-start snapshot of `grok.acp.*` timeouts (#117). */
   private acpClientTimeouts() {
-    const cfg = this.host.getConfiguration("grok");
-    return {
-      promptIdleTimeoutMs: cfg.get<number>("acp.promptIdleTimeoutMs"),
-      promptAbsoluteTimeoutMs: cfg.get<number>("acp.promptAbsoluteTimeoutMs"),
-      requestTimeoutMs: cfg.get<number>("acp.requestTimeoutMs"),
-    };
+    return this.providerSetup.acpClientTimeouts();
   }
 
   private locateProvider(provider: AcpProvider): string | undefined {
-    if (provider === "grok") {
-      if (this.cliPath && fs.existsSync(this.cliPath)) return this.cliPath;
-      if (this.testForceMissingGrokCli) {
-        this.cliPath = undefined;
-        return undefined;
-      }
-      const located = locateGrokCli(this.host.getConfiguration("grok").get<string>("cliPath", "")) || undefined;
-      this.cliPath = located;
-      return located;
-    }
-    if (provider === "codex") {
-      if (this.codexCliPath && fs.existsSync(this.codexCliPath)) return this.codexCliPath;
-      const located = locateCodexCli({
-        configuredPath: this.host.getConfiguration("grok").get<string>("codexCliPath", ""),
-        managedStorageRoot: this.context.globalStorageUri.fsPath,
-        arch: process.arch,
-      });
-      this.codexCliPath = located;
-      return located;
-    }
-    if (provider === "claude") {
-      if (this.claudeCliPath && fs.existsSync(this.claudeCliPath)) return this.claudeCliPath;
-      const located = locateClaudeCli({
-        configuredPath: this.host.getConfiguration("grok").get<string>("claudeCliPath", ""),
-      });
-      this.claudeCliPath = located;
-      return located;
-    }
-    if (provider === "muse") {
-      if (this.museCliPath && fs.existsSync(this.museCliPath)) return this.museCliPath;
-      const located = locateMuseCli({
-        configuredPath: this.host.getConfiguration("grok").get<string>("museCliPath", ""),
-      });
-      this.museCliPath = located;
-      return located;
-    }
-    if (this.geminiCliPath && fs.existsSync(this.geminiCliPath)) return this.geminiCliPath;
-    const located = locateGeminiCli({
-      configuredPath: this.host.getConfiguration("grok").get<string>("geminiCliPath", ""),
-    });
-    this.geminiCliPath = located;
-    return located;
+    return this.providerSetup.locateProvider(provider);
   }
 
   private locatedProviders(): Partial<Record<AcpProvider, boolean>> {
-    return {
-      grok: !!this.locateProvider("grok"),
-      codex: !!this.locateProvider("codex"),
-      claude: !!this.locateProvider("claude"),
-      gemini: !!this.locateProvider("gemini"),
-      muse: !!this.locateProvider("muse"),
-    };
+    return this.providerSetup.locatedProviders();
   }
 
-  private adapterHistory(provider: AcpProvider): {
-    cache: Map<string, SessionListEntry[]>;
-    at: Map<string, number>;
-    refresh: Map<string, Promise<void>>;
-  } | undefined {
-    if (provider === "codex") {
-      return { cache: this.codexSessionCache, at: this.codexSessionCacheAt, refresh: this.codexSessionRefresh };
-    }
-    if (provider === "claude") {
-      return { cache: this.claudeSessionCache, at: this.claudeSessionCacheAt, refresh: this.claudeSessionRefresh };
-    }
-    if (provider === "gemini") {
-      return { cache: this.geminiSessionCache, at: this.geminiSessionCacheAt, refresh: this.geminiSessionRefresh };
-    }
-    if (provider === "muse") {
-      return { cache: this.museSessionCache, at: this.museSessionCacheAt, refresh: this.museSessionRefresh };
-    }
-    return undefined;
+  private adapterHistory(provider: AcpProvider) {
+    return this.providerSetup.adapterHistory(provider);
   }
 
   private allAdapterCatalogs(): Iterable<readonly SessionListEntry[]> {
-    return [
-      ...(this.codexSessionCache?.values() ?? []),
-      ...(this.claudeSessionCache?.values() ?? []),
-      ...(this.geminiSessionCache?.values() ?? []),
-      ...(this.museSessionCache?.values() ?? []),
-    ];
+    return this.providerSetup.allAdapterCatalogs();
   }
 
-  private createProviderBackend(provider: AcpProvider, effort?: string): CodexBackend | ClaudeBackend | GeminiBackend | MuseBackend | undefined {
-    if (provider === "codex") return new CodexBackend();
-    if (provider === "claude") {
-      const allowedTools = this.host.getConfiguration("companions").get<string[]>(
-        "claudeAllowedTools",
-        this.host.getConfiguration("grok").get<string[]>("claudeAllowedTools", []),
-      );
-      const customAgents = this.host.getConfiguration("companions").get<unknown>(
-        "claudeCustomAgents",
-        this.host.getConfiguration("grok").get<unknown>("claudeCustomAgents", undefined),
-      );
-      return new ClaudeBackend({
-        allowedTools: Array.isArray(allowedTools) && allowedTools.length > 0 ? allowedTools : undefined,
-        customAgents: customAgents ? customAgents : undefined,
-        effort: effort || undefined,
-      });
-    }
-    if (provider === "gemini") return new GeminiBackend();
-    if (provider === "muse") return new MuseBackend();
-    return undefined;
+  private createProviderBackend(provider: AcpProvider, effort?: string) {
+    return this.providerSetup.createProviderBackend(provider, effort);
   }
 
   private connectedProviders(): AcpProvider[] {
-    return connectedProviderIds(this.providerConnections(), this.locatedProviders());
+    return this.providerSetup.connectedProviders();
   }
 
-  /** Connected AND able to answer — see usableProviderIds. Use this to decide who
-   *  runs a turn or which onboarding to show; use connectedProviders() to decide
-   *  what to say ABOUT a provider, which still wants the lapsed ones. */
   private usableProviders(): AcpProvider[] {
-    return usableProviderIds(this.providerConnections(), this.locatedProviders(), this.providerNeedsLogin ?? {});
+    return this.providerSetup.usableProviders();
   }
 
-  /**
-   * The onboarding panel a session should show when it cannot run.
-   *
-   * With nothing CONNECTED, offer the choice of all three rather than one
-   * provider's sign-in instructions: a session can carry a stale `provider`
-   * inherited from a project default, and telling someone who has connected
-   * nothing to "Complete codex login" names an agent they may never have picked.
-   *
-   * A conversation WITH history is different, and never gets the chooser: its
-   * provider is pinned after the first turn, so there is nothing to choose. If
-   * that agent's credentials die mid-session, its own sign-in is the only
-   * correct panel — offering three would trade an answer for a question about
-   * something the session cannot change anyway.
-   *
-   * Otherwise it depends on whether anything can answer. With NONE available,
-   * the provider on an empty session is only a guess — a project default, or
-   * whatever was used last — so naming one agent's sign-in presents a decision
-   * as though it had already been made; offer all three and ask honestly. With
-   * something available the session's own provider is the specific gap to
-   * close, so show that.
-   */
-  private onboardingForSession(session: Session): "connect-agent" | "auth-required" | "codex-login" | "claude-login" | "gemini-login" | "muse-login" {
-    if (session.hasHistory) return providerLoginState(session.provider);
-    return this.usableProviders().length ? providerLoginState(session.provider) : "connect-agent";
+  private onboardingForSession(session: Session) {
+    return this.providerSetup.onboardingForSession(session);
   }
 
   private migrateProviderConnections(): ProviderConnections {
-    const existing = this.state.get<ProviderConnections>(PROVIDER_CONNECTIONS_KEY);
-    if (existing !== undefined) return existing;
-    // Nothing is inferred from what is installed or signed in on disk:
-    // connecting is one press, and guessing it is what #171 was about.
-    const migrated: ProviderConnections = {};
-    void this.state.update(PROVIDER_CONNECTIONS_KEY, migrated);
-    return migrated;
+    return this.providerSetup.migrateProviderConnections();
   }
 
   private setProviderConnectedInMemory(provider: AcpProvider, connected: boolean): void {
-    const current = this.providerConnections();
-    if (!connected || !current[provider]) this.invalidateSubscriptionUsage(provider);
-    this.providerConnectionState = { ...current, [provider]: connected };
-    if (!connected && isAdapterProvider(provider)) {
-      const history = this.adapterHistory(provider);
-      history?.cache.clear();
-      // A reconnect must re-list immediately. Keeping the old freshness stamp
-      // after dropping the rows creates a fresh-but-empty cache for ten seconds.
-      history?.at.clear();
-    }
-    this.postProviderState();
-    if (connected) void this.probeProviderVersion(provider);
+    this.providerSetup.setProviderConnectedInMemory(provider, connected);
   }
 
   private async persistProviderConnections(): Promise<void> {
-    await this.state.update(PROVIDER_CONNECTIONS_KEY, this.providerConnectionState);
+    return this.providerSetup.persistProviderConnections();
   }
 
   private async setProviderConnected(provider: AcpProvider, connected: boolean): Promise<void> {
-    this.setProviderConnectedInMemory(provider, connected);
-    await this.persistProviderConnections();
+    return this.providerSetup.setProviderConnected(provider, connected);
   }
 
-  /**
-   * An agent that is installed and configured but will not authenticate.
-   *
-   * Disconnecting it would be the wrong hammer — that hides every conversation
-   * it owns and tears down live sessions for a fault one sign-in fixes. This is
-   * a view-only flag: the account still counts as connected, and every surface
-   * that would otherwise degrade silently (a bare "<Agent> default" row in the
-   * model picker, a history list that just comes back empty) shows the same
-   * sign-in action the connect flow uses.
-   *
-   * Only the provider's credential classifier may raise it: adapter probes use
-   * that backend's `isCredentialError`, while Grok uses `isCredentialError`.
-   * The billing/entitlement family must never route to a login screen (#58).
-   */
   private setProviderNeedsLogin(provider: AcpProvider, needsLogin: boolean): void {
-    const current = this.providerNeedsLogin ?? {};
-    if (!!current[provider] === needsLogin) return;
-    this.providerNeedsLogin = { ...current, [provider]: needsLogin };
-    if (needsLogin) this.invalidateSubscriptionUsage(provider);
-    // A recovered account must be able to re-list at once; the freshness stamp
-    // would otherwise hold the empty catalog for its full back-off window.
-    if (!needsLogin && isAdapterProvider(provider)) this.adapterHistory(provider)?.at.clear();
-    // And it must be able to RECOVER again. `authRecoveryTried` survives a
-    // restart on purpose (#58) and only a clean turn re-arms it — which a
-    // conversation holding a process built on a dead token never has. A
-    // completed sign-in is the new information it stood in for (upstream 61e0c57).
-    if (!needsLogin) this.rearmAuthRecovery(provider);
-    this.postProviderState();
+    this.providerSetup.setProviderNeedsLogin(provider, needsLogin);
   }
 
-  /** Every session on this provider may try the token dance once more. */
   private rearmAuthRecovery(provider: AcpProvider): void {
-    const rearm = (session: Session | undefined) => {
-      if (session?.provider === provider) session.authRecoveryTried = false;
-    };
-    rearm(this.focused);
-    for (const session of this.pool ?? []) rearm(session);
+    this.providerSetup.rearmAuthRecovery(provider);
   }
 
   private async warmConnectedCodexModels(): Promise<boolean> {
-    if (!this.hasProviderConsent("codex")) return false;
-    const cliPath = this.locateProvider("codex");
-    if (!cliPath) return false;
-    try {
-      await warmCodexModelCache({
-        cliPath,
-        onModels: (models, currentModelId) => this.cacheProviderModels("codex", models, currentModelId),
-        log: (message) => this.host.appendLine(message),
-        // Codex answered "Internal error" for a session in a bare temp dir on
-        // Windows, so the cache never filled and a freshly connected Codex was
-        // missing from the picker until a real session created one. The
-        // workspace is the cwd a real session uses, so it is known to work.
-        fallbackCwd: this.workspaceRoot() || undefined,
-      });
-      this.setProviderNeedsLogin("codex", false);
-      return true;
-    } catch (error) {
-      this.host.appendLine(`[codex] model-cache warm-up failed: ${(error as Error).message}`);
-      // The warm-up is the first thing that talks to the agent after a connect,
-      // so its failure is the earliest honest answer about the credentials —
-      // but only when the failure IS about credentials.
-      if (isCodexCredentialError(error)) {
-        this.setProviderNeedsLogin("codex", true);
-      } else {
-        // Anything else says nothing about the sign-in, and leaving a stale
-        // needs-login standing made Codex permanently unusable: it never
-        // cleared, so it stayed out of the model picker and out of the
-        // "connected" confirmation, no matter how many times the user signed
-        // in. Observed as `Internal error` from session/new, which is not a
-        // credential failure at all.
-        this.setProviderNeedsLogin("codex", false);
-      }
-      return false;
-    }
+    return this.providerSetup.warmConnectedCodexModels();
   }
 
   private async warmConnectedClaudeModels(): Promise<boolean> {
-    if (!this.hasProviderConsent("claude")) return false;
-    const cliPath = this.locateProvider("claude");
-    if (!cliPath) return false;
-    try {
-      await warmClaudeModelCache({
-        cliPath,
-        onModels: (models, currentModelId) => this.cacheProviderModels("claude", models, currentModelId),
-        log: (message) => this.host.appendLine(message),
-        // Same refusal Codex saw: `session/new` answering "Internal error" for
-        // a session in a bare temp directory on Windows, so the cache never
-        // filled and Claude never appeared connected (#146). The workspace is
-        // the cwd a real session uses, so it is known to work.
-        fallbackCwd: this.workspaceRoot() || undefined,
-      });
-      this.setProviderNeedsLogin("claude", false);
-      return true;
-    } catch (error) {
-      this.host.appendLine(`[claude] model-cache warm-up failed: ${(error as Error).message}`);
-      if (isClaudeCredentialError(error)) {
-        this.setProviderNeedsLogin("claude", true);
-      } else {
-        // Anything else says nothing about the sign-in, and a stale needs-login
-        // left standing made Codex permanently unusable in exactly this way: it
-        // never cleared, so the account stayed out of the model picker and out
-        // of the "connected" confirmation however many times the user signed
-        // in. Claude had no such branch until #146.
-        this.setProviderNeedsLogin("claude", false);
-      }
-      return false;
-    }
+    return this.providerSetup.warmConnectedClaudeModels();
   }
 
   private async warmConnectedGeminiModels(): Promise<boolean> {
-    if (!this.hasProviderConsent("gemini")) return false;
-    const cliPath = this.locateProvider("gemini");
-    if (!cliPath) return false;
-    try {
-      await warmGeminiModelCache({
-        cliPath,
-        onModels: (models, currentModelId) => this.cacheProviderModels("gemini", models, currentModelId),
-        log: (message) => this.host.appendLine(message),
-        fallbackCwd: this.workspaceRoot() || undefined,
-      });
-      // The Antigravity adapter answers session/new from a static model list
-      // without launching `agy`, so this warm-up proves the binary, not the
-      // account — it reported Connected while signed out. The legacy `gemini`
-      // CLI does open a real session, so it still speaks for itself.
-      const signedIn = !isAntigravityCli(cliPath) || hasAntigravityCredentials();
-      if (!signedIn) this.host.appendLine("[gemini] no Antigravity credentials found — run `agy auth login`");
-      this.setProviderNeedsLogin("gemini", !signedIn);
-      return signedIn;
-    } catch (error) {
-      this.host.appendLine(`[gemini] model-cache warm-up failed: ${(error as Error).message}`);
-      if (isGeminiCredentialError(error)) {
-        this.setProviderNeedsLogin("gemini", true);
-      } else {
-        this.setProviderNeedsLogin("gemini", false);
-      }
-      return false;
-    }
+    return this.providerSetup.warmConnectedGeminiModels();
   }
 
-  /** Explicit credential observation. Unlike history refresh this never obeys
-   * the listing freshness clock, so a completed sign-in is visible at once. */
   private async reprobeProviderCredentials(provider: AcpProvider): Promise<boolean> {
-    if (!this.hasProviderConsent(provider)) return false;
-    if (provider === "codex") return this.warmConnectedCodexModels();
-    if (provider === "claude") return this.warmConnectedClaudeModels();
-    if (provider === "gemini") return this.warmConnectedGeminiModels();
-    // Muse exposes no credential-status operation, and a catalog read cannot
-    // prove a sign-in (upstream). A turn reports any credential failure.
-    if (provider === "muse") return false;
-    const cliPath = this.locateProvider("grok");
-    if (!cliPath) return false;
-    // session/new is what actually proves the account, but grok has no ACP
-    // session/delete (AcpClient.deleteSession always throws for this provider).
-    // A leftover lands in ~/.grok/sessions/<urlencoded-cwd>/ as a summary-only
-    // directory the catalog lists as "Untitled" and the CLI cannot load.
-    // Probe in a scratch cwd so a failed cleanup cannot appear in the user's
-    // project; still delete the dir after the process exits.
-    const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "grok-cred-probe-"));
-    const envCwd = this.workspaceRoot() || scratch;
-    const client = new AcpClient({
-      cliPath,
-      cwd: scratch,
-      env: this.buildEnv(envCwd),
-      log: (message) => this.host.appendLine(message),
-      grokVersion: this.providerCliVersions.grok,
-    });
-    try {
-      await client.start();
-      await client.newSession();
-      this.cacheProviderModels("grok", client.availableModels, client.currentModelId);
-      this.setProviderNeedsLogin("grok", false);
-      return true;
-    } catch (error) {
-      this.host.appendLine(`[grok] credential re-probe failed: ${errorDetail(error)}`);
-      if (client.isCredentialError(error) || isCredentialError(error)) {
-        this.setProviderNeedsLogin("grok", true);
-      }
-      return false;
-    } finally {
-      const probeId = client.sessionId;
-      await client.dispose();
-      if (probeId) this.removeSessionFromDisk(probeId, scratch);
-      try { fs.rmSync(scratch, { recursive: true, force: true }); } catch { /* leftover temp dir is harmless */ }
-    }
+    return this.providerSetup.reprobeProviderCredentials(provider);
   }
 
-  /** Does the provider's own credential file exist? Deliberately shallow —
-   *  presence only, no validity claim: it separates "sign-in never landed"
-   *  from "landed, but our probe is unhappy", which lead a person to
-   *  different next actions. */
   private providerCredentialFilePresent(provider: AcpProvider): boolean {
-    try {
-      if (provider === "codex") return fs.existsSync(path.join(resolveCodexHome(), "auth.json"));
-      if (provider === "muse") return fs.existsSync(path.join(os.homedir(), ".config", "muse", "auth.json"));
-      // GROK_HOME, not a hardcoded ~/.grok: the CLI honours it and so does the
-      // rest of this host, so hardcoding made the fallback miss a credential
-      // that was plainly there and tell the user to sign in again (review).
-      if (provider === "grok") return fs.existsSync(path.join(resolveGrokHome(process.env), "auth.json"));
-      if (provider === "gemini") {
-        const home = process.env.USERPROFILE || process.env.HOME || os.homedir();
-        return fs.existsSync(path.join(home, ".gemini", "oauth.json")) || fs.existsSync(path.join(home, ".gemini", "settings.json"));
-      }
-      return false;
-    } catch {
-      return false;
-    }
+    return this.providerSetup.providerCredentialFilePresent(provider);
   }
 
-  /** Observe an interactive terminal login without requiring a reload. Terminal
-   * APIs do not expose CLI completion portably, so retry on a short bounded
-   * cadence and stop at the first authenticated probe. */
   private watchProviderLogin(provider: AcpProvider): void {
-    const previous = this.loginReprobeTimers.get(provider);
-    if (previous) clearTimeout(previous);
-    const delays = [0, 2_000, 5_000, 10_000, 20_000, 30_000, 60_000];
-    const attempt = async (index: number): Promise<void> => {
-      this.loginReprobeTimers.delete(provider);
-      if (await this.reprobeProviderCredentials(provider)) return;
-      const delay = delays[index + 1];
-      if (delay === undefined) return;
-      const timer = setTimeout(() => void attempt(index + 1), delay);
-      this.loginReprobeTimers.set(provider, timer);
-    };
-    void attempt(0);
+    this.providerSetup.watchProviderLogin(provider);
   }
 
   private async installManagedCodexCli(): Promise<void> {
-    if (this.codexInstallAbort) return;
-    const alreadyLocated = this.locateProvider("codex");
-    if (alreadyLocated) {
-      this.postLocal({ type: "onboarding", state: "codex-login", platform: process.platform });
-      return;
-    }
-
-    const controller = new AbortController();
-    this.codexInstallAbort = controller;
-    try {
-      const binary = await installManagedCodex({
-        storageRoot: this.context.globalStorageUri.fsPath,
-        signal: controller.signal,
-        onProgress: (phase, value) => this.postLocal({
-          type: "codexInstallProgress",
-          phase,
-          receivedBytes: value?.receivedBytes,
-          totalBytes: value?.totalBytes,
-        }),
-      });
-      this.codexCliPath = binary;
-      this.postProviderState();
-      this.postLocal({ type: "codexInstallProgress", phase: "idle" });
-      this.postLocal({ type: "onboarding", state: "codex-login", platform: process.platform });
-    } catch (error) {
-      const cancelled = controller.signal.aborted;
-      const reason = cancelled
-        ? "Codex installation was cancelled."
-        : `Codex installation failed: ${errorDetail(error)}`;
-      this.host.appendLine(`[codex] managed install failed: ${reason}`);
-      this.postLocal({ type: "codexInstallProgress", phase: "idle", reason });
-      this.postLocal({ type: "onboarding", state: "missing-codex", platform: process.platform, reason, provider: "codex" });
-    } finally {
-      if (this.codexInstallAbort === controller) this.codexInstallAbort = undefined;
-    }
+    return this.providerSetup.installManagedCodexCli();
   }
 
   private providerStateMessage(): Extract<HostMsg, { type: "providerState" }> {
-    const connected = this.providerConnections();
-    const located = this.locatedProviders();
-    const versions = this.providerCliVersions ?? {};
-    const needsLogin = this.providerNeedsLogin ?? {};
-    const grokConnected = connected.grok === true && located.grok === true;
-    const codexConnected = connected.codex === true && located.codex === true;
-    const claudeConnected = connected.claude === true && located.claude === true;
-    const geminiConnected = connected.gemini === true && located.gemini === true;
-    const museConnected = connected.muse === true && located.muse === true;
-    this.lastProviderConnected = { grok: grokConnected, codex: codexConnected, claude: claudeConnected, gemini: geminiConnected };
-    return {
-      type: "providerState",
-      providers: [
-        {
-          id: "grok",
-          connected: grokConnected,
-          ...(grokConnected && versions.grok ? { cliVersion: versions.grok } : {}),
-          ...(grokConnected && needsLogin.grok ? { needsLogin: true } : {}),
-        },
-        {
-          id: "codex",
-          connected: codexConnected,
-          ...(codexConnected && needsLogin.codex ? { needsLogin: true } : {}),
-          ...(codexConnected && versions.codex ? { cliVersion: versions.codex } : {}),
-          ...(codexConnected ? {
-            adapterVersion: CODEX_ACP_ADAPTER_VERSION,
-            latestCliVersion: CODEX_MANAGED_VERSION,
-            ...(versions.codex ? { updateAvailable: versionIsOlder(versions.codex, CODEX_MANAGED_VERSION) } : {}),
-          } : {}),
-        },
-        {
-          id: "claude",
-          connected: claudeConnected,
-          ...(claudeConnected && needsLogin.claude ? { needsLogin: true } : {}),
-          ...(claudeConnected && versions.claude ? { cliVersion: versions.claude } : {}),
-          ...(claudeConnected ? { adapterVersion: CLAUDE_ACP_ADAPTER_VERSION } : {}),
-        },
-        {
-          id: "gemini",
-          connected: geminiConnected,
-          ...(geminiConnected && needsLogin.gemini ? { needsLogin: true } : {}),
-          ...(geminiConnected && versions.gemini ? { cliVersion: versions.gemini } : {}),
-        },
-        {
-          id: "muse",
-          connected: museConnected,
-          ...(museConnected && needsLogin.muse ? { needsLogin: true } : {}),
-          ...(museConnected && versions.muse ? { cliVersion: versions.muse } : {}),
-        },
-      ],
-      ...(this.providerRefreshInFlight ? { checking: true } : {}),
-    };
+    return this.providerSetup.providerStateMessage();
   }
 
-  /** Chat, the projects rail, remotes — and the VS Code settings tab, which
-   *  reads `providerState` but sits outside `post()`. Without this line that
-   *  tab's Providers page only ever showed the snapshot it booted with, so a
-   *  sign-in completed elsewhere never reached it. Same shape as
-   *  {@link postGrokUpdateStatus}. */
   private postProviderState(): void {
-    const message = this.providerStateMessage();
-    this.post(message);
-    void this.settingsEditor?.webview.postMessage(message);
+    this.providerSetup.postProviderState();
   }
 
-  /**
-   * Re-observe every account, asserting nothing about any of them.
-   *
-   * Settings → Providers is derived from a persisted connection flag, a cached
-   * CLI path and the last credential probe — none of which re-check themselves.
-   * Sign out inside a terminal, install a CLI, let a token lapse, and the page
-   * keeps repeating what it last heard. This is the way to make it tell the
-   * truth, and it runs both from the page's Refresh button and when the page
-   * is opened.
-   *
-   * Every INSTALLED agent is probed, not just the ones already marked connected.
-   * Signing in happens outside this extension — a browser OAuth approval, a
-   * `grok login` in any terminal — and the desk has no way to hear about it.
-   * Probing only the already-connected set made the button useless in exactly
-   * the case people press it: approve Grok in the browser, press Refresh, and
-   * it skipped Grok because the stale flag said "not connected" (owner, and it
-   * meant opening the chat and pressing Check instead).
-   *
-   * A provider whose CLI is not installed is still skipped — there is nothing
-   * to run and nothing to learn.
-   *
-   * Still NOT `recheckConnection`: that marks its provider connected BEFORE
-   * probing, so a failed sign-in leaves an account the user never had. Here the
-   * probe comes first and only a SUCCESS promotes — evidence, not assumption.
-   * A failure never demotes: a lapsed account keeps its row and gets the
-   * sign-in action (see setProviderNeedsLogin), and one that was never
-   * connected simply stays that way.
-   */
   private async refreshProviderStates(): Promise<void> {
-    if (this.providerRefreshInFlight) return;
-    this.providerRefreshInFlight = true;
-    // Say it started before the slow part. The button reads `checking` off this
-    // frame, so posting it first is what makes the click feel answered.
-    this.postProviderState();
-    try {
-      // Drop the located paths so the locators genuinely re-run. `locateProvider`
-      // only invalidates a cached path when the file is gone, so a CLI installed
-      // or repointed since boot would otherwise stay invisible.
-      if (!this.testForceMissingGrokCli) this.cliPath = undefined;
-      this.codexCliPath = undefined;
-      this.claudeCliPath = undefined;
-      this.geminiCliPath = undefined;
-      this.museCliPath = undefined;
-      // Read AFTER dropping the paths, so a CLI that appeared since boot counts.
-      const located = this.locatedProviders();
-      // NEITHER probe nor promotion for an agent that is not connected (#171):
-      // promoting whichever installed CLI answered was the extension deciding,
-      // on the person's behalf, to run a vendor's binary and keep the result.
-      const installed = ACP_PROVIDERS.filter((provider) => located[provider] && this.hasProviderConsent(provider));
-      // Failures are the answer here, not an error: a rejected probe is how a
-      // lapsed account gets its needsLogin flag. reprobeProviderCredentials
-      // already classifies and records that, so nothing is swallowed.
-      //
-      // Versions are deliberately not re-probed. They are read once per
-      // activation by design, they do not appear on this page, and every
-      // connected account already probes its version when it connects.
-      await Promise.all(installed.map(async (provider) => {
-        await this.reprobeProviderCredentials(provider).catch(() => false);
-      }));
-    } finally {
-      this.providerRefreshInFlight = false;
-      // Always the last word, however the probes went — a spinner that outlives
-      // its refresh is worse than a stale row, because it never resolves.
-      this.postProviderState();
-      void this.refreshGithubState();
-    }
+    return this.providerSetup.refreshProviderStates();
   }
 
-  // USABLE, not merely connected. A provider whose credentials have lapsed is
-  // still connected and still located, so it used to win connected[0] and
-  // capture every new session — the owner had Grok and Claude unconnected and
-  // Codex connected-but-expired, and a fresh session dropped him into "Complete
-  // codex login" rather than letting him pick. Grok stays the fallback when
-  // nothing can answer, which is what the empty case already did.
   private defaultProviderForProject(cwd: string): AcpProvider {
-    const usable = this.usableProviders();
-    const saved = this.state.get<ProjectProviderDefaults>(PROJECT_PROVIDER_DEFAULTS_KEY, {})[
-      projectProviderKey(cwd)
-    ];
-    if (saved && usable.includes(saved.provider)) return saved.provider;
-    return usable[0] ?? "grok";
+    return this.providerSetup.defaultProviderForProject(cwd);
   }
 
   private providerDefaultForProject(cwd: string, provider: AcpProvider): string | undefined {
-    const saved = this.state.get<ProjectProviderDefaults>(PROJECT_PROVIDER_DEFAULTS_KEY, {})[
-      projectProviderKey(cwd)
-    ];
-    if (saved?.provider === provider) return saved.modelId || undefined;
-    return provider === "grok"
-      ? this.host.getConfiguration("grok").get<string>("defaultModel", "") || undefined
-      : undefined;
+    return this.providerSetup.providerDefaultForProject(cwd, provider);
   }
 
   private async rememberProjectProvider(cwd: string, provider: AcpProvider, modelId?: string): Promise<void> {
-    const current = this.state.get<ProjectProviderDefaults>(PROJECT_PROVIDER_DEFAULTS_KEY, {});
-    await this.state.update(PROJECT_PROVIDER_DEFAULTS_KEY, {
-      ...current,
-      [projectProviderKey(cwd)]: { provider, ...(modelId ? { modelId } : {}) },
-    } satisfies ProjectProviderDefaults);
+    return this.providerSetup.rememberProjectProvider(cwd, provider, modelId);
   }
 
   private cacheProviderModels(
@@ -8880,1056 +6607,46 @@ Only continue if you trust this code.`,
   }
 
   async newWorktreeSession(): Promise<void> {
-    // No worktree-from-worktree — checkouts stay singular. The gear hides this
-    // inside a worktree; guard the Command-Palette path too.
-    if (this.focused.worktree) {
-      return void this.host.showInformationMessage(
-        "You're already in a worktree. Start a new worktree from a normal session — worktrees don't nest.",
-      );
-    }
-    // The CONVERSATION's repository — not the open folder, and not the rail's
-    // selection either.
-    //
-    // Not the open folder, because a project-B conversation can be on screen in
-    // a window opened on A: that made an A worktree out of a B conversation, and
-    // Apply Worktree would later merge it into A. Not the selection, because
-    // selecting a project in the rail changes the history scope and leaves the
-    // focused conversation exactly where it was — "Continue in a worktree" is an
-    // id-less action about the conversation in front of you, so a selection made
-    // since would have branched from a checkout you never mentioned.
-    //
-    // One rule for every caller: a worktree is cut from the conversation it
-    // continues. The Command Palette lands here too, and `focused` is the
-    // conversation open there as well.
-    const sourcePath = this.sessionCwd(this.focused);
-    if (!isGitRepo(sourcePath, fs)) {
-      return void this.host.showWarningMessage(
-        "Worktree sessions need a git repository. Open a folder that is a git checkout (or run git init).",
-      );
-    }
-    // One at a time. Creation reuses whatever live client the project already
-    // has, and the CLI's progress notifications carry no worktree path — only
-    // the terminal one does — so two overlapping creates on one client produce
-    // events that cannot be told apart. Serialising is the honest fix; trying
-    // to correlate uncorrelatable events is not. Nothing legitimate wants two
-    // at once: this is a deliberate action, and only the desk can start it
-    // (remote-policy keeps `newWorktreeSession` host-local).
-    if (this.worktreeCreateInFlight) {
-      return void this.host.showWarningMessage(
-        "A worktree is already being created. Wait for it to finish before starting another.",
-      );
-    }
-    this.worktreeCreateInFlight = true;
-    try {
-      await this.createWorktreeSession(sourcePath);
-    } finally {
-      this.worktreeCreateInFlight = false;
-    }
+    return this.worktreeHost.newWorktreeSession();
   }
 
-  /** Guards {@link newWorktreeSession} against overlapping creates. */
-  private worktreeCreateInFlight = false;
-
-  /** The body of {@link newWorktreeSession}, run under its single-flight guard. */
-  private async createWorktreeSession(sourcePath: string): Promise<void> {
-    const rawLabel = await this.host.showInputBox({
-      prompt: "Worktree label (optional)",
-      placeHolder: "e.g. feat-auth — leave blank for an auto name",
-      ignoreFocusOut: true,
-    });
-    if (rawLabel === undefined) return; // cancelled
-    const label = sanitizeWorktreeLabel(rawLabel);
-
-    await this.host.withProgress(
-      { title: "Creating git worktree…", cancellable: false },
-      async () => {
-        try {
-          // Grok RPC stays the path when a Grok session is already running for
-          // this checkout — it is proven and it knows clone mode. We never
-          // start Grok just to make a worktree (AP-13a): no live Grok client
-          // means the local git path, which can only produce a linked worktree
-          // and says so rather than pretending a clone happened (18.8).
-          const live = this.liveGrokWorktreeClient(sourcePath);
-          if (!live) {
-            this.host.appendLine("[worktree] using local git (linked worktree; clone mode is Grok-only)");
-            await this.createWorktreeViaLocalGit(sourcePath, label);
-            return;
-          }
-          this.host.appendLine("[worktree] using Grok RPC (clone mode available)");
-          const creator = { client: live, disposeAfter: false };
-          const { client, disposeAfter } = creator;
-          // Disposed after the LAST validation query, not here and not at the
-          // end. Not here, because validation asks this same client for its
-          // worktree list and killing it first made that call reject every time
-          // — invisible for a linked worktree, which local git lists anyway,
-          // and fatal for a clone-mode one, which only the ACP list mentions.
-          // Not at the end either: a temporary `grok.exe` still running while
-          // the new session starts holds the executable's file lock on Windows,
-          // and the first session after an extension upgrade is when the silent
-          // CLI updater runs — it would fail, and then record the version
-          // anyway, so the update would be skipped for the whole release.
-          let created;
-          let creatorDisposed = false;
-          const releaseCreator = async () => {
-            if (creatorDisposed || !disposeAfter) return;
-            creatorDisposed = true;
-            const probeId = client.sessionId;
-            await client.dispose();
-            if (probeId) this.removeSessionFromDisk(probeId, sourcePath);
-          };
-          try {
-            // The authoritative set BEFORE creating anything. Without it,
-            // "is this path a worktree of this repo" is the only question the
-            // validator can answer — and an existing SIBLING worktree passes
-            // it. A response naming one would have been cached, opened,
-            // persisted, made remotely targetable, and later applied or
-            // removed as though we had just made it.
-            const preExisting = await this.listAuthoritativeWorktreePaths(
-              client,
-              sourcePath,
-              gitRootForPath(sourcePath, defaultFs) || sourcePath,
-            );
-            // Watch BEFORE the RPC. `createWorktree` returns while the status
-            // is still "creating" and completion rides an event, so a small
-            // repo can finish before the call even resolves — a listener
-            // attached afterwards waits for something that already happened.
-            const watch = this.watchWorktreeCreate(client);
-            try {
-              created = await client.createWorktree({
-                sourcePath,
-                label: label || undefined,
-              });
-            } catch (createErr) {
-              watch.cancel();
-              throw createErr;
-            }
-            if (created === "unsupported") {
-              watch.cancel();
-              return void this.host.showWarningMessage(
-                "Worktrees need a newer Grok Build CLI. Update via Settings → About.",
-              );
-            }
-            const wtPath = created.worktreePath;
-            const wtLabel = label || path.basename(wtPath);
-            this.host.appendLine(`[worktree] created ${wtPath} (label=${wtLabel})`);
-
-            // Wait for the CLI to say it is DONE, not merely for the checkout
-            // to exist. Registration happens before the files are copied, so
-            // `.git` on disk and a `git worktree list` entry both appear while
-            // the copy is still running — and the temporary creator we are
-            // about to dispose is the process doing the copying. Killing it
-            // then leaves a partial checkout that every later check calls
-            // valid, with staged or untracked work silently absent.
-            //
-            // Bounded, and a timeout falls through to the disk checks rather
-            // than failing: an older CLI may not emit the event at all, and
-            // refusing a good worktree over a missing notification would be a
-            // worse trade than the race it protects against.
-            const outcome = await watch.settled(wtPath);
-            if (outcome === "failed") {
-              return void this.host.showErrorMessage(
-                `Worktree "${wtLabel}" was not created: the Grok CLI reported it failed.`,
-              );
-            }
-            if (outcome === "stalled") {
-              // It reported progress and then stopped. That is an unfinished
-              // copy, not an old CLI — and the checks below cannot tell the
-              // difference, because registration lands before the files do.
-              this.host.appendLine(`[worktree] create reported progress then stalled: ${wtPath}`);
-              return void this.host.showErrorMessage(
-                `Worktree "${wtLabel}" never finished being created, so no session was started. The partial checkout was left at ${wtPath}.`,
-              );
-            }
-            if (outcome === "silent") {
-              // Nothing at all was said about this create, so the CLI predates
-              // the status event. The checks below are how this worked before
-              // it existed — an unchanged risk rather than a new one.
-              this.host.appendLine(`[worktree] no status reported for ${wtPath}; using disk checks`);
-            }
-            // create is ASYNC — the RPC returns "creating" before git writes the
-            // checkout (its dir + `.git` pointer appear a beat later). Spawning a
-            // session in a not-yet-existing cwd hangs the whole flow, so wait for
-            // the checkout to land before validating or starting the session.
-            const ready = await this.waitForWorktreeReady(wtPath, 30000);
-            if (!ready) {
-              return void this.host.showErrorMessage(
-                `Worktree "${wtLabel}" was created but its checkout never appeared on disk — the session wasn't started. Try again, or check \`git worktree list\`.`,
-              );
-            }
-
-            // Validate against an authoritative worktree list before cache /
-            // overrides / auth roots. A compromised or malformed ACP path must
-            // not become a trusted session cwd.
-            //
-            // The root we QUERY is derived locally from the folder the user
-            // actually asked to branch — never from the response. Taking
-            // `created.sourceGitRoot` first (as this did) made the check answer
-            // itself: the same value arrived as both the claim and the thing the
-            // claim was compared against, so it always matched. A response naming
-            // repository B could then hand back a genuine worktree OF B, have git
-            // truthfully list it, and be filed under A.
-            const sourceGitRoot = gitRootForPath(sourcePath, defaultFs) || sourcePath;
-            const claimedGitRoot = created.sourceGitRoot?.trim() || undefined;
-            if (claimedGitRoot && !pathsEqual(claimedGitRoot, sourceGitRoot) && !pathsEqual(claimedGitRoot, sourcePath)) {
-              this.host.appendLine(
-                `[worktree] refused: create claims source ${claimedGitRoot}, but ${sourcePath} is in ${sourceGitRoot}`,
-              );
-              return void this.host.showErrorMessage(
-                `Worktree "${wtLabel}" came back attributed to a different repository, so no session was started.`,
-              );
-            }
-            // Ask more than once. The create RPC returns as soon as git is asked,
-            // and `waitForWorktreeReady` only proves the DIRECTORY exists — the
-            // worktree can still be missing from `git worktree list` for a beat
-            // after that. Validating on the first answer refused a perfectly good
-            // checkout roughly 14ms after creating it: "not in git worktree list".
-            //
-            // This weakens nothing. The path must still appear in an authoritative
-            // list; it is only given the moment it needs to get there.
-            let listedPaths = await this.listAuthoritativeWorktreePaths(
-              client,
-              sourcePath,
-              sourceGitRoot,
-            );
-            for (let attempt = 0; attempt < 6; attempt++) {
-              if (listedPaths.some((p) => pathsEqual(p, wtPath))) break;
-              await new Promise((r) => setTimeout(r, 250));
-              listedPaths = await this.listAuthoritativeWorktreePaths(
-                client,
-                sourcePath,
-                sourceGitRoot,
-              );
-            }
-            if (
-              !worktreePathAuthorizedForRepo({
-                worktreePath: wtPath,
-                sourceRepo: sourcePath,
-                listedWorktreePaths: listedPaths,
-                claimedSourceGitRoot: claimedGitRoot,
-                sourceGitRoot,
-              })
-            ) {
-              this.host.appendLine(
-                `[worktree] refused unlisted/unauthorized path from create: ${wtPath}`,
-              );
-              // The CLI already wrote a checkout there — for a clone-mode repo, a
-              // full copy of it. Refusing without saying so left the directory
-              // behind silently, so the next attempt with the same label got a
-              // "-2" suffix and the owner accumulated orphans they had no way to
-              // see. We do not delete it: it is real work on disk and this path
-              // is reached precisely when we could NOT establish what it is.
-              return void this.host.showErrorMessage(
-                `Worktree "${wtLabel}" could not be confirmed as part of this repository, so no session was started. The checkout was left at ${wtPath} — remove it yourself if you don't want it.`,
-              );
-            }
-            // "A worktree of this repo" is not the same claim as "the worktree
-            // I just asked you to make". Every sibling passes the first test,
-            // so a response naming one would take over a checkout somebody else
-            // is working in — and Apply and Remove would then act on it.
-            if (preExisting.some((p) => pathsEqual(p, wtPath))) {
-              this.host.appendLine(
-                `[worktree] refused: ${wtPath} already existed before this create`,
-              );
-              return void this.host.showErrorMessage(
-                `Worktree "${wtLabel}" already existed before this request, so no session was started. Open it from the conversation list instead.`,
-              );
-            }
-
-            // Every question that needed the creator has been asked. Let it go
-            // BEFORE the session starts — see the note where it was obtained.
-            await releaseCreator();
-
-            // Refresh cache only after validation.
-            this.worktreeCache = this.worktreeCache.filter((w) => !pathsEqual(w.path, wtPath));
-            this.worktreeCache.push({
-              id: wtLabel,
-              path: wtPath,
-              sourceRepo: sourcePath,
-              repoName: path.basename(sourcePath),
-              kind: "session",
-              creationMode: "linked",
-              gitRef: "HEAD",
-              headCommit: "",
-              status: "alive",
-              label: wtLabel,
-              userProvidedLabel: !!label,
-            });
-
-            // Open a brand-new session whose process cwd is the worktree.
-            this.parkFocused();
-            // Held as an OBJECT across the await, never re-read from
-            // `this.focused`. Focus is free to move while startup runs — the
-            // user can click another conversation — and reading it back
-            // afterwards wrote this worktree's name, path and source root onto
-            // whatever session happened to be focused by then. A cold restore
-            // later treats that saved binding as authoritative, so the wrong
-            // conversation comes back believing it lives in the worktree.
-            const wtSession = this.newLocalSession();
-            this.focused = wtSession;
-            this.pool.add(wtSession);
-            wtSession.cwd = wtPath;
-            wtSession.worktree = {
-              path: wtPath,
-              label: wtLabel,
-              sourceGitRoot,
-            };
-            await this.startSession(undefined, wtSession);
-            const id = wtSession.activeSessionId;
-            if (id) {
-              const overrides = this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
-              await this.state.update(SESSION_META_KEY, {
-                ...overrides,
-                [id]: {
-                  ...(overrides[id] ?? {}),
-                  customName: worktreeDisplayName(wtLabel),
-                  worktreePath: wtPath,
-                  worktreeLabel: wtLabel,
-                  sourceGitRoot,
-                },
-              });
-              this.sessionCache.delete(id);
-            }
-              this.postSessionsList();
-              void this.host.showInformationMessage(
-                `Worktree session ready: ${wtLabel}. Edits stay isolated until you Apply worktree.`,
-              );
-          } finally {
-            // Belt: every early return above lands here too.
-            await releaseCreator();
-          }
-        } catch (e: any) {
-          void this.host.showErrorMessage(`Create worktree failed: ${e?.message ?? e}`);
-        }
-      },
-    );
-  }
-
-  /**
-   * Watch one worktree create through to completion.
-   *
-   * Started BEFORE the RPC, because the CLI can finish a small repo before the
-   * call resolves — so events are BUFFERED until the path is known and then
-   * replayed. The path arrives from the RPC's own answer, which is why this is
-   * two steps rather than one call.
-   *
-   * Correlation is the point. Creation reuses whatever live client the project
-   * already has, so two creates on one client interleave their notifications;
-   * accepting the first terminal event on the client let one create's
-   * completion release another's wait, and that other flow would then start in
-   * a checkout still being copied. An event with a `worktreePath` must name
-   * OURS. An event without one is only trusted while a single create is in
-   * flight on that client, which is the ordinary case and the one older CLIs
-   * produce.
-   *
-   * The timeout distinguishes two situations that look identical from here:
-   *
-   *  - the CLI never said ANYTHING about this create → it does not speak the
-   *    status protocol. Fall through to the disk and git checks, which is how
-   *    this worked before the event existed.
-   *  - the CLI DID report progress and then went quiet → it speaks the
-   *    protocol and the copy is genuinely unfinished. Registration happens
-   *    before the files are copied, so the disk checks would call a partial
-   *    checkout valid. Refuse instead.
-   */
-  private watchWorktreeCreate(client: AcpClient, timeoutMs = 120000) {
-    const events: Array<{ status?: string; worktreePath?: string }> = [];
-    let target: string | undefined;
-    let settleNow: ((o: WorktreeCreateOutcome) => void) | undefined;
-    // Whether this CLI has said ANYTHING about our create. It is what separates
-    // "does not speak the protocol" from "spoke, then stopped", and it is only
-    // trustworthy because creates are serialised: progress notifications carry
-    // no worktree path, so attributing one depends on there being exactly one
-    // create it could belong to.
-    let spoke = false;
-
-    const mine = (e: { worktreePath?: string }) =>
-      worktreeStatusIsForCreate(e, {
-        target,
-        soleCreateInFlight: this.worktreeCreatesInFlight.sole(client),
-      });
-    const verdict = worktreeStatusVerdict;
-    // Arrow, so `this` is the sidebar: the object returned below has methods
-    // of its own and would shadow it.
-    const clientReportsStatus = () => this.worktreeStatusCapableClients.has(client);
-    let onActivity: (() => void) | undefined;
-    const onStatus = (status: { status?: string; worktreePath?: string }) => {
-      // ANY event on this client — ours or not — proves the CLI emits status
-      // notifications. That fact outlives a single create, and it is the thing
-      // that makes "we heard nothing, so this must be an old build" a safe
-      // inference or a false one.
-      this.worktreeStatusCapableClients.add(client);
-      events.push(status || {});
-      if (!settleNow || !target) return; // buffered; replayed once we know ours
-      if (!mine(status)) return;
-      // Any matched event counts, progress included — that is the whole point
-      // of the flag. Only a terminal one settles the wait.
-      spoke = true;
-      onActivity?.();
-      const outcome = verdict(status);
-      if (outcome) settleNow(outcome);
-    };
-
-    // Taking the slot also registers the listener that releases it when the CLI
-    // dies — at watch START, which is the whole point. `exit` is one-shot, so
-    // registering it later (as this used to, only once a stall decided to hold
-    // the slot) attaches to an event a crashed CLI has already emitted.
-    // See WorktreeCreateSlots for the two properties and why they are there.
-    const releaseSlot = this.worktreeCreatesInFlight.take(client);
-    try {
-      client.on("worktreeStatus", onStatus);
-    } catch {
-      /* a client that cannot subscribe simply never reports */
-    }
-
-    const detach = (opts?: { keepSlot?: boolean }) => {
-      try {
-        client.off?.("worktreeStatus", onStatus);
-      } catch {
-        /* best effort — a disposed client has nothing to detach from */
-      }
-      releaseSlot({ keep: opts?.keepSlot });
-    };
-
-    return {
-      /** Abandon the watch without waiting (the RPC failed or was unsupported). */
-      cancel: () => detach(),
-      /** Wait for OUR create to finish, now that the RPC has named its path. */
-      settled(worktreePath: string): Promise<WorktreeCreateOutcome> {
-        target = worktreePath;
-        return new Promise<WorktreeCreateOutcome>((resolve) => {
-          let done = false;
-          const timers: Array<ReturnType<typeof setTimeout>> = [];
-          const finish = (outcome: WorktreeCreateOutcome) => {
-            if (done) return;
-            done = true;
-            for (const t of timers) clearTimeout(t);
-            // A stalled create is one we STOPPED WAITING FOR, not one that
-            // ended: the CLI may still be copying. Releasing its slot would let
-            // the next create believe it is the only one in flight and trust
-            // pathless progress events that belong to this one. The listener is
-            // dropped either way; only the count is held, and only until the
-            // client goes.
-            detach({ keepSlot: outcome === "stalled" });
-            resolve(outcome);
-          };
-          settleNow = finish;
-          // ONE clock, and a long one.
-          //
-          // A short "has it said anything yet" window was tried and was worse
-          // than the problem: a create-capable CLI whose first notification is
-          // slow, or whose copy simply takes longer, was classified as a build
-          // that never reports and admitted through the disk checks — which
-          // approve a half-copied checkout, because registration lands before
-          // the files do. That widened the unsafe window from "copies over two
-          // minutes" to "copies over five seconds".
-          //
-          // What running out MEANS still depends on whether it ever spoke.
-          // Deleting that distinction along with the short clock was the
-          // over-correction: a CLI that reported progress and then stopped is
-          // an unfinished copy, and letting it fall through hands the disk
-          // checks the partial checkout they are guaranteed to approve.
-          //
-          // IDLE, not elapsed. A fixed deadline calls a copy stopped for taking
-          // long, which for a big repository it legitimately does — and the
-          // protocol emits progress while copying, so quiet is the signal, not
-          // duration. Every matched event restarts the clock; only silence
-          // running out ends the wait.
-          //
-          // "Silent" is a claim about the CLI, not about this create, so it is
-          // only safe while nothing has ever proved otherwise. A retry after a
-          // stall cannot attribute its own progress — the abandoned create's
-          // slot is still held, so pathless events are ambiguous by design —
-          // and reading that as "old build, fall through to the disk checks"
-          // would be provably wrong: the retained slot exists BECAUSE this
-          // client reports. Fail closed there.
-          const capable = () => spoke || clientReportsStatus();
-          let idle: ReturnType<typeof setTimeout>;
-          const arm = () => {
-            clearTimeout(idle);
-            idle = setTimeout(() => finish(capable() ? "stalled" : "silent"), timeoutMs);
-            timers.push(idle);
-          };
-          onActivity = arm;
-          arm();
-          // Replay what arrived before the path was known.
-          for (const e of events) {
-            if (!mine(e)) continue;
-            spoke = true;
-            const outcome = verdict(e);
-            if (outcome) return finish(outcome);
-          }
-        });
-      },
-    };
-  }
-
-  /**
-   * Live creates per client, so an event with no `worktreePath` can be trusted
-   * only when there is exactly one create it could belong to. Lifetime rules
-   * and their reasons live on {@link WorktreeCreateSlots}.
-   */
-  private worktreeCreatesInFlight = new WorktreeCreateSlots();
-
-  /**
-   * Clients observed emitting `worktree/status` at least once.
-   *
-   * Kept per client rather than per create because it is a fact about the
-   * BUILD, and it is what stops "we heard nothing" from being read as "this
-   * CLI is too old" in a case where we already know better.
-   */
-  private worktreeStatusCapableClients = new WeakSet<AcpClient>();
-
-  /** Poll until a freshly-created worktree's checkout exists on disk (its `.git`
-   *  pointer file, which `git worktree add` writes). create is async — the RPC
-   *  returns "creating" before git finishes — so a session spawned in the cwd
-   *  before this would hang. Accepts a bare dir over hanging if `.git` never
-   *  shows. */
-  private async waitForWorktreeReady(worktreePath: string, timeoutMs: number): Promise<boolean> {
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-      try {
-        if (fs.existsSync(path.join(worktreePath, ".git"))) return true;
-      } catch { /* keep polling */ }
-      await new Promise((r) => setTimeout(r, 200));
-    }
-    // The timeout fallback used to accept the bare directory. A directory with
-    // no `.git` is not a checkout — it is what is left when creation failed
-    // halfway — and calling it ready is how grok came to be spawned in an empty
-    // folder and exit 1. If the loop above never saw a `.git`, there isn't one.
-    return false;
-  }
-
-  /**
-   * A live Grok ACP client whose cwd is `sourcePath`.
-   *
-   * The RPC path is only used when Grok is already running in this checkout —
-   * clone mode lives there, and starting a throwaway Grok just to `git
-   * worktree add` is the lock AP-13a removes. A Grok session in a different
-   * cwd does not count: its create would be about a different repository.
-   */
-  private liveGrokWorktreeClient(sourcePath: string): AcpClient | undefined {
-    const match = (s: Session) =>
-      s.provider === "grok" && !!s.client?.sessionId && pathsEqual(this.sessionCwd(s), sourcePath);
-    for (const s of this.pool) {
-      if (match(s) && s.client) return s.client;
-    }
-    if (match(this.focused) && this.focused.client) return this.focused.client;
-    return undefined;
-  }
-
-  /** Lazy local-git worktree ops. Tests inject `this.localWorktrees`. */
-  private localWorktrees?: LocalGitWorktrees;
-
-  private worktreeLocal(): LocalGitWorktrees {
-    return this.localWorktrees ?? (this.localWorktrees = new LocalGitWorktrees({
-      git: nodeGitRunner(),
-      fs: nodeWorktreeFs(),
-      now: () => Date.now(),
-      join: (...parts) => path.join(...parts),
-      dirname: (p) => path.dirname(p),
-      basename: (p) => path.basename(p),
-      log: (msg) => this.host.appendLine(msg),
-    }));
-  }
-
-  /**
-   * Create a linked worktree with local git and open a session in it.
-   * The choice is already logged by the caller; this is the body.
-   */
-  private async createWorktreeViaLocalGit(sourcePath: string, label: string): Promise<void> {
-    const sourceGitRoot = gitRootForPath(sourcePath, defaultFs) || sourcePath;
-    const root = path.join(resolveGrokHome(), "worktrees");
-    const created = await this.worktreeLocal().create({
-      sourcePath,
-      label: label || undefined,
-      root,
-    });
-    if ("error" in created) {
-      return void this.host.showErrorMessage(`Create worktree failed: ${created.error}`);
-    }
-    const wtPath = created.worktreePath;
-    const wtLabel = label || path.basename(wtPath);
-    const ready = await this.waitForWorktreeReady(wtPath, 30000);
-    if (!ready) {
-      return void this.host.showErrorMessage(
-        `Worktree "${wtLabel}" was created but its checkout never appeared on disk — the session wasn't started. Try again, or check \`git worktree list\`.`,
-      );
-    }
-    const listed = await listGitWorktreePaths(sourceGitRoot, {
-      log: (msg) => this.host.appendLine(msg),
-    });
-    if (
-      !worktreePathAuthorizedForRepo({
-        worktreePath: wtPath,
-        sourceRepo: sourcePath,
-        listedWorktreePaths: listed,
-        claimedSourceGitRoot: created.sourceGitRoot,
-        sourceGitRoot,
-      })
-    ) {
-      this.host.appendLine(`[worktree] refused unlisted/unauthorized path from local create: ${wtPath}`);
-      return void this.host.showErrorMessage(
-        `Worktree "${wtLabel}" could not be confirmed as part of this repository, so no session was started. The checkout was left at ${wtPath} — remove it yourself if you don't want it.`,
-      );
-    }
-    await this.bindCreatedWorktreeSession(wtPath, wtLabel, sourceGitRoot, !!label);
-  }
-
-  /** Cache + open a fresh session in a worktree that has already been validated. */
-  private async bindCreatedWorktreeSession(
-    wtPath: string,
-    wtLabel: string,
-    sourceGitRoot: string,
-    userProvidedLabel: boolean,
-  ): Promise<void> {
-    this.worktreeCache = this.worktreeCache.filter((w) => !pathsEqual(w.path, wtPath));
-    this.worktreeCache.push({
-      id: wtLabel,
-      path: wtPath,
-      sourceRepo: sourceGitRoot,
-      repoName: path.basename(sourceGitRoot),
-      kind: "session",
-      creationMode: "linked",
-      gitRef: "HEAD",
-      headCommit: "",
-      status: "alive",
-      label: wtLabel,
-      userProvidedLabel,
-    });
-    this.parkFocused();
-    const wtSession = this.newLocalSession();
-    this.focused = wtSession;
-    this.pool.add(wtSession);
-    wtSession.cwd = wtPath;
-    wtSession.worktree = {
-      path: wtPath,
-      label: wtLabel,
-      sourceGitRoot,
-    };
-    await this.startSession(undefined, wtSession);
-    const id = wtSession.activeSessionId;
-    if (id) {
-      const overrides = this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
-      await this.state.update(SESSION_META_KEY, {
-        ...overrides,
-        [id]: {
-          ...(overrides[id] ?? {}),
-          customName: worktreeDisplayName(wtLabel),
-          worktreePath: wtPath,
-          worktreeLabel: wtLabel,
-          sourceGitRoot,
-        },
-      });
-      this.sessionCache.delete(id);
-    }
-    this.postSessionsList();
-    void this.host.showInformationMessage(
-      `Worktree session ready: ${wtLabel}. Edits stay isolated until you Apply worktree.`,
-    );
-  }
-
-  /** Merge the given session's worktree back into the main checkout.
-   *  `skipConfirm` = the webview's custom confirm dialog already ran. */
   async applyFocusedWorktree(session: Session = this.focused, skipConfirm = false): Promise<void> {
-    const wt = session.worktree;
-    if (!wt) {
-      return void this.host.showInformationMessage(
-        "This session is not in a worktree. Start one with Grok: New Worktree Session.",
-      );
-    }
-    if (!skipConfirm) {
-      const ok = await this.host.showWarningMessage(
-        `Apply worktree "${wt.label}" into the main checkout?\n\n${wt.path}\n→ ${wt.sourceGitRoot || this.workspaceRoot()}`,
-        { modal: true },
-        "Apply",
-      );
-      if (ok !== "Apply") return;
-    }
-    const sourceGitRoot = wt.sourceGitRoot || this.workspaceRoot();
-    const grokClient = session.provider === "grok" ? session.client : undefined;
-    if (grokClient?.sessionId) {
-      this.host.appendLine("[worktree] using Grok RPC (clone mode available)");
-      try {
-        const r = await grokClient.applyWorktree(wt.path);
-        if (r === "unsupported") {
-          return void this.host.showWarningMessage(
-            "Apply worktree needs a newer Grok Build CLI. Update via Settings → About.",
-          );
-        }
-        const n = r.files?.length ?? 0;
-        this.host.appendLine(`[worktree] apply ${wt.path}: ${n} file(s), status=${r.status}`);
-        void this.host.showInformationMessage(
-          n ? `Applied ${n} file${n === 1 ? "" : "s"} from worktree "${wt.label}".` : `Worktree "${wt.label}" applied (no file changes).`,
-        );
-      } catch (e: any) {
-        void this.host.showErrorMessage(`Apply worktree failed: ${e?.message ?? e}`);
-      }
-      return;
-    }
-    this.host.appendLine("[worktree] using local git (linked worktree; clone mode is Grok-only)");
-    await this.applyWorktreeViaLocalGit(session, wt.path, sourceGitRoot, wt.label);
+    return this.worktreeHost.applyFocusedWorktree(session, skipConfirm);
   }
 
-  /**
-   * File-by-file apply through the same conflict rule as planEditRevert:
-   * a source file that moved since the branch point is a card, never a write.
-   */
   private async applyWorktreeViaLocalGit(
     session: Session,
     worktreePath: string,
     sourceGitRoot: string,
     label: string,
   ): Promise<void> {
-    try {
-      const first = await this.worktreeLocal().apply({ worktreePath, sourceGitRoot });
-      if ("conflicts" in first && first.conflicts.length) {
-        const listed = first.conflicts.map((f) => `• ${f}`).join("\n");
-        const ok = await this.confirmInChat(session, {
-          title: "Files changed since this worktree branched",
-          body: `These files in the main checkout changed after the worktree was created. Overwrite them?\n${listed}`,
-          confirmLabel: "Overwrite",
-          danger: true,
-        });
-        if (!ok) {
-          this.host.appendLine(`[worktree] apply ${worktreePath}: refused ${first.conflicts.length} conflict(s), no write`);
-          return;
-        }
-        const second = await this.worktreeLocal().apply({ worktreePath, sourceGitRoot, overwrite: true });
-        if ("error" in second && !("conflicts" in second)) {
-          return void this.host.showErrorMessage(`Apply worktree failed: ${second.error}`);
-        }
-        if ("files" in second) {
-          const n = second.files.length;
-          this.host.appendLine(`[worktree] apply ${worktreePath}: ${n} file(s), status=${second.status} (overwrite)`);
-          void this.host.showInformationMessage(
-            n ? `Applied ${n} file${n === 1 ? "" : "s"} from worktree "${label}".` : `Worktree "${label}" applied (no file changes).`,
-          );
-        }
-        return;
-      }
-      if ("error" in first) {
-        return void this.host.showErrorMessage(`Apply worktree failed: ${first.error}`);
-      }
-      const n = first.files?.length ?? 0;
-      this.host.appendLine(`[worktree] apply ${worktreePath}: ${n} file(s), status=${first.status}`);
-      void this.host.showInformationMessage(
-        n ? `Applied ${n} file${n === 1 ? "" : "s"} from worktree "${label}".` : `Worktree "${label}" applied (no file changes).`,
-      );
-    } catch (e: any) {
-      void this.host.showErrorMessage(`Apply worktree failed: ${e?.message ?? e}`);
-    }
+    return this.worktreeHost.applyWorktreeViaLocalGit(session, worktreePath, sourceGitRoot, label);
   }
 
-  /** Remove the given session's worktree (after disposing processes that use it).
-   *  `skipConfirm` = the webview's custom confirm dialog already ran. */
   async removeFocusedWorktree(session: Session = this.focused, skipConfirm = false): Promise<void> {
-    const wt = session.worktree;
-    if (!wt) {
-      return void this.host.showInformationMessage("This session is not in a worktree.");
-    }
-    if (!skipConfirm) {
-      const ok = await this.host.showWarningMessage(
-        `Remove worktree "${wt.label}"?\n\n${wt.path}\n\nThis deletes the isolated checkout. Unapplied edits are lost.`,
-        { modal: true },
-        "Remove",
-      );
-      if (ok !== "Remove") return;
-    }
-    try {
-      // Any live process still using the worktree as cwd locks remove on Windows.
-      for (const s of [...this.pool]) {
-        if (s.worktree && pathsEqual(s.worktree.path, wt.path)) {
-          // Detach, don't hand-roll: this used to drop the client without ending
-          // the turn, so a cancel recovery armed before the removal still held a
-          // live token and a matching generation and would respawn the session
-          // against a checkout that no longer exists.
-          void this.detachClient(s)?.dispose();
-          if (s !== session) this.pool.delete(s);
-        }
-      }
-      // Grok RPC when this session is Grok and still has a client — clone-mode
-      // checkouts only the CLI can name. Otherwise local `git worktree remove`
-      // (AP-13a). We never start Grok just to delete a directory.
-      const grokClient = session.provider === "grok" ? session.client : undefined;
-      if (!grokClient?.sessionId) {
-        this.host.appendLine("[worktree] using local git (linked worktree; clone mode is Grok-only)");
-        const local = await this.worktreeLocal().remove({ worktreePath: wt.path, force: true });
-        if ("error" in local) {
-          const refusal = this.canSelfRemoveWorktree(wt);
-          if (refusal) {
-            this.host.appendLine(`[worktree] self-remove refused: ${refusal}`);
-            void this.host.showErrorMessage(
-              `Remove worktree failed: ${local.error}. The checkout at ${wt.path} was left alone because ${refusal}.`,
-            );
-            return;
-          }
-          this.host.appendLine(`[worktree] local remove failed (${local.error}); removing the checkout directly`);
-          fs.rmSync(wt.path, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-        }
-        await this.finishRemovedWorktree(session, wt, { removed: true });
-        return;
-      }
-      this.host.appendLine("[worktree] using Grok RPC (clone mode available)");
-      const client = grokClient;
-      let r;
-      try {
-        try {
-          r = await client.removeWorktree(wt.path);
-        } catch (rpcErr: any) {
-          // The CLI refuses ("Internal error") for a checkout git does not
-          // recognise as a worktree — which is exactly the clone-mode case,
-          // where `git worktree remove` has nothing to remove. That left the
-          // user with a directory they explicitly asked to delete, an error
-          // they could do nothing about, and a row still in the rail.
-          //
-          // We delete it ourselves, but only where we can prove all three:
-          // it lives under the grok worktrees root, it carries the marker
-          // naming this repo, and it is not the repo itself. Anything less
-          // and the error stands.
-          const detail = rpcErr?.message ?? String(rpcErr);
-          const refusal = this.canSelfRemoveWorktree(wt);
-          if (refusal) {
-            this.host.appendLine(`[worktree] self-remove refused: ${refusal}`);
-            void this.host.showErrorMessage(
-              `Remove worktree failed: ${detail}. The checkout at ${wt.path} was left alone because ${refusal}.`,
-            );
-            return;
-          }
-          this.host.appendLine(
-            `[worktree] CLI remove failed (${detail}); removing the checkout directly`,
-          );
-          fs.rmSync(wt.path, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-          r = { removed: true };
-        }
-      } catch (e: any) {
-        void this.host.showErrorMessage(`Remove worktree failed: ${e?.message ?? e}`);
-        return;
-      }
-      if (r === "unsupported") {
-        return void this.host.showWarningMessage(
-          "Remove worktree needs a newer Grok Build CLI. Update via Settings → About.",
-        );
-      }
-      await this.finishRemovedWorktree(session, wt, r);
-    } catch (e: any) {
-      void this.host.showErrorMessage(`Remove worktree failed: ${e?.message ?? e}`);
-    }
+    return this.worktreeHost.removeFocusedWorktree(session, skipConfirm);
   }
-
-  /**
-   * After a successful remove: drop the cache/meta, start a replacement
-   * conversation in the project the worktree was cut from, re-home remotes.
-   */
-  private async finishRemovedWorktree(
-    session: Session,
-    wt: { path: string; label: string; sourceGitRoot?: string },
-    r: { removed: boolean },
-  ): Promise<void> {
-      // WHO OWNED IT — captured before the records that answer that are erased.
-      // `resolveLocalRepoTarget` finds the owning project by walking session
-      // ownership, and the next few lines drop the worktree from the cache and
-      // strip its bindings from session meta, after which the lookup returns
-      // nothing and the fallback lands on the git ROOT. For a nested project
-      // (`/repo/packages/app` inside a `/repo` checkout) that is one level up,
-      // free to touch sibling packages — and on desktop, where `/repo` is not an
-      // open folder, startSession refuses it and the promised replacement
-      // conversation never appears at all.
-      const worktreeOwnerCwd = this.resolveLocalRepoTarget(wt.path)?.cwd;
-      this.worktreeCache = this.worktreeCache.filter((w) => !pathsEqual(w.path, wt.path));
-      this.host.appendLine(`[worktree] removed ${wt.path} (removed=${r.removed})`);
-      // Clear worktree binding on meta for sessions that pointed here.
-      const overrides = this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
-      let changed = false;
-      const next: SessionMetaOverrides = { ...overrides };
-      for (const [id, o] of Object.entries(overrides)) {
-        if (o.worktreePath && pathsEqual(o.worktreePath, wt.path)) {
-          const { worktreePath: _p, worktreeLabel: _l, sourceGitRoot: _s, ...rest } = o;
-          next[id] = rest;
-          changed = true;
-        }
-      }
-      if (changed) await this.state.update(SESSION_META_KEY, next);
-      session.worktree = undefined;
-      // Leave the chat; start a normal session so the user isn't stuck — in the
-      // repository this worktree was cut FROM, which is where the work goes back
-      // to. The open folder was right only while conversations were pinned to
-      // it; the rail can put you in another project entirely, and landing in the
-      // window's folder then dropped you somewhere you had not been working.
-      this.parkFocused();
-      this.focused = this.newLocalSession();
-      this.pool.add(this.focused);
-      // The catalog PROJECT that owned the worktree (captured above), not its
-      // git root — that is the relationship the rail draws, and where the work
-      // goes back to.
-      this.focused.cwd = worktreeOwnerCwd || wt.sourceGitRoot || this.historyCwdFor();
-      await this.startSession();
-      this.postSessionsList();
-      void this.host.showInformationMessage(`Removed worktree "${wt.label}".`);
-  }
-
-  /** Cached worktree list for the current repo (refreshed on create/list). */
-  private worktreeCache: WorktreeRecord[] = [];
 
   private async refreshWorktreeCache(): Promise<void> {
-    const session = this.focused.client
-      ? this.focused
-      : [...this.pool].find((candidate) => !!candidate.client);
-    const client = session?.client;
-    if (!client) return;
-    const sourceRepo = session.worktree?.sourceGitRoot || this.sessionCwd(session);
-    const sourceGitRoot = gitRootForPath(sourceRepo, defaultFs) ?? sourceRepo;
-    try {
-      const list = await client.listWorktrees({});
-      if (list === "unsupported") return;
-      // mergeWorktreeRefresh filters unattributed / wrong-repo rows.
-      this.worktreeCache = mergeWorktreeRefresh(this.worktreeCache, sourceRepo, list, {
-        sourceGitRoot,
-      });
-    } catch (e: any) {
-      this.host.appendLine(`[worktree] list failed: ${e?.message ?? e}`);
-    }
+    return this.worktreeHost.refreshWorktreeCache();
   }
 
-  /**
-   * Authoritative worktree paths for `sourcePath`: prefer the CLI list RPC
-   * (scoped to that client's repo), fall back to `git worktree list --porcelain`.
-   */
-  private async listAuthoritativeWorktreePaths(
-    client: AcpClient,
-    sourcePath: string,
-    sourceGitRoot: string,
-  ): Promise<string[]> {
-    // git first, and ALWAYS — it is the only party here that cannot be wrong
-    // about its own worktrees, and it is a local process that answers in
-    // milliseconds. What used to happen: an ACP list with any attributed row
-    // was returned as-is and git was consulted only when that list came back
-    // empty. So a path the agent named, and nothing else could confirm, passed
-    // a check whose whole job was to confirm it — which is how an EMPTY
-    // DIRECTORY became a session cwd and grok exited 1 inside it.
-    const gitPaths = await listGitWorktreePaths(sourceGitRoot || sourcePath, {
-      log: (m) => this.host.appendLine(m),
-    });
-    const authorized = [...gitPaths];
-    const add = (p: string) => {
-      if (p && !authorized.some((existing) => pathsEqual(existing, p))) authorized.push(p);
-    };
-    try {
-      const list = await client.listWorktrees({});
-      if (list !== "unsupported" && Array.isArray(list)) {
-        // ACP rows still need corroboration, but a CLONE-mode checkout has a
-        // second kind of proof available: the marker the CLI writes inside it.
-        // Those never appear in the source repo's `git worktree list` — they
-        // are separate repositories — so before this they were refused outright
-        // and the feature simply did not work for any repo the CLI clones.
-        for (const row of filterWorktreesForSourceRepo(list, sourcePath, { sourceGitRoot })) {
-          // git already vouched for it — asking for a clone marker as well would
-          // fail every LINKED worktree and log an alarming line about a checkout
-          // that is perfectly valid.
-          if (authorized.some((p) => pathsEqual(p, row.path))) continue;
-          if (this.cloneWorktreeBelongsTo(row.path, sourcePath, sourceGitRoot)) add(row.path);
-        }
-      }
-    } catch (e: any) {
-      this.host.appendLine(`[worktree] listWorktrees for validate failed: ${e?.message ?? e}`);
-    }
-    return authorized;
+  private worktreeLocal(): LocalGitWorktrees {
+    return this.worktreeHost.worktreeLocal();
   }
 
-  /**
-   * Whether we may delete this checkout ourselves after the CLI refused to.
-   *
-   * A recursive delete is the most destructive thing in this file, so the fence
-   * is deliberately narrow — the user's confirmation already said "this deletes
-   * the isolated checkout", and this decides only whether the thing in front of
-   * us IS an isolated checkout. Location is necessary but never sufficient; on
-   * top of it we need ONE of two positive answers:
-   *
-   *  - **nothing to lose** — the directory is gone or empty. This is the common
-   *    case in practice, and the one that kept the owner stuck: the CLI deletes
-   *    the contents and THEN fails to deregister, so by the time it reports
-   *    "Internal error" the checkout is already an empty folder with no marker,
-   *    no `.git`, and nothing left to prove anything with. Refusing there is
-   *    refusing to delete an empty directory the user asked us to delete.
-   *  - **provenance** — the clone marker names the repo it claims to come from,
-   *    for a checkout that still has contents worth being careful about.
-   *
-   * Returns the reason on refusal so the error the user sees can say it.
-   */
-  private canSelfRemoveWorktree(wt: { path: string; sourceGitRoot?: string }): string | undefined {
-    const target = wt?.path;
-    // The session's own binding carries only the git root; the cache has the
-    // full record when we have one. Either way this is the repo the MARKER has
-    // to name — get it wrong and the check fails closed, which is the point.
-    const cached = this.worktreeCache.find((w) => pathsEqual(w.path, target));
-    const source = cached?.sourceRepo || wt?.sourceGitRoot || this.workspaceRoot();
-    if (!target || !path.isAbsolute(target)) return "no absolute path to remove";
-    const root = path.join(resolveGrokHome(), "worktrees");
-    if (!relativePathWithin(root, target)) return `it is outside ${root}`;
-    if (pathsEqual(target, root)) return "it is the worktrees root itself";
-    if (source && pathsEqual(target, source)) return "it is the source repository";
-    for (const folder of this.openWorkspaceFolders()) {
-      if (pathsEqual(target, folder)) return "it is an open folder";
-    }
-    let contents: string[] | undefined;
-    try {
-      contents = fs.readdirSync(target);
-    } catch {
-      // Already gone — the CLI removed it and then failed on the bookkeeping.
-      return undefined;
-    }
-    if (!contents.length) return undefined;
-    if (!source) return "the source repository is unknown";
-    if (this.cloneWorktreeBelongsTo(target, source, gitRootForPath(source, defaultFs) || source)) {
-      return undefined;
-    }
-    return `it has contents but no ${CLONE_WORKTREE_SOURCE_MARKER} naming ${source}`;
+  get worktreeCache(): WorktreeRecord[] {
+    return this.worktreeHost.worktreeCache;
+  }
+  set worktreeCache(records: WorktreeRecord[]) {
+    this.worktreeHost.worktreeCache = records;
   }
 
-  /**
-   * Whether `worktreePath` carries an on-disk marker naming `sourceRepo`.
-   *
-   * The I/O wrapper around {@link cloneWorktreeSourceMatches} — kept here so the
-   * decision itself stays pure and testable, and so every refusal says why in
-   * the log rather than leaving the owner with "not in git worktree list" for a
-   * checkout that was never going to be in one.
-   */
-  private cloneWorktreeBelongsTo(
-    worktreePath: string,
-    sourceRepo: string,
-    sourceGitRoot: string,
-  ): boolean {
-    // LOCATION FIRST, and it is not optional. A marker is a file, and a file is
-    // something whoever proposed the path can write — so on its own it proves
-    // only that the proposer touched that directory, not that we made it. Grok
-    // creates clone-mode worktrees under its own root and nowhere else, so
-    // anything outside that root is not one of ours whatever it contains.
-    // Canonical, because a symlink planted inside the root and pointing
-    // somewhere else entirely would satisfy a textual prefix check.
-    //
-    // The DELETE path already demanded this. Authorization is the more
-    // dangerous of the two: it ends with a Grok process running in that
-    // directory, the path persisted on the session, and the path in the
-    // trusted-cwd set a linked remote is allowed to target.
-    const root = path.join(resolveGrokHome(), "worktrees");
-    if (!isCanonicallyInsideRoot(root, worktreePath)) {
-      this.host.appendLine(
-        `[worktree] refused clone provenance for ${worktreePath}: outside ${root}`,
-      );
-      return false;
-    }
-    const ok = cloneWorktreeSourceMatches({
-      worktreePath,
-      sourceRepo,
-      sourceGitRoot,
-      readMarker: (markerPath) => fs.readFileSync(markerPath, "utf8"),
-      joinPath: (a, b) => path.join(a, ...b.split("/")),
-    });
-    if (!ok) {
-      this.host.appendLine(
-        `[worktree] no clone provenance for ${worktreePath} (expected ${CLONE_WORKTREE_SOURCE_MARKER} naming ${sourceRepo})`,
-      );
-    }
-    return ok;
+  get localWorktrees(): LocalGitWorktrees | undefined {
+    return this.worktreeHost.localWorktrees;
+  }
+  set localWorktrees(lw: LocalGitWorktrees | undefined) {
+    this.worktreeHost.localWorktrees = lw;
   }
 
   /** Every open workspace folder root (desktop multi-folder, or VS Code folders). */
@@ -10390,2285 +7107,402 @@ Only continue if you trust this code.`,
   }
 
   // ---------------------------------------------------------------- AP-16 --
-  // Companion subagents. The pure decisions live in `target-eligibility.ts`
-  // (which target may run) and `companion-subagents.ts` (what state a run is
-  // in); everything here is the glue those modules deliberately refuse to own:
-  // the settings, the pipe, the child session, the card.
-
-  private companionsChannel?: CompanionsHostServer;
-
-  // Lazily created rather than field-initialised, so every construction path
-  // has them — including `Object.create(GrokSidebar.prototype)`, which the host
-  // test harnesses use and which runs no field initialisers at all. Stop must
-  // not throw because a conversation was built that way.
-  private subagentState?: {
-    /** Live subagent state for this window. Never persisted — a reopened parent
-     *  rebuilds its cards from the run directory (§6.6 point 6), not from here. */
-    registry: SubagentRegistry;
-    /** Full replies, kept for `await` with `action: "read"` (§6.4.2). */
-    reports: Map<string, string>;
-    /** Resolvers waiting on a subagent to reach a terminal state. */
-    waiters: Map<string, Array<() => void>>;
-    /** Finished runs, for the card and for the tool payload. */
-    outcomes: Map<string, Awaited<ReturnType<GrokSidebar["runAgentRole"]>>>;
-  };
-
-  private get subagents(): SubagentRegistry { return this.subagentStore().registry; }
-  private get subagentReports(): Map<string, string> { return this.subagentStore().reports; }
-  private get subagentWaiters(): Map<string, Array<() => void>> { return this.subagentStore().waiters; }
-  private get subagentOutcomes(): Map<string, Awaited<ReturnType<GrokSidebar["runAgentRole"]>>> {
-    return this.subagentStore().outcomes;
-  }
-
-  private subagentStore(): NonNullable<GrokSidebar["subagentState"]> {
-    if (!this.subagentState) {
-      this.subagentState = {
-        registry: new SubagentRegistry(),
-        reports: new Map(),
-        waiters: new Map(),
-        outcomes: new Map(),
-      };
+  // Companion subagents & Delegation subsystem (extracted to SubagentHost, W-15 Schritt D3).
+  public _subagentHost?: SubagentHost;
+  public get subagentHost(): SubagentHost {
+    if (!this._subagentHost) {
+      this._subagentHost = createSubagentHost(this.createSubagentHostDeps());
     }
-    return this.subagentState;
+    return this._subagentHost;
   }
 
-  /** The delegation channel, bound lazily and shared by every session. */
+  private createSubagentHostDeps(): SubagentHostDeps {
+    const self = this;
+    return {
+      get host() { return self.host; },
+      get context() { return self.context; },
+      get state() { return self.state; },
+      get agentRuns() { return self.agentRuns; },
+      get pool() { return self.pool; },
+      getFocused: () => self.focused,
+      focusSession: (s) => self.focusSession(s),
+      sessionCwd: (s) => self.sessionCwd(s),
+      emit: (s, m) => self.emit(s, m),
+      post: (m) => self.post(m),
+      setStatus: (s, st) => self.setStatus(s, st),
+      sessionTypeMetaFor: (s) => self.sessionTypeMetaFor(s),
+      agentNotice: (s, l, t) => self.agentNotice(s, l === "error" ? "warning" : l, t),
+      confirmInChat: (s, o) => self.confirmInChat(s, o),
+      runAgentRole: (r, b, t, c, co) => self.runAgentRole(r, b, t, c, co),
+      usableProviders: () => self.usableProviders(),
+      companionsSetting: (k, d) => self.companionsSetting(k, d),
+      agentRoleSet: (cwd) => self.agentRoleSet(cwd),
+      sessionDisplayName: (s) => self.sessionDisplayName(s),
+      steerSend: (t, s) => self.steerSend(t, s),
+      crewFileClaims: () => self.crewFileClaims(),
+      mcpOps: {
+        hostPipe: () => self.hostPipe(),
+        reservedMcpIdentityFor: (s) => self.reservedMcpIdentityFor(s),
+      },
+      worktreeOps: {
+        createCrewWorktree: (cwd, b) => self.createCrewWorktree(cwd, b),
+        applyCrewWorktree: (s, wt) => self.applyCrewWorktree(s, wt),
+        worktreeLocal: () => self.worktreeLocal(),
+      },
+      lifecycleOps: {
+        emitWorkflowRun: (s) => self.emitWorkflowRun(s),
+        persistWorkflowRun: (s) => self.persistWorkflowRun(s),
+        getWorkflowDefs: () => self.workflowState?.defs,
+        getWorkflowStore: () => self.workflowStore?.()?.store ?? self.workflowStore?.(),
+        handleGeneratorTool: (s, c) => self.handleGeneratorTool(s, c),
+        turnEndFields: (s, st) => self.turnEndFields(s, st as any),
+        noteLiveTurnEnded: (s) => self.noteLiveTurnEnded(s),
+        noteSessionActivity: (s) => self.noteSessionActivity(s),
+        setProviderNeedsLogin: (p, n) => self.setProviderNeedsLogin(p, n),
+        maybeGenerateTitle: (s) => self.maybeGenerateTitle(s),
+        postSessionName: (s) => self.postSessionName(s),
+        postSessionsList: () => self.postSessionsList(),
+        sessionCacheDelete: (id) => self.sessionCache.delete(id),
+      },
+      getOverride: (name) => ((self as any).getOverride ? (self as any).getOverride(name) : (self as any)[name]),
+    };
+  }
+
+  public static readonly SUBAGENT_INDEX_KEY = SUBAGENT_INDEX_KEY;
+
+  public get subagentState(): SubagentState | undefined {
+    return this.subagentHost.state;
+  }
+  public set subagentState(val: SubagentState | undefined) {
+    this.subagentHost.state = val;
+  }
+
+  public get subagents(): SubagentRegistry { return this.subagentHost.subagents; }
+  public get subagentReports(): Map<string, string> { return this.subagentHost.reports; }
+  public get subagentWaiters(): Map<string, Array<() => void>> { return this.subagentHost.waiters; }
+  public get subagentOutcomes(): Map<string, any> { return this.subagentHost.outcomes; }
+
+  private subagentStore(): SubagentState {
+    return this.subagentHost.subagentStore();
+  }
+
   private companions(): CompanionsHostServer {
-    if (!this.companionsChannel) {
-      this.companionsChannel = new CompanionsHostServer({
-        mux: this.hostPipe(),
-        // From `extensionUri`, not a path relative to `out/`: the script is a
-        // packaged RESOURCE, and `.vscodeignore` has to keep `resources/mcp/**`
-        // in the VSIX or this path exists in development and nowhere else.
-        scriptPath: path.join(this.context.extensionUri.fsPath, "resources", "mcp", "companions-server.cjs"),
-        log: (message) => this.host.appendLine(message),
-        onCall: (token, call) => {
-          const session = this.sessionForCompanionsToken(token);
-          // No session owns this token any more: answer immediately so the CLI
-          // is not left blocked inside `tools/call`.
-          if (!session) {
-            call.fail("This session's delegation channel has ended. Continue alone and tell the user why.");
-            return;
-          }
-          void this.handleCompanionsCall(session, call);
-        },
-        onAbandon: (token, id) => {
-          // The parent's CLI is gone, so nothing is waiting for this result —
-          // but its children are still running and still spending a
-          // subscription. Stop means stop, and so does "the parent died".
-          const session = this.sessionForCompanionsToken(token);
-          if (!session) return;
-          this.host.appendLine(`[companions] call ${id} was abandoned; cancelling its subagents`);
-          this.cancelSubagentsOf(session, "the parent session ended");
-        },
-      });
-    }
-    return this.companionsChannel;
+    return this.subagentHost.companions();
   }
 
   private sessionForCompanionsToken(token: string): Session | undefined {
-    for (const session of this.pool) {
-      if (session.companionsToken === token) return session;
-    }
-    return undefined;
+    return this.subagentHost.sessionForCompanionsToken(token);
   }
 
   private revokeCompanionsToken(session: Session): void {
-    if (!session.companionsToken) return;
-    this.companionsChannel?.revoke(session.companionsToken);
-    session.companionsToken = undefined;
+    this.subagentHost.revokeCompanionsToken(session);
   }
 
-  /**
-   * The `mcpServers` entry for this session, or `undefined`.
-   *
-   * §6.4.1 gates it on four things, and every one of them is a "could this
-   * session ever delegate", not "is it delegating now": the server list is
-   * fixed at `session/new`, so a session started without it cannot gain it
-   * without a restart. The current switch value is enforced at SPAWN time
-   * instead, which is what makes turning a provider off take effect on the very
-   * next spawn in an already-open session.
-   */
   private async companionsMcpServer(session: Session): Promise<AcpMcpStdioServer | undefined> {
-    const hidden = session.pendingHiddenChild?.hiddenReason
-      ?? this.sessionTypeMetaFor(session)?.hiddenReason;
-    const stored = this.sessionTypeMetaFor(session)?.subagentsEnabled;
-    const decision = decideCompanionsMcp({
-      ...(hidden ? { hiddenReason: hidden } : {}),
-      sessionType: session.sessionType ?? "agent",
-      // The type gate lives in decideCompanionsMcp; pass the switch alone so
-      // a Crew session is `crew-orchestrator`, not `subagents-disabled`.
-      subagentsEnabled: stored ?? this.subagentsEnabledGlobally(),
-      stageMayDelegate: this.stageMayDelegate(session),
-      depth: session.pendingHiddenChild?.depth
-        ?? this.sessionTypeMetaFor(session)?.depth
-        ?? 0,
-      maxDepth: this.subagentMaxDepth(),
-    });
-    if (decision.kind === "skip") {
-      this.noteCompanionsSkip(session, decision.reason);
-      return undefined;
-    }
-    return this.spawnCompanionsServer(session, decision.mode);
+    return this.subagentHost.companionsMcpServer(session);
   }
 
-  /**
-   * Record a withheld delegation server. Surprising reasons become a chat
-   * notice once; expected gates (crew, depth, stage) stay in the log.
-   */
   private noteCompanionsSkip(session: Session, reason: CompanionsSkipReason): void {
-    session.companionsMcpInjected = false;
-    session.companionsSkipReason = reason;
-    this.host.appendLine(`[companions] not offering delegation: ${reason}`);
-    const hidden = session.pendingHiddenChild?.hiddenReason
-      ?? this.sessionTypeMetaFor(session)?.hiddenReason;
-    if (!shouldAnnounceCompanionsSkip(reason, hidden) || session.companionsSkipAnnounced) return;
-    session.companionsSkipAnnounced = true;
-    this.emit(session, {
-      type: "hostNotice",
-      level: "warning",
-      text: companionsSkipNotice(reason),
-    });
+    this.subagentHost.noteCompanionsSkip(session, reason);
   }
 
-  /**
-   * `companions.subagents.maxDepth`, clamped, with the clamp said once.
-   *
-   * Said once per window rather than per session: a user who typed 3 into their
-   * settings wants to know it became 2, and wants to be told that a single time
-   * rather than on every session they open.
-   */
   private subagentMaxDepth(): 1 | 2 {
-    const { depth, clamped } = resolveMaxDepth(
-      this.companionsSetting<number>("subagents.maxDepth", 1),
-    );
-    if (clamped && !this.maxDepthClampReported) {
-      this.maxDepthClampReported = true;
-      this.host.appendLine(
-        `[companions] companions.subagents.maxDepth is out of range; using ${depth}. `
-        + "Delegation is capped at two levels by design.",
-      );
-    }
-    return depth;
+    return this.subagentHost.subagentMaxDepth();
   }
 
-  private maxDepthClampReported = false;
-
-  /**
-   * May THIS crew stage's session delegate (§7.9)?
-   *
-   * Both flags, and the stage's own is carried on the child session rather than
-   * looked up from the run: by the time the CLI asks for `mcpServers` the stage
-   * is already running, and re-deriving which stage this is from run state would
-   * be a second source of truth for something already decided.
-   */
   private stageMayDelegate(session: Session): boolean {
-    if (!this.companionsSetting<boolean>("crew.stagesMayUseSubagents", false)) return false;
-    return session.stageAllowsSubagents === true;
+    return this.subagentHost.stageMayDelegate(session);
   }
 
-  private async spawnCompanionsServer(
-    session: Session,
-    mode: "delegate" | "generator",
-  ): Promise<AcpMcpStdioServer | undefined> {
-    if (providerCapability(session.provider, "hostMcp").state !== "yes") {
-      this.noteCompanionsSkip(session, "host-mcp-unproven");
-      return undefined;
-    }
-    const reserved = this.reservedMcpIdentityFor(session);
-    if (reserved.names.some((name) => normalizeMcpName(name) === COMPANIONS_SERVER_NAME)) {
-      this.noteCompanionsSkip(session, "name-collision");
-      return undefined;
-    }
-    const channel = this.companions();
-    if (!(await channel.listen())) {
-      this.noteCompanionsSkip(session, "pipe-failed");
-      return undefined;
-    }
-    this.revokeCompanionsToken(session);
-    session.companionsToken = channel.register(mode);
-    const spec = channel.spawnSpec(session.companionsToken);
-    if (!spec) {
-      this.noteCompanionsSkip(session, "pipe-failed");
-      return undefined;
-    }
-    session.companionsMcpInjected = true;
-    session.companionsSkipReason = undefined;
-    return spec;
+  private async spawnCompanionsServer(session: Session, mode: "delegate" | "generator"): Promise<AcpMcpStdioServer | undefined> {
+    return this.subagentHost.spawnCompanionsServer(session, mode);
   }
 
-  /**
-   * Could this session use subagents at all?
-   *
-   * Agent sessions only (a Crew stage's own delegation is P6), and only when
-   * the master switch is on globally or was turned on for this session before
-   * its first message.
-   */
   private subagentsCouldBeUsedIn(session: Session): boolean {
-    if (session.sessionType !== "agent") return false;
-    if (session.delegationOverride) return session.delegationOverride.enabled;
-    const stored = this.sessionTypeMetaFor(session)?.subagentsEnabled;
-    return stored ?? this.subagentsEnabledGlobally();
+    return this.subagentHost.subagentsCouldBeUsedIn(session);
   }
 
   private subagentsEnabledGlobally(): boolean {
-    try {
-      return this.host.getConfiguration("companions").get<boolean>("subagents.enabled", true) !== false;
-    } catch {
-      // A settings provider that cannot answer must not decide the feature is
-      // off — the shipped default is on (D19).
-      return true;
-    }
+    return this.subagentHost.subagentsEnabledGlobally();
   }
 
-  private companionsSetting<T>(key: string, fallback: T): T {
-    try {
-      return this.host.getConfiguration("companions").get<T>(key, fallback) ?? fallback;
-    } catch {
-      return fallback;
-    }
-  }
-
-  /** The per-provider roster, defaulted so an untouched install just works. */
   private subagentRoster(): Partial<Record<AcpProvider, RosterEntry>> {
-    const raw = this.companionsSetting<Record<string, unknown>>("subagents.roster", {});
-    const roster: Partial<Record<AcpProvider, RosterEntry>> = {};
-    for (const provider of ACP_PROVIDERS) {
-      const entry = (raw?.[provider] ?? {}) as Record<string, unknown>;
-      const str = (value: unknown): string | undefined => {
-        const text = typeof value === "string" ? value.trim() : "";
-        return text || undefined;
-      };
-      roster[provider] = {
-        enabled: entry.enabled !== false,
-        allowedModels: Array.isArray(entry.allowedModels)
-          ? entry.allowedModels.filter((id): id is string => typeof id === "string" && !!id.trim())
-          : [],
-        ...(str(entry.defaultModel) ? { defaultModel: str(entry.defaultModel) } : {}),
-        ...(isEffortLevel(entry.defaultEffort) ? { defaultEffort: entry.defaultEffort } : {}),
-        ...(isEffortLevel(entry.maxEffort) ? { maxEffort: entry.maxEffort } : {}),
-        ...(str(entry.notes) ? { notes: str(entry.notes) } : {}),
-        allowWrite: entry.allowWrite !== false,
-      };
-    }
-    return roster;
+    return this.subagentHost.subagentRoster();
   }
 
   private subagentLimits(session: Session, turnId: string): SpawnLimits {
-    const configured = (key: string, fallback: number) =>
-      Math.max(1, Number(this.companionsSetting(`subagents.limits.${key}`, fallback)) || fallback);
-    const counts = this.subagents.counts(session.activeSessionId ?? "", turnId);
-    const own: SpawnLimits = {
-      ...counts,
-      maxConcurrent: configured("maxConcurrent", 3),
-      maxPerTurn: configured("maxPerTurn", 4),
-      maxPerSession: configured("maxPerSession", 20),
-      // The pool is shared with every other conversation, so its headroom is a
-      // window-wide number rather than this session's own.
-      poolHeadroom: Math.max(0, GrokSidebar.MAX_LIVE_SESSIONS - this.pool.size),
-    };
-    // §12.3 — a delegating CHILD spends its parent's allowance, not a fresh
-    // copy of it. Without this, depth 2 would multiply the cost of a turn: a
-    // parent allowed four children would become a parent allowed four children
-    // each allowed four more.
-    const depth = this.sessionTypeMetaFor(session)?.depth ?? 0;
-    if (depth <= 0) return own;
-    const parent = this.parentSessionOf(session);
-    const parentCounts = parent
-      ? this.subagents.counts(parent.activeSessionId ?? "", this.currentTurnId(parent))
-      : { running: 0, thisTurn: 0, thisSession: 0 };
-    const carved = carveChildLimits({ ...own, ...parentCounts });
-    // The child's OWN counters still decide when it is full.
-    return { ...carved, ...counts };
+    return this.subagentHost.subagentLimits(session, turnId);
   }
 
-  /** The live session that owns this hidden child, if it is still in the pool. */
   private parentSessionOf(session: Session): Session | undefined {
-    const parentId = session.pendingHiddenChild?.parentSessionId
-      ?? this.sessionTypeMetaFor(session)?.parentSessionId;
-    if (!parentId) return undefined;
-    return [...this.pool].find((candidate) => candidate.activeSessionId === parentId);
+    return this.subagentHost.parentSessionOf(session);
   }
 
-  /**
-   * "Stage: review" / the child's own label — what started this delegation.
-   *
-   * Only ever shown on a card that had to be re-homed to a visible ancestor: in
-   * the ordinary case the conversation the card sits in IS the thing that
-   * started it, and saying so would be noise.
-   */
   private chainLabelFor(session: Session): string | undefined {
-    const pending = session.pendingHiddenChild;
-    const meta = this.sessionTypeMetaFor(session);
-    const reason = pending?.hiddenReason ?? meta?.hiddenReason;
-    const id = pending?.subagentId ?? meta?.subagentId ?? "";
-    if (reason === "crew-stage") {
-      // The id is `<runId>:<stageId>`; the stage is the half a person knows.
-      const stageId = id.includes(":") ? id.slice(id.indexOf(":") + 1) : id;
-      return stageId ? `Stage: ${stageId}` : "A crew stage";
-    }
-    if (reason === "companion-subagent") {
-      return this.subagents.get(id)?.label ?? "A subagent";
-    }
-    return undefined;
+    return this.subagentHost.chainLabelFor(session);
   }
 
-  // ---------- X-01: questions from hidden children ----------
+  public get childRelayTable(): ChildRelayTable<Session> | undefined {
+    return (this.subagentHost as any).childRelayTable;
+  }
+  public set childRelayTable(v: ChildRelayTable<Session> | undefined) {
+    (this.subagentHost as any).childRelayTable = v;
+  }
 
-  private childRelayTable?: ChildRelayTable<Session>;
-  private relayTable(): ChildRelayTable<Session> {
-    if (!this.childRelayTable) this.childRelayTable = new ChildRelayTable<Session>();
-    return this.childRelayTable;
+  public relayTable(): ChildRelayTable<Session> {
+    return this.subagentHost.relayTable();
   }
 
   private hiddenReasonOf(session: Session): HiddenReason | undefined {
-    return session.pendingHiddenChild?.hiddenReason ?? this.sessionTypeMetaFor(session)?.hiddenReason;
+    return this.subagentHost.hiddenReasonOf(session);
   }
 
-  /** What a relayed card says about where it came from. */
   private relayOriginFor(child: Session, route: string): RelayOrigin {
-    const reason = this.hiddenReasonOf(child);
-    const id = child.pendingHiddenChild?.subagentId ?? this.sessionTypeMetaFor(child)?.subagentId ?? "";
-    const kind: ChildKind = reason === "crew-stage" ? "stage" : "subagent";
-    let name: string;
-    if (reason === "crew-stage") {
-      const stageId = id.includes(":") ? id.slice(id.indexOf(":") + 1) : id;
-      const runId = id.includes(":") ? id.slice(0, id.indexOf(":")) : "";
-      const def = runId ? this.workflowState?.defs.get(runId) : undefined;
-      name = (def && findStage(def, stageId)?.title) || stageId || "Stage";
-    } else if (reason === "workflow-generator") {
-      name = "Workflow generator";
-    } else {
-      name = this.subagents.get(id)?.label ?? "Subagent";
-    }
-    return {
-      kind,
-      route,
-      scopeWord: relayScopeWord(kind),
-      label: relayOriginLabel({
-        kind,
-        name,
-        providerName: providerDisplayName(child.provider),
-        ...(child.client?.currentModelId ? { model: child.client.currentModelId } : {}),
-      }),
-    };
+    return this.subagentHost.relayOriginFor(child, route);
   }
 
-  /**
-   * Mirror a hidden child's card into its visible ancestor, and every later
-   * frame about that card (new options, resolution). Wer zuerst antwortet
-   * gewinnt: an answer in either place resolves the child's request once, and
-   * the resolved frame then closes both cards.
-   */
-  private relayFromChild(child: Session, message: HostMsg): void {
-    if (message.type === "hostNotice" && message.level === "warning" && /^Denied by /.test(message.text)) {
-      // A rule or the safety floor refused a child's tool call: the person
-      // should see that where they look, not only in the hidden transcript.
-      if (!this.hiddenReasonOf(child)) return;
-      const ancestor = this.visibleAncestorOf(child);
-      if (ancestor === child) return;
-      const origin = this.relayOriginFor(child, "");
-      this.emit(ancestor, { type: "hostNotice", level: "warning", text: `${origin.label}: ${message.text}` });
-      return;
-    }
-    if (
-      message.type !== "permissionRequest" && message.type !== "questionRequest" && message.type !== "exitPlanRequest"
-      && message.type !== "permissionOptions" && message.type !== "permissionResolved"
-      && message.type !== "planResolved" && message.type !== "questionResolved"
-    ) return;
-    if (!this.hiddenReasonOf(child)) return;
-    const table = this.relayTable();
-    if (message.type === "permissionRequest" || message.type === "questionRequest" || message.type === "exitPlanRequest") {
-      const ancestor = this.visibleAncestorOf(child);
-      if (ancestor === child) return;
-      const kind: RelayKind = message.type;
-      const route = table.open(child, ancestor, message.req.id, kind);
-      const origin = this.relayOriginFor(child, route);
-      if (message.type === "permissionRequest") {
-        const outOfScope = this.outsideStageScope(child, message.req);
-        this.emit(ancestor, {
-          ...message,
-          req: { ...message.req, id: route },
-          origin: outOfScope ? { ...origin, outOfScope: true } : origin,
-          ...(message.ruleSuggestions ? { ruleSuggestions: childScopedSuggestions(message.ruleSuggestions) } : {}),
-        });
-      } else if (message.type === "questionRequest") {
-        this.emit(ancestor, { ...message, req: { ...message.req, id: route }, origin });
-      } else {
-        this.emit(ancestor, { ...message, req: { ...message.req, id: route }, origin });
-      }
-      if (ancestor.status !== "needs-you") {
-        ancestor.statusBeforeChildAsk = ancestor.status;
-        this.setStatus(ancestor, "needs-you");
-      }
-      this.childNeedsYouChanged(child, true);
-      this.notifyChildNeedsYou(ancestor, origin, kind);
-      return;
-    }
-    const route = table.routeFor(child, message.requestId);
-    if (!route) return;
-    const entry = table.resolve(route)!;
-    this.emit(entry.ancestor, { ...message, requestId: route } as HostMsg);
-    if (message.type === "permissionOptions") return;
-    table.close(route);
-    this.afterRelayClosed(entry.ancestor, child);
+  public relayFromChild(child: Session, message: HostMsg): void {
+    this.subagentHost.relayFromChild(child, message);
   }
 
-  // ---------- X-02 / X-03 / X-04: watching children ----------
-
-  /** Where a child's activity feed is shown: the stage row or the subagent card. */
   private activityOwnerOf(child: Session): import("./child-activity").ActivityOwner | undefined {
-    const reason = this.hiddenReasonOf(child);
-    const id = child.pendingHiddenChild?.subagentId ?? this.sessionTypeMetaFor(child)?.subagentId ?? "";
-    if (!id) return undefined;
-    if (reason === "crew-stage") return { kind: "stage", id };
-    if (reason === "companion-subagent") return { kind: "subagent", id };
-    return undefined;
+    return this.subagentHost.activityOwnerOf(child);
   }
 
   private tapChildActivity(child: Session, message: HostMsg): void {
-    const item = activityItemFromHostMsg(message);
-    if (!item) return;
-    const owner = this.activityOwnerOf(child);
-    if (!owner) return;
-    child.lastChildActivityAt = Date.now();
-    if (child.stalled) {
-      child.stalled = false;
-      const parent = this.parentSessionOf(child);
-      if (parent?.workflowRun) this.emitWorkflowRun(parent);
-    }
-    (child.childActivityQueue ??= []).push(item);
-    if (child.childActivityTimer) return;
-    const timer = setTimeout(() => this.flushChildActivity(child), ACTIVITY_FLUSH_MS);
-    (timer as { unref?: () => void }).unref?.();
-    child.childActivityTimer = timer;
+    this.subagentHost.tapChildActivity(child, message);
   }
 
   private flushChildActivity(child: Session): void {
-    child.childActivityTimer = undefined;
-    const queued = child.childActivityQueue ?? [];
-    child.childActivityQueue = [];
-    const owner = this.activityOwnerOf(child);
-    if (!owner || !queued.length) return;
-    const ancestor = this.visibleAncestorOf(child);
-    if (ancestor === child) return;
-    const items = coalesceActivity(queued);
-    this.emit(ancestor, { type: "childActivity", owner, items, lastLine: activityLastLine(items) });
+    this.subagentHost.flushChildActivity(child);
   }
 
-  /**
-   * X-03: the child exists — its session id is known now, not only at the end,
-   * so "Open transcript" and the stage row work while it runs.
-   */
   private noteChildStarted(caller: Session, child: Session, subagentId?: string): void {
-    this.postRunningChildren();
-    const now = Date.now();
-    child.childStartedAt = now;
-    child.lastChildActivityAt = now;
-    child.stalled = false;
-    const sessionId = child.activeSessionId;
-    if (subagentId && sessionId) {
-      this.subagents.update(subagentId, { childSessionId: sessionId }, now);
-      this.postSubagentCard(caller, subagentId);
-    }
-    if (this.hiddenReasonOf(child) === "crew-stage" && caller.workflowRun?.current && sessionId) {
-      caller.workflowRun = bindStageSession(caller.workflowRun, sessionId);
-      this.persistWorkflowRun(caller);
-      this.emitWorkflowRun(caller);
-      this.ensureStallWatch();
-    }
+    this.subagentHost.noteChildStarted(caller, child, subagentId);
   }
 
-  private stallWatch?: ReturnType<typeof setInterval>;
-
-  /** X-04: one light timer while any crew stage runs. */
   private ensureStallWatch(): void {
-    if (this.stallWatch) return;
-    const t = setInterval(() => this.checkStalls(), 15_000);
-    (t as { unref?: () => void }).unref?.();
-    this.stallWatch = t;
+    this.subagentHost.ensureStallWatch();
   }
 
-  private checkStalls(now = Date.now()): void {
-    const warnMs = normalizeStallWarningSec(this.companionsSetting<number>("crew.stallWarningSec", 300)) * 1000;
-    let any = false;
-    for (const parent of this.pool) {
-      for (const live of parent.crewLive ?? []) {
-        any = true;
-        const child = live.roleSession;
-        if (!child.lastChildActivityAt) continue;
-        const state = stageStallState({
-          lastActivityAt: child.lastChildActivityAt,
-          now,
-          warnAfterMs: warnMs,
-          needsYou: this.childWaitsForYou(child),
-        });
-        const stalled = state === "stalled";
-        if (stalled !== !!child.stalled) {
-          child.stalled = stalled;
-          if (parent.workflowRun) this.emitWorkflowRun(parent);
-          this.postRunningChildren();
-        }
-      }
-    }
-    if (!any && this.stallWatch) {
-      clearInterval(this.stallWatch);
-      this.stallWatch = undefined;
-    }
+  public checkStalls(now = Date.now()): void {
+    this.subagentHost.checkStalls(now);
   }
 
-  // ---------- E-01: every running child of this window, in one place ----------
-
-  /** Grok's own subagents, from the live lifecycle rail. */
   private noteNativeChild(session: Session, update: unknown): void {
-    const u = update as { sessionUpdate?: string; subagent_id?: string; subagentId?: string; description?: string; task?: string; name?: string };
-    const id = String(u.subagent_id ?? u.subagentId ?? "");
-    if (!id) return;
-    if (!session.nativeChildren) session.nativeChildren = new Map();
-    if (u.sessionUpdate === "subagent_spawned") {
-      session.nativeChildren.set(id, { label: String(u.description ?? u.name ?? u.task ?? "Grok subagent").slice(0, 80), startedAt: Date.now() });
-    } else {
-      session.nativeChildren.delete(id);
-    }
-    this.postRunningChildren();
+    this.subagentHost.noteNativeChild(session, update);
   }
 
-  private runningChildrenTimer?: ReturnType<typeof setTimeout>;
-
-  /** Debounced: children change state often; the overview needs one frame. */
-  private postRunningChildren(): void {
-    if (this.runningChildrenTimer) return;
-    const t = setTimeout(() => {
-      this.runningChildrenTimer = undefined;
-      this.post({ type: "runningChildren", ...this.runningChildrenSnapshot() });
-    }, 300);
-    (t as { unref?: () => void }).unref?.();
-    this.runningChildrenTimer = t;
+  public postRunningChildren(): void {
+    this.subagentHost.postRunningChildren();
   }
 
-  private runningChildrenSnapshot(now = Date.now()): Omit<Extract<HostMsg, { type: "runningChildren" }>, "type"> {
-    type Row = { kind: "stage" | "subagent" | "native"; id: string; label: string; target: string; status: ChildStatusView; startedAt: number; tokens?: number; sessionId?: string };
-    const groups: Array<{ parentSessionId: string; parentName: string; children: Row[] }> = [];
-    let needYou = 0;
-    for (const parent of this.pool) {
-      if (this.hiddenReasonOf(parent)) continue;
-      const children: Row[] = [];
-      for (const live of parent.crewLive ?? []) {
-        const child = live.roleSession;
-        const waiting = this.childWaitsForYou(child);
-        if (waiting) needYou += 1;
-        const run = parent.workflowRun;
-        const def = run ? this.workflowStore().defs.get(run.runId) : undefined;
-        const stageId = run?.current?.stageId ?? "";
-        children.push({
-          kind: "stage",
-          id: `${run?.runId ?? live.runId}:${stageId}`,
-          label: (def && findStage(def, stageId)?.title) || live.roleName,
-          target: [providerDisplayName(child.provider), child.client?.currentModelId].filter(Boolean).join(" · "),
-          status: waiting ? "needs-you" : child.stalled ? "stalled" : "running",
-          startedAt: child.childStartedAt ?? now,
-          ...(child.activeSessionId ? { sessionId: child.activeSessionId } : {}),
-        });
-      }
-      for (const handle of parent.subagentLive ?? []) {
-        const record = this.subagents.get(handle.subagentId);
-        if (!record) continue;
-        const waiting = this.childWaitsForYou(handle.roleSession);
-        if (waiting) needYou += 1;
-        children.push({
-          kind: "subagent",
-          id: record.subagentId,
-          label: record.label,
-          target: [providerDisplayName(record.target.provider), record.target.model].filter(Boolean).join(" · "),
-          status: subagentChildStatus(record.status, { needsYou: waiting }),
-          startedAt: record.startedAt,
-          ...(typeof record.tokens === "number" ? { tokens: record.tokens } : {}),
-          ...(record.childSessionId ? { sessionId: record.childSessionId } : {}),
-        });
-      }
-      for (const [id, native] of parent.nativeChildren ?? []) {
-        children.push({ kind: "native", id, label: native.label, target: "Grok · built-in", status: "running", startedAt: native.startedAt });
-      }
-      if (children.length) {
-        groups.push({
-          parentSessionId: parent.activeSessionId ?? "",
-          parentName: this.sessionDisplayName(parent) || "This conversation",
-          children,
-        });
-      }
-    }
-    return { groups, needYou };
+  public runningChildrenSnapshot(now = Date.now()): Omit<Extract<HostMsg, { type: "runningChildren" }>, "type"> {
+    return this.subagentHost.runningChildrenSnapshot(now);
   }
 
-  /** E-01 / E-03: focus the conversation holding the first open question. */
-  private jumpToWaitingApproval(): boolean {
-    const entry = this.relayTable().all()[0];
-    const holder = entry?.ancestor
-      ?? [...this.pool].find((s) => s.status === "needs-you" && !this.hiddenReasonOf(s));
-    if (!holder) return false;
-    if (holder !== this.focused && this.pool.has(holder)) this.focusSession(holder);
-    void this.host.revealChatView();
-    this.post({ type: "scrollToWaiting" });
-    return true;
+  public jumpToWaitingApproval(): boolean {
+    return this.subagentHost.jumpToWaitingApproval();
   }
 
   private async childOverviewAction(msg: { action: string; kind?: string; id?: string; parentSessionId?: string; sessionId?: string }): Promise<void> {
-    const parent = this.poolSessionById(msg.parentSessionId);
-    if (msg.action === "jump") {
-      if (!this.jumpToWaitingApproval()) this.host.appendLine("[companions] nothing is waiting for you");
-      return;
-    }
-    if (msg.action === "open") {
-      const live = this.poolSessionById(msg.sessionId);
-      if (live) this.focusSession(live);
-      else if (parent) this.focusSession(parent);
-      return;
-    }
-    if (msg.action === "stop" && parent) {
-      if (msg.kind === "stage") {
-        for (const live of parent.crewLive ?? []) {
-          live.cancelled = true;
-          void live.roleSession.client?.cancel("stopped from the running-children overview");
-        }
-      } else if (msg.kind === "subagent" && msg.id) {
-        this.cancelSubagent(msg.id, "the user stopped it from the running-children overview");
-        this.postSubagentCard(parent, msg.id);
-        this.postSubagentTray(parent);
-      }
-      this.postRunningChildren();
-    }
+    return this.subagentHost.childOverviewAction(msg);
   }
 
-  /** The running stage's session of a crew parent, if any. */
   private runningStageSession(parent: Session): Session | undefined {
-    return (parent.crewLive ?? []).find((live) => !live.cancelled)?.roleSession;
+    return this.subagentHost.runningStageSession(parent);
   }
 
-  /**
-   * X-03: text for a running child. `steer` goes into the running turn
-   * (queued until the turn ends where the companion cannot steer); `note`
-   * waits for the next gate. Either way it is a visible line in the parent.
-   */
   private async sendToRunningStage(parent: Session, text: string, mode: "steer" | "note"): Promise<void> {
-    const body = text.trim();
-    if (!body) return;
-    const run = parent.workflowRun;
-    const child = this.runningStageSession(parent);
-    const def = run ? this.workflowStore().defs.get(run.runId) : undefined;
-    const title = run?.current && def ? findStage(def, run.current.stageId)?.title ?? run.current.stageId : "the stage";
-    if (mode === "note" || !child) {
-      if (run) {
-        parent.workflowRun = { ...run, pendingNotes: [run.pendingNotes, body].filter(Boolean).join("\n") };
-        this.persistWorkflowRun(parent);
-      }
-      this.emit(parent, { type: "userMessage", text: body, chips: [] });
-      this.agentNotice(parent, "info", `→ noted for the next stage`);
-      return;
-    }
-    this.emit(parent, { type: "userMessage", text: body, chips: [] });
-    this.agentNotice(parent, "info", `→ sent to ${title}`);
-    await this.steerSend(body, child);
+    return this.subagentHost.sendToRunningStage(parent, text, mode);
   }
 
-  /** X-03: a focused hidden child says whose it is, with a way back. */
   private postChildContext(session: Session): void {
-    const reason = this.hiddenReasonOf(session);
-    if (!reason || reason === "workflow-generator") {
-      this.emit(session, { type: "childContext", context: null });
-      return;
-    }
-    const parentId = session.pendingHiddenChild?.parentSessionId ?? this.sessionTypeMetaFor(session)?.parentSessionId ?? "";
-    const origin = this.relayOriginFor(session, "");
-    const running = session.status === "working" || session.status === "needs-you";
-    this.emit(session, {
-      type: "childContext",
-      context: {
-        kind: origin.kind,
-        label: origin.label,
-        parentSessionId: parentId,
-        running,
-        canSteer: providerCapability(session.provider, "steer").state !== "no",
-      },
-    });
+    this.subagentHost.postChildContext(session);
   }
 
-  /** C-01: an edit request from a scoped stage that reaches past its scope. */
   private outsideStageScope(child: Session, req: PermissionRequest): boolean {
-    const globs = child.stageScope;
-    if (!globs) return false;
-    const facts = extractPermissionFacts(req.toolCall);
-    if (facts.kind !== "edit" || facts.paths.length === 0) return false;
-    const root = this.sessionCwd(child);
-    return !facts.paths.every((p) => globs.some((g) => pathMatchesGlob(g, p, root)));
+    return this.subagentHost.outsideStageScope(child, req);
   }
 
   private afterRelayClosed(ancestor: Session, child: Session): void {
-    const table = this.relayTable();
-    if (table.pendingIn(ancestor).length === 0 && ancestor.status === "needs-you") {
-      const before = ancestor.statusBeforeChildAsk;
-      ancestor.statusBeforeChildAsk = undefined;
-      // Only undo what the relay did: the ancestor's own cards keep it waiting.
-      if (ancestor.pendingPermissions.size === 0 && ancestor.pendingQuestions.size === 0) {
-        this.setStatus(ancestor, before && before !== "needs-you" ? before : "working");
-      }
-    }
-    if (table.pendingFor(child) === 0) this.childNeedsYouChanged(child, false);
+    this.subagentHost.afterRelayClosed(ancestor, child);
   }
 
-  /** A child ended or was torn down with cards still open: close them upstairs. */
-  private closeChildRelays(child: Session): void {
-    for (const entry of this.relayTable().closeChild(child)) {
-      if (entry.kind === "questionRequest") {
-        this.emit(entry.ancestor, { type: "questionResolved", requestId: entry.route, outcome: "closed" });
-      } else if (entry.kind === "exitPlanRequest") {
-        this.emit(entry.ancestor, { type: "planResolved", requestId: entry.route, verdict: "abandoned" });
-      } else {
-        this.emit(entry.ancestor, { type: "permissionResolved", requestId: entry.route, optionId: "" });
-      }
-      this.afterRelayClosed(entry.ancestor, child);
-    }
+  public closeChildRelays(child: Session): void {
+    this.subagentHost.closeChildRelays(child);
   }
 
-  /** The "Needs you" state of a stage row / subagent card, and the fair clock. */
   private childNeedsYouChanged(child: Session, needsYou: boolean): void {
-    this.postRunningChildren();
-    const reason = this.hiddenReasonOf(child);
-    const id = child.pendingHiddenChild?.subagentId ?? this.sessionTypeMetaFor(child)?.subagentId ?? "";
-    const parent = this.parentSessionOf(child);
-    if (reason === "companion-subagent") {
-      const deadline = this.subagentDeadlines?.get(id);
-      if (deadline) {
-        if (needsYou) deadline.pause(Date.now());
-        else deadline.resume(Date.now());
-        this.rearmSubagentTimer(id);
-      }
-      if (parent) this.postSubagentCard(parent, id);
-    } else if (reason === "crew-stage" && parent?.workflowRun) {
-      this.emitWorkflowRun(parent);
-    }
+    this.subagentHost.childNeedsYouChanged(child, needsYou);
   }
 
-  private childWaitsForYou(child: Session | undefined): boolean {
-    return !!child && this.relayTable().pendingFor(child) > 0;
+  public childWaitsForYou(child: Session | undefined): boolean {
+    return this.subagentHost.childWaitsForYou(child);
   }
 
-  /** One OS notification when the window is not focused (setting, default on). */
   private notifyChildNeedsYou(ancestor: Session, origin: RelayOrigin, kind: RelayKind): void {
-    if (this.host.isWindowFocused?.() !== false) return;
-    if (this.companionsSetting<boolean>("notifications.childNeedsYou", true) === false) return;
-    const name = origin.label.replace(/^(Stage|Subagent) "/, "").replace(/".*$/, "");
-    void this.host.showInformationMessage(childNeedsYouNotice(origin.kind, name, kind), "Show").then((pick) => {
-      if (pick !== "Show") return;
-      if (ancestor !== this.focused && this.pool.has(ancestor)) this.focusSession(ancestor);
-      void this.host.revealChatView();
-    });
+    this.subagentHost.notifyChildNeedsYou(ancestor, origin, kind);
   }
 
-  /**
-   * Route an answer to a relayed card back to its child. The webview only
-   * ever names the opaque route; the table knows the real request id.
-   */
-  private resolveRelayedAnswer(msg: WebviewMsg): { session: Session; msg: WebviewMsg } | undefined {
-    if (
-      msg.type !== "permissionAnswer" && msg.type !== "exitPlanAnswer" && msg.type !== "questionAnswer"
-      && msg.type !== "questionCancel" && msg.type !== "questionDraft"
-    ) return undefined;
-    const entry = this.childRelayTable?.resolve(msg.requestId);
-    if (!entry) return undefined;
-    return { session: entry.child, msg: { ...msg, requestId: entry.requestId } as WebviewMsg };
+  public resolveRelayedAnswer(msg: WebviewMsg): { session: Session; msg: WebviewMsg } | undefined {
+    return this.subagentHost.resolveRelayedAnswer(msg);
   }
 
-  /**
-   * The nearest ancestor a person can actually see (§6.11, §7.9).
-   *
-   * A card emitted into a hidden child's transcript is a card nobody reads —
-   * the child is not in the history list and its transcript only opens on
-   * request. So a subagent started BY a stage or by a depth-1 child renders in
-   * the conversation that owns the whole chain, which is the Crew session or
-   * the Agent session the user is looking at.
-   *
-   * Falls back to the session itself: a chain whose parent has been reaped is
-   * still better shown somewhere than nowhere.
-   */
   private visibleAncestorOf(session: Session): Session {
-    let current = session;
-    for (let hops = 0; hops < SUBAGENT_MAX_DEPTH_CAP + 1; hops += 1) {
-      const hidden = current.pendingHiddenChild?.hiddenReason
-        ?? this.sessionTypeMetaFor(current)?.hiddenReason;
-      if (!hidden) return current;
-      const parent = this.parentSessionOf(current);
-      if (!parent) return current;
-      current = parent;
-    }
-    return current;
+    return this.subagentHost.visibleAncestorOf(session);
   }
 
-  /** Everything `target-eligibility.ts` needs, gathered from live host state. */
   private eligibilityInput(session: Session, turnId: string): EligibilityInput {
-    const cache = this.state.get<ProviderModelCache>(PROVIDER_MODEL_CACHE_KEY, {});
-    return {
-      purpose: "subagent",
-      usable: this.usableProviders(),
-      roster: this.subagentRoster(),
-      capabilities: (provider) => ({
-        companionSubagentTarget: providerCapability(provider, "companionSubagentTarget"),
-        hostMcp: providerCapability(provider, "hostMcp"),
-      }),
-      models: (provider) => {
-        const entry = cache[provider];
-        return {
-          // An absent entry means the cache was never warmed for this provider
-          // — NOT that the provider has no models (§6.3 rule 4).
-          checked: !!entry && Array.isArray(entry.models),
-          models: (entry?.models ?? []).map((model) => ({
-            id: model.modelId,
-            ...(model.name ? { label: model.name } : {}),
-            ...(model.reasoningEfforts?.length
-              ? { efforts: model.reasoningEfforts.filter(isEffortLevel) }
-              : {}),
-            ...(typeof model.totalContextTokens === "number"
-              ? { contextWindow: model.totalContextTokens }
-              : {}),
-            ...(entry?.currentModelId === model.modelId ? { isDefault: true } : {}),
-          })),
-        };
-      },
-      parent: {
-        provider: session.provider,
-        // Plan mode is the ceiling that matters; Auto accept does not raise it,
-        // and does not propagate to children unless the user asked (§6.7).
-        maxProfile: session.planActive ? "read-only" : "inherit",
-        planMode: session.planActive,
-        // The parent's live effort is not readable off `AcpClient`, so
-        // `inherit` resolves through the remembered-effort settings below
-        // rather than being invented here.
-      },
-      limits: this.subagentLimits(session, turnId),
-      // AP-06 marks a provider exhausted for a whole crew RUN; an ordinary
-      // Agent session has no such record yet, so nothing is pre-excluded and a
-      // quota error surfaces on the spawn that hits it (§6.12).
-      exhausted: new Set<AcpProvider>(),
-      displayName: providerDisplayName,
-      effortDefaults: {
-        ...(this.sessionTypeMetaFor(session)?.subagentEffortOverride
-          ? { sessionOverride: this.sessionTypeMetaFor(session)!.subagentEffortOverride }
-          : {}),
-        global: (() => {
-          const configured = this.companionsSetting<string>("subagents.defaultEffort", "inherit");
-          return configured === "inherit" || isEffortLevel(configured) ? configured : "inherit";
-        })(),
-        providerDefault: (provider) => {
-          const byProvider = this.companionsSetting<Record<string, string>>("defaultEffortByProvider", {});
-          const candidate = byProvider?.[provider] ?? this.companionsSetting<string>("defaultEffort", "");
-          return isEffortLevel(candidate) ? candidate : undefined;
-        },
-      },
-      subagentsEnabled: this.subagentsCouldBeUsedIn(session),
-      // §6.8 "no subagents for this message" — set by `@subagent:none` on the
-      // current turn, and ENFORCED here rather than merely asked for in the
-      // prompt: a spawn during that turn is refused with `forbidden-by-user`.
-      forbiddenThisTurn: session.subagentsForbiddenThisTurn === true,
-    };
+    return this.subagentHost.eligibilityInput(session, turnId);
   }
 
-  /** The turn a spawn belongs to, for the per-turn limit and for D20. */
-  private currentTurnId(session: Session): string {
-    return String(session.userMessageCount);
+  public currentTurnId(session: Session): string {
+    return this.subagentHost.currentTurnId(session);
   }
-
-  // ---------- the three tools ----------
 
   private async handleCompanionsCall(session: Session, call: CompanionsCall): Promise<void> {
-    try {
-      const hidden = session.pendingHiddenChild?.hiddenReason
-        ?? this.sessionTypeMetaFor(session)?.hiddenReason;
-      if (hidden === "workflow-generator" || isGeneratorOnlyTool(call.tool)) {
-        this.handleGeneratorTool(session, call);
-        return;
-      }
-      switch (call.tool) {
-        case COMPANIONS_LIST_TOOL:
-          call.resolve(this.companionsList(session, normalizeListArguments(call.args)));
-          return;
-        case COMPANIONS_SPAWN_TOOL: {
-          const parsed = normalizeSpawnArguments(call.args);
-          if (!parsed.ok) { call.fail(parsed.error); return; }
-          await this.companionsSpawn(session, parsed.value, call);
-          return;
-        }
-        case COMPANIONS_AWAIT_TOOL: {
-          const parsed = normalizeAwaitArguments(call.args);
-          if (!parsed.ok) { call.fail(parsed.error); return; }
-          await this.companionsAwait(session, parsed.value, call);
-          return;
-        }
-        default:
-          call.fail(`Unknown tool: ${call.tool}`);
-      }
-    } catch (error) {
-      // A throw here would leave the CLI blocked inside `tools/call` for ever.
-      this.host.appendLine(`[companions] ${call.tool} failed: ${(error as Error).message}`);
-      call.fail(`${call.tool} failed: ${(error as Error).message}`);
-    }
-  }
-
-  private handleGeneratorTool(session: Session, call: CompanionsCall): void {
-    const hidden = session.pendingHiddenChild?.hiddenReason
-      ?? this.sessionTypeMetaFor(session)?.hiddenReason;
-    if (hidden !== "workflow-generator") {
-      call.fail("This tool is only available while generating a workflow.");
-      return;
-    }
-    const store = this.generatorStore();
-    const ctx = this.workflowValidateContext({
-      generated: true,
-      allowWrite: store.state.options.allowWrite,
-      maxStages: store.state.options.maxStages,
-    });
-    switch (call.tool) {
-      case COMPANIONS_WORKFLOW_SCHEMA_TOOL:
-        call.resolve({ guide: WORKFLOW_AUTHORING_GUIDE });
-        return;
-      case COMPANIONS_LIST_ROLES_TOOL:
-        call.resolve({
-          roles: this.agentRoleSet(this.sessionCwd()).roles.map((role) => ({
-            name: role.name,
-            whenToUse: role.whenToUse,
-            provider: role.source === "builtin" ? undefined : role.provider,
-            ...(role.model ? { model: role.model } : {}),
-            source: role.source,
-          })),
-        });
-        return;
-      case COMPANIONS_LIST_TOOL:
-        call.resolve(this.companionsList(session, normalizeListArguments(call.args)));
-        return;
-      case COMPANIONS_LIST_WORKFLOWS_TOOL:
-        call.resolve({
-          workflows: this.crewPresetSet(this.sessionCwd()).presets.map((preset) => ({
-            name: preset.name,
-            title: preset.title || preset.name,
-            whenToUse: preset.whenToUse || "",
-            source: preset.source,
-          })),
-        });
-        return;
-      case COMPANIONS_VALIDATE_WORKFLOW_TOOL: {
-        const raw = workflowArg(call.args);
-        const validation = validateWorkflowRaw(raw, ctx);
-        store.state = recordValidation(store.state, raw, validation);
-        call.resolve(validation);
-        return;
-      }
-      case COMPANIONS_SUBMIT_WORKFLOW_TOOL: {
-        const raw = workflowArg(call.args);
-        const accepted = acceptSubmission(raw, ctx, store.compiler);
-        store.submitted = accepted;
-        if (accepted.ok) {
-          call.resolve({ ok: true, name: accepted.workflow.name, warnings: accepted.validation.warnings });
-        } else {
-          call.resolve({
-            ok: false,
-            error: accepted.error,
-            ...(accepted.validation
-              ? { errors: accepted.validation.errors, warnings: accepted.validation.warnings }
-              : {}),
-          });
-        }
-        return;
-      }
-      default:
-        call.fail(`Unknown tool: ${call.tool}`);
-    }
+    return this.subagentHost.handleCompanionsCall(session, call);
   }
 
   private companionsList(session: Session, args: ListArguments): unknown {
-    const input = this.eligibilityInput(session, this.currentTurnId(session));
-    const listing = listEligibleTargets(input, args);
-    return {
-      targets: listing.targets,
-      // Withheld unless asked for, because it is per-turn schema budget for
-      // information the agent usually cannot act on (§2.1 point 3).
-      ...(args.includeIneligible
-        ? { ineligible: listing.ineligible.map((entry) => ({ provider: entry.provider, reason: entry.reason })) }
-        : {}),
-      limits: {
-        ...listing.limits,
-        foregroundWaitSec: this.companionsSetting("subagents.limits.foregroundWaitSec", 40),
-        resultInlineChars: this.companionsSetting("subagents.limits.resultInlineChars", 4000),
-      },
-      ...(listing.parent
-        ? {
-            parent: {
-              ...listing.parent,
-              ...(session.client?.currentModelId ? { model: session.client.currentModelId } : {}),
-            },
-          }
-        : {}),
-    };
+    return this.subagentHost.companionsList(session, args);
   }
 
-  private async companionsSpawn(
-    session: Session,
-    args: SpawnArguments,
-    call: CompanionsCall,
-  ): Promise<void> {
-    // `args` and `verdict` are reassigned by S-02 when the person changes
-    // the request on the approval card.
-    const turnId = this.currentTurnId(session);
-    const parentSessionId = session.activeSessionId ?? "";
-    // §6.8: a `must` directive pins the target the agent left open. A directive
-    // naming a ROLE also supplies the template, so the user's `@role:inspector`
-    // reaches the child even when the agent never named the role itself.
-    const directive = this.directiveForSpawn(session, args);
-    const roleName = args.role ?? directive?.role;
-    const roleTemplate = roleName
-      ? findAgentRole(this.agentRoleSet(this.sessionCwd(session)), roleName)
-      : undefined;
-    let verdict = resolveTarget(
-      {
-        // Explicit tool arguments still win; the directive fills what the agent
-        // left open, which is the difference between constraining the worker
-        // and writing the agent's tool call for it.
-        ...(args.provider ?? directive?.provider ? { provider: args.provider ?? directive?.provider } : {}),
-        ...(args.model ?? directive?.model ? { model: args.model ?? directive?.model } : {}),
-        ...(args.effort ?? directive?.effort ? { effort: args.effort ?? directive?.effort } : {}),
-        ...(args.profile ?? directive?.profile ? { profile: args.profile ?? directive?.profile } : {}),
-        ...(roleTemplate
-          ? {
-              role: {
-                // A built-in's provider is a placeholder the host may rewrite
-                // (`agent-roles.ts`), so it is deliberately NOT passed as a
-                // pinned choice; a user-written role's provider is.
-                ...(roleTemplate.source !== "builtin" ? { provider: roleTemplate.provider } : {}),
-                ...(roleTemplate.model ? { model: roleTemplate.model } : {}),
-                ...(isEffortLevel(roleTemplate.effort) ? { effort: roleTemplate.effort } : {}),
-                ...(roleTemplate.preferDifferentProvider ? { preferDifferentProvider: true } : {}),
-              },
-            }
-          : {}),
-      },
-      this.eligibilityInput(session, turnId),
-    );
-
-    if (!verdict.ok) {
-      // A refusal is a RESULT the model reads and acts on, with the
-      // alternatives it should try instead — never a thrown error (§6.13).
-      const subagentId = `sa_${this.agentRuns.newRunId()}`;
-      this.subagents.add({
-        subagentId,
-        parentSessionId,
-        runId: "",
-        step: 0,
-        label: args.label ?? deriveSubagentLabel(args.task),
-        target: { provider: args.provider ?? session.provider },
-        profile: args.profile ?? "read-only",
-        status: "refused",
-        startedAt: Date.now(),
-        endedAt: Date.now(),
-        background: args.wait === "none",
-        spawnedInTurn: turnId,
-        errorCode: verdict.code,
-        refusalMessage: verdict.message,
-        refusalAlternatives: verdict.alternatives.map((t) =>
-          [providerDisplayName(t.provider), t.model, t.effort ? `effort ${t.effort}` : ""].filter(Boolean).join(" · ")),
-      });
-      this.postSubagentCard(session, subagentId);
-      call.resolve({
-        subagentId,
-        ...refusalPayload(verdict.code, verdict.message, verdict.alternatives),
-      });
-      return;
-    }
-
-    // §6.2 spawn policy. `auto` is the default (D15); `ask` raises a card for
-    // every spawn, `auto-read-only` only for one that can write. The card shows
-    // the FULL task, because approving a delegation you cannot read is not an
-    // approval.
-    const policy = this.sessionSpawnPolicy(session);
-    const needsApproval = policy === "ask"
-      || (policy === "auto-read-only" && verdict.profile !== "read-only");
-    let adjustedByUser: Record<string, unknown> | undefined;
-    if (needsApproval) {
-      // S-02: approve as asked, or with changes — task, companion, model,
-      // effort, and a profile no wider than proposed.
-      const answer = await this.askSubagentApproval(session, args, verdict);
-      if (!answer.approved) {
-        call.resolve({
-          subagentId: `sa_${this.agentRuns.newRunId()}`,
-          ...refusalPayload("denied-by-user", "The user did not approve this subagent.", []),
-        });
-        return;
-      }
-      if (answer.adjusted) {
-        adjustedByUser = answer.adjusted;
-        args = {
-          ...args,
-          ...(typeof answer.adjusted.task === "string" ? { task: answer.adjusted.task } : {}),
-          ...(isAcpProvider(answer.adjusted.provider) ? { provider: answer.adjusted.provider } : {}),
-          ...(typeof answer.adjusted.model === "string" ? { model: answer.adjusted.model || undefined } : {}),
-          ...(isEffortLevel(answer.adjusted.effort) ? { effort: answer.adjusted.effort } : {}),
-          ...(answer.adjusted.profile === "read-only" || answer.adjusted.profile === "scoped-edit" || answer.adjusted.profile === "inherit"
-            ? { profile: answer.adjusted.profile }
-            : {}),
-        };
-        const again = resolveTarget(
-          {
-            ...(args.provider ? { provider: args.provider } : {}),
-            ...(args.model ? { model: args.model } : {}),
-            ...(args.effort ? { effort: args.effort } : {}),
-            ...(args.profile ? { profile: args.profile } : {}),
-          },
-          this.eligibilityInput(session, turnId),
-        );
-        if (!again.ok) {
-          call.resolve({ subagentId: `sa_${this.agentRuns.newRunId()}`, ...refusalPayload(again.code, again.message, again.alternatives) });
-          return;
-        }
-        verdict = again;
-      }
-    }
-
-    const label = args.label ?? deriveSubagentLabel(args.task);
-    const runId = this.agentRuns.newRunId();
-    const subagentId = `sa_${runId}`;
-    const startedAt = Date.now();
-    // S-01: a writer claims the files it names BEFORE it starts. A conflict is
-    // a refusal the main agent can act on (sequence the work), not a card
-    // after the edit already happened.
-    if (verdict.profile !== "read-only") {
-      const conflict = this.preClaimSubagentFiles(runId, label, [...(args.files ?? []), ...(args.scope ?? [])]);
-      if (conflict) {
-        call.resolve({
-          subagentId,
-          ...refusalPayload("file-claimed", conflict, []),
-        });
-        return;
-      }
-    }
-    this.subagents.add({
-      subagentId,
-      parentSessionId,
-      runId,
-      step: 1,
-      label,
-      target: verdict.target,
-      profile: verdict.profile,
-      status: "running",
-      startedAt,
-      background: args.wait === "none",
-      spawnedInTurn: turnId,
-      ...(directive ? { directiveId: directive.id } : {}),
-      ...(roleName ? { roleName } : {}),
-      modelVerified: verdict.modelVerified,
-      sameProviderAsParent: verdict.sameProviderAsParent,
-      ...(verdict.effortClamped ? { effortClamped: verdict.effortClamped } : {}),
-      ...(verdict.profileDowngraded ? { profileDowngraded: verdict.profileDowngraded } : {}),
-      ...(adjustedByUser ? { adjustedByUser } : {}),
-    });
-    this.rememberSubagentRun(session, runId);
-    this.postSubagentCard(session, subagentId);
-
-    // The run itself. Deliberately NOT awaited inline: a foreground spawn waits
-    // only up to `foregroundWaitSec` (§6.4.3) and then hands back an id, while
-    // the child keeps going regardless of how long the parent waits.
-    const running = this.runCompanionSubagent(session, subagentId, args, verdict, roleTemplate);
-
-    if (args.wait === "none") {
-      call.resolve({
-        subagentId,
-        status: "running",
-        target: this.targetPayload(verdict),
-        profile: verdict.profile,
-        ...(adjustedByUser ? { adjustedByUser } : {}),
-      });
-      void running;
-      return;
-    }
-
-    const waitSec = Math.max(1, Number(this.companionsSetting("subagents.limits.foregroundWaitSec", 40)));
-    const finished = await this.raceSubagent(subagentId, waitSec * 1000);
-    if (!finished) {
-      // Normal, and the tool description says so: the child is still working.
-      call.resolve({
-        subagentId,
-        status: "running",
-        target: this.targetPayload(verdict),
-        profile: verdict.profile,
-        ...(adjustedByUser ? { adjustedByUser } : {}),
-      });
-      return;
-    }
-    const payload = this.subagentResultPayload(subagentId, { markCollected: true }) as Record<string, unknown>;
-    call.resolve(adjustedByUser ? { ...payload, adjustedByUser } : payload);
+  private async companionsSpawn(session: Session, args: SpawnArguments, call: CompanionsCall): Promise<void> {
+    return this.subagentHost.companionsSpawn(session, args, call);
   }
 
-  private async companionsAwait(
-    session: Session,
-    args: AwaitArguments,
-    call: CompanionsCall,
-  ): Promise<void> {
-    const parentSessionId = session.activeSessionId ?? "";
-    const mine = args.ids.filter((id) => this.subagents.get(id)?.parentSessionId === parentSessionId);
-    const unknown = args.ids.filter((id) => !mine.includes(id));
-
-    if (args.action === "cancel") {
-      const status: Record<string, string> = {};
-      for (const id of mine) {
-        this.cancelSubagent(id, args.reason ?? "the main agent cancelled it");
-        status[id] = this.subagents.get(id)?.status ?? "unknown";
-      }
-      for (const id of unknown) status[id] = "unknown";
-      call.resolve({ status });
-      return;
-    }
-
-    if (args.action === "continue") {
-      const id = mine[0];
-      if (!id) {
-        call.resolve({ unknown });
-        return;
-      }
-      const started = await this.continueSubagent(session, id, args.message ?? "");
-      if (!started.ok) {
-        call.resolve({ subagentId: id, ...refusalPayload(started.code, started.message, []) });
-        return;
-      }
-      const cap = Math.max(1, Number(this.companionsSetting("subagents.limits.foregroundWaitSec", 40)));
-      const done = await this.raceSubagent(id, cap * 1000);
-      call.resolve(done
-        ? this.subagentResultPayload(id, { markCollected: true })
-        : { subagentId: id, status: "running" });
-      return;
-    }
-
-    if (args.action === "read") {
-      const id = mine[0];
-      // S-05: after a reload the in-memory report is gone; the raw reply on
-      // disk still answers.
-      const text = (id && (this.subagentReports.get(id) ?? this.readSubagentReport(id))) ?? "";
-      const offset = Math.max(0, args.offset ?? 0);
-      const length = Math.max(1, args.length ?? 8000);
-      const slice = text.slice(offset, offset + length);
-      call.resolve({
-        text: slice,
-        offset,
-        nextOffset: offset + slice.length,
-        totalLength: text.length,
-        ...(unknown.length ? { unknown } : {}),
-      });
-      return;
-    }
-
-    const cap = Math.max(1, Number(this.companionsSetting("subagents.limits.foregroundWaitSec", 40)));
-    // `maxWaitSec: 0` is a status poll, and 0 has to survive the defaulting —
-    // treating it as unset would turn a poll into a 40-second block.
-    const requested = args.maxWaitSec === undefined ? cap : args.maxWaitSec;
-    const waitMs = Math.min(cap, Math.max(0, requested)) * 1000;
-    if (waitMs > 0) await this.raceSubagents(mine, waitMs, args.mode);
-
-    const completed: unknown[] = [];
-    const running: string[] = [];
-    for (const id of mine) {
-      const record = this.subagents.get(id);
-      if (record && isTerminalSubagentStatus(record.status)) {
-        completed.push(this.subagentResultPayload(id, { markCollected: true }));
-      } else {
-        running.push(id);
-      }
-    }
-    call.resolve({ completed, running, unknown });
+  private async companionsAwait(session: Session, args: AwaitArguments, call: CompanionsCall): Promise<void> {
+    return this.subagentHost.companionsAwait(session, args, call);
   }
 
-  // ---------- running one child ----------
-
-  private async runCompanionSubagent(
-    session: Session,
-    subagentId: string,
-    args: SpawnArguments,
-    verdict: Extract<EligibilityResult, { ok: true }>,
-    roleTemplate: AgentRole | undefined,
-  ): Promise<void> {
-    const record = this.subagents.get(subagentId)!;
-    const provider = verdict.target.provider;
-    // §6.5 step 4. A named role is a TEMPLATE — preamble, scope, forbidden —
-    // and the resolved target overrides its provider/model/effort.
-    const role: AgentRole = {
-      ...(roleTemplate ?? {
-        name: "subagent",
-        whenToUse: "A companion subagent started by the main agent.",
-        source: "builtin" as const,
-      }),
-      name: roleTemplate?.name ?? "subagent",
-      provider,
-      ...(verdict.target.model ? { model: verdict.target.model } : {}),
-      ...(verdict.target.effort ? { effort: verdict.target.effort } : {}),
-      mode: SUBAGENT_RUN_MODE,
-      ...(args.scope?.length ? { scope: args.scope } : roleTemplate?.scope ? { scope: roleTemplate.scope } : {}),
-      permissions: subagentPermissionOverlay(
-        verdict.profile,
-        args.scope ?? roleTemplate?.scope ?? [],
-        this.companionsSetting<string[]>("subagents.readOnlyCommandAllowList", []),
-      ),
-      source: roleTemplate?.source ?? "builtin",
-    };
-
-    const timeoutSec = Math.max(
-      30,
-      args.timeoutSec ?? Number(this.companionsSetting("subagents.limits.timeoutSec", 900)),
-    );
-    // X-04: the clock pauses while the child waits for the person.
-    if (!this.subagentDeadlines) this.subagentDeadlines = new Map();
-    this.subagentDeadlines.set(subagentId, new PausableDeadline(timeoutSec * 1000, Date.now()));
-    this.rearmSubagentTimer(subagentId);
-    const timer = { clear: () => this.clearSubagentDeadline(subagentId) };
-
-    // S-01: `writeIsolation: "worktree"` — a writer works in its own local
-    // worktree; the card offers Apply (file by file) or Discard afterwards.
-    let childCwd: string | undefined;
-    if (verdict.profile !== "read-only" && this.companionsSetting<string>("subagents.writeIsolation", "shared") === "worktree") {
-      const wt = await this.createCrewWorktree(this.sessionCwd(session), `sa-${record.runId.slice(-12)}`);
-      if ("error" in wt) {
-        this.host.appendLine(`[companions] ${subagentId}: no worktree (${wt.error}); running in the shared tree`);
-      } else {
-        childCwd = wt.path;
-        this.subagents.update(subagentId, { worktree: { ...wt, state: "pending" } }, Date.now());
-      }
-    }
-    try {
-      const outcome = await this.runAgentRole(
-        role,
-        {
-          goal: session.firstUserMessageForTitle?.split("\n")[0] ?? "",
-          task: args.task,
-          ...(args.context ? { decisions: [args.context] } : {}),
-          ...(args.files?.length ? { files: args.files } : {}),
-          ...(args.acceptance ? { acceptance: args.acceptance } : {}),
-          returnFormat: subagentReturnFormat(args.deliverable),
-          forbidden: subagentForbidden(verdict.profile),
-          provenance: [
-            `Delegated by ${providerDisplayName(session.provider)}`
-            + `${session.client?.currentModelId ? ` (${session.client.currentModelId})` : ""}`
-            + ` in session ${session.activeSessionId ?? "?"}; this subagent sees only this brief.`,
-          ],
-        },
-        "subagent",
-        session,
-        {
-          runId: record.runId,
-          step: 1,
-          ...(childCwd ? { cwd: childCwd } : {}),
-          subagent: { subagentId, label: record.label, profile: verdict.profile },
-        },
-      );
-      timer.clear();
-      if (outcome.rawReply !== undefined) this.writeSubagentRaw(record.runId, 1, outcome.rawReply);
-      if (outcome.rawReply !== undefined) this.subagentReports.set(subagentId, outcome.rawReply);
-      // §6.7 file claims. Only a child that could write takes them: a read-only
-      // inspector holds nothing, and claiming on its behalf would block the
-      // parent out of files nobody is editing. A conflict raises the existing
-      // claim card rather than being silently overwritten.
-      if (verdict.profile !== "read-only") {
-        await this.claimSubagentFiles(session, record, outcome.filesObserved);
-      }
-      this.subagents.update(
-        subagentId,
-        {
-          status: outcome.outcome === "completed"
-            ? "completed"
-            : outcome.outcome === "cancelled" ? "cancelled" : "failed",
-          ...(outcome.sessionId ? { childSessionId: outcome.sessionId } : {}),
-          ...(outcome.totalTokens !== undefined ? { tokens: outcome.totalTokens } : {}),
-          ...(this.poolSessionById(outcome.sessionId)?.client?.currentModelId
-            ? { ranModel: this.poolSessionById(outcome.sessionId)!.client!.currentModelId }
-            : {}),
-        },
-        Date.now(),
-      );
-      this.subagentOutcomes.set(subagentId, outcome);
-    } catch (error) {
-      timer.clear();
-      this.host.appendLine(`[companions] ${subagentId} crashed: ${(error as Error).message}`);
-      this.subagents.update(subagentId, { status: "failed", errorCode: "child-crashed" }, Date.now());
-    } finally {
-      // S-01: every exit drops the claims this child held.
-      try { this.crewFileClaims().releaseRun(record.runId); } catch { /* claims are a lock, not the run */ }
-      this.persistSubagentRecord(subagentId);
-      this.postSubagentCard(session, subagentId);
-      this.releaseSubagentWaiters(subagentId);
-      this.maybeFinishSubagentTurn(session);
-    }
+  private async runCompanionSubagent(session: Session, subagentId: string, args: SpawnArguments, verdict: Extract<EligibilityResult, { ok: true }>, roleTemplate: AgentRole | undefined): Promise<void> {
+    return this.subagentHost.runCompanionSubagent(session, subagentId, args, verdict, roleTemplate);
   }
 
-  // ---------- S-01 / S-02 / S-04 / S-05 ----------
-
-  /** Concrete paths (no glob characters) of a spawn's files and scope. */
   private preClaimSubagentFiles(runId: string, label: string, entries: readonly string[]): string | undefined {
-    const concrete = [...new Set(entries.map((e) => String(e ?? "").trim().replace(/\\/g, "/")).filter((e) => e && !/[*?[\]{}]/.test(e)))];
-    for (const file of concrete) {
-      let claim;
-      try {
-        claim = this.crewFileClaims().tryClaim({ path: file, runId, step: 1, role: label, at: Date.now() });
-      } catch (error) {
-        this.host.appendLine(`[companions] could not claim ${file}: ${(error as Error).message}`);
-        continue;
-      }
-      if (!claim.ok) {
-        try { this.crewFileClaims().releaseRun(runId); } catch { /* */ }
-        return `${file} is being edited by ${claim.heldBy.role} (run ${claim.heldBy.runId}). Wait for it to finish, or give this subagent other files.`;
-      }
-    }
-    return undefined;
+    return this.subagentHost.preClaimSubagentFiles(runId, label, entries);
   }
 
-  /**
-   * S-01: an `inherit` / scoped writer without named files claims each file at
-   * its first write. A file another writer holds turns the request into a card
-   * with a warning, never an automatic grant.
-   */
   private childWriteClaimWarning(session: Session, req: PermissionRequest): string | undefined {
-    if (this.hiddenReasonOf(session) !== "companion-subagent") return undefined;
-    const id = session.pendingHiddenChild?.subagentId ?? this.sessionTypeMetaFor(session)?.subagentId ?? "";
-    const record = this.subagents.get(id);
-    if (!record || record.profile === "read-only") return undefined;
-    const facts = extractPermissionFacts(req.toolCall);
-    if (facts.kind !== "edit" || !facts.paths.length) return undefined;
-    const root = this.sessionCwd(session);
-    for (const p of facts.paths) {
-      const relative = path.relative(root, p);
-      const rel = (relative && !relative.startsWith("..") && !path.isAbsolute(relative) ? relative : p).replace(/\\/g, "/");
-      let claim;
-      try {
-        claim = this.crewFileClaims().tryClaim({ path: rel, runId: record.runId, step: record.step, role: record.label, at: Date.now() });
-      } catch {
-        continue;
-      }
-      if (!claim.ok && claim.heldBy.runId !== record.runId) {
-        return `${rel} is being edited by ${claim.heldBy.role}.`;
-      }
-    }
-    return undefined;
+    return this.subagentHost.childWriteClaimWarning(session, req);
   }
 
   private sessionSpawnPolicy(session: Session): string {
-    return session.delegationOverride?.spawnPolicy
-      ?? this.sessionTypeMetaFor(session)?.spawnPolicy
-      ?? this.companionsSetting<string>("subagents.spawnPolicy", "auto");
+    return this.subagentHost.sessionSpawnPolicy(session);
   }
 
-  private pendingSubagentApprovals?: Map<string, (answer: { approved: boolean; adjusted?: Record<string, unknown> }) => void>;
-
-  /** S-02: the approval card, with the request editable. */
-  private askSubagentApproval(
-    session: Session,
-    args: SpawnArguments,
-    verdict: Extract<EligibilityResult, { ok: true }>,
-  ): Promise<{ approved: boolean; adjusted?: Record<string, unknown> }> {
-    if (!this.pendingSubagentApprovals) this.pendingSubagentApprovals = new Map();
-    const id = `sa-approval-${randomUUID()}`;
-    const listing = listEligibleTargets(this.eligibilityInput(session, this.currentTurnId(session)), { expand: "all" });
-    const profiles = PERMISSION_PROFILES.slice(0, PERMISSION_PROFILES.indexOf(verdict.profile) + 1);
-    return new Promise((resolve) => {
-      this.pendingSubagentApprovals!.set(id, (answer) => {
-        this.pendingSubagentApprovals!.delete(id);
-        this.emit(session, { type: "subagentApprovalResolved", id, approved: answer.approved });
-        resolve(answer);
-      });
-      this.emit(session, {
-        type: "subagentApproval",
-        id,
-        label: args.label ?? deriveSubagentLabel(args.task),
-        task: args.task,
-        provider: verdict.target.provider,
-        ...(verdict.target.model ? { model: verdict.target.model } : {}),
-        ...(verdict.target.effort ? { effort: verdict.target.effort } : {}),
-        profile: verdict.profile,
-        profiles: [...profiles],
-        targets: listing.targets.map((t) => ({
-          provider: t.provider,
-          displayName: t.displayName,
-          ...(t.models ? { models: t.models.map((m) => ({ id: m.id, ...(m.label ? { label: m.label } : {}), ...(m.efforts ? { efforts: m.efforts } : {}) })) } : {}),
-        })),
-      });
-      this.setStatus(session, "needs-you");
-    });
+  private askSubagentApproval(session: Session, args: SpawnArguments, verdict: Extract<EligibilityResult, { ok: true }>): Promise<{ approved: boolean; adjusted?: Record<string, unknown> }> {
+    return this.subagentHost.askSubagentApproval(session, args, verdict);
   }
 
-  private answerSubagentApproval(
-    session: Session,
-    msg: { id: string; approved: boolean; task?: string; provider?: string; model?: string; effort?: string; profile?: string },
-  ): void {
-    const resolve = this.pendingSubagentApprovals?.get(msg.id);
-    if (!resolve) return;
-    if (session.status === "needs-you") this.setStatus(session, "working");
-    if (!msg.approved) {
-      resolve({ approved: false });
-      return;
-    }
-    const adjusted: Record<string, unknown> = {};
-    for (const key of ["task", "provider", "model", "effort", "profile"] as const) {
-      if (typeof msg[key] === "string") adjusted[key] = msg[key];
-    }
-    resolve({ approved: true, ...(Object.keys(adjusted).length ? { adjusted } : {}) });
+  private answerSubagentApproval(session: Session, msg: { id: string; approved: boolean; task?: string; provider?: string; model?: string; effort?: string; profile?: string }): void {
+    this.subagentHost.answerSubagentApproval(session, msg);
   }
 
-  /**
-   * S-04: a follow-up into a finished child's own session — its context is
-   * kept, which is much cheaper than a new spawn with a new brief. Refused
-   * when the child session is no longer live.
-   */
-  private async continueSubagent(
-    parent: Session,
-    subagentId: string,
-    message: string,
-  ): Promise<{ ok: true } | { ok: false; code: RefusalCode; message: string }> {
-    const record = this.subagents.get(subagentId);
-    if (!record) return { ok: false, code: "session-gone", message: "No such subagent." };
-    if (!isTerminalSubagentStatus(record.status)) {
-      return { ok: false, code: "still-running", message: "This subagent is still running; await it first." };
-    }
-    const child = this.poolSessionById(record.childSessionId);
-    if (!child?.client) {
-      return { ok: false, code: "session-gone", message: "This subagent's session is no longer live. Spawn a new one with a self-contained task." };
-    }
-    const reopened = this.subagents.reopen(subagentId);
-    if (!reopened) return { ok: false, code: "session-gone", message: "This subagent cannot take a follow-up." };
-    this.postSubagentCard(parent, subagentId);
-    this.postSubagentTray(parent);
-    const role: AgentRole = {
-      name: reopened.roleName ?? "subagent",
-      provider: child.provider,
-      whenToUse: "A companion subagent's follow-up.",
-      source: "builtin",
-      mode: SUBAGENT_RUN_MODE,
-    };
-    const run = async () => {
-      try {
-        const outcome = await this.runAgentRole(
-          role,
-          { goal: "", task: message, returnFormat: subagentReturnFormat() },
-          "subagent",
-          parent,
-          {
-            runId: reopened.runId,
-            step: reopened.step,
-            subagent: { subagentId, label: reopened.label, profile: reopened.profile },
-            continueSession: child,
-            continueMessage: message,
-          },
-        );
-        if (outcome.rawReply !== undefined) {
-          this.subagentReports.set(subagentId, outcome.rawReply);
-          this.writeSubagentRaw(reopened.runId, reopened.step, outcome.rawReply);
-        }
-        this.subagents.update(subagentId, {
-          status: outcome.outcome === "completed" ? "completed" : outcome.outcome === "cancelled" ? "cancelled" : "failed",
-          ...(outcome.totalTokens !== undefined ? { tokens: (reopened.tokens ?? 0) + outcome.totalTokens } : {}),
-        }, Date.now());
-        this.subagentOutcomes.set(subagentId, outcome);
-      } catch (error) {
-        this.subagents.update(subagentId, { status: "failed", errorCode: "child-crashed" }, Date.now());
-        this.host.appendLine(`[companions] follow-up for ${subagentId} failed: ${(error as Error).message}`);
-      } finally {
-        this.persistSubagentRecord(subagentId);
-        this.postSubagentCard(parent, subagentId);
-        this.releaseSubagentWaiters(subagentId);
-        this.postSubagentTray(parent);
-        this.maybeFinishSubagentTurn(parent);
-      }
-    };
-    void run();
-    return { ok: true };
+  private async continueSubagent(parent: Session, subagentId: string, message: string): Promise<{ ok: true } | { ok: false; code: RefusalCode; message: string }> {
+    return this.subagentHost.continueSubagent(parent, subagentId, message);
   }
-
-  // S-05: reports and cards survive a reload.
 
   private writeSubagentRaw(runId: string, step: number, raw: string): void {
-    try {
-      const dir = this.agentRuns.runDir(runId);
-      fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(path.join(dir, `${stepSlug(step)}.raw.md`), raw, "utf8");
-    } catch (error) {
-      this.host.appendLine(`[companions] could not write the raw report: ${(error as Error).message}`);
-    }
+    this.subagentHost.writeSubagentRaw(runId, step, raw);
   }
 
   private readSubagentReport(subagentId: string): string | undefined {
-    const record = this.subagents.get(subagentId);
-    if (!record?.runId) return undefined;
-    for (const name of [`${stepSlug(record.step)}.raw.md`, `${stepSlug(1)}.raw.md`]) {
-      try {
-        const text = fs.readFileSync(path.join(this.agentRuns.runDir(record.runId), name), "utf8");
-        this.subagentReports.set(subagentId, text);
-        return text;
-      } catch { /* try the next */ }
-    }
-    try {
-      return fs.readFileSync(this.agentRuns.resultPath(record.runId, record.step), "utf8");
-    } catch {
-      return undefined;
-    }
+    return this.subagentHost.readSubagentReport(subagentId);
   }
 
-  private static readonly SUBAGENT_INDEX_KEY = "companions.subagents.index";
-
-  /** Remember which runs belong to a parent, so its cards come back after a reload. */
   private rememberSubagentRun(parent: Session, runId: string): void {
-    const parentId = parent.activeSessionId;
-    if (!parentId) return;
-    const index = { ...this.state.get<Record<string, string[]>>(GrokSidebar.SUBAGENT_INDEX_KEY, {}) };
-    const runs = [...(index[parentId] ?? []), runId].slice(-50);
-    index[parentId] = runs;
-    const keys = Object.keys(index);
-    if (keys.length > 200) delete index[keys[0]!];
-    void this.state.update(GrokSidebar.SUBAGENT_INDEX_KEY, index);
+    this.subagentHost.rememberSubagentRun(parent, runId);
   }
 
   private persistSubagentRecord(subagentId: string): void {
-    const record = this.subagents.get(subagentId);
-    if (!record?.runId) return;
-    const outcome = this.subagentOutcomes.get(subagentId);
-    try {
-      const dir = this.agentRuns.runDir(record.runId);
-      fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(path.join(dir, "subagent.json"), `${JSON.stringify({
-        record,
-        ...(outcome ? {
-          outcome: {
-            summary: outcome.summary,
-            filesReported: outcome.filesReported,
-            filesObserved: outcome.filesObserved,
-            unreported: outcome.reconciliation?.unreported ?? [],
-            claimedOnly: outcome.reconciliation?.claimedOnly ?? [],
-            durationMs: outcome.durationMs,
-            ...(typeof outcome.totalTokens === "number" ? { totalTokens: outcome.totalTokens } : {}),
-          },
-        } : {}),
-      }, null, 2)}\n`, "utf8");
-    } catch (error) {
-      this.host.appendLine(`[companions] could not persist ${subagentId}: ${(error as Error).message}`);
-    }
+    this.subagentHost.persistSubagentRecord(subagentId);
   }
 
-  /** S-05 / D3: rebuild a restored parent's subagent cards from the run folders. */
   private restoreSubagentCards(parent: Session): void {
-    const parentId = parent.activeSessionId;
-    if (!parentId) return;
-    const runs = this.state.get<Record<string, string[]>>(GrokSidebar.SUBAGENT_INDEX_KEY, {})[parentId] ?? [];
-    for (const runId of runs) {
-      try {
-        const raw = JSON.parse(fs.readFileSync(path.join(this.agentRuns.runDir(runId), "subagent.json"), "utf8")) as {
-          record: SubagentRecord;
-          outcome?: { summary: string; filesReported: string[]; filesObserved: string[]; unreported: string[]; claimedOnly: string[]; durationMs: number; totalTokens?: number };
-        };
-        const record = raw.record;
-        if (!record?.subagentId || this.subagents.get(record.subagentId)) continue;
-        // A child still "running" on disk died with the window.
-        const status = isTerminalSubagentStatus(record.status) ? record.status : "cancelled";
-        this.subagents.add({ ...record, status, ...(record.endedAt ? {} : { endedAt: record.startedAt }) });
-        if (raw.outcome) {
-          this.subagentOutcomes.set(record.subagentId, {
-            outcome: status === "completed" ? "completed" : status === "failed" ? "failed" : "cancelled",
-            filesReported: raw.outcome.filesReported,
-            filesObserved: raw.outcome.filesObserved,
-            durationMs: raw.outcome.durationMs,
-            ...(typeof raw.outcome.totalTokens === "number" ? { totalTokens: raw.outcome.totalTokens } : {}),
-            summary: raw.outcome.summary,
-            planEntries: [],
-            reconciliation: { touched: [], unreported: raw.outcome.unreported, claimedOnly: raw.outcome.claimedOnly },
-          });
-        }
-        this.postSubagentCard(parent, record.subagentId);
-      } catch { /* a run without a record (older build) stays history-only */ }
-    }
+    this.subagentHost.restoreSubagentCards(parent);
   }
 
-  /** S-01: apply or discard a worktree child's changes. */
   private async settleSubagentWorktree(session: Session, subagentId: string, apply: boolean): Promise<void> {
-    const record = this.subagents.get(subagentId);
-    const wt = record?.worktree;
-    if (!record || !wt || wt.state !== "pending") return;
-    if (!isTerminalSubagentStatus(record.status)) {
-      this.agentNotice(session, "warning", "This subagent is still running.");
-      return;
-    }
-    if (apply) {
-      await this.applyCrewWorktree(session, wt);
-    } else {
-      try {
-        const removed = await this.worktreeLocal().remove({ worktreePath: wt.path, force: true });
-        if ("error" in removed) this.host.appendLine(`[companions] discard worktree: ${removed.error}`);
-      } catch (error) {
-        this.host.appendLine(`[companions] discard worktree failed: ${(error as Error).message}`);
-      }
-    }
-    this.subagents.update(subagentId, { worktree: { ...wt, state: apply ? "applied" : "discarded" } }, Date.now());
-    this.persistSubagentRecord(subagentId);
-    this.postSubagentCard(session, subagentId);
+    return this.subagentHost.settleSubagentWorktree(session, subagentId, apply);
   }
 
-  private subagentDeadlines?: Map<string, PausableDeadline>;
-  private subagentTimers?: Map<string, ReturnType<typeof setTimeout>>;
-
-  /** (Re)schedule the one timer for a subagent's remaining time; none while paused. */
   private rearmSubagentTimer(subagentId: string): void {
-    const deadline = this.subagentDeadlines?.get(subagentId);
-    if (!this.subagentTimers) this.subagentTimers = new Map();
-    const old = this.subagentTimers.get(subagentId);
-    if (old) clearTimeout(old);
-    this.subagentTimers.delete(subagentId);
-    if (!deadline || deadline.paused) return;
-    const t = setTimeout(() => {
-      this.subagentTimers?.delete(subagentId);
-      const d = this.subagentDeadlines?.get(subagentId);
-      if (!d || d.paused) return;
-      if (!d.expired(Date.now())) {
-        this.rearmSubagentTimer(subagentId);
-        return;
-      }
-      this.cancelSubagent(subagentId, "it ran past its time limit", "timeout");
-    }, Math.max(10, deadline.remainingMs(Date.now())));
-    (t as { unref?: () => void }).unref?.();
-    this.subagentTimers.set(subagentId, t);
+    this.subagentHost.rearmSubagentTimer(subagentId);
   }
 
   private clearSubagentDeadline(subagentId: string): void {
-    const t = this.subagentTimers?.get(subagentId);
-    if (t) clearTimeout(t);
-    this.subagentTimers?.delete(subagentId);
-    this.subagentDeadlines?.delete(subagentId);
+    this.subagentHost.clearSubagentDeadline(subagentId);
   }
 
-  /**
-   * Take exclusive claims on the files a write-capable subagent changed (§6.7).
-   *
-   * The claim is the file — same store the crew chain uses, so a subagent and a
-   * crew step cannot both think they own `src/auth.ts`. A conflict raises the
-   * existing claim card rather than being overwritten quietly; the user decides,
-   * because by this point the edit has already happened and the question is
-   * whether to keep it.
-   */
-  private async claimSubagentFiles(
-    session: Session,
-    record: { runId: string; step: number; label: string },
-    files: readonly string[],
-  ): Promise<void> {
-    for (const file of files) {
-      let claim;
-      try {
-        claim = this.crewFileClaims().tryClaim({
-          path: file,
-          runId: record.runId,
-          step: record.step,
-          role: record.label,
-          at: Date.now(),
-        });
-      } catch (error) {
-        // A claim is a lock, not the run. An unwritable claim directory must
-        // not turn a finished subagent into a failed one.
-        this.host.appendLine(`[companions] could not claim ${file}: ${(error as Error).message}`);
-        continue;
-      }
-      if (claim.ok) continue;
-      await this.confirmInChat(session, {
-        title: "File already claimed",
-        body: `${file} is held by ${claim.heldBy.role} (step ${claim.heldBy.step}). `
-          + `The subagent has already changed it — review the diff before keeping it.`,
-        confirmLabel: "Understood",
-      });
-    }
+  private async claimSubagentFiles(session: Session, record: { runId: string; step: number; label: string }, files: readonly string[]): Promise<void> {
+    return this.subagentHost.claimSubagentFiles(session, record, files);
   }
 
-  // ---------- D20: the turn spans the delegation ----------
-
-  /**
-   * Hold the parent turn open while its subagents are still running (§6.10).
-   *
-   * "Background" (`wait: "none"`) only means the main agent did not block its
-   * own tool call — never that a child outlives the turn unobserved. So when
-   * the CLI ends its prompt turn with children still live, the host keeps the
-   * session `working` and defers the end to `maybeFinishSubagentTurn`, which
-   * runs as each child settles.
-   *
-   * Returns true when the turn was held.
-   */
-  private holdTurnForSubagents(session: Session, meta?: unknown): boolean {
-    const parentSessionId = session.activeSessionId ?? "";
-    const turnId = this.currentTurnId(session);
-    if (!this.subagents.turnHasLiveChildren(parentSessionId, turnId)) return false;
-    session.subagentTurnHold = { turnId, meta };
-    this.setStatus(session, "working");
-    this.postSubagentTray(session);
-    this.host.appendLine(
-      `[companions] holding turn ${turnId}: `
-      + `${this.subagents.running(parentSessionId).length} subagent(s) still running`,
-    );
-    return true;
+  public holdTurnForSubagents(session: Session, meta?: unknown): boolean {
+    return this.subagentHost.holdTurnForSubagents(session, meta);
   }
 
-  /**
-   * The tray above the composer (§6.10 point 5).
-   *
-   * Its whole job is answering "why is this still working?" — so it lists the
-   * live children with their targets and elapsed time, and disappears the
-   * moment the last one is terminal.
-   */
-  private postSubagentTray(session: Session): void {
-    const parentId = session.activeSessionId ?? "";
-    const running = this.subagents.running(parentId);
-    const turnId = this.currentTurnId(session);
-    // S-08: while others still run, this turn's finished children stay in the
-    // tray so one can be kept as a session from there too.
-    const finished = running.length
-      ? this.subagents.forParent(parentId).filter((record) =>
-          record.spawnedInTurn === turnId && isTerminalSubagentStatus(record.status)
-          && record.status !== "refused" && !!record.childSessionId && !record.promoted)
-      : [];
-    const row = (record: SubagentRecord) => {
-      const live = (session.subagentLive ?? []).find((h) => h.subagentId === record.subagentId)?.roleSession;
-      return {
-        subagentId: record.subagentId,
-        label: record.label,
-        provider: record.target.provider,
-        providerName: providerDisplayName(record.target.provider),
-        ...(record.target.model ? { model: record.target.model } : {}),
-        startedAt: record.startedAt,
-        ...(isTerminalSubagentStatus(record.status) ? { status: record.status, promotable: true } : {}),
-        ...(this.childWaitsForYou(live) ? { needsYou: true } : {}),
-      };
-    };
-    // Same reasoning as the card: the tray belongs where somebody is looking.
-    this.emit(this.visibleAncestorOf(session), {
-      type: "subagentTray",
-      subagents: [...running, ...finished].map(row),
-    });
+  public postSubagentTray(session: Session): void {
+    this.subagentHost.postSubagentTray(session);
   }
 
-  /** Finish a turn that was held for its subagents. */
-  private releaseTurnHold(session: Session): void {
-    const hold = session.subagentTurnHold;
-    if (!hold) return;
-    session.subagentTurnHold = undefined;
-    this.postSubagentTray(session);
-    if (turnIsInFlight(session)) return;
-    this.emit(session, {
-      type: "agentEnd",
-      ...(hold.meta ? { meta: hold.meta as never } : {}),
-      ...this.turnEndFields(session, "completed"),
-    });
-    this.noteLiveTurnEnded(session);
-    this.setStatus(session, "done");
-    this.noteSessionActivity(session);
+  public releaseTurnHold(session: Session): void {
+    this.subagentHost.releaseTurnHold(session);
   }
 
-  // ---------- directives (§6.8) ----------
-
-  /**
-   * Read this message's `@subagent:` / `@role:` directives, and arm the turn.
-   *
-   * Returns the text with the mention tokens removed and the block to append.
-   * Deliberately replaces whatever the last turn set, including with nothing: a
-   * directive is something the user said about THIS message, and carrying it
-   * forward would silently pin every later turn to a worker they named once.
-   */
-  private applyTurnDirectives(session: Session, text: string): { text: string; block: string } {
-    const parsed = parseSubagentMentions(text);
-    session.subagentDirectives = parsed.directives.length ? parsed.directives : undefined;
-    session.subagentsForbiddenThisTurn = parsed.directives.some((d) => d.strength === "forbid");
-    const block = renderDirectiveBlock(parsed.directives);
-    if (parsed.directives.length) {
-      this.host.appendLine(
-        `[companions] ${parsed.directives.length} directive(s) on this turn: `
-        + parsed.directives.map((d) => `${d.id}=${d.strength}${d.provider ? `:${d.provider}` : ""}${d.role ? `:${d.role}` : ""}`).join(", "),
-      );
-    }
-    return { text: parsed.text || text, block };
+  public applyTurnDirectives(session: Session, text: string): { text: string; block: string } {
+    return this.subagentHost.applyTurnDirectives(session, text);
   }
 
-  /**
-   * The directive a spawn should be resolved against, if any.
-   *
-   * A `must` directive PINS the target when the agent left it open — that is
-   * what "must" means. It deliberately does not override an explicit provider
-   * on the tool call: the agent may have been told to use two workers, and the
-   * host is not in a position to decide which of them this call is.
-   */
   private directiveForSpawn(session: Session, args: SpawnArguments): SubagentDirective | undefined {
-    const directives = session.subagentDirectives ?? [];
-    if (!directives.length) return undefined;
-    if (args.provider || args.role) {
-      return directives.find(
-        (directive) =>
-          (args.provider && directive.provider === args.provider)
-          || (args.role && directive.role === args.role),
-      );
-    }
-    return directives.find((directive) => directive.strength === "must");
+    return this.subagentHost.directiveForSpawn(session, args);
   }
 
-  /**
-   * Say so when a `must` directive was not followed (§6.8).
-   *
-   * Only `must`: `prefer` is advice, and flagging it would train the user to
-   * ignore the footer. The host knows whether a matching spawn happened, which
-   * is what makes this checkable rather than a guess about intent.
-   */
-  private reportUnfollowedDirectives(session: Session, turnId: string): void {
-    const directives = session.subagentDirectives ?? [];
-    if (!directives.length) return;
-    const spawned = this.subagents
-      .all()
-      .filter(
-        (record) =>
-          record.parentSessionId === (session.activeSessionId ?? "")
-          && record.spawnedInTurn === turnId
-          && record.status !== "refused",
-      )
-      .map((record) => ({
-        provider: record.target.provider,
-        ...(record.target.model ? { model: record.target.model } : {}),
-        ...(record.roleName ? { role: record.roleName } : {}),
-      }));
-    for (const directive of unfollowedDirectives(directives, spawned)) {
-      this.emit(session, {
-        type: "hostNotice",
-        level: "warning",
-        text: `Directive ${directive.id} was not followed.`,
-      });
-    }
+  public reportUnfollowedDirectives(session: Session, turnId: string): void {
+    this.subagentHost.reportUnfollowedDirectives(session, turnId);
   }
 
-  // ---------- child visibility, cards and waiters ----------
-
-  /**
-   * Stamp a child session hidden BEFORE its first turn (§6.6 point 1).
-   *
-   * Before, not after, because a history refresh triggered by the child's own
-   * `session/new` would otherwise race it into the list — visibly, and with a
-   * name the user never chose. The write itself has to wait until the CLI has
-   * named the session (the record is keyed by that id), so the stamp is parked
-   * on the session object and flushed the moment the id exists.
-   */
-  private markHiddenChildSession(
-    child: Session,
-    parent: Session,
-    subagentId: string,
-    hiddenReason: HiddenReason = "companion-subagent",
-  ): void {
-    child.sessionType = "agent";
-    child.sessionTypeLockedAt = Date.now();
-    child.pendingHiddenChild = {
-      parentSessionId: parent.activeSessionId ?? "",
-      subagentId,
-      hiddenReason,
-      depth: (this.sessionTypeMetaFor(parent)?.depth ?? 0) + 1,
-    };
+  private markHiddenChildSession(child: Session, parent: Session, subagentId: string, hiddenReason: HiddenReason = "companion-subagent"): void {
+    this.subagentHost.markHiddenChildSession(child, parent, subagentId, hiddenReason);
   }
 
-  /**
-   * Promote a companion subagent to a session of its own (§6.6 point 8, P6).
-   *
-   * The child has been a real session for its provider all along; it was only
-   * ever hidden by our own metadata. So this is a deletion of four fields plus
-   * a name, and the history filter and the empty-session sweep pick it up on
-   * their next pass.
-   *
-   * Refused while the child is still running: promoting mid-flight would put a
-   * conversation in the list that the parent is still driving and Stop still
-   * owns, and the user would have two places to steer one turn from.
-   */
   private async promoteSubagentSession(session: Session, subagentId: string): Promise<void> {
-    const record = this.subagents.get(subagentId);
-    if (!record) return;
-    if (!isTerminalSubagentStatus(record.status)) {
-      this.emit(session, {
-        type: "hostNotice",
-        level: "warning",
-        text: "This subagent is still running. Wait for it to finish, or cancel it first.",
-      });
-      return;
-    }
-    const childId = record.childSessionId;
-    if (!childId) {
-      // A refusal or a crash before `session/new` — there is no session to
-      // promote, and saying "promoted" would be a lie about an empty shell.
-      this.emit(session, {
-        type: "hostNotice",
-        level: "warning",
-        text: "This subagent never started a session, so there is nothing to keep.",
-      });
-      return;
-    }
-    const overrides = this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
-    const promotion = promoteHiddenChild(overrides[childId]);
-    if (!promotion.ok) {
-      this.emit(session, {
-        type: "hostNotice",
-        level: "warning",
-        text: promotion.reason === "generator"
-          ? "A workflow generator run cannot be kept as a session."
-          : "This is already a session of its own.",
-      });
-      return;
-    }
-    const name = promotedSessionName(record.label, this.sessionDisplayName(session));
-    await this.state.update(SESSION_META_KEY, {
-      ...overrides,
-      [childId]: { ...promotion.meta, customName: name },
-    });
-    this.sessionCache.delete(childId);
-    // The live child object, if it is still in the pool, has its own copy of
-    // the hidden marker — clear it too, or a refresh before the next reload
-    // would put the row back.
-    const live = [...this.pool].find((candidate) => candidate.activeSessionId === childId);
-    if (live) live.pendingHiddenChild = undefined;
-    // The card keeps its place in the parent transcript: the delegation
-    // happened, and hiding the record of it would be a second lie.
-    this.subagents.update(subagentId, { promoted: true }, Date.now());
-    this.postSubagentCard(session, subagentId);
-    this.host.appendLine(`[companions] promoted ${subagentId} (${childId}) to "${name}"`);
-    this.postSessionsList();
-    this.emit(session, {
-      type: "hostNotice",
-      level: "info",
-      text: `Kept as a session: ${name}`,
-    });
+    return this.subagentHost.promoteSubagentSession(session, subagentId);
   }
 
-  /** Write the parked hidden-child stamp once the CLI has named the session. */
   private flushHiddenChildMeta(session: Session): void {
-    const pending = session.pendingHiddenChild;
-    const id = session.activeSessionId;
-    if (!pending || !id) return;
-    session.pendingHiddenChild = undefined;
-    const overrides = this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
-    void this.state.update(SESSION_META_KEY, {
-      ...overrides,
-      [id]: { ...(overrides[id] ?? {}), ...pending },
-    });
-    this.sessionCache.delete(id);
+    this.subagentHost.flushHiddenChildMeta(session);
   }
 
-  /** The target block a spawn/await payload carries (§6.4.2). */
-  private targetPayload(verdict: Extract<EligibilityResult, { ok: true }>): unknown {
-    return {
-      provider: verdict.target.provider,
-      ...(verdict.target.model ? { model: verdict.target.model } : {}),
-      ...(verdict.target.effort ? { effort: verdict.target.effort } : {}),
-      effortClamped: verdict.effortClamped ?? null,
-      modelVerified: verdict.modelVerified,
-      sameProviderAsParent: verdict.sameProviderAsParent,
-    };
+  public postSubagentCard(session: Session, subagentId: string): void {
+    this.subagentHost.postSubagentCard(session, subagentId);
   }
 
-  /**
-   * The result payload for one finished child.
-   *
-   * Capped at `resultInlineChars` and never trimmed silently: `truncated`,
-   * `fullLength` and `resultRef` travel with it so the model can decide whether
-   * the rest is worth an `await` with `action: "read"` (§2.1 point 4).
-   */
-  private subagentResultPayload(subagentId: string, opts: { markCollected?: boolean } = {}): unknown {
-    const record = this.subagents.get(subagentId);
-    if (!record) return { subagentId, status: "unknown" };
-    if (opts.markCollected) this.subagents.update(subagentId, { collected: true }, Date.now());
-    const outcome = this.subagentOutcomes.get(subagentId);
-    const base = {
-      subagentId,
-      status: record.status,
-      target: {
-        provider: record.target.provider,
-        ...(record.target.model ? { model: record.target.model } : {}),
-        ...(record.target.effort ? { effort: record.target.effort } : {}),
-        effortClamped: record.effortClamped ?? null,
-        modelVerified: record.modelVerified ?? false,
-        sameProviderAsParent: record.sameProviderAsParent ?? false,
-      },
-      profile: record.profile,
-      ...(record.profileDowngraded ? { profileDowngraded: record.profileDowngraded } : {}),
-      durationMs: (record.endedAt ?? Date.now()) - record.startedAt,
-      ...(record.tokens !== undefined ? { usage: { tokens: record.tokens } } : {}),
-    };
-    if (record.status !== "completed" || !outcome) {
-      return { ...base, refusal: record.errorCode ? { code: record.errorCode } : null };
-    }
-    const cap = Math.max(200, Number(this.companionsSetting("subagents.limits.resultInlineChars", 4000)));
-    const summary = capInlineText(outcome.parsed?.summary ?? outcome.summary ?? "", cap);
-    return {
-      ...base,
-      result: {
-        summary: summary.text,
-        findings: outcome.parsed?.open ?? [],
-        filesReported: outcome.filesReported,
-        filesObserved: outcome.filesObserved,
-        unreported: outcome.reconciliation?.unreported ?? [],
-        claimedOnly: outcome.reconciliation?.claimedOnly ?? [],
-        openQuestions: outcome.parsed?.open ?? [],
-        truncated: summary.truncated,
-        fullLength: (this.subagentReports.get(subagentId) ?? "").length,
-        resultRef: subagentId,
-      },
-      // D20 / §2.1 point 5: the hint rides HERE, with the result the parent
-      // already has, rather than costing a second host message.
-      review: COMPANIONS_REVIEW_HINT,
-      refusal: null,
-    };
-  }
-
-  /** Push the card for one subagent into its parent's transcript. */
-  private postSubagentCard(session: Session, subagentId: string): void {
-    const record = this.subagents.get(subagentId);
-    if (!record) return;
-    const outcome = this.subagentOutcomes.get(subagentId);
-    // A card in a hidden child's transcript is a card nobody reads, so a
-    // subagent started by a crew stage or by a depth-1 child renders in the
-    // conversation that owns the chain — labelled with where it came from, or
-    // it would look like the user's own session started it (§7.9).
-    const visible = this.visibleAncestorOf(session);
-    const startedBy = visible === session ? undefined : this.chainLabelFor(session);
-    const liveChild = (session.subagentLive ?? []).find((h) => h.subagentId === subagentId)?.roleSession;
-    this.emit(visible, {
-      type: "companionSubagent",
-      ...(startedBy ? { startedBy } : {}),
-      ...(this.childWaitsForYou(liveChild) ? { needsYou: true } : {}),
-      childStatus: subagentChildStatus(record.status, { needsYou: this.childWaitsForYou(liveChild) }),
-      subagentId,
-      label: record.label,
-      provider: record.target.provider,
-      providerName: providerDisplayName(record.target.provider),
-      ...(record.target.model ? { model: record.target.model } : {}),
-      ...(record.target.effort ? { effort: record.target.effort } : {}),
-      profile: record.profile,
-      profileLabel: profileBadge(record.profile),
-      status: record.status,
-      startedAt: record.startedAt,
-      ...(record.endedAt ? { endedAt: record.endedAt } : {}),
-      modelVerified: record.modelVerified ?? false,
-      sameProviderAsParent: record.sameProviderAsParent ?? false,
-      ...(record.effortClamped ? { effortClamped: record.effortClamped } : {}),
-      ...(record.profileDowngraded ? { profileDowngraded: record.profileDowngraded } : {}),
-      ...(record.errorCode ? { errorCode: record.errorCode } : {}),
-      ...(record.refusalMessage ? { refusalMessage: record.refusalMessage } : {}),
-      ...(typeof record.tokens === "number" ? { tokens: record.tokens } : {}),
-      ...(record.worktree ? { worktree: record.worktree.state } : {}),
-      ...(record.adjustedByUser ? { adjustedByUser: true } : {}),
-      ...(isTerminalSubagentStatus(record.status) && record.status !== "refused" && this.poolSessionById(record.childSessionId)?.client
-        ? { canFollowUp: true }
-        : {}),
-      ...(record.ranModel && record.ranModel !== record.target.model ? { ranModel: record.ranModel } : {}),
-      ...(record.refusalAlternatives?.length ? { refusalAlternatives: record.refusalAlternatives } : {}),
-      ...(record.childSessionId ? { sessionId: record.childSessionId } : {}),
-      // §6.6 point 8: offered only once the child is finished and actually has
-      // a session to keep. Promoting mid-flight would put a conversation in the
-      // list that the parent is still driving and Stop still owns.
-      ...(record.childSessionId && isTerminalSubagentStatus(record.status) && !record.promoted
-        ? { promotable: true }
-        : {}),
-      ...(outcome?.summary ? { summary: outcome.summary } : {}),
-      ...(outcome?.filesReported?.length ? { filesReported: outcome.filesReported } : {}),
-      ...(outcome?.filesObserved?.length ? { filesObserved: outcome.filesObserved } : {}),
-      ...(outcome?.reconciliation?.unreported.length
-        ? { unreported: outcome.reconciliation.unreported }
-        : {}),
-      ...(outcome?.reconciliation?.claimedOnly.length
-        ? { claimedOnly: outcome.reconciliation.claimedOnly }
-        : {}),
-    });
-  }
-
-  /** Resolve once this subagent is terminal, or after `ms`, whichever is first. */
   private raceSubagent(subagentId: string, ms: number): Promise<boolean> {
-    const record = this.subagents.get(subagentId);
-    if (!record || isTerminalSubagentStatus(record.status)) return Promise.resolve(true);
-    return new Promise<boolean>((resolve) => {
-      let settled = false;
-      const done = (value: boolean) => {
-        if (settled) return;
-        settled = true;
-        resolve(value);
-      };
-      const timer = setTimeout(() => done(false), ms);
-      timer.unref?.();
-      const waiters = this.subagentWaiters.get(subagentId) ?? [];
-      waiters.push(() => { clearTimeout(timer); done(true); });
-      this.subagentWaiters.set(subagentId, waiters);
-    });
+    return this.subagentHost.raceSubagent(subagentId, ms);
   }
 
   private async raceSubagents(ids: readonly string[], ms: number, mode: "all" | "any"): Promise<void> {
-    if (!ids.length) return;
-    const races = ids.map((id) => this.raceSubagent(id, ms));
-    // `any` is what makes a fan-out cheap: the parent gets the first report
-    // back and can start reading while the others are still running.
-    if (mode === "any") await Promise.race(races);
-    else await Promise.all(races);
+    return this.subagentHost.raceSubagents(ids, ms, mode);
   }
 
   private releaseSubagentWaiters(subagentId: string): void {
-    for (const waiter of this.subagentWaiters.get(subagentId) ?? []) waiter();
-    this.subagentWaiters.delete(subagentId);
+    this.subagentHost.releaseSubagentWaiters(subagentId);
   }
 
-  /**
-   * Cancel one child. Every cancel path lands here (§6.5 point 8).
-   *
-   * Idempotent: the registry refuses to move a terminal record, so a timeout
-   * that fires while the child was already finishing changes nothing.
-   */
-  private cancelSubagent(subagentId: string, reason: string, code?: RefusalCode): void {
-    const record = this.subagents.get(subagentId);
-    if (!record || isTerminalSubagentStatus(record.status)) return;
-    this.host.appendLine(`[companions] cancelling ${subagentId}: ${reason}`);
-    for (const session of this.pool) {
-      const handle = session.subagentLive?.find((entry) => entry.subagentId === subagentId);
-      if (!handle) continue;
-      handle.cancelled = true;
-      void handle.roleSession.client?.cancel("companion subagent cancelled");
-      break;
-    }
-    this.subagents.update(
-      subagentId,
-      { status: "cancelled", ...(code ? { errorCode: code } : {}) },
-      Date.now(),
-    );
-    this.releaseSubagentWaiters(subagentId);
+  public cancelSubagent(subagentId: string, reason: string, code?: RefusalCode): void {
+    this.subagentHost.cancelSubagent(subagentId, reason, code);
   }
 
-  /** Stop means stop: every running child of this parent (§6.5 point 8). */
-  private cancelSubagentsOf(session: Session, reason: string): void {
-    for (const record of this.subagents.running(session.activeSessionId ?? "")) {
-      this.cancelSubagent(record.subagentId, reason);
-    }
+  public cancelSubagentsOf(session: Session, reason: string): void {
+    this.subagentHost.cancelSubagentsOf(session, reason);
   }
 
-  /**
-   * D20 — the parent turn ends only after the last child is terminal.
-   *
-   * When a child finished that the parent never collected, ONE batched line
-   * says so (§6.10 point 3). A parent that already has the result gets nothing:
-   * it was told with the tool result, and a second message would be an extra
-   * turn spent repeating it.
-   */
-  private maybeFinishSubagentTurn(session: Session): void {
-    const parentSessionId = session.activeSessionId ?? "";
-    const turnId = this.currentTurnId(session);
-    // Every child settling refreshes the tray, so the user watches the count
-    // fall rather than seeing it vanish all at once at the end.
-    this.postSubagentTray(session);
-    if (this.subagents.turnHasLiveChildren(parentSessionId, turnId)) return;
-    // §6.8: said once the turn's delegation is settled, so it reflects what
-    // actually ran rather than what had run so far.
-    this.reportUnfollowedDirectives(session, turnId);
-    const uncollected = this.subagents.uncollectedFinished(parentSessionId, turnId);
-    if (!uncollected.length) return;
-    this.emit(session, {
-      type: "hostNotice",
-      level: "info",
-      text: uncollectedFollowUpText(uncollected),
-    });
-    for (const record of uncollected) {
-      this.subagents.update(record.subagentId, { collected: true }, Date.now());
-    }
+  public maybeFinishSubagentTurn(session: Session): void {
+    this.subagentHost.maybeFinishSubagentTurn(session);
   }
 
 
@@ -14421,8 +9255,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     if (this.reaper) { clearInterval(this.reaper); this.reaper = undefined; }
     if (this.routineTimer) { clearInterval(this.routineTimer); this.routineTimer = undefined; }
     if (this.workflowTimer) { clearInterval(this.workflowTimer); this.workflowTimer = undefined; }
-    for (const timer of this.loginReprobeTimers.values()) clearTimeout(timer);
-    this.loginReprobeTimers.clear();
+    this._providerSetup?.dispose();
     for (const timer of this.turnOrderTimers) clearTimeout(timer);
     this.turnOrderTimers.clear();
     // Window reload and extension deactivation both land here. Closing the pipe
@@ -14443,8 +9276,6 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       session.askUserToken = undefined;
       this.dropPendingQuestions(session);
     }
-    this.codexInstallAbort?.abort(new Error("Installation cancelled."));
-    this.codexInstallAbort = undefined;
     try { this.settingsEditor?.dispose(); } catch { /* tab already gone */ }
     this.settingsEditor = undefined;
     void this.disposePool();
@@ -18562,13 +13393,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       : this.refreshAdapterHistory(provider, cwd, key))
       .catch((error) => {
         this.host.appendLine(`[${provider}] session listing failed: ${(error as Error).message}`);
-        const credential = provider === "claude"
-          ? isClaudeCredentialError(error)
-          : provider === "gemini"
-          ? isGeminiCredentialError(error)
-          : provider === "muse"
-          ? new MuseBackend().isCredentialError(error)
-          : isCodexCredentialError(error);
+        const credential = this.providerSetup.isProviderCredentialError(provider, error);
         if (!credential) return;
         history.at.set(key, Date.now());
         this.setProviderNeedsLogin(provider, true);
@@ -20213,83 +15038,14 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     replaceAll?: boolean,
     sites?: { oldText: string; newText: string; oldLine?: number; newLine?: number }[],
   ): Promise<void> {
-    const base = path.basename(filePath);
-    // grok's diff block carries only the replaced region, which opens as a
-    // context-free two-line tab. Expand it against the file on disk so the tab
-    // shows the whole file and lands on the change (#66); a pending permission
-    // hasn't been written yet, so there the file on disk is the "before".
-    const sides = expandDiffToWholeFile({
-      diskText: this.readFileForDiff(session, filePath),
-      oldRegion: oldText,
-      newRegion: newText,
-      diskIsBefore: requestId !== undefined,
-      replaceAll,
-      sites,
-    });
-    // Unique key per diff so sequential edits to the same file don't collide on
-    // the content map. The trailing real filename gives VS Code the language.
-    const key = String(this.diffSeq++);
-    const left = Uri.from({ scheme: GROK_DIFF_SCHEME, path: `/${key}/before/${base}` });
-    const right = Uri.from({ scheme: GROK_DIFF_SCHEME, path: `/${key}/after/${base}` });
-    this.diffProvider.set(left, sides.oldText);
-    this.diffProvider.set(right, sides.newText);
-    if (requestId !== undefined) {
-      // Auto-open is per pending permission; remember the URIs so the matching
-      // tab can be closed (and its content dropped) once the user decides (#21).
-      const stale = this.openDiffsByRequest.set(session, requestId, { left, right });
-      if (stale) this.closeDiffUris(stale);
-    }
-    // preview:false — VS Code keeps ONE preview slot per group, so a preview
-    // diff evicted the file the user had single-clicked open (#167, upstream
-    // 033360c; pinned by test/proposed-diff-preview.test.ts).
-    // preserveFocus:true keeps focus on the chat so the permission card is
-    // immediately clickable. `selection` opens a whole-file diff on the edit
-    // instead of at line 1 (#66) — harmless at 0 when expansion fell back.
-    const at = sides.firstChangedLine;
-    await this.host.openDiff(left, right, `${providerDisplayName(session.provider)} proposed: ${base}`, {
-      preview: false,
-      preserveFocus: true,
-      selection: {
-        start: { line: at, character: 0 },
-        end: { line: at, character: 0 },
-      },
-    });
+    return this.reviewHost.openDiffEditor(session, filePath, oldText, newText, requestId, replaceAll, sites);
   }
-
-  /**
-   * The file's current content, for whole-file diff expansion (#66). Undefined
-   * when it can't be read — a create whose file doesn't exist yet, a file
-   * deleted since, or one too big to hold twice — which leaves the diff at the
-   * region-only fallback rather than failing the open.
-   */
-  /** Resolve a diff/revert file path against the session's cwd, revalidating
-   *  containment on desktop (same TOCTOU class as openFsPath / file-tree
-   *  open) immediately before use. Returns undefined when desktop's policy
-   *  check refuses the path. VS Code keeps the plain resolve. */
   private resolveDiffFilePath(session: Session, filePath: string): string | undefined {
-    return path.isAbsolute(filePath) ? filePath : path.join(this.sessionCwd(session), filePath);
+    return this.reviewHost.resolveDiffFilePath(session, filePath);
   }
-
   private readFileForDiff(session: Session, filePath: string): string | undefined {
-    try {
-      const abs = this.resolveDiffFilePath(session, filePath);
-      if (!abs) return undefined;
-      const stat = fs.statSync(abs);
-      if (!stat.isFile() || stat.size > MAX_DIFF_EXPAND_BYTES) return undefined;
-      return fs.readFileSync(abs, "utf8");
-    } catch {
-      return undefined;
-    }
+    return this.reviewHost.readFileForDiff(session, filePath);
   }
-
-  /**
-   * Revert one completed edit (docs/UNIVERSAL_DIFF_SUPPORT_PLAN.md § 5). The
-   * webview sends the diff block it already rendered rather than an id into
-   * a host-side store; {@link planEditRevert} (pure — see diff-view.ts) turns
-   * that plus the file's current disk content into a plan, and this method
-   * only carries out the effects (read, confirm, write/delete) the plan asks
-   * for.
-   */
   private async revertToolEdit(
     session: Session,
     msg: {
@@ -20301,689 +15057,90 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       sites?: { oldText: string; newText: string; oldLine?: number; newLine?: number }[];
     },
   ): Promise<void> {
-    const respond = (ok: boolean, reason?: string) => {
-      this.emit(session, {
-        type: "toolEditReverted",
-        toolCallId: msg.toolCallId,
-        path: msg.path,
-        ok,
-        ...(reason ? { reason } : {}),
-      });
-    };
-    const abs = this.resolveDiffFilePath(session, msg.path);
-    if (!abs) {
-      respond(false, "File could not be located.");
-      return;
-    }
-    let currentText: string | undefined;
-    try {
-      const stat = fs.statSync(abs);
-      if (stat.isFile() && stat.size <= MAX_DIFF_EXPAND_BYTES) currentText = fs.readFileSync(abs, "utf8");
-    } catch {
-      currentText = undefined;
-    }
-
-    const plan = planEditRevert({
-      oldText: msg.oldText,
-      newText: msg.newText,
-      replaceAll: msg.replaceAll,
-      sites: msg.sites,
-      currentText,
-    });
-    switch (plan.action) {
-      case "unreadable":
-        respond(false, "File could not be read.");
-        return;
-      case "conflict":
-        respond(false, "The file has changed since this edit and can't be safely reverted.");
-        return;
-      case "delete-confirm":
-      case "delete":
-        if (plan.action === "delete-confirm") {
-          const choice = await this.host.showWarningMessage(
-            `${path.basename(abs)} has changed since this edit. Delete it anyway?`,
-            "Delete",
-            "Cancel",
-          );
-          if (choice !== "Delete") {
-            respond(false, "Cancelled.");
-            return;
-          }
-        }
-        try {
-          await this.host.fs.delete(Uri.file(abs), { useTrash: true });
-          this.forgetReviewPath(session, msg.path, { toolCallId: msg.toolCallId });
-          respond(true);
-        } catch {
-          respond(false, "Could not delete the file.");
-        }
-        return;
-      case "write":
-        try {
-          await this.host.fs.writeFile(Uri.file(abs), Buffer.from(plan.text, "utf8"));
-          this.forgetReviewPath(session, msg.path, { toolCallId: msg.toolCallId });
-          respond(true);
-        } catch {
-          respond(false, "Could not write the file.");
-        }
-        return;
-    }
+    return this.reviewHost.revertToolEdit(session, msg);
   }
-
-  /**
-   * Fold a tool call's diff blocks into the review-center list (AP-09).
-   *
-   * Ingest always (including replay, so the snapshot after historyReplay has
-   * the rows). Emit only live — replay would paint the panel N times before
-   * `sessionUiSnapshot` sends the finished list.
-   */
   private noteReviewToolCall(session: Session, call: unknown): void {
-    const turnId = String(session.userMessageCount || 0);
-    const next = ingestReviewToolCall(session.reviewBlocks, call, turnId);
-    if (next === session.reviewBlocks) return;
-    if (next.length === session.reviewBlocks.length
-      && next.every((b, i) => b === session.reviewBlocks[i])) return;
-    const had = session.reviewBlocks.length > 0;
-    session.reviewBlocks = next;
-    if (!had && !next.length) return;
-    if (!session.replaying) this.emitReviewCenter(session);
+    return this.reviewHost.noteReviewToolCall(session, call);
   }
-
   private emitReviewCenter(session: Session): void {
-    const currentTurnId = String(session.userMessageCount);
-    this.emit(session, {
-      type: "reviewCenter",
-      currentTurnId,
-      files: reviewCenterSnapshot(session.reviewBlocks, currentTurnId),
-    });
+    return this.reviewHost.emitReviewCenter(session);
   }
-
-  private forgetReviewPath(
-    session: Session,
-    filePath: string,
-    opts?: { turnId?: string; toolCallId?: string },
-  ): void {
-    const next = dropReviewPath(session.reviewBlocks, filePath, opts);
-    if (next.length === session.reviewBlocks.length) return;
-    session.reviewBlocks = next;
-    this.emitReviewCenter(session);
+  private forgetReviewPath(session: Session, filePath: string, opts?: { turnId?: string; toolCallId?: string }): void {
+    return this.reviewHost.forgetReviewPath(session, filePath, opts);
   }
-
   private ackReviewReverted(session: Session, blocks: { toolCallId: string; path: string }[]): void {
-    const seen = new Set<string>();
-    for (const b of blocks) {
-      const key = `${b.toolCallId}|${b.path}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      this.emit(session, {
-        type: "toolEditReverted",
-        toolCallId: b.toolCallId,
-        path: b.path,
-        ok: true,
-      });
-    }
+    return this.reviewHost.ackReviewReverted(session, blocks);
   }
-
-  /**
-   * Discard one file's completed edits in the selected scope. Chains
-   * `planEditRevert` in memory ({@link planFileRevert}) and performs one
-   * write/delete — never N disk reverts that could stop mid-list.
-   */
   private async reviewRevertFile(session: Session, filePath: string, scope: ReviewScope): Promise<void> {
-    const currentTurnId = String(session.userMessageCount);
-    const blocks = completedBlocksForPath(session.reviewBlocks, filePath, scope, currentTurnId);
-    const fail = (reason: string) => {
-      const first = blocks[0];
-      if (first) {
-        this.emit(session, {
-          type: "toolEditReverted",
-          toolCallId: first.toolCallId,
-          path: first.path,
-          ok: false,
-          reason,
-        });
-      }
-    };
-    if (!blocks.length) {
-      fail("Nothing to discard for this file.");
-      return;
-    }
-    const pathForDisk = blocks[blocks.length - 1].path;
-    const abs = this.resolveDiffFilePath(session, pathForDisk);
-    if (!abs) {
-      fail("File could not be located.");
-      return;
-    }
-    let currentText: string | undefined;
-    try {
-      const stat = fs.statSync(abs);
-      if (stat.isFile() && stat.size <= MAX_DIFF_EXPAND_BYTES) currentText = fs.readFileSync(abs, "utf8");
-    } catch {
-      currentText = undefined;
-    }
-    const plan = planFileRevert(blocks, currentText);
-    switch (plan.action) {
-      case "unreadable":
-        fail("File could not be read.");
-        return;
-      case "conflict":
-        fail("The file has changed since this edit and can't be safely reverted.");
-        return;
-      case "delete-confirm":
-      case "delete":
-        if (plan.action === "delete-confirm") {
-          const choice = await this.host.showWarningMessage(
-            `${path.basename(abs)} has changed since this edit. Delete it anyway?`,
-            "Delete",
-            "Cancel",
-          );
-          if (choice !== "Delete") {
-            fail("Cancelled.");
-            return;
-          }
-        }
-        try {
-          await this.host.fs.delete(Uri.file(abs), { useTrash: true });
-        } catch {
-          fail("Could not delete the file.");
-          return;
-        }
-        break;
-      case "write":
-        try {
-          await this.host.fs.writeFile(Uri.file(abs), Buffer.from(plan.text, "utf8"));
-        } catch {
-          fail("Could not write the file.");
-          return;
-        }
-        break;
-    }
-    session.reviewBlocks = dropReviewPath(
-      session.reviewBlocks,
-      pathForDisk,
-      scope === "turn" ? { turnId: currentTurnId } : undefined,
-    );
-    this.emitReviewCenter(session);
-    this.ackReviewReverted(session, blocks);
+    return this.reviewHost.reviewRevertFile(session, filePath, scope);
   }
-
-  /**
-   * Discard every file in the selected scope by restoring the AP-08
-   * checkpoint. Not N `planEditRevert`s — a conflict would otherwise leave
-   * earlier files reverted and later ones untouched.
-   */
-  private async reviewRevertAll(
-    session: Session,
-    scope: ReviewScope,
-  ): Promise<void> {
-    const currentTurnId = String(session.userMessageCount);
-    const plan = planDiscardAll(scope, currentTurnId);
-    if (plan.kind === "unavailable") {
-      this.emit(session, { type: "hostNotice", level: "warning", text: "Can't discard all — there is no checkpoint for this turn." });
-      return;
-    }
-    const sid = session.activeSessionId ?? session.client?.sessionId;
-    if (!sid || !this.checkpointStore) {
-      this.emit(session, { type: "hostNotice", level: "warning", text: "Can't discard all — there is no checkpoint for this turn." });
-      return;
-    }
-
-    let merged: Checkpoint;
-    if (plan.mode === "turn") {
-      const cp = this.checkpointStore.load(sid, plan.turnId);
-      if (!cp || cp.disabled || (!cp.files.length && !cp.skipped.length)) {
-        this.emit(session, {
-          type: "hostNotice",
-          level: "warning",
-          text: cp?.disabled
-            ? `Can't discard all — the checkpoint for this turn is unavailable (${cp.disableReason || "disabled"}).`
-            : "Can't discard all — there is no checkpoint for this turn.",
-        });
-        return;
-      }
-      merged = cp;
-    } else {
-      const later = this.checkpointStore.loadFrom(sid, 0);
-      if (!later.length) {
-        this.emit(session, { type: "hostNotice", level: "warning", text: "Can't discard all — there is no checkpoint for this conversation." });
-        return;
-      }
-      merged = mergeCheckpoints(later);
-    }
-
-    const cwd = this.sessionCwd(session);
-    const current = new Map<string, string | null>();
-    for (const file of merged.files) {
-      const abs = path.join(cwd, file.relPath);
-      try {
-        current.set(file.relPath, fs.readFileSync(abs, "utf8"));
-      } catch {
-        current.set(file.relPath, null);
-      }
-    }
-    const restore = planRestoreDetailed(merged, current);
-    const skippedNote = restore.skipped.length
-      ? `\n\nNot restorable:\n${restore.skipped.map((s) => `• ${s.relPath} (${s.reason === "too-large" ? "too large" : "binary"}, ${s.bytes} bytes)`).join("\n")}`
-      : "";
-    const wouldTouch = restore.writes.length + restore.deletes.length + restore.conflicts.length;
-    if (wouldTouch === 0 && !restore.skipped.length) {
-      this.emit(session, { type: "hostNotice", level: "info", text: "Nothing to discard — files already match the checkpoint." });
-      return;
-    }
-    if (wouldTouch > 0) {
-      const ok = await this.confirmInChat(session, {
-        title: "Discard all changes?",
-        body: `This will restore ${wouldTouch} file(s) to how they were before ${scope === "turn" ? "this turn" : "this conversation"}.${skippedNote}`,
-        confirmLabel: "Discard all",
-        danger: true,
-      });
-      if (!ok) return;
-    }
-    let overwrite = false;
-    if (restore.conflicts.length) {
-      const items = [
-        { label: "Overwrite all conflicting files", description: `${restore.conflicts.length} file(s) changed since the snapshot`, action: "overwrite" as const },
-        { label: "Cancel", action: "cancel" as const },
-      ];
-      const pick = await this.host.showQuickPick(items, {
-        placeHolder: "Restore anyway? Foreign changes will be overwritten.",
-        ignoreFocusOut: true,
-      });
-      if (!pick || pick.action === "cancel") return;
-      overwrite = true;
-    }
-
-    const toAck = (scope === "turn"
-      ? session.reviewBlocks.filter((b) => b.turnId === currentTurnId)
-      : session.reviewBlocks.slice());
-    const actions = restoreActions(restore, overwrite, merged);
-    const restored: string[] = [];
-    const failed: string[] = [];
-    for (const w of actions.writes) {
-      const abs = path.join(cwd, w.relPath);
-      try {
-        fs.mkdirSync(path.dirname(abs), { recursive: true });
-        fs.writeFileSync(abs, Buffer.from(w.blob, "utf8"));
-        restored.push(w.relPath);
-      } catch (e) {
-        failed.push(`${w.relPath}: ${(e as Error).message}`);
-      }
-    }
-    for (const rel of actions.deletes) {
-      const abs = path.join(cwd, rel);
-      try {
-        fs.unlinkSync(abs);
-        restored.push(rel);
-      } catch (e) {
-        const code = (e as NodeJS.ErrnoException).code;
-        if (code !== "ENOENT") failed.push(`${rel}: ${(e as Error).message}`);
-      }
-    }
-
-    // I/O failed mid-list: keep the remaining review rows so the user can
-    // retry. Success (even with skipped unrestorable files) drops the scope.
-    if (failed.length) {
-      this.emit(session, {
-        type: "hostNotice",
-        level: "warning",
-        text: `Discarded some files, but ${failed.length} could not be restored:\n${failed.join("\n")}`,
-      });
-      for (const rel of restored) {
-        session.reviewBlocks = dropReviewPath(
-          session.reviewBlocks,
-          rel,
-          scope === "turn" ? { turnId: currentTurnId } : undefined,
-        );
-      }
-    } else {
-      if (scope === "turn") {
-        session.reviewBlocks = session.reviewBlocks.filter((b) => b.turnId !== currentTurnId);
-      } else {
-        session.reviewBlocks = [];
-      }
-      const skip = restore.skipped.length
-        ? ` Not restorable: ${restore.skipped.map((s) => s.relPath).join(", ")}.`
-        : "";
-      this.emit(session, {
-        type: "hostNotice",
-        level: "info",
-        text: restored.length
-          ? `Discarded ${restored.length} file(s).${skip}`
-          : `Discarded.${skip}`,
-      });
-    }
-    this.emitReviewCenter(session);
-    const restoredSet = new Set(restored.map((rel) => normalizeReviewPath(rel)));
-    const ackBlocks = failed.length
-      ? toAck.filter((b) => restoredSet.has(normalizeReviewPath(b.path)))
-      : toAck;
-    this.ackReviewReverted(session, ackBlocks);
+  private async reviewRevertAll(session: Session, scope: ReviewScope): Promise<void> {
+    return this.reviewHost.reviewRevertAll(session, scope);
   }
-
-  /** Close the diff tab opened for a pending permission request and free its
-   *  virtual content (issue #21). No-op if the user already closed it. */
   private closeDiffForRequest(session: Session, requestId: number | string): void {
-    const uris = this.openDiffsByRequest.take(session, requestId);
-    if (!uris) return;
-    this.closeDiffUris(uris);
+    return this.reviewHost.closeDiffForRequest(session, requestId);
   }
-
   private closeDiffUris(uris: { left: Uri; right: Uri }): void {
-    this.host.closeDiffTabs(uris.left, uris.right);
-    this.diffProvider.delete(uris.left, uris.right);
+    return this.reviewHost.closeDiffUris(uris);
   }
-
-  /**
-   * Take one ACP `plan` update into the session (AP-02).
-   *
-   * One notification, two unrelated shapes — see src/plan-entries.ts. The
-   * plan-TEXT stash below is unchanged from before AP-02 and still runs for
-   * every provider: on a structured update each of those reads is `undefined`
-   * and `lastPlanText` lands on "" exactly as it always did, so nothing about
-   * grok's or Antigravity's path can move. Only a real `entries` list adds
-   * anything, and there is no heuristic that could manufacture one from prose.
-   */
   private applyPlanUpdate(session: Session, u: any): void {
-    // Fallback stash. Current CLIs send exit_plan_mode with planContent
-    // populated; postExitPlanRequest prefers req.plan over lastPlanText.
-    session.lastPlanText =
-      (typeof u?.plan === "string" ? u.plan : "") ||
-      (typeof u?.planText === "string" ? u.planText : "") ||
-      (typeof u?.content === "string" ? u.content : "") ||
-      (typeof u?.content?.text === "string" ? u.content.text : "");
-    this.host.appendLine(`[plan] event payload keys: ${Object.keys(u ?? {}).join(", ")}`);
-    const entries = parsePlanEntries(u);
-    if (!entries) return;
-    session.planEntries = entries;
-    this.emit(session, { type: "planEntries", entries });
+    return this.reviewHost.applyPlanUpdate(session, u);
   }
-
-  /**
-   * Retire the checklist and SAY so.
-   *
-   * Separate from writing the field because the message is transient: a client
-   * that is never told keeps painting the list it last received, and no buffer
-   * replay will correct it.
-   */
   private clearPlanEntries(session: Session): void {
-    if (!session.planEntries.length) return;
-    session.planEntries = [];
-    this.emit(session, { type: "planEntries", entries: [] });
+    return this.reviewHost.clearPlanEntries(session);
   }
-
   private async postExitPlanRequest(req: ExitPlanRequest, session: Session, gen: number): Promise<void> {
-    const plan = req.plan || session.lastPlanText;
-    let snapshot: { path: string; name: string } | undefined;
-    try {
-      snapshot = await this.createPlanReviewSnapshot(
-        plan,
-        session.activeSessionId ?? session.client?.sessionId,
-      );
-    } catch (e) {
-      this.host.appendLine(`[plan-review] ${(e as Error).message}`);
-    }
-    if (gen !== session.gen) return;
-    // Host ownership begins only after the snapshot's generation check. Re-focus
-    // can replay the card without consuming this pending request.
-    session.pendingExitPlans.set(req.id, { planText: plan });
-    this.syncHumanWait(session);
-    session.lastPlanText = "";
-    this.emit(session, {
-      type: "exitPlanRequest",
-      req: { ...req, plan, planPath: snapshot?.path, planName: snapshot?.name },
-    });
-    this.setStatus(session, "needs-you");
+    return this.reviewHost.postExitPlanRequest(req, session, gen);
   }
-
   private async withPlanReviewPaths<T extends { text: string }>(
     plans: T[],
     sessionId?: string,
   ): Promise<Array<T & { planPath?: string; planName?: string }>> {
-    const out: Array<T & { planPath?: string; planName?: string }> = [];
-    for (const plan of plans) {
-      try {
-        const snapshot = await this.createPlanReviewSnapshot(plan.text, sessionId);
-        out.push({ ...plan, planPath: snapshot.path, planName: snapshot.name });
-      } catch (e) {
-        this.host.appendLine(`[plan-review] ${(e as Error).message}`);
-        out.push(plan);
-      }
-    }
-    return out;
+    return this.reviewHost.withPlanReviewPaths<T>(plans, sessionId);
   }
-
-  /** Drop client checkpoints for a deleted session. Best-effort, like plan-reviews. */
   private removeCheckpoints(sessionId: string): void {
-    try {
-      this.checkpointStore?.removeSession(sessionId);
-    } catch {
-      /* never fail a delete over leftover snapshots */
-    }
+    return this.reviewHost.removeCheckpoints(sessionId);
   }
-
   private startTurnGitBaseline(session: Session, turn: object): void {
-    // Prototype-built test sidebars have no fields; a real one always does.
-    if (session.replaying || !this.turnGitBaselines || !this.gitRunGate) return;
-    const root = this.sessionCwd(session);
-    if (!root) return;
-    const entry = { turnId: String(session.userMessageCount), root, turn, pending: true } as {
-      turnId: string; root: string; turn: object; pending: boolean; baseline?: GitTurnBaseline;
-    };
-    this.turnGitBaselines.set(session, entry);
-    // Skip a busy repo rather than queue a snapshot of a later working tree.
-    if (!this.gitRunGate.tryAcquire(root)) { entry.pending = false; return; }
-    void captureGitTurnBaseline(root).then((captured) => {
-      if (entry.pending && entry.turn === turn && this.turnGitBaselines.get(session) === entry) {
-        entry.baseline = captured;
-      }
-    }).catch(() => {
-      // Best effort: no baseline keeps the Review Center's tool-call diff.
-    }).finally(() => {
-      entry.pending = false;
-      this.gitRunGate.release(root);
-    });
+    return this.reviewHost.startTurnGitBaseline(session, turn);
   }
-
-  /**
-   * The Review Center's "Open diff" in turn scope: one editor tab covering
-   * everything this turn did to the file, against the git baseline taken as
-   * the turn began (upstream 033360c). False when there is no trustworthy
-   * baseline, so the caller falls back to the tool-call diff.
-   */
   private async openTurnGitDiff(session: Session, relPath: string): Promise<boolean> {
-    const entry = this.turnGitBaselines?.get(session);
-    if (!entry?.baseline || entry.pending) return false;
-    if (entry.turnId !== String(session.userMessageCount)) return false;
-    if (!pathsEqual(entry.root, this.sessionCwd(session))) return false;
-    const abs = path.isAbsolute(relPath) ? relPath : path.join(entry.root, relPath);
-    const rel = path.relative(entry.root, abs).split(path.sep).join("/");
-    if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) return false;
-    const before = await readGitTurnFileBefore(entry.root, rel, entry.baseline);
-    if (!before.ok) return false;
-    // A deleted file is an empty after-side; an unreadable one is not a deletion.
-    const after = fs.existsSync(abs) ? this.readFileForDiff(session, abs) : "";
-    if (after === undefined) return false;
-    const base = path.basename(rel);
-    const key = String(this.diffSeq++);
-    const left = Uri.from({ scheme: GROK_DIFF_SCHEME, path: `/${key}/before/${base}` });
-    const right = Uri.from({ scheme: GROK_DIFF_SCHEME, path: `/${key}/after/${base}` });
-    this.diffProvider.set(left, before.text);
-    this.diffProvider.set(right, after);
-    await this.host.openDiff(left, right, `Turn diff: ${base}`, { preview: false, preserveFocus: true });
-    return true;
+    return this.reviewHost.openTurnGitDiff(session, relPath);
   }
-
   private beginCheckpointTurn(session: Session, text: string): void {
-    if (session.replaying) return;
-    session.checkpointTurn = {
-      turnId: String(session.userMessageCount),
-      preview: previewUserMessage(text),
-      disabled: false,
-      files: [],
-      skipped: [],
-    };
+    return this.reviewHost.beginCheckpointTurn(session, text);
   }
-
   private ensureCheckpointTurn(session: Session): Session["checkpointTurn"] | undefined {
-    if (session.replaying) return undefined;
-    if (session.userMessageCount < 1) return undefined;
-    if (!session.checkpointTurn || session.checkpointTurn.turnId !== String(session.userMessageCount)) {
-      session.checkpointTurn = {
-        turnId: String(session.userMessageCount),
-        preview: session.checkpointTurn?.preview ?? "",
-        disabled: false,
-        files: [],
-        skipped: [],
-      };
-    }
-    return session.checkpointTurn;
+    return this.reviewHost.ensureCheckpointTurn(session);
   }
-
-  /**
-   * Snapshot workspace files BEFORE the agent is allowed to write them.
-   * Failures disable this turn's checkpoint and never throw — the turn continues.
-   */
   private snapshotToolCallWrites(
     session: Session,
     toolCall: { kind?: string; rawInput?: unknown; content?: unknown } | undefined,
     cwd: string,
   ): void {
-    if (normalizePermissionKind(toolCall?.kind) !== "edit") return;
-    this.snapshotRelOrAbsPaths(session, extractPermissionFacts(toolCall).paths, cwd);
+    return this.reviewHost.snapshotToolCallWrites(session, toolCall, cwd);
   }
-
   private snapshotPendingEditToolCall(session: Session, call: { kind?: string; status?: string; rawInput?: unknown; content?: unknown }): void {
-    const status = String(call.status || "").toLowerCase();
-    if (status === "completed" || status === "failed") return;
-    this.snapshotToolCallWrites(session, call, this.sessionCwd(session));
+    return this.reviewHost.snapshotPendingEditToolCall(session, call);
   }
-
   private snapshotRelOrAbsPaths(session: Session, paths: readonly string[], cwd: string): void {
-    const abs = paths.map((p) => path.isAbsolute(p) ? p : path.join(cwd, p));
-    this.snapshotAbsPaths(session, abs);
+    return this.reviewHost.snapshotRelOrAbsPaths(session, paths, cwd);
   }
-
   private snapshotAbsPaths(session: Session, absPaths: readonly string[]): void {
-    try {
-      if (!this.checkpointStore || session.replaying) return;
-      const turn = this.ensureCheckpointTurn(session);
-      if (!turn || turn.disabled) return;
-      const cwd = this.sessionCwd(session);
-      let changed = false;
-      for (const abs of absPaths) {
-        if (!abs) continue;
-        const rel = checkpointRelPath(abs, cwd);
-        if (!rel) continue;
-        if (turn.files.some((f) => f.relPath === rel) || turn.skipped.some((s) => s.relPath === rel)) continue;
-        let bytes: Uint8Array | null = null;
-        let reportedBytes: number | undefined;
-        try {
-          const st = fs.statSync(abs);
-          if (!st.isFile()) continue;
-          reportedBytes = st.size;
-          if (st.size > CHECKPOINT_MAX_FILE_BYTES) {
-            const cap = snapshotFromBytes(rel, null, { reportedBytes: st.size });
-            if (cap.kind === "skipped") turn.skipped.push(cap.skipped);
-            changed = true;
-            continue;
-          }
-          bytes = fs.readFileSync(abs);
-        } catch (e) {
-          const code = (e as NodeJS.ErrnoException).code;
-          if (code === "ENOENT") bytes = null;
-          else {
-            this.disableCheckpointTurn(session, `read ${rel}: ${(e as Error).message}`);
-            return;
-          }
-        }
-        const cap = snapshotFromBytes(rel, bytes, { reportedBytes });
-        if (cap.kind === "skipped") turn.skipped.push(cap.skipped);
-        else turn.files.push(cap.file);
-        changed = true;
-      }
-      if (changed) this.persistCheckpointTurn(session);
-    } catch (e) {
-      this.disableCheckpointTurn(session, (e as Error).message);
-    }
+    return this.reviewHost.snapshotAbsPaths(session, absPaths);
   }
-
   private noteCheckpointAfterContent(session: Session, absPath: string, content: string): void {
-    const turn = session.checkpointTurn;
-    if (!turn || turn.disabled) return;
-    const rel = checkpointRelPath(absPath, this.sessionCwd(session));
-    if (!rel) return;
-    const file = turn.files.find((f) => f.relPath === rel);
-    if (file) file.afterSha256 = sha256Bytes(Buffer.from(content, "utf8"));
+    return this.reviewHost.noteCheckpointAfterContent(session, absPath, content);
   }
-
   private persistCheckpointTurn(session: Session): void {
-    const store = this.checkpointStore;
-    const turn = session.checkpointTurn;
-    const sid = session.activeSessionId;
-    if (!store || !turn || !sid || turn.disabled) return;
-    if (!turn.files.length && !turn.skipped.length) return;
-    const result = store.save({
-      id: checkpointId(sid, turn.turnId),
-      sessionId: sid,
-      turnId: turn.turnId,
-      createdAt: Date.now(),
-      userMessagePreview: turn.preview,
-      files: turn.files,
-      skipped: turn.skipped,
-      bytes: turn.files.reduce((n, f) => n + Buffer.byteLength(f.blob, "utf8"), 0),
-    });
-    if (!result.ok) this.disableCheckpointTurn(session, result.reason);
+    return this.reviewHost.persistCheckpointTurn(session);
   }
-
   private disableCheckpointTurn(session: Session, reason: string): void {
-    try {
-      const turn = session.checkpointTurn;
-      if (turn) {
-        turn.disabled = true;
-        turn.disableReason = reason;
-        turn.files = [];
-      }
-      const sid = session.activeSessionId;
-      try {
-        if (sid && turn) this.checkpointStore?.disable(sid, turn.turnId, reason);
-      } catch {
-        /* store failure must not skip the notice */
-      }
-      this.emit(session, {
-        type: "hostNotice",
-        level: "warning",
-        text: `Checkpoint for this turn is off: ${reason}. Rewind will not restore these files.`,
-      });
-    } catch {
-      /* never abort the turn */
-    }
+    return this.reviewHost.disableCheckpointTurn(session, reason);
   }
-
   private finishCheckpointTurn(session: Session): void {
-    try {
-      const turn = session.checkpointTurn;
-      if (!turn || turn.disabled) return;
-      const cwd = this.sessionCwd(session);
-      for (const file of turn.files) {
-        if (file.afterSha256) continue;
-        const abs = path.join(cwd, file.relPath);
-        try {
-          file.afterSha256 = sha256Bytes(fs.readFileSync(abs));
-        } catch {
-          /* leave unset — restore treats unknown after-hash as a conflict */
-        }
-      }
-      this.persistCheckpointTurn(session);
-    } catch (e) {
-      this.disableCheckpointTurn(session, (e as Error).message);
-    }
+    return this.reviewHost.finishCheckpointTurn(session);
   }
-
-  /**
-   * Provider-neutral rewind: restore files from client snapshots, then truncate
-   * the transcript. Grok's native path is preferred when it exists; this is
-   * the path for Codex/Claude/Gemini and Grok's fallback.
-   */
   private async rewindFromClientCheckpoints(
     session: Session,
     opts: {
@@ -20993,158 +15150,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       edit: boolean;
     },
   ): Promise<void> {
-    const sid = session.activeSessionId;
-    if (!sid) {
-      return void this.notifyUser("warning", "Start a session before rewinding it.");
-    }
-    if (typeof opts.totalUserBubbles === "number" && opts.totalUserBubbles !== session.userMessageCount) {
-      return void this.notifyUser("warning",
-        "Restore points no longer line up with this conversation, so rewinding could remove the wrong turn. Reload the window and try again.",
-      );
-    }
-
-    let surviving: number;
-    if (typeof opts.userBubbleIndex === "number") {
-      if (opts.userBubbleIndex < 0 || opts.userBubbleIndex >= session.userMessageCount) {
-        return void this.notifyUser("info",
-          opts.edit
-            ? "Can't edit this message — the checkpoint is unavailable."
-            : "Can't rewind to this message — it's the latest turn, or the checkpoint is unavailable.",
-        );
-      }
-      if (!opts.edit && opts.userBubbleIndex === session.userMessageCount - 1) {
-        return void this.notifyUser("info",
-          "Can't rewind to this message — it's the latest turn, or the checkpoint is unavailable.",
-        );
-      }
-      surviving = survivingAfterClientRewind(opts.userBubbleIndex);
-    } else {
-      const users = session.buffer.filter((m) => m.type === "userMessage" && !m.steer);
-      const selectable = opts.edit ? users : users.slice(0, Math.max(0, users.length - 1));
-      if (selectable.length === 0) {
-        return void this.host.showInformationMessage(
-          users.length <= 1
-            ? "Only one message so far — hover an earlier user message and click Rewind."
-            : "No rewind points available.",
-        );
-      }
-      const items = selectable.map((m, i) => {
-        const text = m.type === "userMessage" ? m.text : "";
-        return {
-          label: `#${i + 1}  ${previewUserMessage(text || "", 60)}`,
-          description: undefined as string | undefined,
-          index: i,
-        };
-      }).reverse();
-      const pick = await this.host.showQuickPick(items, {
-        placeHolder: "Rewind past which message? (it and everything after it are discarded)",
-        ignoreFocusOut: true,
-      });
-      if (!pick) return;
-      surviving = survivingAfterClientRewind(pick.index);
-    }
-
-    const later = this.checkpointStore?.loadFrom(sid, surviving) ?? [];
-    const merged: Checkpoint = later.length ? mergeCheckpoints(later) : {
-      id: checkpointId(sid, String(surviving + 1)),
-      sessionId: sid,
-      turnId: String(surviving + 1),
-      createdAt: 0,
-      userMessagePreview: "",
-      files: [],
-      skipped: later.flatMap((c) => c.skipped),
-      bytes: 0,
-    };
-    const cwd = this.sessionCwd(session);
-    const current = new Map<string, string | null>();
-    for (const file of merged.files) {
-      const abs = path.join(cwd, file.relPath);
-      try {
-        current.set(file.relPath, fs.readFileSync(abs, "utf8"));
-      } catch {
-        current.set(file.relPath, null);
-      }
-    }
-    const plan = planRestoreDetailed(merged, current);
-    const skippedNote = plan.skipped.length
-      ? `\n\nNot restorable:\n${plan.skipped.map((s) => `• ${s.relPath} (${s.reason === "too-large" ? "too large" : "binary"}, ${s.bytes} bytes)`).join("\n")}`
-      : "";
-    const wouldTouch = plan.writes.length + plan.deletes.length + plan.conflicts.length;
-    if (wouldTouch > 0) {
-      const ok = await this.confirmInChat(session, {
-        title: opts.edit ? "Edit this message?" : "Rewind past this message?",
-        body: `This will restore ${wouldTouch} file(s) on disk to how they were before that message.${skippedNote}`,
-        confirmLabel: opts.edit ? "Edit" : "Rewind",
-        danger: true,
-      });
-      if (!ok) return;
-    }
-    let overwrite = false;
-    if (plan.conflicts.length) {
-      const items = [
-        { label: "Overwrite all conflicting files", description: `${plan.conflicts.length} file(s) changed since the snapshot`, action: "overwrite" as const },
-        { label: "Cancel", action: "cancel" as const },
-        ...plan.conflicts.map((f) => ({ label: f, description: "changed since snapshot", action: "overwrite" as const })),
-      ];
-      const pick = await this.host.showQuickPick(items, {
-        placeHolder: "Restore anyway? Foreign changes will be overwritten.",
-        ignoreFocusOut: true,
-      });
-      if (!pick || pick.action === "cancel") return;
-      overwrite = true;
-    }
-
-    if (
-      ["working", "needs-you"].includes(session.status) ||
-      session.activeSessionId !== sid
-    ) {
-      return void this.notifyUser("warning",
-        `${opts.edit ? "Edit" : "Rewind"} cancelled because the conversation changed or another turn started. Nothing was rewound. Try ${opts.edit ? "Edit" : "Rewind"} again when the conversation is idle.`,
-      );
-    }
-
-    const actions = restoreActions(plan, overwrite, merged);
-    const restored: string[] = [];
-    const failed: string[] = [];
-    for (const w of actions.writes) {
-      const abs = path.join(cwd, w.relPath);
-      try {
-        fs.mkdirSync(path.dirname(abs), { recursive: true });
-        fs.writeFileSync(abs, Buffer.from(w.blob, "utf8"));
-        restored.push(w.relPath);
-      } catch (e) {
-        failed.push(`${w.relPath}: ${(e as Error).message}`);
-      }
-    }
-    for (const rel of actions.deletes) {
-      const abs = path.join(cwd, rel);
-      try {
-        fs.unlinkSync(abs);
-        restored.push(rel);
-      } catch (e) {
-        const code = (e as NodeJS.ErrnoException).code;
-        if (code !== "ENOENT") failed.push(`${rel}: ${(e as Error).message}`);
-      }
-    }
-
-    await this.truncateSessionCardsAfterRewind(sid, surviving);
-    this.applyRewindToView(session, surviving);
-    this.checkpointStore?.pruneAfter(sid, surviving);
-    const restoredText = (opts.bubbleText ?? "").trim();
-    if (restoredText) this.restoreComposerFor(session, restoredText);
-
-    if (failed.length) {
-      this.notifyUser("error", `Rewound the conversation, but some files could not be restored:\n${failed.join("\n")}`);
-    } else if (restored.length || plan.skipped.length) {
-      const skip = plan.skipped.length
-        ? ` Not restorable: ${plan.skipped.map((s) => s.relPath).join(", ")}.`
-        : "";
-      this.notifyUser("info",
-        restored.length
-          ? `Rewound. Restored ${restored.length} file(s).${skip}`
-          : `Rewound.${skip}`,
-      );
-    }
+    return this.reviewHost.rewindFromClientCheckpoints(session, opts);
   }
 
   /** Delete a session's plan-review snapshots. They live under globalStorage,
@@ -23779,26 +17785,9 @@ ${directives.block}`;
    * deadline on a run they left behind.
    */
   showQuestion(session: Session, req: QuestionRequest, responder: QuestionResponder): void {
-    session.pendingQuestions.set(req.id, responder);
-    this.syncHumanWait(session);
-    const timeout = askTimeoutMs(this.host.getConfiguration("grok").get<string>("askTimeout", "off"));
-    this.emit(session, { type: "questionRequest", req, ...(timeout === undefined ? {} : { autoContinueMs: timeout }) });
-    this.setStatus(session, "needs-you");
-    if (timeout === undefined) return;
-    const timer = setTimeout(() => this.autoContinueQuestion(session, req.id), timeout);
-    // Never the reason a host process stays alive.
-    (timer as unknown as { unref?: () => void }).unref?.();
-    session.questionTimers.set(req.id, timer);
+    return this.questionHost.showQuestion(session, req, responder);
   }
 
-  /**
-   * Settle a card with the user's selections.
-   *
-   * The `delete` is the stale-card guard and it comes FIRST: a card that is no
-   * longer outstanding — replayed from the session buffer, or still on screen
-   * in a second tab — would otherwise write a duplicate response and drag a
-   * settled session back to `working` with no turn left to ever end it.
-   */
   private answerQuestion(
     session: Session,
     requestId: number | string,
@@ -23806,239 +17795,58 @@ ${directives.block}`;
     annotations: Record<string, { notes?: string; preview?: string }>,
     auto = false,
   ): boolean {
-    const responder = session.pendingQuestions.get(requestId);
-    if (!responder) return false;
-    this.forgetQuestion(session, requestId);
-    return responder.answer(answers, annotations, auto);
+    return this.questionHost.answerQuestion(session, requestId, answers, annotations, auto);
   }
 
-  /** Settle a card as dismissed. Same stale-card guard as {@link answerQuestion}. */
   private cancelQuestion(session: Session, requestId: number | string, auto = false): boolean {
-    const responder = session.pendingQuestions.get(requestId);
-    if (!responder) return false;
-    this.forgetQuestion(session, requestId);
-    return responder.cancel(auto);
+    return this.questionHost.cancelQuestion(session, requestId, auto);
   }
 
   private forgetQuestion(session: Session, requestId: number | string): void {
-    session.pendingQuestions.delete(requestId);
-    this.syncHumanWait(session);
-    session.questionDrafts.delete(requestId);
-    const timer = session.questionTimers.get(requestId);
-    if (timer) { clearTimeout(timer); session.questionTimers.delete(requestId); }
+    return this.questionHost.forgetQuestion(session, requestId);
   }
 
-  /**
-   * `companions.askTimeout` elapsed with the card still up.
-   *
-   * Sends what the user already marked if — and only if — every question in the
-   * card carries an answer. A half-filled map is worse than none: the model
-   * would read a confident partial answer and never learn that the rest was
-   * guessed. Either way the card collapses marked as continued automatically,
-   * so the transcript never implies a person chose this.
-   */
   private autoContinueQuestion(session: Session, requestId: number | string): void {
-    const draft = session.questionDrafts.get(requestId);
-    const settled = draft?.complete
-      ? this.answerQuestion(session, requestId, draft.answers, draft.annotations, true)
-      : this.cancelQuestion(session, requestId, true);
-    if (!settled && !session.pendingQuestions.has(requestId)) return;
-    this.emit(session, {
-      type: "questionResolved",
-      requestId,
-      auto: true,
-      ...(draft?.complete ? { answers: draft.answers } : {}),
-    });
-    this.noteAnswered(session);
+    return this.questionHost.autoContinueQuestion(session, requestId);
   }
 
-  /**
-   * Drop every outstanding card for this session without the user having acted.
-   *
-   * Each responder decides what that means for its own transport — silence for
-   * grok, whose CLI already settled the request, and a cancellation for the MCP
-   * path, where nothing else will ever reply and the tool call would otherwise
-   * block until the CLI is killed.
-   */
   private dropPendingQuestions(session: Session): void {
-    for (const [requestId, responder] of session.pendingQuestions) {
-      try { responder.abandon(); } catch { /* teardown is not worth failing over */ }
-      // The card must stop taking input the moment nothing will read it.
-      this.emit(session, { type: "questionResolved", requestId, outcome: "closed" });
-    }
-    session.pendingQuestions.clear();
-    this.syncHumanWait(session);
-    session.questionDrafts.clear();
-    for (const timer of session.questionTimers.values()) clearTimeout(timer);
-    session.questionTimers.clear();
+    return this.questionHost.dropPendingQuestions(session);
   }
 
-  /**
-   * The host-side `ask_user` MCP channel, created on first use.
-   *
-   * One per window, shared by every session: the pipe is the transport, the
-   * per-session token is the identity on it.
-   */
-  /**
-   * The window's one host pipe (P6, §16).
-   *
-   * Shared by the AP-05 question channel and the AP-16 delegation channel. Two
-   * protocols, two entries in `mcpServers` — the CLI needs two stdio servers —
-   * but one listener underneath, and the per-session token is what routes a
-   * connection to the right one.
-   */
   private hostPipe(): HostPipeMux {
-    if (!this.hostPipeMux) {
-      this.hostPipeMux = new HostPipeMux({ log: (message) => this.host.appendLine(message) });
-    }
-    return this.hostPipeMux;
+    return this.questionHost.hostPipe();
   }
-
-  private hostPipeMux?: HostPipeMux;
 
   private askUser(): AskUserServer {
-    if (!this.askUserChannel) {
-      this.askUserChannel = new AskUserServer({
-        mux: this.hostPipe(),
-        // From `extensionUri`, not a path relative to `out/`: the script is a
-        // packaged RESOURCE, and `.vscodeignore` has to keep `resources/mcp/**`
-        // in the VSIX or this path exists in development and nowhere else.
-        scriptPath: path.join(this.context.extensionUri.fsPath, "resources", "mcp", "ask-user-server.cjs"),
-        log: (message) => this.host.appendLine(message),
-        onRequest: (token, request) => {
-          const session = this.sessionForAskUserToken(token);
-          // No session owns this token any more: answer immediately so the CLI
-          // is not left blocked inside `tools/call`.
-          if (!session) { request.cancel(); return; }
-          this.showQuestion(session, {
-            id: request.id,
-            sessionId: session.activeSessionId ?? "",
-            // Narrowed to `QuestionItem`, the shape grok's RPC produces, so the
-            // card sees one thing and there is no second render path. The
-            // derived `header` is dropped here on purpose: nothing renders it
-            // today, and a field on the wire that no reader consumes is a
-            // promise the next feature would have to keep.
-            questions: request.questions.map((q) => ({
-              question: q.question,
-              options: q.options.map((option) => ({ ...option })),
-              multiSelect: q.multiSelect,
-            })),
-          }, {
-            answer: (answers, annotations, auto) => request.answer(answers, annotations, auto),
-            cancel: (auto) => request.cancel(auto),
-            abandon: () => { request.cancel(); },
-          });
-        },
-        onWithdraw: (token, id) => {
-          const session = this.sessionForAskUserToken(token);
-          if (!session || !session.pendingQuestions.has(id)) return;
-          // The CLI withdrew the call or its process died. Take the card down
-          // rather than leave a control that does nothing when pressed.
-          this.forgetQuestion(session, id);
-          this.emit(session, { type: "questionResolved", requestId: id, outcome: "closed" });
-          this.noteAnswered(session);
-        },
-      });
-    }
-    return this.askUserChannel;
+    return this.questionHost.askUser();
   }
 
-  private askUserChannel?: AskUserServer;
-
   private sessionForAskUserToken(token: string): Session | undefined {
-    for (const session of this.pool) {
-      if (session.askUserToken === token) return session;
-    }
-    return undefined;
+    return this.questionHost.sessionForAskUserToken(token);
   }
 
   private revokeAskUserToken(session: Session): void {
-    if (!session.askUserToken) return;
-    this.askUserChannel?.revoke(session.askUserToken);
-    session.askUserToken = undefined;
+    return this.questionHost.revokeAskUserToken(session);
   }
 
-  /**
-   * The `companions` MCP entry for this session, if it should get one.
-   *
-   * Withheld from grok, which already has a native question RPC — a second
-   * affordance for the same card would cost every grok turn the tool's tokens
-   * and let the model pick the worse of two identical paths. Withheld too when
-   * the provider already loads a server called `companions`, following the same
-   * rule the connectors use: skip ours rather than shadow theirs.
-   */
   private async askUserMcpServer(session: Session): Promise<AcpMcpStdioServer | undefined> {
-    if (session.provider === "grok") return undefined;
-    const reserved = this.reservedMcpIdentityFor(session);
-    if (reserved.names.some((name) => normalizeMcpName(name) === ASK_USER_SERVER_NAME)) {
-      this.host.appendLine(`[ask_user] a provider MCP server is already named "${ASK_USER_SERVER_NAME}" — not adding ours`);
-      return undefined;
-    }
-    const channel = this.askUser();
-    if (!(await channel.listen())) return undefined;
-    this.revokeAskUserToken(session);
-    session.askUserToken = channel.register();
-    return channel.spawnSpec(session.askUserToken);
+    return this.questionHost.askUserMcpServer(session);
   }
 
-  /**
-   * Suspend the prompt idle timer exactly while a person holds a card.
-   * Called wherever a question, permission or plan request is added or
-   * settled; the absolute cap is never suspended (upstream e2e8458).
-   */
   private syncHumanWait(session: Session): void {
-    session.client?.setHumanWaitActive?.(
-      session.pendingQuestions.size > 0
-      || session.pendingPermissions.size > 0
-      || session.pendingExitPlans.size > 0,
-    );
+    return this.questionHost.syncHumanWait(session);
   }
 
-  /**
-   * A terminal tool update for a question's own tool call: the CLI stopped
-   * waiting (answered, or its ask timeout expired — the wire does not say
-   * which, and the prose is deliberately not read). Retire the card now
-   * rather than leave a Submit that writes into a dead channel (#160).
-   */
   private closeQuestionsForToolCall(
     session: Session,
     call: { toolCallId?: unknown; status?: unknown } | null | undefined,
   ): void {
-    const toolCallId = call?.toolCallId;
-    if (typeof toolCallId !== "string" || !toolCallId
-      || (call?.status !== "completed" && call?.status !== "failed")) return;
-    let closed = false;
-    for (const [requestId, responder] of [...session.pendingQuestions]) {
-      if (responder.toolCallId !== toolCallId) continue;
-      this.forgetQuestion(session, requestId);
-      this.emit(session, { type: "questionResolved", requestId, outcome: "closed" });
-      closed = true;
-    }
-    if (closed && turnIsInFlight(session)) this.noteAnswered(session);
+    return this.questionHost.closeQuestionsForToolCall(session, call);
   }
 
-  /** True when any live pool member is mid-turn or waiting on the user. */
-  /**
-   * The agent was waiting on a person and now it is not.
-   *
-   * Answering is ACTIVITY whether or not it unblocks the whole turn: the tool
-   * that was approved starts running immediately. Setting `working` is separate,
-   * and conditional — with another card still outstanding the turn is not
-   * resumed and saying so would be a lie — but the clock has to be re-armed
-   * either way, or a machine can freeze on work that has only just begun.
-   */
   noteAnswered(session: Session): void {
-    // EVERY kind of card, not just permissions. Parallel tool calls can raise a
-    // question and a plan review together, and answering one of them resumed
-    // nothing — while `working` is what holds a rented machine awake, so the
-    // claim cost money as well as being untrue.
-    if (session.pendingPermissions.size === 0
-      && session.pendingExitPlans.size === 0
-      && session.pendingQuestions.size === 0) {
-      this.setStatus(session, "working"); // setStatus touches and re-asserts
-      return;
-    }
-    this.touch(session);
+    return this.questionHost.noteAnswered(session);
   }
 
   /** Push just this session's recomputed dot to the webview (cheap — no disk read
@@ -25130,47 +18938,10 @@ ${directives.block}`;
    * chat.js (that would create a second chat client).
    */
   private getProjectsRailHtml(webview: HostWebview): string {
-    const nonce = getNonce();
-    const mediaUri = (file: string) =>
-      webview.asWebviewUri(Uri.joinPath(this.context.extensionUri, "media", file));
-    return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8" />
-<meta http-equiv="Content-Security-Policy"
-      content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; img-src ${webview.cspSource} data:; font-src ${webview.cspSource}; script-src 'nonce-${nonce}';" />
-<style>
-  /* The same cold-start gap the chat webview guards against — see getHtml.
-     Cheaper here because the rail is nearly empty before its script runs: a
-     search box and a scroll region, which unstyled is a full-width native
-     input on a white page. projects-rail.css re-reveals. */
-  html, body { background: var(--vscode-sideBar-background, var(--vscode-editor-background)); }
-  body { visibility: hidden; }
-</style>
-<link rel="stylesheet" href="${mediaUri("projects-rail.css")}" />
-</head>
-<body>
-  <aside id="projects-rail" class="projects-rail" aria-label="Projects">
-    <div class="rail-search-wrap">
-      <span class="rail-search-icon" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-      </span>
-      <input id="rail-search" class="rail-search" type="search" placeholder="Filter projects…" autocomplete="off" spellcheck="false" aria-label="Filter projects" />
-    </div>
-    <div id="rail-scroll" class="rail-scroll"></div>
-  </aside>
-  <script nonce="${nonce}" src="${mediaUri("webview-helpers.js")}"></script>
-  <script nonce="${nonce}" src="${mediaUri("projects-rail.js")}"></script>
-</body>
-</html>`;
+    return this.webviewHtml.getProjectsRailHtml(webview);
   }
 
   /**
-   * Open the shared settings surface as a VS Code editor tab.
-   *
-   * Snapshot-on-open: the tab does not subscribe to live chat updates. Every
-   * change still posts an existing set-/open- message, so the sidebar and
-   * chat webview stay in sync through the same handlers the gear uses.
    */
   async openSettingsEditor(category?: string): Promise<void> {
     const targetCategory = category === "rules" ? "advanced" : category;
@@ -25216,503 +18987,13 @@ ${directives.block}`;
 
   private getSettingsHtml(
     webview: HostWebview,
-    opts: { category?: string },
+    opts: { category?: string } = {},
   ): string {
-    const nonce = getNonce();
-    const mediaUri = (file: string) =>
-      webview.asWebviewUri(Uri.joinPath(this.context.extensionUri, "media", file));
-    const cfg = this.host.getConfiguration("grok");
-    const boot = {
-      snapshot: {
-        appPurpose: this.appPurpose() || DEFAULT_APP_PURPOSE,
-        showThinking: cfg.get("showThinking", false),
-        expandCommandOutputs: cfg.get("expandCommandOutputs", false),
-        steerByDefault: cfg.get("steerByDefault", false),
-        promptNav: cfg.get<boolean>("promptNav", true) !== false,
-        fontScale: this.chatFontScale(),
-        soundNotifications: cfg.get("soundNotifications", false),
-        processingSound: cfg.get("processingSound", false),
-        readRepliesAloud: cfg.get("readRepliesAloud", false),
-        summarizeRepliesAloud: cfg.get("summarizeRepliesAloud", true),
-        voiceConfigured: !!this.voiceBackendState(this.sessionCwd(this.focused), this.focused.provider).backend,
-        voiceBackendState: this.voiceBackendState(this.sessionCwd(this.focused), this.focused.provider),
-        voiceSendPhrase: this.voiceSetting(
-          this.sessionCwd(this.focused),
-          "voiceSendPhrase",
-          DEFAULT_SEND_PHRASE,
-        ),
-        voiceKeyterms: sanitizeVoiceKeyterms(
-          this.voiceSetting(this.sessionCwd(this.focused), "voiceKeyterms", []),
-        ),
-        telemetryEnabled: cfg.get("telemetry.enabled", true),
-        thumbsFeedback: cfg.get("thumbsFeedback", false),
-        providers: this.providerStateMessage().providers,
-        providersChecking: this.providerRefreshInFlight,
-        githubState: this.githubStatePayload(),
-        extVersion: this.context.extensionVersion,
-        cliVersion: this.providerCliVersions.grok || "",
-        hostKind: "extension" as const,
-        grokUpdate: null,
-        mcpServers: this.mcpServersView,
-        mcpLoading: false,
-        mcpError: "",
-        mcpWarning: MCP_GLOBAL_SCOPE_WARNING,
-        mcpConnectors: this.mcpConnectorsMessage().connectors,
-        // `null` rather than `[]`: the page distinguishes "not asked yet"
-        // (which paints a loading line) from "asked, and there are none".
-        agentRoles: null,
-        crewFlows: null,
-        agentRoleProviders: [],
-      },
-      category: opts.category || "general",
-      env: {
-        isRemote: false,
-        isDesktop: false,
-        clientOwnsFontScale: false,
-        steerSupported: true,
-        providersKnown: true,
-        hostCaps: {
-          relocateView: this.host.canRelocateView,
-          secondarySideBar: this.host.canUseSecondarySideBar,
-          showOutput: this.host.canShowOutput,
-          toggleDevTools: this.host.canToggleDevTools,
-          settingsEditor: true,
-          ...(this.host.canShowMcpSettings ? { mcpSettings: true } : {}),
-        },
-      },
-    };
-    const bootJson = JSON.stringify(boot).replace(/</g, "\\u003c");
-    return `<!DOCTYPE html>
-<html lang="en" class="settings-page">
-<head>
-<meta charset="UTF-8" />
-<meta http-equiv="Content-Security-Policy"
-      content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; img-src ${webview.cspSource} data:; font-src ${webview.cspSource}; script-src 'nonce-${nonce}';" />
-<style>
-  /* Background only, not the visibility pair the chat and rail webviews use:
-     this page's body holds one empty div until settings.js mounts into it, so
-     there is no unstyled content to hide — only an unpainted page, which
-     without this is white on a dark theme. */
-  html, body { background: var(--vscode-editor-background, var(--vscode-sideBar-background)); }
-</style>
-<link rel="stylesheet" href="${mediaUri("settings.css")}" />
-<title>All your Companions Settings</title>
-</head>
-<body class="settings-page">
-  <div id="settings-root"></div>
-  <script nonce="${nonce}">window.__grokSettingsBoot = ${bootJson};</script>
-  <script nonce="${nonce}" src="${mediaUri("webview-helpers.js")}"></script>
-  <script nonce="${nonce}" src="${mediaUri("settings.js")}"></script>
-  <script nonce="${nonce}">
-    (function () {
-      var vscode = acquireVsCodeApi();
-      var boot = window.__grokSettingsBoot || {};
-      var tts = !!(window.speechSynthesis && window.SpeechSynthesisUtterance);
-      window.GrokVoiceSettings.install(window.GrokSettings);
-      var surface = window.GrokSettings.mount(document.getElementById("settings-root"), {
-        snapshot: boot.snapshot,
-        env: Object.assign({ ttsAvailable: tts }, boot.env || {}),
-        post: function (msg) { vscode.postMessage(msg); },
-        standalone: true,
-        category: boot.category,
-        onClose: function () { vscode.postMessage({ type: "closeSettingsSurface" }); }
-      });
-      window.addEventListener("message", function (e) {
-        var msg = e.data;
-        if (!msg || !msg.type || !surface) return;
-        if (msg.type === "voiceConfigured") {
-          surface.update({ voiceConfigured: !!msg.value, voiceBackendState: msg.backendState,
-            voiceSendPhrase: msg.sendPhrase, voiceKeyterms: msg.keyterms });
-        }
-        if (msg.type === "grokUpdateStatus") {
-          var next = { grokUpdate: {
-            current: msg.current, latest: msg.latest,
-            updateAvailable: !!msg.updateAvailable, error: msg.error || null,
-            policy: msg.policy || null,
-          } };
-          if (msg.current) next.cliVersion = msg.current;
-          surface.update(next);
-        }
-        if (msg.type === "providerState" && Array.isArray(msg.providers)) {
-          surface.update({ providers: msg.providers, providersChecking: msg.checking === true });
-        }
-        if (msg.type === "githubState" && msg.github) {
-          surface.update({ githubState: msg.github });
-        }
-        if (msg.type === "mcpServers") {
-          surface.update({
-            mcpServers: Array.isArray(msg.servers) ? msg.servers : [],
-            mcpLoading: msg.loading === true,
-            mcpError: msg.error || "",
-            mcpWarning: msg.warning || "",
-          });
-        }
-        if (msg.type === "mcpConnectors") {
-          surface.update({
-            mcpConnectors: Array.isArray(msg.connectors) ? msg.connectors : [],
-          });
-        }
-        if (msg.type === "agentRoles") {
-          surface.update({
-            agentRoles: Array.isArray(msg.roles) ? msg.roles : [],
-            crewFlows: Array.isArray(msg.flows) ? msg.flows : [],
-            agentRoleProviders: Array.isArray(msg.providers) ? msg.providers : [],
-            agentRoleProblems: Array.isArray(msg.problems) ? msg.problems : [],
-            agentRolesCwd: msg.cwd || "",
-            agentRolesHasProject: msg.hasProject === true,
-            agentRolesError: msg.error || "",
-            agentRolesErrorId: msg.errorId || "",
-            workflows: Array.isArray(msg.workflows) ? msg.workflows : [],
-            defaultWorkflow: msg.defaultWorkflow || "idea-to-done",
-            subagentRoster: Array.isArray(msg.subagentRoster) ? msg.subagentRoster : [],
-            subagentsEnabled: msg.subagentsEnabled !== false,
-            subagentRouting: Array.isArray(msg.subagentRouting) ? msg.subagentRouting : [],
-            crewStagesMayUseSubagents: msg.crewStagesMayUseSubagents === true,
-            companionSettings: msg.companionSettings || {},
-            efforts: Array.isArray(msg.efforts) ? msg.efforts : []
-          });
-        }
-        if (msg.type === "ruleFiles") {
-          surface.update({ ruleFiles: Array.isArray(msg.files) ? msg.files : [] });
-        }
-        if (msg.type === "permissionRules") {
-          surface.update({
-            permissionRules: Array.isArray(msg.rules) ? msg.rules : [],
-            permissionRulesOrderCopy: typeof msg.orderCopy === "string" ? msg.orderCopy : "",
-            permissionRulesPending: msg.pendingAdoption && typeof msg.pendingAdoption === "object" ? msg.pendingAdoption : null
-          });
-        }
-        if (msg.type === "workflowGenerator") {
-          surface.update({
-            workflowGenerator: {
-              status: msg.status || "idle",
-              requestId: msg.requestId || "",
-              progress: msg.progress || "",
-              draft: msg.draft,
-              mermaid: msg.mermaid || "",
-              validation: msg.validation,
-              error: msg.error || "",
-              compiler: msg.compiler
-            }
-          });
-        }
-        if (msg.type === "routines") {
-          surface.update({
-            routines: Array.isArray(msg.entries) ? msg.entries : [],
-            routineProjects: Array.isArray(msg.projects) ? msg.projects : [],
-            routineModels: Array.isArray(msg.models) ? msg.models : [],
-            routineError: msg.error || "",
-            routineErrorId: msg.errorId || "",
-          });
-        }
-        if (msg.type === "error") {
-          // Same reason as chat.js: a quota-refused save never reaches the host,
-          // so the relay's bounce is the only answer the page will get.
-          surface.update({ routineError: msg.text || "", routineErrorId: "" });
-        }
-        if (msg.type === "settingsCategory" && msg.category) surface.setCategory(msg.category);
-      });
-    })();
-  </script>
-</body>
-</html>`;
+    return this.webviewHtml.getSettingsHtml(webview, opts);
   }
 
   private getHtml(webview: HostWebview): string {
-    const nonce = getNonce();
-    // Join under extensionUri so remote hosts keep vscode-remote:// (Uri.file
-    // on extensionPath.fsPath would point the webview at a missing local path).
-    const mediaUri = (file: string) =>
-      webview.asWebviewUri(Uri.joinPath(this.context.extensionUri, "media", file));
-    const resourceUri = (file: string) =>
-      webview.asWebviewUri(Uri.joinPath(this.context.extensionUri, "resources", file));
-
-    // Desktop multi-folder: host ships the rail mount. VS Code never does —
-    // absence of `#projects-rail` is the property that keeps the extension's
-    // chat column free of an in-panel rail (the projects view is a separate
-    // primary-side-bar webview). A `repos` frame still arrives for clear-all.
-    // Chrome mirrors AFK Pilot: brand + panel toggle, search, scroll, footer
-    // theme toggle (no account avatar). chat.js only empties #rail-scroll.
-    const railMark = this.host.canSwitchWorkspaceFolder
-      ? resourceUri("grok-icon.svg")
-      : "";
-    const railMount = this.host.canSwitchWorkspaceFolder
-      ? `
-  <aside id="projects-rail" class="projects-rail" aria-label="Projects">
-    <div class="rail-top">
-      <span class="rail-brand" title="Grok Build Desktop">
-        <span class="mark" style="--rail-mark:url('${railMark}')" aria-hidden="true"></span>
-        <span class="wordmark"><b>Grok</b> <span class="dim">Build</span></span>
-      </span>
-      <button id="desk-rail-toggle" class="rail-icon-btn" type="button" title="Hide projects" aria-label="Hide projects" aria-expanded="true">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/></svg>
-      </button>
-    </div>
-    <div class="rail-search-wrap">
-      <span class="rail-search-icon" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-      </span>
-      <input id="rail-search" class="rail-search" type="search" placeholder="Filter projects…" autocomplete="off" spellcheck="false" aria-label="Filter projects" />
-    </div>
-    <div id="rail-scroll" class="rail-scroll"></div>
-    <div class="rail-foot">
-      <div class="rail-user" aria-hidden="true"></div>
-      <button id="rail-gear-btn" class="rail-icon-btn" type="button" title="Settings" aria-label="Settings" hidden></button>
-      <button id="desk-theme-toggle" class="rail-icon-btn" type="button" title="Toggle theme" aria-label="Toggle light and dark theme">
-        <svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.5M12 19v2.5M4.2 4.2l1.8 1.8M18 18l1.8 1.8M2.5 12H5M19 12h2.5M4.2 19.8L6 18M18 6l1.8-1.8"/></svg>
-        <svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.2 6.2 0 0 0 10.5 10.5z"/></svg>
-      </button>
-    </div>
-  </aside>`
-      : "";
-    const openMain = this.host.canSwitchWorkspaceFolder ? `<div class="app-main">` : "";
-    const closeMain = this.host.canSwitchWorkspaceFolder ? `</div>` : "";
-    // Files shell is in the first HTML frame so desktop never paints the
-    // panel-less column and then upgrades. Inject reuses this node.
-    const fileShellOpen = this.host.canSwitchWorkspaceFolder
-      ? `<div id="desk-ft-shell" class="desk-ft-shell"><div class="desk-ft-chat">`
-      : "";
-    const fileShellClose = this.host.canSwitchWorkspaceFolder ? `</div></div>` : "";
-    const deskLayoutClass = this.host.canSwitchWorkspaceFolder ? " has-rail desk-with-ft" : "";
-    const firstFrameLayout = this.host.canSwitchWorkspaceFolder
-      ? `
-  body.desk.has-rail { display: flex; flex-direction: row; align-items: stretch; }
-  body.desk.has-rail #projects-rail { width: var(--rail-width, 260px); flex-shrink: 0; height: 100%; display: flex; flex-direction: column; }
-  body.desk.has-rail .app-main { flex: 1; min-width: 0; display: flex; flex-direction: column; height: 100%; overflow: hidden; }
-  body.desk.has-rail .desk-ft-shell { display: flex; flex: 1 1 auto; flex-direction: row; min-width: 0; min-height: 0; height: 100%; }
-  body.desk.has-rail .desk-ft-chat { display: flex; flex: 1 1 auto; flex-direction: column; min-width: 0; min-height: 0; height: 100%; overflow: hidden; }`
-      : "";
-    // The shared file-panel asset is desktop-only in this generated document.
-    // Remote browsers load it from the relay's own web/chat.html; VS Code gets
-    // neither the tag nor the bytes, making the no-file-panel decision structural.
-    const filePanelStyle = this.host.canSwitchWorkspaceFolder
-      ? `<link rel="stylesheet" href="${mediaUri("file-panel.css")}" />`
-      : "";
-    // The highlighter rides the same gate and MUST precede the panel: the panel
-    // reads `GrokSyntaxHighlight` at render time, and a missing global there
-    // silently degrades every file to plain text rather than failing loudly.
-    const filePanelScript = this.host.canSwitchWorkspaceFolder
-      ? `<script nonce="${nonce}" src="${mediaUri("syntax-highlight.js")}"></script>\n` +
-        `  <script nonce="${nonce}" src="${mediaUri("file-panel.js")}"></script>`
-      : "";
-
-    return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8" />
-<meta http-equiv="Content-Security-Policy"
-      content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; img-src ${webview.cspSource} data:; media-src ${webview.cspSource} data:; font-src ${webview.cspSource}; script-src 'nonce-${nonce}';" />
-<style>
-  /* Critical pre-stylesheet paint. VS Code serves chat.css through its webview
-     service worker, which can cold-start a beat after the HTML renders — that
-     gap otherwise paints the panel with no stylesheet at all. It was the welcome
-     screen on a white background; on a restored session it is skeleton bars as
-     white rectangles, the composer as a bare textarea and the context meter as
-     raw text. Same gap, and whichever one shows depends only on what the panel
-     happened to open with, so hold the WHOLE body rather than one screen of it.
-     html keeps its background, so the gap shows the theme colour rather than
-     white, and chat.css re-reveals (visibility: visible on body). */
-  html, body { background: var(--vscode-sideBar-background, var(--vscode-editor-background)); }
-  body { color: var(--vscode-foreground); font-family: var(--vscode-font-family); }
-  body { visibility: hidden; }
-${firstFrameLayout}
-</style>
-<link rel="stylesheet" href="${mediaUri("chat.css")}" />
-<link rel="stylesheet" href="${mediaUri("settings.css")}" />
-${filePanelStyle}
-</head>
-<body class="desk${deskLayoutClass}${this.showThinking() ? "" : " thinking-hidden"}" style="--chat-zoom: ${this.chatFontScale()}">
-${this.host.canSwitchWorkspaceFolder ? `<script nonce="${nonce}">try{if(localStorage.getItem("desk-rail-open")==="0")document.body.classList.add("desk-rail-collapsed")}catch(e){}</script>` : ""}
-${railMount}
-${openMain}
-  <header class="top-bar">
-    <div id="session-name-chip" class="session-name-chip" hidden>
-      <button id="session-name-label" class="session-name-label" type="button"></button>
-      <!-- Which project this conversation belongs to. History went
-           multi-workspace, so the open conversation is no longer necessarily
-           from the folder VS Code has open, and the name alone stopped saying
-           where you are. Same treatment the rail gives its cross-project rows. -->
-      <span id="session-name-repo" class="session-name-repo" hidden></span>
-      <button id="session-name-edit" class="session-name-edit icon-btn" type="button" hidden></button>
-    </div>
-    <!-- AP-15. Two mutually exclusive controls in one slot: the segmented
-         switch while the session is empty, the locked badge afterwards. This is
-         NOT the composer's Agent/Plan/Auto-accept picker — that one decides what
-         the agent may do in a turn, this one decides what the conversation is.
-         The removed prototype's #mode-switch-bar must not come back here. -->
-    <div id="session-type-picker" class="cx-seg cx-session-type" role="radiogroup" aria-label="Session type" title="Session type decides how this conversation works. The Agent/Plan picker decides what the agent may do in a turn." hidden>
-      <button id="session-type-agent" class="cx-seg-opt session-type-opt" type="button" role="radio" aria-checked="true" tabindex="0" data-session-type="agent">Agent</button>
-      <button id="session-type-crew" class="cx-seg-opt session-type-opt" type="button" role="radio" aria-checked="false" tabindex="-1" data-session-type="crew">Crew</button>
-    </div>
-    <span id="session-type-badge" class="cx-pill cx-pill--outline cx-session-badge" hidden></span>
-    <button id="history-btn" class="icon-btn" title="Session history"></button>
-    <button id="new-btn" class="icon-btn" title="New session"></button>
-    ${this.host.canSwitchWorkspaceFolder ? `<div id="session-head-actions"></div>` : ""}
-    ${this.host.canSwitchWorkspaceFolder ? "" : `<div id="vscode-session-actions"></div>`}
-    <div id="history-popover" class="toolbar-popover history-popover" hidden></div>
-  </header>
-${fileShellOpen}
-  <main id="messages" class="messages">
-    <div class="welcome" id="welcome">
-      <span class="welcome-mark" role="img" aria-label="Grok" style="--welcome-mark:url('${resourceUri("grok-icon.svg")}')"></span>
-      <h2>All your Companions</h2>
-      <p class="welcome-byline muted">Unified AI Companions · Antigravity, Grok, Codex &amp; Claude</p>
-      <p id="welcome-version" class="muted welcome-status-busy"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg><span>Starting</span></p>
-      <div id="welcome-onboarding"></div>
-    </div>
-  </main>
-
-  <footer class="composer">
-    <button id="scroll-bottom-btn" class="scroll-bottom-btn" type="button" title="Scroll to bottom"></button>
-    <!-- The dock: every companion panel that pins above the composer shares
-         one bounded, scrollable column, so four of them open at once cannot
-         push the input off the panel. Each panel is hidden until it has
-         something to say; an empty dock takes no space. -->
-    <div id="cx-dock" class="cx-dock">
-      <!-- AP-15/AP-17. A new Crew session picks its workflow here before the
-           first message; the composer below is where the idea is typed. -->
-      <section id="crew-empty" class="cx-rail cx-crew-start" aria-label="Start a crew run" hidden>
-        <div class="cx-rail-head">
-          <span class="cx-rail-toggle is-static">
-            <span class="cx-rail-icon" aria-hidden="true" data-icon="users"></span>
-            <span class="cx-rail-title">Choose a workflow</span>
-          </span>
-        </div>
-        <div id="crew-workflow-list" class="cx-choice-list" role="radiogroup" aria-label="Workflow"></div>
-        <div class="cx-rail-foot">
-          <span class="cx-hint">Describe the idea below, then start.</span>
-          <button id="crew-start" class="cx-btn cx-btn--primary cx-btn--sm" type="button">Start workflow</button>
-        </div>
-      </section>
-      <!-- Agent step checklist (AP-02). Present but hidden until a structured
-           plan update with entries arrives; providers that send plan TEXT
-           never fill it. -->
-      <section id="todo-rail" class="cx-rail" aria-label="Tasks" hidden>
-        <div class="cx-rail-head">
-          <button id="todo-rail-head" class="cx-rail-toggle" type="button" aria-expanded="true" aria-controls="todo-rail-list">
-            <span class="cx-rail-caret" aria-hidden="true" data-icon="chevronDown"></span>
-            <span class="cx-rail-icon" aria-hidden="true" data-icon="listChecks"></span>
-            <span class="cx-rail-title">Tasks</span>
-            <span id="todo-rail-count" class="cx-rail-meta"></span>
-          </button>
-        </div>
-        <div class="cx-rail-bar" aria-hidden="true"><span id="todo-rail-bar"></span></div>
-        <ol id="todo-rail-list" class="cx-rail-body cx-list-plain"></ol>
-      </section>
-      <!-- AP-16 §6.10 point 5. Answers "why is this still working?" while a
-           turn waits on its subagents, and disappears when the last one is done. -->
-      <section id="subagent-tray" class="cx-rail cx-rail--purple" aria-label="Running subagents" hidden>
-        <div class="cx-rail-head">
-          <span class="cx-rail-toggle is-static">
-            <span class="cx-rail-icon" aria-hidden="true" data-icon="bot"></span>
-            <span class="cx-rail-title">Subagents</span>
-            <span id="subagent-tray-title" class="cx-rail-meta"></span>
-          </span>
-        </div>
-        <ol id="subagent-tray-list" class="cx-rail-body cx-list-plain"></ol>
-      </section>
-      <section id="crew-run" class="cx-rail" aria-label="Crew run" hidden>
-        <div class="cx-rail-head">
-          <button id="crew-run-toggle" class="cx-rail-toggle" type="button" aria-expanded="true" aria-controls="crew-run-list">
-            <span class="cx-rail-caret" aria-hidden="true" data-icon="chevronDown"></span>
-            <span class="cx-rail-icon" aria-hidden="true" data-icon="users"></span>
-            <span id="crew-run-title" class="cx-rail-title">Crew</span>
-            <span id="crew-run-count" class="cx-rail-meta"></span>
-          </button>
-          <div class="cx-rail-actions">
-            <button id="crew-run-stop" class="cx-btn cx-btn--danger cx-btn--sm" type="button">Stop</button>
-          </div>
-        </div>
-        <div class="cx-rail-bar" aria-hidden="true"><span id="crew-run-bar"></span></div>
-        <ol id="crew-run-list" class="cx-rail-body cx-list-plain cx-steps"></ol>
-      </section>
-      <!-- Multi-file change overview (AP-09). Hidden until a turn produces
-           diffs; empty list hides it rather than painting a blank card. -->
-      <section id="review-center" class="cx-rail" aria-label="Review changes" hidden>
-        <div class="cx-rail-head">
-          <button id="review-center-toggle" class="cx-rail-toggle" type="button" aria-expanded="true" aria-controls="review-center-body">
-            <span class="cx-rail-caret" aria-hidden="true" data-icon="chevronDown"></span>
-            <span class="cx-rail-icon" aria-hidden="true" data-icon="gitCompare"></span>
-            <span class="cx-rail-title">Review</span>
-            <span id="review-center-count" class="cx-rail-meta"></span>
-          </button>
-        </div>
-        <div id="review-center-body" class="cx-rail-section">
-          <div class="cx-rail-toolbar">
-            <div class="cx-seg" role="tablist" aria-label="Review scope">
-              <button id="review-scope-turn" class="cx-seg-opt" type="button" role="tab" aria-selected="true" aria-controls="review-center-list">This turn</button>
-              <button id="review-scope-session" class="cx-seg-opt" type="button" role="tab" aria-selected="false" aria-controls="review-center-list">Session</button>
-            </div>
-            <span class="cx-spacer"></span>
-            <button id="review-handoff" class="cx-btn cx-btn--sm" type="button">Hand off</button>
-            <button id="review-revert-all" class="cx-btn cx-btn--danger cx-btn--sm" type="button">Discard all</button>
-          </div>
-          <ul id="review-center-list" class="cx-rail-body cx-list-plain" role="tabpanel"></ul>
-        </div>
-      </section>
-    </div>
-    <div class="composer-card">
-      <div id="attachments" class="attachments"></div>
-      <div class="composer-input-wrap">
-        <div id="input-highlight" class="input-highlight" aria-hidden="true" dir="auto"></div>
-        <textarea id="input" placeholder="Ask Grok..." rows="2" dir="auto"></textarea>
-        <button id="mic-btn" class="mic-btn" title="Voice control"></button>
-      </div>
-      <div class="composer-toolbar">
-        <div class="toolbar-left">
-          <button id="add-btn" class="icon-btn" title="Add context"></button>
-          <button id="gear-btn" class="icon-btn" title="Settings"></button>
-          <div class="context-donut" id="donut" title="Context usage">
-            <svg width="16" height="16" viewBox="0 0 16 16">
-              <circle cx="8" cy="8" r="6" fill="none" stroke="var(--vscode-editorWidget-border,#444)" stroke-width="3"/>
-              <circle id="donut-arc" cx="8" cy="8" r="6" fill="none" stroke="var(--vscode-charts-green,#4ec9b0)" stroke-width="3" stroke-dasharray="0 999" transform="rotate(-90 8 8)"/>
-            </svg>
-            <span id="donut-label" class="small muted">0%</span>
-          </div>
-          <div id="chips"></div>
-        </div>
-        <div class="toolbar-right">
-          <button id="mode-btn" class="toolbar-btn" title="Pick mode"></button>
-          <button id="send-btn" class="send"></button>
-        </div>
-      </div>
-    </div>
-    <div id="mode-popover" class="toolbar-popover" hidden></div>
-    <div id="gear-popover" class="toolbar-popover gear-popover" hidden></div>
-    <div id="add-popover" class="toolbar-popover" hidden></div>
-    <div id="context-popover" class="toolbar-popover" hidden></div>
-    <div id="slash-popover" class="slash-popover" hidden></div>
-    <div id="mention-popover" class="slash-popover mention-popover" hidden></div>
-  </footer>
-${fileShellClose}
-${closeMain}
-
-  <script nonce="${nonce}">
-    // Configure MathJax before its bundle loads. We drive typesetting manually
-    // via MathJax.tex2svg (startup.typeset:false), so it never scans the page.
-    // svg.fontCache:'local' makes each equation's SVG embed its own glyph paths
-    // (self-contained — required for the upcoming SVG/PNG export). enableMenu:false
-    // drops the right-click menu (its assets would need network/CSP exceptions).
-    // enableAssistiveMml:false is critical: by default MathJax appends a hidden
-    // <mjx-assistive-mml> MathML copy of every equation, normally hidden by CSS
-    // that MathJax injects when it manages the page. We drive it manually via
-    // tex2svg + outerHTML, so that hiding CSS isn't applied and Chromium renders
-    // the MathML natively — a visible *second* copy of every equation.
-    window.MathJax = {
-      tex: { processEnvironments: true, processRefs: true },
-      svg: { fontCache: "local" },
-      options: { enableMenu: false, enableAssistiveMml: false },
-      startup: { typeset: false }
-    };
-  </script>
-  <script nonce="${nonce}" src="${mediaUri("mathjax/tex-svg-full.js")}"></script>
-  <script nonce="${nonce}" src="${mediaUri("mermaid/mermaid.min.js")}"></script>
-  <script nonce="${nonce}" src="${mediaUri("webview-helpers.js")}"></script>
-  <script nonce="${nonce}" src="${mediaUri("settings.js")}"></script>
-  ${filePanelScript}
-  <script nonce="${nonce}" src="${mediaUri("chat.js")}"></script>
-</body>
-</html>`;
+    return this.webviewHtml.getHtml(webview);
   }
 }
 
@@ -25723,11 +19004,4 @@ ${closeMain}
  */
 export function agentCardErrorId(kind: "role" | "flow" | "workflow", name?: string): string {
   return kind + ":" + (name || "*new*");
-}
-
-function getNonce(): string {
-  let text = "";
-  const possible = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  for (let i = 0; i < 32; i++) text += possible.charAt(Math.floor(Math.random() * possible.length));
-  return text;
 }

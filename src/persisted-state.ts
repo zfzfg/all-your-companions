@@ -4,8 +4,7 @@
 // `globalState`, which nothing outside a VS Code window can read. They move to
 // `~/.grok/client-state/` so that a second client of the same machine (the
 // planned desktop app) shows the same names, pins and archives — and so the
-// install id, which the relay keys device de-duplication on, identifies the
-// MACHINE rather than one editor profile.
+// install id identifies the MACHINE rather than one editor profile.
 //
 // Three shape constraints, in order of how much they cost to get wrong:
 //
@@ -83,7 +82,7 @@ export const DISK_KEYS: Readonly<Record<string, string>> = {
   // Empty-state tips the user is finished with — a record map of id -> true,
   // never an array (validValue accepts a string scalar or a record map, and an
   // array is silently rejected; the routines list learned that the hard way).
-  // Machine-wide on purpose: the desk and a linked phone show subsets of the
+  // Machine-wide on purpose: every window on this machine shows subsets of the
   // same pool to the same person.
   "grok.welcomeTips": "welcome-tips.json",
   // Companion to the above: id -> the local day that tip last appeared, so the
@@ -213,8 +212,7 @@ export class PersistedState {
       } else if (shadow !== undefined) {
         // First run after the upgrade: seed the file from what VS Code already
         // holds. Critically this PRESERVES the existing install id — minting a
-        // fresh one would read as a new machine at the relay, mint a second
-        // device row, and strand a free-tier user against the 1-device cap.
+        // fresh one would look like a different install to telemetry.
         const ingested = this.ingest(key, shadow);
         this.cache.set(key, ingested.value);
         // A malformed existing file is evidence to preserve, not a migration

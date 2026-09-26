@@ -9,7 +9,7 @@
   // Shared Seti lookup data. Hosts provide only a URL rooted in their own
   // scheme; the component chooses the asset and the browser lazily loads icons
   // that actually appear on screen. This keeps Node work and SVG/data-URL
-  // payloads out of both the Electron injection and the phone round trip.
+  // payloads out of the Electron injection.
   const FILE_ICON_BY_NAME = {
     "package.json": "npm", "package-lock.json": "npm", "yarn.lock": "yarn",
     "pnpm-lock.yaml": "yarn", "cargo.toml": "rust", "cargo.lock": "lock",
@@ -98,7 +98,7 @@
 
   /**
    * Filesystem root of a panel scope. Production mounts put the host cwd in
-   * `id` (desktop `value.root`, remote `cwd`) and the same path in `title`.
+   * `id` (desktop `value.root`, or the workspace `cwd`) and the same path in `title`.
    * Tests may use a synthetic id and keep the real root in `title`.
    */
   function scopeCwd(scope) {
@@ -111,9 +111,9 @@
   }
 
   /**
-   * Join a host cwd to a workspace-relative path using the **desk's** separator.
-   * A phone client must not invent `/` just because it is POSIX: a backslash
-   * anywhere in `cwd` means the desk is Windows (`C:\repo\src\foo.ts`, never
+   * Join a host cwd to a workspace-relative path using the host's separator.
+   * Do not invent `/` just because the page is POSIX: a backslash anywhere
+   * in `cwd` means the workspace is Windows (`C:\repo\src\foo.ts`, never
    * `C:\repo/src/foo.ts`).
    */
   function joinHostPath(root, relPath) {
@@ -431,8 +431,8 @@
     closePanel.setAttribute("aria-label", "Close file panel");
     closePanel.innerHTML = ICON.close;
 
-    // Re-list the tree. Present on every mount — the phone needs it most, since
-    // it is the surface watching an agent write files it did not open itself.
+    // Re-list the tree. Present on every mount — the surface watching an agent
+    // write files it did not open itself.
     // It is also the control that pins the trailing group to the right edge
     // when no tabs are open; see .gfp-refresh in file-panel.css.
     const refreshBtn = doc.createElement("button");
@@ -443,11 +443,9 @@
     refreshBtn.setAttribute("aria-label", "Refresh file tree");
     refreshBtn.addEventListener("click", () => void refreshTree());
 
-    // Content-area maximize. The mount opts in (desktop and the wide browser);
-    // the phone overlay already goes full-viewport at the 899 dock breakpoint,
-    // so applyPresentation hides the control there rather than fighting that
-    // layout. Remote used to omit the flag entirely, which also hid it on a
-    // desktop monitor where the panel docks beside the chat.
+    // Content-area maximize. The mount opts in. A narrow overlay already fills
+    // the viewport, so applyPresentation hides the control there rather than
+    // fighting that layout.
     const canMaximize = !!mount.maximize;
     let maximized = false;
     const maximizeBtn = canMaximize ? doc.createElement("button") : null;
@@ -524,20 +522,18 @@
       rootEl.classList.toggle("gfp-overlay", overlay);
       rootEl.classList.toggle("gfp-docked", !overlay);
       // An overlay starts below the host's own bar, so it occupies the same band
-      // the docked panel does instead of painting over the chrome — including,
-      // on a phone, the button that just opened it. Measured rather than
-      // hardcoded because the bar wraps to two rows on a narrow screen, and
-      // re-measured here because this runs on every resize.
-      // Its BOTTOM edge, not its height: the relay page has a second header
-      // above this bar, and a height alone would start the panel that much too
-      // high. Clamped at zero so a scrolled-away bar cannot push it off-screen.
+      // the docked panel does instead of painting over the chrome, including
+      // the button that just opened it. Measured rather than hardcoded because
+      // the bar wraps to two rows on a narrow screen, and re-measured here
+      // because this runs on every resize.
+      // Its BOTTOM edge, not its height: a bar above this one would start the
+      // panel too high if only the height were used. Clamped at zero so a
+      // scrolled-away bar cannot push it off-screen.
       //
-      // Resolved on every call rather than captured at mount, because WHICH bar
-      // is on screen changes at runtime: the relay hides `.top-bar` and shows
-      // `#session-head` the moment the host sends a project catalog. A captured
-      // reference measured a hidden element, got zero, and left the overlay
-      // covering the conversation header — the exact thing this offset exists to
-      // prevent. Defaulting to the toggle's own container keeps it honest: the
+      // Resolved on every call rather than captured at mount, because which
+      // bar is on screen can change. A captured reference that measured a
+      // hidden element got zero and left the overlay covering the conversation
+      // header. Defaulting to the toggle's own container keeps it honest: the
       // panel starts below whichever bar its button lives in.
       const from = typeof mount.overlayTopFrom === "function"
         ? mount.overlayTopFrom()
@@ -547,7 +543,7 @@
       rootEl.style.setProperty("--gfp-overlay-top", top + "px");
       resizer.hidden = !open || overlay || maximized;
       closePanel.hidden = !overlay;
-      // Overlay is already the full remaining viewport (phone / <900). A second
+      // Overlay is already the full remaining viewport (<900). A second
       // maximize would fight that layout, so drop it and hide the control.
       if (overlay && maximized) {
         maximized = false;
@@ -913,23 +909,22 @@
       // What a drag may eat into is the ROW the panel shares with the chat, not
       // the panel's own column.
       //
-      // Those are the same element on the desktop and different on the relay,
-      // where the dock host is shrink-wrapped around the panel (`flex: 0 0
-      // auto`). Measuring the column there returns the panel's own width, so
+      // The dock host can be shrink-wrapped around the panel (`flex: 0 0
+      // auto`). Measuring that column returns the panel's own width, so
       // `hostWidth - MIN_CHAT_WIDTH` falls below MIN_WIDTH and the first drag
       // pins the panel at 200px with no way to enlarge it again.
       //
       // The host names the row instead of the component guessing: any
       // climb-until-an-ancestor-looks-wider rule is a heuristic that breaks the
-      // next time either layout moves. `win.innerWidth` is not a substitute
-      // either — on the relay the rail lives inside that width, so the chat
-      // would be squeezed below its own minimum.
+      // next time the layout moves. `win.innerWidth` is not a substitute
+      // either — the rail can live inside that width, so the chat would be
+      // squeezed below its own minimum.
       // `widthPeer` is the element the panel must not starve — the chat column.
       // Available space is that column plus whatever the panel already occupies,
       // which is exactly the width the two of them share and nothing else.
       //
       // A whole-row basis is wrong for the same reason the panel's own column
-      // was: on the relay the row also contains the project rail, so reserving
+      // was: the row can also contain the project rail, so reserving
       // MIN_CHAT_WIDTH from the row let a drag squeeze the chat to ~150px on a
       // 1366px window and persist it.
       const peer = mount.widthPeer && mount.widthPeer.getBoundingClientRect().width;
@@ -1522,7 +1517,7 @@
      * saying something the panel already says. The tab strip above names the
      * file and marks it dirty, and the project title beside it is the way back
      * to the tree — so the breadcrumb row was a third copy of the same two
-     * facts, costing a row of height on a phone.
+     * facts, costing a row of height.
      */
     function viewerHead() {
       const head = doc.createElement("div");
@@ -1531,8 +1526,8 @@
     }
 
     /** The highlighter, or null where it was not loaded (VS Code does not ship
-     *  the panel at all, and a stale relay page may predate this script). Every
-     *  use is guarded: no highlighter means plain text, never a broken viewer. */
+     *  the panel at all). Every use is guarded: no highlighter means plain
+     *  text, never a broken viewer. */
     function highlighter() {
       const api = root.GrokSyntaxHighlight;
       return api && typeof api.highlightCode === "function" ? api : null;
@@ -1724,7 +1719,7 @@
         markdown.innerHTML = renderMarkdown(tab.draftText);
         // A relative link in a rendered README points at a file in this
         // workspace, not at a URL. Left alone the browser navigates away from
-        // the app entirely — on a remote client, to the relay's 404. Open it
+        // the app entirely. Open it
         // here instead; links that are genuinely external fall through to the
         // browser untouched (see resolveMarkdownLink).
         markdown.addEventListener("click", (event) => {
@@ -1944,8 +1939,7 @@
       const state = scopes.get(tab.scopeId);
       if (!state || state.tabs.get(tab.relPath) !== tab || tab.reloading) return false;
       // Reload replaces the whole tab with the host's version, so anything typed
-      // while the read is in flight would vanish without a word — and on a phone
-      // that flight is long enough to type into. The editor is held read-only
+      // while the read is in flight would vanish without a word. The editor is held read-only
       // for the duration instead: Reload means "take the file's version", and
       // the honest way to say that is to stop accepting edits, not to accept
       // them and then drop them.
@@ -2414,10 +2408,8 @@
    * or null when it is not ours to open.
    *
    * A rendered `[auth](_shared/auth.ts)` is a plain `<a href>`, so the browser
-   * resolves it against the PAGE — which on a remote client is the relay, and
-   * the user lands on `https://<relay>/_shared/auth.ts` instead of the file.
-   * That is not a remote-only bug (a webview would resolve it against its own
-   * origin too), it is just most visible there.
+   * resolves it against the PAGE, so the user lands on the webview origin
+   * plus `_shared/auth.ts` instead of the file.
    *
    * Returns null for anything that is not a workspace file — a scheme
    * (`https:`, `mailto:`), a protocol-relative `//host`, a bare `#fragment` —

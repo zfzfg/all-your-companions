@@ -12,6 +12,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { GrokSidebar } from "../src/sidebar";
+import { wireExtractedHosts } from "./host-delegates";
 import { Session } from "../src/session";
 import type { HostMsg } from "../src/protocol";
 
@@ -101,6 +102,8 @@ function makeSidebar(options: {
   }));
   sidebar.localizeHistoryMessage = (message: HostMsg) => message;
   sidebar.startSession = vi.fn(async () => {});
+  sidebar.setStatus = vi.fn();
+  wireExtractedHosts(sidebar);
   return sidebar;
 }
 

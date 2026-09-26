@@ -150,7 +150,7 @@ export interface SessionMetaOverride extends SessionTypeMeta {
   unread?: boolean;
   /** The unread turn ended in an error (red dot instead of green). */
   unreadError?: boolean;
-  /** Documents uploaded from a remote browser and staged in extension storage.
+  /** Documents uploaded from the webview and staged in extension storage.
    *  Retained until the last session/fork referencing each path is deleted. */
   uploadedFiles?: string[];
   /** A composer draft the host rescued when this conversation was disposed out

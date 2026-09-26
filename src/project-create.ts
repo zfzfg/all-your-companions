@@ -4,13 +4,12 @@
  * `addProjectFolder` opens a native picker and takes whatever path comes back.
  * That is the right shape for a folder that already exists and the wrong shape
  * for everything else: a knowledge-work user starting their first piece of work
- * has no folder to point at, and a phone has no picker to open.
+ * has no folder to point at.
  *
  * So the two new ways in take a NAME or a URL — never a path. The destination
  * is derived here, inside one configured root, and checked to be inside it
- * afterwards. That is the whole containment model, and it is what lets these
- * be reachable from a remote when `addProjectFolder` never could: a remote
- * cannot say WHERE, only WHAT.
+ * afterwards. That is the whole containment model: the client says WHAT, the
+ * host says WHERE.
  *
  * Pure. No I/O, no `vscode`, no process spawning — the caller does all three.
  */
@@ -85,7 +84,7 @@ const ILLEGAL_NAME_CHARS = /[\\/:*?"<>|\x00-\x1f]/;
  * TCC-protected (unlike Desktop / Documents / Downloads) so creating it raises
  * no consent dialog, and it is findable in Finder without being hidden.
  *
- * A single root is not tidiness. It is what makes a remote-supplied name safe:
+ * A single root is not tidiness. It is what makes a client-supplied name safe:
  * the client says what to call it, the host says where it goes.
  */
 export function projectRoot(

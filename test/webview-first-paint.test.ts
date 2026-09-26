@@ -18,7 +18,7 @@ import { readFileSync } from "node:fs";
  * the pairing that breaks. Scoped to the VS Code webviews: the desktop app
  * loads its HTML and CSS off disk with no worker in between.
  */
-const src = readFileSync(new URL("../src/sidebar.ts", import.meta.url), "utf8");
+const src = readFileSync(new URL("../src/webview-html.ts", import.meta.url), "utf8");
 
 const heads = [...src.matchAll(/<head>([\s\S]*?)<\/head>/g)].map((m) => m[1]);
 
