@@ -148,7 +148,7 @@ Don't skip the tag/release (or the vsix asset) on a release push. A pure mid-dev
 
 - **Work on `main`, synced to `origin/main`.** `main` is the only working line — start every task from `main` fast-forwarded to `origin/main`. The `dev` branch is **abandoned** (stale far behind `main`); do **not** develop on it. If the working tree is on `dev`, or `main` is behind `origin/main`, switch to `main` and `git reset --hard origin/main` before doing anything else (the published version lives on `main` — a stale checkout will look many versions behind and misnumber the changelog).
 - Direct-to-`main`, no feature branches
-- **Never commit or push automatically.** Changes reach `main`/`origin` only on the user's **explicit** request (rare) or as part of a release. Otherwise: build + reinstall locally for testing and leave the working tree uncommitted.
+- **Commit regularly after each completed step.** After finishing a self-contained unit of work (e.g. one module extracted + gate green), create a commit to secure progress. Intermediate commits prevent data loss and provide safe rollback points. **Do not push** to `origin` unless the user explicitly asks — commits stay local until requested. Releases still follow the § Publishing procedure.
 - Commits explain the *why*, not the *what*
 - Don't introduce abstractions speculatively
 - Don't add comments that explain what well-named code already says
