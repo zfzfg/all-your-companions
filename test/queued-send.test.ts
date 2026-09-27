@@ -152,9 +152,10 @@ describe("dequeueQueuedSends index meaning by client generation", () => {
 
 describe("live host keeps the entry-store invariants", () => {
   const sidebarSrc = readFileSync(new URL("../src/sidebar.ts", import.meta.url), "utf8");
+  const inboundSrc = readFileSync(new URL("../src/sidebar-inbound.ts", import.meta.url), "utf8");
 
   it("dequeueSend from an old webview is the pending block, not index-into-entries", () => {
-    expect(sidebarSrc).toContain("dequeueQueuedSends(s.queuedSends, msg.index, false)");
+    expect(inboundSrc).toContain("dequeueQueuedSends(s.queuedSends, msg.index, false)");
   });
 
   it("assigns image numbers at attach and never reindexes them", () => {

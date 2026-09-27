@@ -24,18 +24,26 @@ const src = readFileSync(
   path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "sidebar.ts"),
   "utf8",
 );
+const sessionStartSrc = readFileSync(
+  path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "session-start.ts"),
+  "utf8",
+);
+const sessionCatalogSrc = readFileSync(
+  path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "session-catalog.ts"),
+  "utf8",
+);
 
 const body = (() => {
-  const start = src.indexOf("private async newFocusedSession(");
+  const start = sessionCatalogSrc.indexOf("async newFocusedSession(");
   expect(start).toBeGreaterThan(-1);
-  const end = src.indexOf("\n  private ", start + 1);
-  return src.slice(start, end);
+  const end = sessionCatalogSrc.indexOf("\n  async ", start + 1);
+  return sessionCatalogSrc.slice(start, end);
 })();
 
 describe("a new local session refreshes the rail", () => {
   it("posts the sessions list, not only the repo catalog", () => {
     expect(body).toContain("this.postRepoCatalog();");
-    expect(body).toContain("this.postSessionsList();");
+    expect(body).toMatch(/(?:this|uiOps)\.postSessionsList\(\);/);
   });
 
   it("posts it after the empty-session sweep", () => {
@@ -47,7 +55,7 @@ describe("a new local session refreshes the rail", () => {
     // own before returning. The ordering guarded here is the one on the way
     // through to actually starting a session.
     const sweep = body.indexOf("sweepEmptySessions");
-    const list = body.lastIndexOf("this.postSessionsList();");
+    const list = body.lastIndexOf("postSessionsList();");
     expect(sweep).toBeGreaterThan(-1);
     expect(list).toBeGreaterThan(sweep);
   });
@@ -74,11 +82,11 @@ describe("turn end refreshes the project preview", () => {
   });
 
   it("stamps ordering optimistically before prompt and reasserts it at turn end", () => {
-    const start = src.indexOf("private async handleSend(");
+    const start = sessionStartSrc.indexOf("public async handleSend(");
     expect(start).toBeGreaterThan(-1);
-    const body = src.slice(start, src.indexOf("\n  private ", start + 1));
+    const body = sessionStartSrc.slice(start, sessionStartSrc.indexOf("\n  private ", start + 1));
     const prompt = body.indexOf("await client.prompt(");
-    const stamps = [...body.matchAll(/this\.noteSessionActivity\(session\)/g)].map((match) => match.index!);
+    const stamps = [...body.matchAll(/this\.deps\.noteSessionActivity\(session\)/g)].map((match) => match.index!);
     expect(stamps.length).toBeGreaterThanOrEqual(2);
     expect(stamps[0]).toBeLessThan(prompt);
     expect(stamps.some((index) => index > prompt)).toBe(true);

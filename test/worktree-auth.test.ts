@@ -532,11 +532,11 @@ describe("worktree validation reads git first", () => {
     // Losing the lock retry is the accepted cost. It is self-correcting: the
     // update is optional, the version floor and Plan gating still run against
     // whatever is installed, and the CLI's own autoUpdate catches it up.
-    const src = fs.readFileSync(path.join(root, "src", "sidebar.ts"), "utf8");
-    const start = src.indexOf("private async maybeUpdateCliOnUpgrade");
+    const src = fs.readFileSync(path.join(root, "src", "provider-session.ts"), "utf8");
+    const start = src.indexOf("public async maybeUpdateCliOnUpgrade");
     const body = src.slice(start, src.indexOf("\n  }", src.indexOf("finally", start)));
     expect(body).not.toContain("updateFailed");
-    expect(body).toContain("void this.state.update(CLI_UPDATE_VERSION_KEY, current);");
+    expect(body).toContain("void this.deps.state.update(CLI_UPDATE_VERSION_KEY, current);");
     // Unconditional: no flag, no branch guarding the write.
     expect(body.slice(body.indexOf("} finally {"))).not.toMatch(/if\s*\(/);
     // And the wait it can cost is bounded to something a person will sit through.

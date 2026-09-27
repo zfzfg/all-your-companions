@@ -1388,22 +1388,22 @@ describe("settings restore skips disabled rows", () => {
 describe("review lows (settings / telemetry / voice write scope)", () => {
   it("posts the stored global MCP view device-wide", () => {
     const src = readFileSync(
-      path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "sidebar.ts"),
+      path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "voice-and-mcp.ts"),
       "utf8",
     );
-    const start = src.indexOf("private postMcpServers");
-    const end = src.indexOf("private connectedConnectorStore");
+    const start = src.indexOf("public postMcpServers");
+    const end = src.indexOf("public connectedConnectorStore");
     expect(start).toBeGreaterThan(-1);
     expect(end).toBeGreaterThan(start);
     const body = src.slice(start, end);
-    expect(body).toContain("this.post(view)");
+    expect(body).toContain(".post(view)");
     expect(body).toContain("this.mcpServersView");
     expect(body).not.toContain("this.postLocal");
   });
 
   it("voice send-phrase and keyterms write the winning inspect scope", () => {
     const src = readFileSync(
-      path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "sidebar.ts"),
+      path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "sidebar-inbound.ts"),
       "utf8",
     );
     const start = src.indexOf('case "setVoiceSendPhrase"');

@@ -429,6 +429,10 @@ describe("the surfaces this page has to reach", () => {
     fileURLToPath(new URL("../src/webview-html.ts", import.meta.url)),
     "utf8",
   );
+  const routineSchedulerSrc = readFileSync(
+    fileURLToPath(new URL("../src/routine-scheduler.ts", import.meta.url)),
+    "utf8",
+  );
 
   function block(marker: string, terminator = "]);"): string {
     const start = sidebarSrc.indexOf(marker);
@@ -469,8 +473,8 @@ describe("the surfaces this page has to reach", () => {
     // `handleSend` catches a failed turn, renders the error and resolves
     // normally, so awaiting it says nothing about whether the turn worked.
     // Without this check a rate-limited run gets a green tick — the exact lie
-    // the run strip exists to prevent.
-    const body = block("private async runRoutine(", "\n  }\n\n  /** Connected models");
+    const start = routineSchedulerSrc.indexOf("public async runRoutine(");
+    const body = routineSchedulerSrc.slice(start, routineSchedulerSrc.indexOf("\n  }\n}", start));
     expect(body).toContain('session.status === "error"');
     expect(body).not.toMatch(/finish\("ran"\)/);
   });
@@ -481,8 +485,9 @@ describe("the surfaces this page has to reach", () => {
     // offers concrete rows instead. Matching a saved routine against that list
     // meant a "Grok default" routine ran once and then skipped for ever,
     // reporting a provider that was connected as not connected.
-    const body = block("private async runRoutine(", "\n  }\n\n  /** Connected models");
-    expect(body).toContain("this.usableProviders().includes(routine.provider)");
+    const start = routineSchedulerSrc.indexOf("public async runRoutine(");
+    const body = routineSchedulerSrc.slice(start, routineSchedulerSrc.indexOf("\n  }\n}", start));
+    expect(body).toContain("this.deps.usableProviders().includes(routine.provider)");
     expect(body).not.toMatch(/models\.some\(\(m\) =>[^)]*routine\.model/);
   });
 

@@ -20,12 +20,22 @@ const src = readFileSync(
   path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "sidebar.ts"),
   "utf8",
 );
+const turnEditSrc = readFileSync(
+  path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "turn-edit.ts"),
+  "utf8",
+);
 
 function methodBody(signature: string): string {
-  const start = src.indexOf(signature);
+  const isTurnEditMethod = signature.includes("editLastMessage") || signature.includes("rewindFocusedSession");
+  const targetSrc = isTurnEditMethod ? turnEditSrc : src;
+  const bare = signature.replace(/^(?:private|public)\s+/, "");
+  const targetSig = isTurnEditMethod ? bare : signature;
+  const start = targetSrc.indexOf(targetSig);
   expect(start, `${signature} not found`).toBeGreaterThan(-1);
-  const end = src.indexOf("\n  private ", start + 1);
-  return src.slice(start, end === -1 ? undefined : end);
+  const end = targetSrc.indexOf("\n  private ", start + 1);
+  const endPub = targetSrc.indexOf("\n  public ", start + 1);
+  const effectiveEnd = end === -1 ? endPub : (endPub === -1 ? end : Math.min(end, endPub));
+  return targetSrc.slice(start, effectiveEnd === -1 ? undefined : effectiveEnd);
 }
 
 describe("who receives a rewound message", () => {

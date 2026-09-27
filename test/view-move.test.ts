@@ -158,8 +158,8 @@ describe("both routes to the host picker retire the hint BEFORE moving", () => {
   });
 
   it("the gear handler retires the hint, then relocates", () => {
-    const src = readFileSync(path.join(root, "src", "sidebar.ts"), "utf8");
-    expect(before(src, "this.retireMoveViewHint()", "this.host.relocateView(")).toBe(true);
+    const src = readFileSync(path.join(root, "src", "sidebar-inbound.ts"), "utf8");
+    expect(before(src, "this.deps.settings.retireMoveViewHint()", "this.deps.host.relocateView(")).toBe(true);
   });
 
   it("the startup correction checks for a user move before applying one", () => {

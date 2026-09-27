@@ -277,10 +277,11 @@ describe("who is handed the delegation server (D10, §7.9)", () => {
 
 describe("/subagents is answered by the host", () => {
   it("is dispatched from both send paths without an unconditional await", () => {
-    const source = require("node:fs").readFileSync(new URL("../src/sidebar.ts", import.meta.url), "utf8") as string;
-    expect(source).toContain('if (parseSubagentsCommand(msg.text).kind !== "none")');
-    expect(source).toContain('if (parseSubagentsCommand(text).kind !== "none")');
-    expect(source).not.toMatch(/if \(await this\.handleSubagentsCommand/);
+    const inbound = require("node:fs").readFileSync(new URL("../src/sidebar-inbound.ts", import.meta.url), "utf8") as string;
+    const sessionStart = require("node:fs").readFileSync(new URL("../src/session-start.ts", import.meta.url), "utf8") as string;
+    expect(inbound).toContain('if (parseSubagentsCommand(msg.text).kind !== "none")');
+    expect(sessionStart).toContain('if (parseSubagentsCommand(text).kind !== "none")');
+    expect(inbound + sessionStart).not.toMatch(/if \(await this\.handleSubagentsCommand/);
   });
 });
 

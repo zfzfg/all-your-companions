@@ -254,6 +254,8 @@ describe("the sidebar source keeps the AP-05 wiring", () => {
   // Cheap structural pins for the paths a unit test cannot reach without a live
   // ACP process, all of which are "if this is missing, something hangs".
   const source = require("node:fs").readFileSync(new URL("../src/sidebar.ts", import.meta.url), "utf8") as string;
+  const mcpSource = require("node:fs").readFileSync(new URL("../src/voice-and-mcp.ts", import.meta.url), "utf8") as string;
+  const sessionStart = require("node:fs").readFileSync(new URL("../src/session-start.ts", import.meta.url), "utf8") as string;
   const questionHost = require("node:fs").readFileSync(new URL("../src/question-host.ts", import.meta.url), "utf8") as string;
 
   it("withholds the MCP question tool from grok, which has its own RPC", () => {
@@ -273,11 +275,11 @@ describe("the sidebar source keeps the AP-05 wiring", () => {
   });
 
   it("revokes the session token on a session start or restart", () => {
-    expect(source).toContain("this.revokeAskUserToken(session);");
+    expect(sessionStart).toContain("this.deps.sessionLifecycleOps.revokeAskUserToken(session);");
   });
 
   it("never lets a failed pipe keep a session from starting", () => {
-    const method = source.slice(source.indexOf("private async hostMcpServersFor("));
+    const method = mcpSource.slice(mcpSource.indexOf("public async hostMcpServersFor("));
     expect(method.slice(0, 2000)).toContain("catch (error)");
   });
 });

@@ -43,14 +43,15 @@ describe("briefingForCrewStep", () => {
 
 describe("/crew async boundary (source pin)", () => {
   it("parses /crew synchronously at both intercepts, awaits only on a hit", () => {
-    const src = readFileSync(join(root, "..", "src", "sidebar.ts"), "utf8");
-    const sendCase = src.slice(src.indexOf('case "send":'), src.indexOf("let queuedSendCommit"));
+    const src = readFileSync(join(root, "..", "src", "sidebar-inbound.ts"), "utf8");
+    const sessionStartSrc = readFileSync(join(root, "..", "src", "session-start.ts"), "utf8");
+    const sendCase = src.slice(src.indexOf('case "send":'), src.indexOf("await this.deps.composer.handleSend(msg.text"));
     expect(sendCase).toContain('if (parseCrewCommand(msg.text).kind !== "none") {');
     expect(sendCase).not.toMatch(/if \(await this\.handleCrewCommand/);
-    const headStart = src.indexOf("const session = target ?? this.focused;");
-    const head = src.slice(
+    const headStart = sessionStartSrc.indexOf("const session = target ?? this.deps.getFocused();");
+    const head = sessionStartSrc.slice(
       headStart,
-      src.indexOf("await this.waitForSessionStart(session);", headStart),
+      sessionStartSrc.indexOf("await this.waitForSessionStart(session);", headStart),
     );
     expect(head).toContain('if (parseCrewCommand(text).kind !== "none") {');
     const beforeCrew = stripComments(head.slice(0, head.indexOf("if (parseCrewCommand(text)")));

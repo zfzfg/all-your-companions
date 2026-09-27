@@ -26,9 +26,46 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const sidebar = fs
   .readFileSync(path.join(root, "src", "sidebar.ts"), "utf8")
   .replace(/\r\n/g, "\n");
+const sessionCatalog = fs
+  .readFileSync(path.join(root, "src", "session-catalog.ts"), "utf8")
+  .replace(/\r\n/g, "\n");
+const classStart = sessionCatalog.indexOf("export class SessionCatalog {");
+const classSrc = sessionCatalog.slice(classStart);
+
+const projectFolders = fs
+  .readFileSync(path.join(root, "src", "project-folders.ts"), "utf8")
+  .replace(/\r\n/g, "\n");
+const pfStart = projectFolders.indexOf("export class ProjectFolders {");
+const pfSrc = projectFolders.slice(pfStart);
+
+const implicitContext = fs
+  .readFileSync(path.join(root, "src", "implicit-context.ts"), "utf8")
+  .replace(/\r\n/g, "\n");
+const icStart = implicitContext.indexOf("export class ImplicitContext {");
+const icSrc = implicitContext.slice(icStart);
 
 /** Body of a method, sliced from its declaration to the first dedented `}`. */
 function methodBody(name: string): string {
+  if (name.startsWith("//")) {
+    const source = classSrc.includes(name) ? classSrc : pfSrc.includes(name) ? pfSrc : icSrc.includes(name) ? icSrc : sidebar;
+    const at = source.indexOf(name);
+    expect(at, `${name} must still exist`).toBeGreaterThan(-1);
+    const end = source.indexOf("\n  }\n", at);
+    expect(end).toBeGreaterThan(at);
+    return source.slice(at, end);
+  }
+  const bare = name.replace(/^private\s+/, "").replace(/^async\s+/, "");
+  for (const source of [classSrc, pfSrc, icSrc]) {
+    const match = source.search(
+      new RegExp(`\\n  (?:public\\s+|private\\s+|async\\s+|public\\s+async\\s+|private\\s+async\\s+)?${bare.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`),
+    );
+    if (match >= 0) {
+      const at = source.indexOf(bare, match);
+      const end = source.indexOf("\n  }\n", at);
+      expect(end).toBeGreaterThan(at);
+      return source.slice(at, end);
+    }
+  }
   const at = sidebar.indexOf(name);
   expect(at, `${name} must still exist`).toBeGreaterThan(-1);
   const end = sidebar.indexOf("\n  }\n", at);
@@ -52,12 +89,14 @@ describe("local repo scope", () => {
     // conversation IS open on this path, and only the VS Code half of the
     // switch is skipped. Reading it as a failure would have made a caller
     // mint a blank conversation over a perfectly good one.
-    expect(body).toMatch(/if \(this\.host\.canSwitchWorkspaceFolder\) return;/);
-    expect(body).toMatch(/this\.selectedRepoCwd = openedIn\.cwd;/);
+    expect(body).toMatch(/if \((?:this|this\.deps)\.host\.canSwitchWorkspaceFolder\) return;/);
+    expect(body).toMatch(/(?:this\.selectedRepoCwd = openedIn\.cwd|setSelectedRepoCwd\(openedIn\.cwd\))/);
   });
 
   it("offers Add project on the repo catalog frame", () => {
-    expect(methodBody("private postRepoCatalog()")).toMatch(/canAddProject: this\.canAddProjectFolder\(\)/);
+    expect(methodBody("private postRepoCatalog()")).toMatch(
+      /canAddProject:\s*(?:this|this\.deps\.repoOps)\.canAddProjectFolder\(\)/,
+    );
   });
 });
 
@@ -127,10 +166,13 @@ describe("cross-project fallout of following the selection", () => {
     // Renamed from `wasFocused`: the snapshot taken before the provider
     // teardown could not see a view that navigated onto the conversation
     // while it was being deleted. The cwd rule this test guards is unchanged.
-    const at = sidebar.indexOf("if (viewNeedsHome) {");
+    const source = sessionCatalog.includes("if (viewNeedsHome) {") ? sessionCatalog : sidebar;
+    const at = source.indexOf("if (viewNeedsHome) {");
     expect(at).toBeGreaterThan(-1);
-    const arm = sidebar.slice(at, sidebar.indexOf("}", sidebar.indexOf("startSession()", at)));
-    expect(arm).toMatch(/this\.setSessionCwd\(\s*this\.focused,\s*this\.historyCwdFor\(\)/);
+    const arm = source.slice(at, source.indexOf("}", source.indexOf("startSession()", at)));
+    expect(arm).toMatch(
+      /(?:this(?:\.deps)?\.sessionOps)?\.setSessionCwd\(\s*(?:this\.focused|nextFocused),\s*(?:this(?:\.deps)?\.sessionOps)?\.historyCwdFor\(\)/,
+    );
   });
 
   it("will not tear down a session that is still starting", () => {
@@ -178,7 +220,7 @@ describe("a row that names its own project", () => {
     expect(body).toMatch(/resolveLocalRepoTarget\(requestedCwd\)/);
     // Ordered AFTER the evidence-bearing sources and BEFORE the scope fallback.
     const named = body.indexOf("localNamedCwd ||");
-    const scope = body.indexOf('this.historyCwdFor()');
+    const scope = body.indexOf("historyCwdFor()");
     expect(named).toBeGreaterThan(-1);
     expect(scope).toBeGreaterThan(named);
   });

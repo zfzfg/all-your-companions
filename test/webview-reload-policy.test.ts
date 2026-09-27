@@ -208,18 +208,18 @@ describe("rehydrate during priming does not lose a prompt", () => {
     // shouldRehydrateOnWebviewReady afterwards misread that self-created
     // client as an incoming reload-rehydrate and skipped the catalog post.
     // Lock the ORDER, not just the presence of the call.
-    const sidebar = readFileSync(path.join(root, "src", "sidebar.ts"), "utf8");
-    const caseStart = sidebar.indexOf('case "ready": {');
+    const inbound = readFileSync(path.join(root, "src", "sidebar-inbound.ts"), "utf8");
+    const caseStart = inbound.indexOf('case "ready": {');
     expect(caseStart).toBeGreaterThan(-1);
-    const caseEnd = sidebar.indexOf("break;", caseStart);
-    const body = sidebar.slice(caseStart, caseEnd);
+    const caseEnd = inbound.indexOf("break;", caseStart);
+    const body = inbound.slice(caseStart, caseEnd);
     const decide = body.indexOf("shouldRehydrateOnWebviewReady");
-    const boot = body.indexOf("this.postInitialState()");
+    const boot = body.indexOf("this.deps.boot.postInitialState()");
     expect(decide).toBeGreaterThan(-1);
     expect(boot).toBeGreaterThan(-1);
     expect(decide).toBeLessThan(boot);
     expect(body).toContain("if (!rehydrating)");
-    expect(body).toContain("this.postRepoCatalog()");
+    expect(body).toContain("this.deps.boot.postRepoCatalog()");
   });
 
   it("unlocks once the session is actually ready", () => {

@@ -25,23 +25,34 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 
 const source = readFileSync(new URL("../src/sidebar.ts", import.meta.url), "utf8");
+const sessionStartSource = readFileSync(new URL("../src/session-start.ts", import.meta.url), "utf8");
 const providerSetupSource = readFileSync(new URL("../src/provider-setup.ts", import.meta.url), "utf8");
+const sessionCatalogSource = readFileSync(new URL("../src/session-catalog.ts", import.meta.url), "utf8");
+const turnEditSource = readFileSync(new URL("../src/turn-edit.ts", import.meta.url), "utf8");
 const between = (from: string, to: string) => {
-  const start = source.indexOf(from);
+  const fromBare = from.replace(/^private\s+/, "");
+  const toBare = to.replace(/^private\s+/, "");
+  const inCat = sessionCatalogSource.includes(fromBare);
+  const inTurnEdit = turnEditSource.includes(from) || turnEditSource.includes(fromBare);
+  const src = inTurnEdit ? turnEditSource : (inCat ? sessionCatalogSource : source);
+  const startTarget = inTurnEdit ? (turnEditSource.includes(from) ? from : fromBare) : (inCat ? fromBare : from);
+  const endTarget = inTurnEdit ? (turnEditSource.includes(to) ? to : toBare) : (inCat ? toBare : to);
+  const start = src.indexOf(startTarget);
   expect(start).toBeGreaterThan(-1);
-  const end = source.indexOf(to, start);
+  const end = src.indexOf(endTarget, start);
   expect(end).toBeGreaterThan(start);
-  return source.slice(start, end);
+  return src.slice(start, end);
 };
 
 describe("only an accepted credential says an account works", () => {
   // A process that started and replayed a transcript has proved that a binary
   // runs and that a file is readable. Neither is the account.
   it("a session that starts is not an account that authenticates", () => {
-    const startSession = between(
-      "this.reapPool(); // enforce the LRU cap",
-      "this.emit(session, { type: \"setBusy\", value: false });",
-    );
+    const reap = sessionStartSource.indexOf("this.reapPool(); // enforce the LRU cap");
+    expect(reap).toBeGreaterThan(-1);
+    const unlocked = sessionStartSource.indexOf('this.emit(session, { type: "setBusy", value: false });', reap);
+    expect(unlocked).toBeGreaterThan(reap);
+    const startSession = sessionStartSource.slice(reap, unlocked);
     expect(startSession).not.toContain("setProviderNeedsLogin(session.provider, false)");
   });
 
@@ -50,23 +61,27 @@ describe("only an accepted credential says an account works", () => {
   // survive a reconnect — the exact moment a phone user is looking.
   it("a session listing that succeeds is evidence of nothing", () => {
     const listing = between("private async refreshAdapterHistory", "private buildGrokSessionsList");
-    expect(listing).not.toContain("this.setProviderNeedsLogin(provider, false)");
+    expect(listing).not.toContain("setProviderNeedsLogin(provider, false)");
   });
 
   // The other half of the same call site: a listing REFUSED on credentials is
   // a real observation and still raises the flag.
   it("a session listing that is refused on credentials still raises it", () => {
     const schedule = between("private scheduleAdapterHistoryRefresh", "private async refreshCodexHistory");
-    expect(schedule).toContain("this.setProviderNeedsLogin(provider, true)");
+    expect(schedule).toMatch(/(?:this|adapterOps)\.setProviderNeedsLogin\(provider, true\)/);
   });
 
   it("a served turn is what lowers it", () => {
-    const clean = between("session.authRecoveryTried = false; // a clean turn", "this.maybeGenerateTitle(session);");
-    expect(clean).toContain("this.setProviderNeedsLogin(session.provider, false)");
+    const cleanStart = sessionStartSource.indexOf("session.authRecoveryTried = false; // a clean turn");
+    expect(cleanStart).toBeGreaterThan(-1);
+    const cleanEnd = sessionStartSource.indexOf("this.deps.turnAndSendOps.maybeGenerateTitle(session);", cleanStart);
+    expect(cleanEnd).toBeGreaterThan(cleanStart);
+    const clean = sessionStartSource.slice(cleanStart, cleanEnd);
+    expect(clean).toContain("this.deps.providerOps.setProviderNeedsLogin(session.provider, false)");
   });
 
   it("and so is a resend the fresh token got through", () => {
-    const recovered = between("session.authRecoveryTried = false; // recovered", "this.maybeGenerateTitle(session);");
+    const recovered = between("session.authRecoveryTried = false; // recovered", "maybeGenerateTitle(session);");
     expect(recovered).toContain("this.setProviderNeedsLogin(session.provider, false)");
   });
 

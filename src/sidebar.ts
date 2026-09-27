@@ -9,7 +9,7 @@ import {
   createSubagentHost,
   type SubagentHostDeps,
   type SubagentState,
-  SUBAGENT_INDEX_KEY,
+  SUBAGENT_INDEX_KEY
 } from "./subagent-host";
 import type {
   Host,
@@ -19,7 +19,7 @@ import type {
   HostTextDocumentContentProvider,
   HostWebview,
   HostWebviewView,
-  HostEditorWebview,
+  HostEditorWebview
 } from "./host";
 import { Uri, disposeAll, shouldRehydrateOnWebviewReady } from "./host";
 import * as fs from "node:fs";
@@ -28,13 +28,13 @@ import * as path from "node:path";
 import { spawn } from "node:child_process";
 import { AcpClient, EffortLevel, ExitPlanRequest, PermissionRequest, QuestionRequest } from "./acp";
 import type { AcpProvider } from "./acp-backend";
-import { isAdapterProvider, isAcpProvider, ACP_PROVIDERS } from "./acp-backend";
+import { isAdapterProvider, isAcpProvider } from "./acp-backend";
 import { allProviderCapabilities, providerCapability } from "./provider-capabilities";
 import {
   dropReviewTurnsAfter,
   filesForScope,
   reviewCenterSnapshot,
-  type ReviewScope,
+  type ReviewScope
 } from "./review-center";
 import {
   appendRuleEntry,
@@ -42,7 +42,7 @@ import {
   resolveRuleFileStates,
   ruleFileCandidates,
   type RuleFile,
-  type RuleFileFs,
+  type RuleFileFs
 } from "./rules-files";
 import {
   PERMISSION_RULES_ADOPTED_KEY,
@@ -54,7 +54,6 @@ import {
   createRule,
   decidePermission,
   extractPermissionFacts,
-  pathMatchesGlob,
   globalRulesToMap,
   loadWorkspaceRulesFile,
   parseAdoptionMap,
@@ -69,7 +68,7 @@ import {
   type AdoptionRecord,
   type PermissionRule,
   type PermissionRulesFs,
-  type PermissionRuleView,
+  type PermissionRuleView
 } from "./permission-rules";
 import { CODEX_MANAGED_VERSION } from "./codex-managed-installer";
 import { resolveCodexHome } from "./codex-cli-locator";
@@ -91,7 +90,7 @@ import {
   type ProviderConnections,
   type ProviderModelCache,
   type ProviderModelInfo,
-  type ProviderHistoryCursor,
+  type ProviderHistoryCursor
 } from "./provider-ui";
 import {
   ROUTINES_KEY,
@@ -103,7 +102,7 @@ import {
   type Routine,
   type RoutineModelOption,
   type RoutineProjectOption,
-  type RoutineRun,
+  type RoutineRun
 } from "./routines";
 import { RoutineRunStore } from "./routine-store";
 import { CheckpointStore, nodeCheckpointFs } from "./checkpoint-store";
@@ -128,7 +127,7 @@ import {
   sessionUiSnapshot,
   turnElapsedMs,
   turnIsInFlight,
-  type QuestionResponder,
+  type QuestionResponder
 } from "./session";
 import { buildReapCandidates, selectReapable, computeDot, Dot } from "./session-pool";
 import { resolveVoiceKey, extractGrokAuthKey, parseVoiceCommand, buildSttKeyterms, voiceSettingForRepo, voiceSettingWriteTarget, sanitizeVoiceSendPhrase, sanitizeVoiceKeyterms, voiceConfiguredFingerprint, DEFAULT_SEND_PHRASE } from "./voice";
@@ -140,13 +139,10 @@ import { summarizeForSpeech } from "./speech-summary";
 import type { PromptResultMeta, PromptUsage, SessionInfoContext } from "./acp-dispatch";
 import { DEFAULT_COMPACT_THRESHOLD, GROK_COMPACT_ENV, compactEventKind, compactSummaryPreview, compactThresholdMismatch, compactThresholdMismatchNotice, grokCompactThresholdEnv, normalizeCompactThreshold, shouldOfferNearFull } from "./grok-compaction";
 import { renderFreshSessionPrompt } from "./handoff";
-import { ChildRelayTable, childNeedsYouNotice, childScopedSuggestions, relayOriginLabel, relayScopeWord, type ChildKind, type RelayKind, type RelayOrigin } from "./child-relay";
-import { PausableDeadline, normalizeStallWarningSec, stageStallState } from "./child-watch";
+import { ChildRelayTable, type RelayKind, type RelayOrigin } from "./child-relay";
+import { normalizeStallWarningSec } from "./child-watch";
 import { subagentTurnSummary } from "./companion-subagents";
 import { bothDelegationsHint, grokSubagentEnv } from "./grok-subagent-env";
-import { subagentChildStatus } from "./child-status";
-import type { ChildStatusView } from "./protocol";
-import { ACTIVITY_FLUSH_MS, activityItemFromHostMsg, activityLastLine, coalesceActivity } from "./child-activity";
 import { MediaRef, adapterCompactSignal, adapterContextOccupancy, agentTimestampMsFromMeta, autoCompactStartedNote, childStreamFromRoute, commandOutputForToolCall, commandOutputFromLiveTerminal, contextUsedFromCompactNotification, enforceCompleteSessionCost, errorDetail, gateZeroTokenMeta, isAuthErrorText, isCredentialError, isIncompatibleAgentError, isResumeNotFound, isSubagentLifecycleUpdate, occupancyFromAdapterTurn, parseSessionInfoContext, permissionOutcomeFor, promptErrorText, rateLimitNoticeText, replayedTurnDuration, sessionInfoCacheFresh, sumUsage, summarizeBackgroundCommand, turnStatusFromPromptResult, usageIsRealMeasurement, type TurnEndStatus, type UpdateRoute } from "./acp-dispatch";
 import { createMcpPrepareState, prepareMcpToolCall } from "./mcp-tool";
 import { configWriteTarget, modeToRemember, rememberedEffort, startsInYolo, withRememberedEffort, type EffortPrefs } from "./mode-prefs";
@@ -160,7 +156,7 @@ import {
   freePercentFromWindows,
   limitOfferTitle,
   recommendedLimitAction,
-  switchTranscriptLine,
+  switchTranscriptLine
 } from "./limit-errors";
 import {
   WELCOME_TIPS_KEY,
@@ -169,7 +165,7 @@ import {
   parseDismissedTips,
   shownOn,
   withDismissedTip,
-  withShownTip,
+  withShownTip
 } from "./welcome-tips";
 import { commandOnPath, runGitClone } from "./git-clone";
 import {
@@ -180,7 +176,7 @@ import {
   loginGithubWithToken,
   logoutGithub,
   readGithubAuthState,
-  type GithubAuthState,
+  type GithubAuthState
 } from "./github-auth";
 import { SubscriptionUsageBinding, SubscriptionUsageCache, subscriptionCredentialContext, type SubscriptionWindow } from "./subscription-usage";
 import { readCodexSubscriptionWindows } from "./codex-usage";
@@ -208,14 +204,14 @@ import {
   legacyProjectRootPath,
   projectRoot,
   rememberedRootFor,
-  shouldUseLegacyRoot,
+  shouldUseLegacyRoot
 } from "./project-create";
 import {
   GROK_VIEW_ID,
   MOVE_VIEW_HINT_USED_KEY,
   moveViewContainerFor,
   panelPositionFor,
-  shouldShowMoveViewHint,
+  shouldShowMoveViewHint
 } from "./view-move";
 import {
   APTABASE_APP_KEY_PROD,
@@ -225,7 +221,7 @@ import {
   sessionStartHostKind,
   sessionStartSurface,
   shouldSendTelemetry,
-  OFFICIAL_EXTENSION_ID,
+  OFFICIAL_EXTENSION_ID
 } from "./telemetry";
 import { randomUUID } from "node:crypto";
 import { execGrokCli } from "./cli-process";
@@ -242,7 +238,7 @@ import {
   CLI_VERSION_CACHE_KEY,
   GROK_REQUIRED_VERSION,
   GROK_STDIO_DOWNGRADE_TARGET,
-  type CliVersionCache,
+  type CliVersionCache
 } from "./cli-locator";
 import { OpenClock } from "./open-timing";
 import {
@@ -252,7 +248,7 @@ import {
   resolvedTerminalShell,
   resolvedTerminalShellDialect,
   setTerminalShellPreference,
-  type ShellPreference,
+  type ShellPreference
 } from "./terminal-manager";
 import {
   FileChip,
@@ -272,7 +268,7 @@ import {
   removeChip,
   selectionLineRange,
   toggleChip,
-  allocateImageIndex,
+  allocateImageIndex
 } from "./chips";
 import {
   contextChipLabel,
@@ -282,7 +278,7 @@ import {
   makeDiagnosticsChip,
   makeTerminalChip,
   type ContextChip,
-  type ContextChipPayload,
+  type ContextChipPayload
 } from "./context-chips";
 import { buildPromptWithImages, buildQueuedPromptWithImages, type PromptImageInput, type QueuedPromptContribution } from "./prompt-builder";
 import {
@@ -297,23 +293,22 @@ import {
   queuedSendsMessage,
   queuedSendsText,
   restoreQueuedChips,
-  type QueuedSendEntry,
+  type QueuedSendEntry
 } from "./queued-send";
 
 import { EXTENSION_HOST_SLASH_COMMANDS, matchSlashCommand, parseAgentCommand, parseCrewCommand, parseHandoffCommand, parseSubagentsCommand } from "./slash-filter";
 import {
-  cancelCrewRun,
+  cancelCrewRun
 } from "./crew";
 import {
   CREW_PRESETS_DIR,
   loadCrewPresets,
   presetToStageGraph,
-  type CrewPresetSet,
+  type CrewPresetSet
 } from "./crew-preset";
 import {
-  findStage,
   workflowToMermaid,
-  type WorkflowDefinition,
+  type WorkflowDefinition
 } from "./workflow";
 import { validateWorkflowDefinition, validateWorkflowRaw, type ValidateWorkflowContext } from "./workflow-validate";
 import { draftFromUnknown, validateWorkflowDraft, workflowToDraft, type WorkflowDraft } from "./workflow-write";
@@ -326,26 +321,24 @@ import {
   COMPANIONS_WORKFLOW_SCHEMA_TOOL,
   extractCompanionsWorkflow,
   generatorMetaPrompt,
-  isGeneratorOnlyTool,
   makeGeneratorState,
   recordValidation,
   workflowArg,
   WORKFLOW_AUTHORING_GUIDE,
-  type GeneratorState,
+  type GeneratorState
 } from "./workflow-generator";
 import {
   applyGateAction,
-  bindStageSession,
   historySubtitle,
   isTerminalRunStatus,
   WorkflowRunStore,
   type Autonomy,
   type RunLineupEntry,
-  type WorkflowRun,
+  type WorkflowRun
 } from "./workflow-run";
 import {
   type HandoffPacket,
-  type HandoffPlanStep,
+  type HandoffPlanStep
 } from "./workflow-handoff";
 import {
   presetToDraft,
@@ -354,7 +347,7 @@ import {
   validateCrewFlowDraft,
   type AgentRoleDraft,
   type CrewFlowDraft,
-  type RoleScope,
+  type RoleScope
 } from "./agent-role-write";
 import { FileClaimStore } from "./file-claims";
 import {
@@ -365,7 +358,7 @@ import {
   rolePermissionsToRules,
   validateRoleModel,
   type AgentRole,
-  type AgentRoleSet,
+  type AgentRoleSet
 } from "./agent-roles";
 import {
   RESULT_FORMAT,
@@ -378,16 +371,16 @@ import {
   type AgentResult,
   type Briefing,
   type BriefingInput,
-  type FileReconciliation,
+  type FileReconciliation
 } from "./briefing";
 import {
   defaultRoleFor,
   deriveBriefing,
   handoffLabel,
   type HandoffKind,
-  type ThreadContext,
+  type ThreadContext
 } from "./handoff";
-import { AgentRunStore, formatRunCost, stepSlug, type AgentRunTrigger } from "./agent-run";
+import { AgentRunStore, formatRunCost, type AgentRunTrigger } from "./agent-run";
 import {
   MENTION_INDEX_LIMIT,
   MENTION_INDEX_TTL_MS,
@@ -400,7 +393,7 @@ import {
   normalizeRelPath,
   orderMentionIndex,
   resolveMentionAttachmentPath,
-  type ContextSourceId,
+  type ContextSourceId
 } from "./mention";
 import {
   ALWAYS_APPROVE_NOTICE_KEY,
@@ -409,20 +402,20 @@ import {
   ensureConfigToml,
   globalConfigPath,
   projectConfigPath,
-  shouldShowAlwaysApproveNotice,
+  shouldShowAlwaysApproveNotice
 } from "./grok-config";
 import { sessionScopedRoots } from "./auth-roots";
 import { fileUriToPath, parseFileRef, shouldReadFileInline } from "./file-ref";
 import {
   retainedUploadDirectories,
   stagedUploadDirectory,
-  unreferencedUploadsForRemovedSessions,
+  unreferencedUploadsForRemovedSessions
 } from "./file-upload";
 import { applyAgentModeToHostPlan, effectivePlanActive, isPlanReviewPermission, permissionAnswerAllowed, permissionOptionsForPlan, pickRejectOption, planReviewVerdictForOption, planTextFromPermissionToolCall, shouldRejectPermission } from "./plan-gate";
 import { appendPlanEntry, planRestoreSource, truncateResolvedAfter, countsAsUserBubble, decideRestoreState, isInterjectionText } from "./plan-restore";
 import {
   planReviewFileName,
-  planReviewSessionDirectoryName,
+  planReviewSessionDirectoryName
 } from "./plan-review";
 import { isPrimerText } from "./grok-primer";
 import { AsyncSerialQueue } from "./async-serial";
@@ -467,7 +460,7 @@ import {
   newestTranscriptMtime,
   resolveGrokHome,
   sessionCatalogDirs,
-  sessionDirFor,
+  sessionDirFor
 } from "./sessions";
 import {
   applySessionTypeSwitch,
@@ -476,80 +469,50 @@ import {
   isSessionTypeLocked,
   forkedSessionTypeMeta,
   lockSessionType,
-  promoteHiddenChild,
-  promotedSessionName,
   type HiddenReason,
   type SessionType,
-  type SessionTypeMeta,
+  type SessionTypeMeta
 } from "./session-type";
 import {
-  COMPANIONS_AWAIT_TOOL,
   COMPANIONS_LIST_TOOL,
-  COMPANIONS_REVIEW_HINT,
-  COMPANIONS_SERVER_NAME,
-  COMPANIONS_SPAWN_TOOL,
-  capInlineText,
-  normalizeAwaitArguments,
   normalizeListArguments,
-  normalizeSpawnArguments,
-  refusalPayload,
   type AwaitArguments,
   type ListArguments,
-  type SpawnArguments,
+  type SpawnArguments
 } from "./companions-protocol";
 import { CompanionsHostServer, type CompanionsCall } from "./companions-server";
 import { HostPipeMux } from "./host-pipe-mux";
 import {
-  parseSubagentMentions,
-  renderDirectiveBlock,
-  unfollowedDirectives,
-  type SubagentDirective,
+  type SubagentDirective
 } from "./subagent-directives";
 import {
-  SUBAGENT_MAX_DEPTH_CAP,
   SubagentRegistry,
-  carveChildLimits,
-  companionsSkipNotice,
-  decideCompanionsMcp,
   formatSubagentDiagnosis,
-  deriveSubagentLabel,
-  resolveMaxDepth,
-  isTerminalSubagentStatus,
-  profileBadge,
-  shouldAnnounceCompanionsSkip,
-  subagentForbidden,
-  subagentPermissionOverlay,
-  SUBAGENT_RUN_MODE,
-  type SubagentRecord,
-  subagentReturnFormat,
-  uncollectedFollowUpText,
-  type CompanionsSkipReason,
+  type CompanionsSkipReason
 } from "./companion-subagents";
 import {
   EFFORT_ORDER,
-  isEffortLevel,
   parseRoutingRules,
   listEligibleTargets,
   resolveTarget,
   type EligibilityInput,
   type EligibilityResult,
   type RefusalCode,
-  PERMISSION_PROFILES,
   type RosterEntry,
-  type SpawnLimits,
+  type SpawnLimits
 } from "./target-eligibility";
 import {
   base64DecodedByteLength,
   isTrustedCodexGeneratedImagePath,
   isTrustedGeneratedMediaPath,
   MAX_INLINE_MEDIA_BYTES,
-  resolveChatOpenFilePath,
+  resolveChatOpenFilePath
 } from "./media-serve";
 import {
   describeFfmpegProblem,
   ffmpegInstallHint,
   resolveConfiguredFfmpeg,
-  type FfmpegResolution,
+  type FfmpegResolution
 } from "./ffmpeg-locate";
 import {
         gitRootForPath,
@@ -560,7 +523,7 @@ import {
               type WorktreeParentRef,
   type WorktreeRecord,
   worktreeCwdsForRepo,
-    worktreesForRepo,
+    worktreesForRepo
 } from "./worktree";
 import {
   authorizedListCwd,
@@ -569,7 +532,7 @@ import {
   imageHandlesToRevoke,
   imagePathStillAuthorized,
   pathBoundToClosedFolder,
-  sessionBoundToClosedFolder,
+  sessionBoundToClosedFolder
 } from "./workspace-auth";
 import {
   formatRewindPointDetail,
@@ -585,25 +548,25 @@ import {
   truncateReplayBuffer,
   rewindConfirmMessage,
   selectableRewindPoints,
-  userFacingRewindPoints,
+  userFacingRewindPoints
 } from "./rewind";
 import {
   commandsAdvertiseFeedback,
   decideFeedbackAvailability,
   feedbackClientType,
   isThumbsRating,
-  parseFeedbackEnabledMeta,
+  parseFeedbackEnabledMeta
 } from "./feedback";
 import {
   parseRunProgressUpdate,
   type RunProgressUpdate,
-  workflowControlCommand,
+  workflowControlCommand
 } from "./run-progress";
 import {
   APP_PURPOSE_KEY,
   DEFAULT_APP_PURPOSE,
   parseAppPurpose,
-  type AppPurpose,
+  type AppPurpose
 } from "./app-purpose";
 import { MCP_GLOBAL_SCOPE_WARNING, mergeMcpNotification, parseMcpListResponse, mcpSettingsServersForCwd, type McpServerView } from "./mcp";
 import {
@@ -626,7 +589,6 @@ import {
   mcpConnectorSecretKey,
   mcpRemoteArgs,
   mergeReserved,
-  normalizeMcpName,
   parseConnectedConnectorStore,
   reservedFromMcpInventory,
   withAuthHeaderEnv,
@@ -634,7 +596,7 @@ import {
   type ConnectorDef,
   type ConnectorId,
   type ReservedMcpIdentity,
-  type AcpMcpStdioServer,
+  type AcpMcpStdioServer
 } from "./mcp-connectors";
 import { AskUserServer } from "./ask-user-server";
 import {
@@ -642,7 +604,7 @@ import {
   connectorsLackingOAuthToken,
   npxSpawnPlan,
   persistConnectorOAuthClientMetadata,
-  writeOAuthClientMetadataFile,
+  writeOAuthClientMetadataFile
 } from "./mcp-connector-auth";
 
 // HostMsg (host -> webview) and WebviewMsg (webview -> host) both live in
@@ -946,7 +908,7 @@ export class GrokSidebar {
   private static readonly STAGING_ORPHAN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
   // The empty-session sweep only scans the newest N by mtime, keeping it bounded
   // on a large store.
-  private static readonly SWEEP_SCAN_LIMIT = 300;
+  public static readonly SWEEP_SCAN_LIMIT = 300;
   // …and leaves recent ones alone entirely. Parking is what removes the empty
   // session you just walked away from; the sweep exists for the ones nothing was
   // there to park, and those are never minutes old. A session grok registered
@@ -956,11 +918,11 @@ export class GrokSidebar {
   // swept) and grok re-persists it on its next turn, so the cost is bounded; the
   // delay is what keeps it from being routine. Costs nothing in return: an orphan
   // is stamped when its window opened, so by the next activation it is already old.
-  private static readonly SWEEP_MIN_AGE_MS = 30 * 60 * 1000;
+  public static readonly SWEEP_MIN_AGE_MS = 30 * 60 * 1000;
   /** How often the sweep may actually walk, per repo. Well under
    *  SWEEP_MIN_AGE_MS, so a shell waits at most SWEEP_MIN_AGE_MS + this before
    *  it is collected — while the walk stops being something a click pays for. */
-  private static readonly SWEEP_INTERVAL_MS = 10 * 60 * 1000;
+  public static readonly SWEEP_INTERVAL_MS = 10 * 60 * 1000;
   /** Last real sweep per repo, for SWEEP_INTERVAL_MS. */
   private readonly lastSweepAt = new Map<string, number>();
   /** A whole-list refresh is already queued for this tick. See postSessionsList. */
@@ -1311,7 +1273,7 @@ export class GrokSidebar {
       notifyUser: (...args) => self.notifyUser(...args),
       truncateSessionCardsAfterRewind: (...args) => self.truncateSessionCardsAfterRewind(...args),
       applyRewindToView: (...args) => self.applyRewindToView(...args),
-      restoreComposerFor: (...args) => self.restoreComposerFor(...args),
+      restoreComposerFor: (...args) => self.restoreComposerFor(...args)
     });
   }
 
@@ -1328,7 +1290,7 @@ export class GrokSidebar {
       get context() { return self.context; },
       get pool() { return self.pool; },
       reservedMcpIdentityFor: (...args) => self.reservedMcpIdentityFor(...args),
-      touch: (...args) => self.touch(...args),
+      touch: (...args) => self.touch(...args)
     });
   }
 
@@ -1349,7 +1311,7 @@ export class GrokSidebar {
       get providerCliVersions() { return self.providerCliVersions; },
       get mcpServersView() { return self.mcpServersView; },
       mcpConnectorsMessage: () => self.mcpConnectorsMessage(),
-      showThinking: () => self.showThinking(),
+      showThinking: () => self.showThinking()
     });
   }
 
@@ -1373,7 +1335,7 @@ export class GrokSidebar {
       postSessionsList: () => self.postSessionsList(),
       removeSessionFromDisk: (...args) => self.removeSessionFromDisk(...args),
       confirmInChat: (...args) => self.confirmInChat(...args),
-      detachClient: (...args) => self.detachClient(...args),
+      detachClient: (...args) => self.detachClient(...args)
     });
   }
 
@@ -1406,7 +1368,7 @@ export class GrokSidebar {
           return (self as any)[name];
         }
         return undefined;
-      },
+      }
     });
   }
 
@@ -1446,7 +1408,7 @@ export class GrokSidebar {
           return (self as any)[name];
         }
         return undefined;
-      },
+      }
     });
   }
 
@@ -1483,12 +1445,12 @@ export class GrokSidebar {
     this.routineRuns = new RoutineRunStore({
       dir: `${path.join(resolveGrokHome(process.env), "client-state").replace(/\\/g, "/")}/routine-runs`,
       fs,
-      log: (line) => this.host.appendLine(line),
+      log: (line) => this.host.appendLine(line)
     });
     this.checkpointStore = new CheckpointStore({
       root: path.join(this.context.globalStorageUri.fsPath, "checkpoints"),
       fs: nodeCheckpointFs(fs),
-      log: (line) => this.host.appendLine(line),
+      log: (line) => this.host.appendLine(line)
     });
     this.agentRuns = new AgentRunStore({
       root: path.join(this.context.globalStorageUri.fsPath, "runs"),
@@ -1497,9 +1459,9 @@ export class GrokSidebar {
         writeFileSync: (file, data) => fs.writeFileSync(file, data, "utf8"),
         appendFileSync: (file, data) => fs.appendFileSync(file, data, "utf8"),
         existsSync: (target) => fs.existsSync(target),
-        rmSync: (target, options) => fs.rmSync(target, options),
+        rmSync: (target, options) => fs.rmSync(target, options)
       },
-      join: (...parts) => path.join(...parts),
+      join: (...parts) => path.join(...parts)
     });
     void this.sweepImageStaging();
     void this.sweepFileStaging();
@@ -1567,7 +1529,7 @@ export class GrokSidebar {
         routineId: routine.id,
         windowKey: key,
         startedAt: now,
-        outcome: "running",
+        outcome: "running"
       });
       if (!claimed) continue;
       await this.runRoutine(routine, key, now);
@@ -1589,7 +1551,7 @@ export class GrokSidebar {
         endedAt: Date.now(),
         outcome,
         cwd: routine.cwd,
-        ...extra,
+        ...extra
       });
       this.routineRuns.prune(routine.id);
       this.routinesInFlight.delete(routine.id);
@@ -1656,7 +1618,7 @@ export class GrokSidebar {
         startedAt,
         outcome: "running",
         cwd: routine.cwd,
-        ...(sessionId ? { sessionId } : {}),
+        ...(sessionId ? { sessionId } : {})
       });
       // Name it before the turn, not after. A run that errors or is interrupted
       // still leaves a session in the rail, and an untitled one is the hardest
@@ -1668,8 +1630,8 @@ export class GrokSidebar {
           ...overrides,
           [sessionId]: {
             ...(overrides[sessionId] ?? {}),
-            customName: routineSessionName(routine.title),
-          },
+            customName: routineSessionName(routine.title)
+          }
         });
         this.sessionCache.delete(sessionId);
         this.postSessionName(session);
@@ -1691,7 +1653,7 @@ export class GrokSidebar {
       finish(failed ? "failed" : "ran", {
         cwd: routine.cwd,
         ...(session.client?.sessionId ? { sessionId: session.client.sessionId } : {}),
-        ...(failed ? { detail: "Failed — the turn ended in an error" } : {}),
+        ...(failed ? { detail: "Failed — the turn ended in an error" } : {})
       });
     } catch (e) {
       finish("failed", { detail: `Failed — ${(e as Error).message}` });
@@ -1761,7 +1723,7 @@ export class GrokSidebar {
           path: `${prefix}/${name}`,
           stem: name.replace(/\.md$/i, ""),
           text: fs.readFileSync(path.join(dir, name), "utf8"),
-          scope,
+          scope
         });
       } catch (error) {
         this.host.appendLine(`[${tag}] could not read ${prefix}/${name}: ${(error as Error).message}`);
@@ -1810,7 +1772,7 @@ export class GrokSidebar {
         error:
           `Role \`${role.name}\` runs on ${providerDisplayName(role.provider)}, which is not connected. `
           + `Connect it, or change its companion in Settings → Agents & Crew `
-          + `(\`${role.path ?? AGENT_ROLES_DIR}\`).`,
+          + `(\`${role.path ?? AGENT_ROLES_DIR}\`).`
       };
     }
     return { provider: usable.includes(caller.provider) ? caller.provider : usable[0] };
@@ -1851,8 +1813,8 @@ export class GrokSidebar {
         running: eligibility.limits.running,
         maxConcurrent: eligibility.limits.maxConcurrent,
         thisTurn: eligibility.limits.thisTurn,
-        maxPerTurn: eligibility.limits.maxPerTurn,
-      },
+        maxPerTurn: eligibility.limits.maxPerTurn
+      }
     });
     this.host.appendLine(`[companions] /subagents\n${report}`);
     this.emit(session, { type: "hostNotice", level: "info", text: report });
@@ -1975,7 +1937,7 @@ export class GrokSidebar {
           + "Everything you were told is in this briefing.",
         ],
         forbidden: roleForbidden({ ...role, provider }),
-        returnFormat: RESULT_FORMAT,
+        returnFormat: RESULT_FORMAT
       },
       "command",
       session,
@@ -2086,7 +2048,7 @@ export class GrokSidebar {
         durationMs: 0,
         detail: (error as Error).message,
         summary: "",
-        planEntries: [],
+        planEntries: []
       };
     }
     this.logAgentRun({
@@ -2096,7 +2058,7 @@ export class GrokSidebar {
       role: role.name,
       provider: role.provider,
       ...(role.model ? { model: role.model } : {}),
-      event: "briefed",
+      event: "briefed"
     });
 
     // Said plainly on the card when a review lands on the companion that just
@@ -2116,7 +2078,7 @@ export class GrokSidebar {
       roleSession.startOverrides = {
         ...(role.model ? { model: role.model } : {}),
         ...(role.effort ? { effort: role.effort } : {}),
-        ...(role.mode ? { mode: role.mode } : {}),
+        ...(role.mode ? { mode: role.mode } : {})
       };
       this.setSessionCwd(roleSession, cwd, this.workspaceRoot());
       this.pool.add(roleSession);
@@ -2195,7 +2157,7 @@ export class GrokSidebar {
       this.postWorkflowGenerator({
         status: "running",
         requestId: generatorCoords.requestId,
-        progress: reply.slice(-500),
+        progress: reply.slice(-500)
       });
     };
     let outcome: "completed" | "failed" | "cancelled" = "completed";
@@ -2291,7 +2253,7 @@ export class GrokSidebar {
         planEntries: roleSession.planEntries,
         reconciliation,
         parsed: result,
-        rawReply: reply,
+        rawReply: reply
       };
     }
     this.emit(caller, {
@@ -2322,7 +2284,7 @@ export class GrokSidebar {
       origin: trigger,
       ...(roleSessionId ? { sessionId: roleSessionId } : {}),
       cwd,
-      ...(detail ? { detail } : {}),
+      ...(detail ? { detail } : {})
     });
     // The closing log line, then — for a run that produced nothing — the
     // directory itself. In that order: writing the log first and deleting
@@ -2346,7 +2308,7 @@ export class GrokSidebar {
         ...(roleSessionId ? { sessionId: roleSessionId } : {}),
         ...(detail ? { detail } : {}),
         durationMs,
-        ...(usage?.costUsdTicks !== undefined ? { costUsdTicks: usage.costUsdTicks } : {}),
+        ...(usage?.costUsdTicks !== undefined ? { costUsdTicks: usage.costUsdTicks } : {})
       });
     }
     this.postSessionsList();
@@ -2360,7 +2322,7 @@ export class GrokSidebar {
       ...(roleSessionId ? { sessionId: roleSessionId } : {}),
       ...(detail ? { detail } : {}),
       summary: result.summary,
-      planEntries: [...roleSession.planEntries],
+      planEntries: [...roleSession.planEntries]
     };
   }
 
@@ -2373,7 +2335,7 @@ export class GrokSidebar {
     const overrides = this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
     void this.state.update(SESSION_META_KEY, {
       ...overrides,
-      [id]: { ...(overrides[id] ?? {}), customName: `${role.name} · ${runId} step ${step}` },
+      [id]: { ...(overrides[id] ?? {}), customName: `${role.name} · ${runId} step ${step}` }
     });
     this.sessionCache.delete(id);
     this.postSessionName(roleSession);
@@ -2451,7 +2413,7 @@ export class GrokSidebar {
         cancelled: false,
         state: makeGeneratorState(""),
         scope: "project",
-        lastProgressAt: 0,
+        lastProgressAt: 0
       };
     }
     return this.generatorState;
@@ -2474,7 +2436,7 @@ export class GrokSidebar {
     const ctx = this.workflowValidateContext({
       generated: true,
       allowWrite: store.state.options.allowWrite,
-      maxStages: store.state.options.maxStages,
+      maxStages: store.state.options.maxStages
     });
     switch (call.tool) {
       case COMPANIONS_WORKFLOW_SCHEMA_TOOL:
@@ -2487,8 +2449,8 @@ export class GrokSidebar {
             whenToUse: role.whenToUse,
             provider: role.source === "builtin" ? undefined : role.provider,
             ...(role.model ? { model: role.model } : {}),
-            source: role.source,
-          })),
+            source: role.source
+          }))
         });
         return;
       case COMPANIONS_LIST_TOOL:
@@ -2500,8 +2462,8 @@ export class GrokSidebar {
             name: preset.name,
             title: preset.title || preset.name,
             whenToUse: preset.whenToUse || "",
-            source: preset.source,
-          })),
+            source: preset.source
+          }))
         });
         return;
       case COMPANIONS_VALIDATE_WORKFLOW_TOOL: {
@@ -2523,7 +2485,7 @@ export class GrokSidebar {
             error: accepted.error,
             ...(accepted.validation
               ? { errors: accepted.validation.errors, warnings: accepted.validation.warnings }
-              : {}),
+              : {})
           });
         }
         return;
@@ -2822,7 +2784,7 @@ export class GrokSidebar {
     // probe when nothing has arrived, because "has not planned yet" and
     // "cannot report a plan" are different sentences in the briefing.
     const cap = providerCapability(session.provider, "structuredPlan", {
-      sawPlanEntries: session.planEntries.length > 0,
+      sawPlanEntries: session.planEntries.length > 0
     });
     return {
       kind,
@@ -2831,7 +2793,7 @@ export class GrokSidebar {
       structuredPlan: cap.state === "yes" ? "yes" : cap.state === "no" ? "no" : "unknown",
       changedFiles: scoped.map((file) => file.path),
       chipPaths: session.chips.filter((chip) => !chip.hidden && chip.relPath).map((chip) => chip.relPath),
-      callerLabel: this.sessionRunLabel(session),
+      callerLabel: this.sessionRunLabel(session)
     };
   }
 
@@ -2926,7 +2888,7 @@ export class GrokSidebar {
           `${runsOn}, in its own session. The briefing is written from this conversation — `
           + `the goal, the steps reported so far and the files that changed. The conversation `
           + `itself is not sent.`,
-        confirmLabel: `Run ${role.name}`,
+        confirmLabel: `Run ${role.name}`
       });
       // A confirm lost to a reload resolves false, and that is the right way
       // round: nothing happens, and nothing is billed.
@@ -2952,7 +2914,7 @@ export class GrokSidebar {
       this.emit(session, {
         type: "userMessage",
         text: `/${kind} ${role.name}`,
-        chips: [],
+        chips: []
       });
     }
     await this.runAgentRole(
@@ -2964,7 +2926,7 @@ export class GrokSidebar {
         // kind-specific line (a reviewer may not edit) stays first, where it
         // is read.
         forbidden: [...derived.briefing.forbidden, ...roleForbidden({ ...role, provider })],
-        returnFormat: RESULT_FORMAT,
+        returnFormat: RESULT_FORMAT
       },
       kind,
       session,
@@ -3058,7 +3020,7 @@ export class GrokSidebar {
       cwd: entry.cwd,
       label: entry.label,
       defaultProvider: this.defaultProviderForProject(entry.cwd),
-      ...(entry.archived ? { archived: true } : {}),
+      ...(entry.archived ? { archived: true } : {})
     }));
   }
 
@@ -3080,7 +3042,7 @@ export class GrokSidebar {
       models: this.routineModelOptions(),
       ...(this.routineError
         ? { error: this.routineError.message, ...(this.routineError.id ? { errorId: this.routineError.id } : {}) }
-        : {}),
+        : {})
     };
   }
 
@@ -3130,7 +3092,7 @@ export class GrokSidebar {
         editable: true,
         // The draft carries the EFFECTIVE provider too: opening a built-in and
         // pressing Save must pin what the row promised, not the placeholder.
-        draft: { ...roleToDraft(role), provider: effective },
+        draft: { ...roleToDraft(role), provider: effective }
       };
       }),
       flows: flowSet.presets.map((preset) => ({
@@ -3142,7 +3104,7 @@ export class GrokSidebar {
         scope: preset.source,
         ...(preset.overrides ? { overrides: preset.overrides } : {}),
         ...(preset.path ? { path: preset.path } : {}),
-        draft: presetToDraft(preset),
+        draft: presetToDraft(preset)
       })),
       // AP-16 §6.2. Delivered with the roles because the roster editor lives in
       // the same settings section and needs exactly the same provider + model
@@ -3165,7 +3127,7 @@ export class GrokSidebar {
           defaultModel: roster[id]?.defaultModel ?? "",
           defaultEffort: roster[id]?.defaultEffort ?? "",
           maxEffort: roster[id]?.maxEffort ?? "",
-          notes: roster[id]?.notes ?? "",
+          notes: roster[id]?.notes ?? ""
         }));
       })(),
       subagentsEnabled: this.subagentsEnabledGlobally(),
@@ -3179,7 +3141,7 @@ export class GrokSidebar {
         match: [...rule.match],
         provider: rule.target.provider ?? "",
         model: rule.target.model ?? "",
-        effort: rule.target.effort ?? "",
+        effort: rule.target.effort ?? ""
       })),
       efforts: [...EFFORT_ORDER],
       providers: PROVIDER_ORDER.map((id) => ({
@@ -3191,8 +3153,8 @@ export class GrokSidebar {
         connected: connected.has(id),
         models: (cache[id]?.models ?? []).map((model) => ({
           modelId: model.modelId,
-          ...(model.name ? { name: model.name } : {}),
-        })),
+          ...(model.name ? { name: model.name } : {})
+        }))
       })),
       problems: [
         ...roleSet.problems.map((problem) => problem.message),
@@ -3203,7 +3165,7 @@ export class GrokSidebar {
       ...(this.agentRolesError ? { error: this.agentRolesError.message } : {}),
       ...(this.agentRolesError?.id ? { errorId: this.agentRolesError.id } : {}),
       workflows: this.buildWorkflowViews(flowSet, roleSet.roles.map((role) => role.name)),
-      defaultWorkflow: this.defaultWorkflowName(),
+      defaultWorkflow: this.defaultWorkflowName()
     };
   }
 
@@ -3251,7 +3213,7 @@ export class GrokSidebar {
       "subagents.writeIsolation": this.companionsSetting<string>("subagents.writeIsolation", "shared"),
       "grok.subagents.enabled": grokSubagents,
       "grok.subagents.maxConcurrent": Number(this.companionsSetting<number>("grok.subagents.maxConcurrent", 0)) || 0,
-      bothDelegationsHint: bothDelegationsHint(grokSubagents !== "off", this.subagentsEnabledGlobally()) ?? "",
+      bothDelegationsHint: bothDelegationsHint(grokSubagents !== "off", this.subagentsEnabledGlobally()) ?? ""
     };
   }
 
@@ -3265,7 +3227,7 @@ export class GrokSidebar {
     "crew.defaultAutonomy": (v) => v === "step" || v === "stop-on-problems" || v === "autopilot",
     "subagents.writeIsolation": (v) => v === "shared" || v === "worktree",
     "grok.subagents.enabled": (v) => v === "default" || v === "on" || v === "off",
-    "grok.subagents.maxConcurrent": (v) => typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= 16,
+    "grok.subagents.maxConcurrent": (v) => typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= 16
   };
 
   private async setCompanionsSetting(key: string, value: unknown): Promise<void> {
@@ -3367,7 +3329,7 @@ export class GrokSidebar {
       knownModels: Object.fromEntries(PROVIDER_ORDER.map((id2) => [id2, cache[id2]?.models ?? []])),
       providerLabel: (provider) => providerDisplayName(provider as AcpProvider),
       existingNames: this.agentRoleNamesInScope(msg.scope, "agents"),
-      ...(msg.originalName ? { originalName: msg.originalName } : {}),
+      ...(msg.originalName ? { originalName: msg.originalName } : {})
     });
     if (!result.ok) {
       this.refuseAgentRoles(id, result.error);
@@ -3381,7 +3343,7 @@ export class GrokSidebar {
         savedName: result.value.name,
         savedScope: msg.scope,
         ...(msg.originalName ? { originalName: msg.originalName } : {}),
-        ...(msg.originalScope ? { originalScope: msg.originalScope } : {}),
+        ...(msg.originalScope ? { originalScope: msg.originalScope } : {})
       });
     } catch (error) {
       this.refuseAgentRoles(id, `Could not write the role file — ${(error as Error).message}`);
@@ -3403,7 +3365,7 @@ export class GrokSidebar {
     const result = validateCrewFlowDraft(msg.draft ?? ({} as CrewFlowDraft), {
       roleNames: this.agentRoleSet(this.sessionCwd()).roles.map((role) => role.name),
       existingNames: this.agentRoleNamesInScope(msg.scope, "crews"),
-      ...(msg.originalName ? { originalName: msg.originalName } : {}),
+      ...(msg.originalName ? { originalName: msg.originalName } : {})
     });
     if (!result.ok) {
       this.refuseAgentRoles(id, result.error);
@@ -3417,7 +3379,7 @@ export class GrokSidebar {
         savedName: result.value.name,
         savedScope: msg.scope,
         ...(msg.originalName ? { originalName: msg.originalName } : {}),
-        ...(msg.originalScope ? { originalScope: msg.originalScope } : {}),
+        ...(msg.originalScope ? { originalScope: msg.originalScope } : {})
       });
     } catch (error) {
       this.refuseAgentRoles(id, `Could not write the crew flow file — ${(error as Error).message}`);
@@ -3436,10 +3398,10 @@ export class GrokSidebar {
         id,
         {
           checked: Array.isArray(cache[id]?.models),
-          ids: (cache[id]?.models ?? []).map((model) => model.modelId),
+          ids: (cache[id]?.models ?? []).map((model) => model.modelId)
         },
       ])),
-      ...over,
+      ...over
     };
   }
 
@@ -3468,15 +3430,15 @@ export class GrokSidebar {
           id: stage.id,
           title: stage.title,
           role: stage.role,
-          profile: stage.profile,
+          profile: stage.profile
         })),
         draft: {
           ...workflowToDraft(graph),
           body: preset.body,
-          verify: preset.verify ?? graph.defaults.verify,
+          verify: preset.verify ?? graph.defaults.verify
         },
         validation,
-        ...(graph.compiler ? { compiler: graph.compiler } : {}),
+        ...(graph.compiler ? { compiler: graph.compiler } : {})
       };
     });
   }
@@ -3496,7 +3458,7 @@ export class GrokSidebar {
     }
     const result = validateWorkflowDraft(msg.draft ?? ({} as WorkflowDraft), this.workflowValidateContext({
       existingNames: this.agentRoleNamesInScope(msg.scope, "crews"),
-      ...(msg.originalName ? { originalName: msg.originalName } : {}),
+      ...(msg.originalName ? { originalName: msg.originalName } : {})
     }));
     if (!result.ok) {
       this.refuseAgentRoles(id, result.error);
@@ -3510,7 +3472,7 @@ export class GrokSidebar {
         savedName: result.workflow.name,
         savedScope: msg.scope,
         ...(msg.originalName ? { originalName: msg.originalName } : {}),
-        ...(msg.originalScope ? { originalScope: msg.originalScope } : {}),
+        ...(msg.originalScope ? { originalScope: msg.originalScope } : {})
       });
     } catch (error) {
       this.refuseAgentRoles(id, `Could not write the workflow file — ${(error as Error).message}`);
@@ -3532,8 +3494,8 @@ export class GrokSidebar {
       ...(result.ok ? { mermaid: workflowToMermaid(result.workflow), validation: result.validation } : {}),
       ...(!result.ok ? {
         error: result.error,
-        ...(result.validation ? { validation: result.validation } : {}),
-      } : {}),
+        ...(result.validation ? { validation: result.validation } : {})
+      } : {})
     });
   }
 
@@ -3552,7 +3514,7 @@ export class GrokSidebar {
       scope,
       originalName: name,
       originalScope: preset.source === "builtin" ? undefined : preset.source,
-      draft: { ...workflowToDraft(graph), body: preset.body, verify: preset.verify },
+      draft: { ...workflowToDraft(graph), body: preset.body, verify: preset.verify }
     });
   }
 
@@ -3573,7 +3535,7 @@ export class GrokSidebar {
       this.postWorkflowGenerator({
         status: "error",
         requestId: "generate",
-        error: "Describe how you want this workflow to run.",
+        error: "Describe how you want this workflow to run."
       });
       return;
     }
@@ -3592,7 +3554,7 @@ export class GrokSidebar {
       reuseRoles: msg.reuseRoles !== false,
       newRoles: msg.newRoles === "files" ? "files" : "inline",
       allowWrite: msg.allowWrite !== false,
-      maxStages: msg.maxStages,
+      maxStages: msg.maxStages
     });
     const caller = this.focused ?? [...this.pool][0];
     if (!caller) {
@@ -3614,7 +3576,7 @@ export class GrokSidebar {
       provider,
       ...(msg.model ? { model: msg.model } : {}),
       sourcePrompt: msg.description.trim(),
-      generatedAt: new Date().toISOString(),
+      generatedAt: new Date().toISOString()
     };
     this.postWorkflowGenerator({ status: "running", requestId, progress: "Starting the generator…" });
     const role: import("./agent-roles").AgentRole = {
@@ -3625,17 +3587,17 @@ export class GrokSidebar {
       mode: "agent",
       whenToUse: "Design a workflow from a description.",
       source: "builtin",
-      permissions: [{ action: "deny", kind: "edit", pathGlob: "**" }],
+      permissions: [{ action: "deny", kind: "edit", pathGlob: "**" }]
     };
     const brief = {
       task: generatorMetaPrompt({ description, options: store.state.options }),
-      goal: description,
+      goal: description
     };
     try {
       const outcome = await this.runAgentRole(role, brief, "workflow-stage", caller, {
         runId: requestId,
         step: 1,
-        generator: { requestId },
+        generator: { requestId }
       });
       if (store.cancelled || store.requestId !== requestId) return;
       const accepted = store.submitted
@@ -3644,7 +3606,7 @@ export class GrokSidebar {
           this.workflowValidateContext({
             generated: true,
             allowWrite: store.state.options.allowWrite,
-            maxStages: store.state.options.maxStages,
+            maxStages: store.state.options.maxStages
           }),
           store.compiler,
         ) : undefined);
@@ -3655,7 +3617,7 @@ export class GrokSidebar {
           draft: workflowToDraft(accepted.workflow),
           mermaid: workflowToMermaid(accepted.workflow),
           validation: accepted.validation,
-          compiler: store.compiler,
+          compiler: store.compiler
         });
         return;
       }
@@ -3666,14 +3628,14 @@ export class GrokSidebar {
           ? accepted.error
           : "The generator finished without a valid workflow. Try again, refine, or open the JSON editor.",
         ...(accepted && !accepted.ok && accepted.validation ? { validation: accepted.validation } : {}),
-        ...(store.state.lastDraft ? { draft: draftFromUnknown(store.state.lastDraft) } : {}),
+        ...(store.state.lastDraft ? { draft: draftFromUnknown(store.state.lastDraft) } : {})
       });
     } catch (error) {
       if (store.cancelled || store.requestId !== requestId) return;
       this.postWorkflowGenerator({
         status: "error",
         requestId,
-        error: (error as Error).message,
+        error: (error as Error).message
       });
     }
   }
@@ -3739,7 +3701,7 @@ export class GrokSidebar {
       routineCount: this.loadRoutines().length,
       connectorCount: Object.keys(this.connectedConnectorStore()).length,
       dismissed: parseDismissedTips(this.state.get(WELCOME_TIPS_KEY, {})),
-      shownToday: shownOn(this.state.get(WELCOME_TIPS_SHOWN_KEY, {}), localDayKey(new Date())),
+      shownToday: shownOn(this.state.get(WELCOME_TIPS_SHOWN_KEY, {}), localDayKey(new Date()))
     };
   }
 
@@ -3891,8 +3853,8 @@ export class GrokSidebar {
         currentModelId,
         seenAt: Date.now(),
         // Stamp the CLI this catalog came from, so a later update can be seen.
-        cliVersion: this.providerCliVersions[provider],
-      },
+        cliVersion: this.providerCliVersions[provider]
+      }
     } satisfies ProviderModelCache);
     // The picker reads this cache, and an adapter's models arrive
     // ASYNCHRONOUSLY — the warm-up runs after the connect returns. Re-posting
@@ -3984,7 +3946,7 @@ export class GrokSidebar {
       models: this.modelsForSession(session, client.availableModels ?? [], client.currentModelId, false),
       currentModelId: client.currentModelId,
       worktree: !!session.worktree,
-      provider: session.provider,
+      provider: session.provider
     };
   }
 
@@ -4000,7 +3962,7 @@ export class GrokSidebar {
       models: this.modelsForSession(session, client.availableModels, client.currentModelId, true),
       currentModelId: client.currentModelId,
       worktree: !!session.worktree,
-      provider: session.provider,
+      provider: session.provider
     });
   }
 
@@ -4033,7 +3995,7 @@ export class GrokSidebar {
       enableScripts: true,
       // Extension assets keep extensionUri identity (vscode-remote on remote hosts).
       // Staging + grok home are genuinely local disk paths → Uri.file.
-      localResourceRoots: this.chatLocalResourceRoots(),
+      localResourceRoots: this.chatLocalResourceRoots()
     };
     view.webview.html = this.getHtml(view.webview);
     // Message handlers run async; without this catch a throw (e.g. an fs error
@@ -4095,13 +4057,13 @@ export class GrokSidebar {
       if (e.affectsConfiguration("grok.expandCommandOutputs")) {
         this.post({
           type: "expandCommandOutputs",
-          value: this.host.getConfiguration("grok").get<boolean>("expandCommandOutputs", false),
+          value: this.host.getConfiguration("grok").get<boolean>("expandCommandOutputs", false)
         });
       }
       if (e.affectsConfiguration("grok.steerByDefault")) {
         this.post({
           type: "steerByDefault",
-          value: this.host.getConfiguration("grok").get<boolean>("steerByDefault", false),
+          value: this.host.getConfiguration("grok").get<boolean>("steerByDefault", false)
         });
       }
       if (e.affectsConfiguration("grok.promptNav")) {
@@ -4112,25 +4074,25 @@ export class GrokSidebar {
       if (e.affectsConfiguration("grok.soundNotifications")) {
         this.post({
           type: "soundNotifications",
-          value: this.host.getConfiguration("grok").get<boolean>("soundNotifications", false),
+          value: this.host.getConfiguration("grok").get<boolean>("soundNotifications", false)
         });
       }
       if (e.affectsConfiguration("grok.processingSound")) {
         this.post({
           type: "processingSound",
-          value: this.host.getConfiguration("grok").get<boolean>("processingSound", false),
+          value: this.host.getConfiguration("grok").get<boolean>("processingSound", false)
         });
       }
       if (e.affectsConfiguration("grok.readRepliesAloud")) {
         this.post({
           type: "readRepliesAloud",
-          value: this.host.getConfiguration("grok").get<boolean>("readRepliesAloud", false),
+          value: this.host.getConfiguration("grok").get<boolean>("readRepliesAloud", false)
         });
       }
       if (e.affectsConfiguration("grok.summarizeRepliesAloud")) {
         this.post({
           type: "summarizeRepliesAloud",
-          value: this.host.getConfiguration("grok").get<boolean>("summarizeRepliesAloud", true),
+          value: this.host.getConfiguration("grok").get<boolean>("summarizeRepliesAloud", true)
         });
       }
       if (e.affectsConfiguration("grok.includeActiveFileByDefault")) {
@@ -4150,7 +4112,7 @@ export class GrokSidebar {
       if (e.affectsConfiguration("grok.telemetry.enabled")) {
         this.post({
           type: "telemetryEnabled",
-          value: this.host.getConfiguration("grok").get<boolean>("telemetry.enabled", true),
+          value: this.host.getConfiguration("grok").get<boolean>("telemetry.enabled", true)
         });
       }
       if (e.affectsConfiguration("companions.grok.autoCompactThresholdPercent")) {
@@ -4196,7 +4158,7 @@ export class GrokSidebar {
       localResourceRoots: [
         Uri.joinPath(this.context.extensionUri, "media"),
         Uri.joinPath(this.context.extensionUri, "resources"),
-      ],
+      ]
     };
     view.webview.html = this.getProjectsRailHtml(view.webview);
     view.webview.onDidReceiveMessage((raw) => {
@@ -4345,7 +4307,7 @@ export class GrokSidebar {
       description: m.provider === this.focused.provider && m.modelId === this.focused.client!.currentModelId ? "$(check) current" : "",
       detail: m.description,
       modelId: m.modelId,
-      provider: m.provider,
+      provider: m.provider
     }));
     if (this.focused.provider === "gemini") {
       items.push({
@@ -4353,18 +4315,18 @@ export class GrokSidebar {
         description: "",
         detail: "Enter a custom Antigravity/Gemini model name (e.g. gemini-3.9-pro)",
         modelId: "__custom__",
-        provider: "gemini",
+        provider: "gemini"
       });
     }
     const picked = await this.host.showQuickPick(items, {
-      placeHolder: this.focused.hasHistory ? "Pick a model" : "Pick an agent and model",
+      placeHolder: this.focused.hasHistory ? "Pick a model" : "Pick an agent and model"
     });
     if (picked) {
       let targetModelId = picked.modelId;
       if (targetModelId === "__custom__") {
         const input = await this.host.showInputBox({
           prompt: "Enter custom model ID (e.g. gemini-3.9-pro)",
-          placeHolder: "gemini-3.9-pro",
+          placeHolder: "gemini-3.9-pro"
         });
         if (!input || !input.trim()) return;
         targetModelId = input.trim();
@@ -4495,8 +4457,8 @@ See design doc for the full state machine diagram.`;
       req: {
         id: "dummy-plan-" + Date.now(),
         sessionId: this.focused.activeSessionId || "dummy-session",
-        plan: dummyPlan,
-      },
+        plan: dummyPlan
+      }
     });
 
     // Make the bottom mode button reflect Plan during the manual test.
@@ -4559,7 +4521,7 @@ ${detail}`,
     };
     return alwaysApproveSource({
       project: cwd ? readSafe(projectConfigPath(cwd)) : undefined,
-      global: readSafe(globalConfigPath()),
+      global: readSafe(globalConfigPath())
     });
   }
 
@@ -4658,7 +4620,7 @@ Only continue if you trust this code.`,
         this.emit(session, {
           type: "permissionOptions",
           requestId,
-          options: pendingPermissionOptions(pending, v),
+          options: pendingPermissionOptions(pending, v)
         });
       }
     }
@@ -4875,7 +4837,7 @@ Only continue if you trust this code.`,
       }
       this.emit(session, {
         type: "error",
-        text: `Plan comment steering failed: ${e?.message ?? e}. Your comment was queued instead.`,
+        text: `Plan comment steering failed: ${e?.message ?? e}. Your comment was queued instead.`
       });
       this.divertRacingSend(session, feedback, false);
     });
@@ -4931,7 +4893,7 @@ Only continue if you trust this code.`,
       attempt,
       modeConfirmed: false,
       turnSettled: !this.turnInFlight(session),
-      warningTimer: undefined as ReturnType<typeof setTimeout> | undefined,
+      warningTimer: undefined as ReturnType<typeof setTimeout> | undefined
     };
     session.planModeRecovery = recovery;
     session.autoApprove = false;
@@ -4955,7 +4917,7 @@ Only continue if you trust this code.`,
       type: "planNotice",
       text:
         `${session.planModeUnavailableReason ?? "Plan mode is unavailable for this Grok CLI version."} ` +
-        "Returning to Agent mode; write and terminal actions remain blocked until the planning turn stops and Agent mode is confirmed.",
+        "Returning to Agent mode; write and terminal actions remain blocked until the planning turn stops and Agent mode is confirmed."
     });
 
     recovery.warningTimer = setTimeout(() => {
@@ -4968,7 +4930,7 @@ Only continue if you trust this code.`,
         type: "error",
         text:
           "Could not finish leaving unavailable Plan mode promptly. " +
-          "Write and terminal actions remain blocked for safety; start a new session if recovery does not complete.",
+          "Write and terminal actions remain blocked for safety; start a new session if recovery does not complete."
       });
     }, 10_000);
 
@@ -4992,7 +4954,7 @@ Only continue if you trust this code.`,
         type: "error",
         text:
           `Could not leave unavailable Plan mode: ${e?.message ?? e}. ` +
-          "Write and terminal actions remain blocked for safety. Update Grok Build or start a new session.",
+          "Write and terminal actions remain blocked for safety. Update Grok Build or start a new session."
       });
     });
   }
@@ -5081,8 +5043,8 @@ Only continue if you trust this code.`,
         lastPlanVerdict: plans.length ? plans[plans.length - 1].verdict : undefined,
         contextUsed: occupancy.used,
         contextWindow: occupancy.window ?? cur.contextWindow,
-        contextPendingCompact: occupancy.pendingCompact || undefined,
-      },
+        contextPendingCompact: occupancy.pendingCompact || undefined
+      }
     });
     // Keep the live popover in step with what we just persisted. The ledger
     // itself remains keyed by session id in meta; no live Session copy exists.
@@ -5093,7 +5055,7 @@ Only continue if you trust this code.`,
         this.emit(live, {
           type: "contextUsage",
           used: occupancy.used,
-          ...(occupancy.window ? { window: occupancy.window } : {}),
+          ...(occupancy.window ? { window: occupancy.window } : {})
         });
       }
     }
@@ -5113,11 +5075,11 @@ Only continue if you trust this code.`,
       verdict,
       afterUserMessage: session.userMessageCount,
       afterInterjection: session.interjectionCount,
-      afterHistoryEvent: session.historyEventCount,
+      afterHistoryEvent: session.historyEventCount
     });
     const next: SessionMetaOverrides = {
       ...overrides,
-      [sid]: { ...cur, lastPlanVerdict: verdict, plans },
+      [sid]: { ...cur, lastPlanVerdict: verdict, plans }
     };
     void this.state.update(SESSION_META_KEY, next);
   }
@@ -5143,7 +5105,7 @@ Only continue if you trust this code.`,
     const overrides = this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
     void this.state.update(SESSION_META_KEY, {
       ...overrides,
-      [sid]: { ...(overrides[sid] ?? {}), activeAt },
+      [sid]: { ...(overrides[sid] ?? {}), activeAt }
     });
     for (const provider of (["codex", "claude", "gemini", "muse"] as const)) {
       const history = this.adapterHistory(provider);
@@ -5183,7 +5145,7 @@ Only continue if you trust this code.`,
     ];
     void this.state.update(SESSION_META_KEY, {
       ...overrides,
-      [sid]: { ...cur, permissions },
+      [sid]: { ...cur, permissions }
     });
   }
 
@@ -5212,7 +5174,7 @@ Only continue if you trust this code.`,
       active: true,
       workspaceRoot: cwd,
       grokHome: resolveGrokHome(process.env),
-      shellDialect: resolvedTerminalShellDialect(),
+      shellDialect: resolvedTerminalShellDialect()
     })) {
       const rejectId = pickRejectOption(req.options);
       if (rejectId) {
@@ -5225,7 +5187,7 @@ Only continue if you trust this code.`,
         type: "planNotice",
         text: kind === "execute"
           ? "Plan mode declined this command because it was not verified as safe to run while planning. Question-card answers are unaffected."
-          : `Plan mode declined this ${kind} request because workspace changes are blocked while planning. Question-card answers are unaffected.`,
+          : `Plan mode declined this ${kind} request because workspace changes are blocked while planning. Question-card answers are unaffected.`
       });
       return;
     }
@@ -5263,7 +5225,7 @@ Only continue if you trust this code.`,
       client.respondPermissionCancelled(req.id);
       this.emit(session, {
         type: "planNotice",
-        text: "Plan mode declined this command because it offered no safe one-time or reject option.",
+        text: "Plan mode declined this command because it offered no safe one-time or reject option."
       });
       return;
     }
@@ -5279,8 +5241,8 @@ Only continue if you trust this code.`,
       options: (req.options ?? []).map((o) => ({
         optionId: o.optionId,
         kind: o.kind,
-        name: o.name,
-      })),
+        name: o.name
+      }))
     }));
     this.syncHumanWait(session);
     const ruleSuggestions = isPlanReviewPermission(req.toolCall?.kind)
@@ -5291,10 +5253,10 @@ Only continue if you trust this code.`,
       req: {
         ...req,
         options: visibleOptions,
-        ...(plan !== undefined ? { plan } : {}),
+        ...(plan !== undefined ? { plan } : {})
       },
       ...(ruleSuggestions && ruleSuggestions.length ? { ruleSuggestions } : {}),
-      ...(claimWarning ? { warning: claimWarning } : {}),
+      ...(claimWarning ? { warning: claimWarning } : {})
     });
     this.setStatus(session, "needs-you");
   }
@@ -5327,7 +5289,7 @@ Only continue if you trust this code.`,
       this.emit(session, {
         type: "hostNotice",
         level: "warning",
-        text: permissionRulesNotice(decision),
+        text: permissionRulesNotice(decision)
       });
       return true;
     }
@@ -5338,7 +5300,7 @@ Only continue if you trust this code.`,
     this.emit(session, {
       type: "hostNotice",
       level: "info",
-      text: permissionRulesNotice(decision),
+      text: permissionRulesNotice(decision)
     });
     return true;
   }
@@ -5348,7 +5310,7 @@ Only continue if you trust this code.`,
       existsSync: (p) => fs.existsSync(p),
       readFileSync: (p, encoding) => fs.readFileSync(p, encoding),
       mkdirSync: (p, opts) => { fs.mkdirSync(p, opts); },
-      writeFileSync: (p, data) => { fs.writeFileSync(p, data); },
+      writeFileSync: (p, data) => { fs.writeFileSync(p, data); }
     };
   }
 
@@ -5370,7 +5332,7 @@ Only continue if you trust this code.`,
       global,
       workspace,
       adoption,
-      shouldPromptAdoption,
+      shouldPromptAdoption
     };
   }
 
@@ -5397,14 +5359,14 @@ Only continue if you trust this code.`,
     this.emit(session, {
       type: "hostNotice",
       level: "warning",
-      text: `This project includes ${count} permission rule${count === 1 ? "" : "s"} that are not active yet. They apply only after you adopt them.`,
+      text: `This project includes ${count} permission rule${count === 1 ? "" : "s"} that are not active yet. They apply only after you adopt them.`
     });
     if (!this.pendingConfirms) return;
     const ok = await this.confirmInChat(session, {
       title: "Adopt this project's permission rules?",
       body: `${path.basename(cwd)} ships .grok/permissions.json (${count} rule${count === 1 ? "" : "s"}). Checked-in rules stay inert until you adopt them — they can auto-allow or auto-deny tool calls.\n\nOnly continue if you trust this repository.`,
       confirmLabel: "Adopt rules",
-      danger: true,
+      danger: true
     });
     await this.adoptPermissionRules(session, !!ok, cwd);
   }
@@ -5429,7 +5391,7 @@ Only continue if you trust this code.`,
           return {
             ...view,
             deletable: false,
-            detail: `Not active until adopted. ${view.detail}`,
+            detail: `Not active until adopted. ${view.detail}`
           };
         })
       : [];
@@ -5437,7 +5399,7 @@ Only continue if you trust this code.`,
       type: "permissionRules",
       rules: [...SOCKET_RULE_VIEWS, ...userViews, ...pendingViews],
       orderCopy: PERMISSION_RULES_ORDER_COPY,
-      ...(pending ? { pendingAdoption: pending } : {}),
+      ...(pending ? { pendingAdoption: pending } : {})
     };
     this.post(message);
     void this.settingsEditor?.webview.postMessage(message);
@@ -5454,7 +5416,7 @@ Only continue if you trust this code.`,
       action: "allow",
       scope: "workspace",
       match,
-      note: "this session only",
+      note: "this session only"
     })];
   }
 
@@ -5470,7 +5432,7 @@ Only continue if you trust this code.`,
       action: "allow",
       scope: "workspace",
       match,
-      note: `from card on ${new Date().toISOString().slice(0, 10)}`,
+      note: `from card on ${new Date().toISOString().slice(0, 10)}`
     });
     await this.addPermissionRule(session, created);
   }
@@ -5535,7 +5497,7 @@ Only continue if you trust this code.`,
       level: "info",
       text: adopt
         ? `Adopted ${loaded.workspace.rules.length} permission rule${loaded.workspace.rules.length === 1 ? "" : "s"} from this project.`
-        : "Left this project's permission rules inactive. They stay visible in Settings until adopted.",
+        : "Left this project's permission rules inactive. They stay visible in Settings until adopted."
     });
   }
 
@@ -5649,7 +5611,7 @@ Only continue if you trust this code.`,
     if (takeQueue) {
       contributions = session.queuedSends.map((item) => ({
         text: item.text,
-        chips: item.chips.map(cloneChipForQueue),
+        chips: item.chips.map(cloneChipForQueue)
       }));
       session.queuedSends = [];
       session.queuedSendCommit = undefined;
@@ -5697,7 +5659,7 @@ Only continue if you trust this code.`,
       // Collected here, in the same tick the interjection is built.
       contextChipPayload: this.contextChipPayloads(
         contributions.flatMap((item) => item.chips),
-      ),
+      )
     };
 
     const builtContributions: QueuedPromptContribution[] = [];
@@ -5780,7 +5742,7 @@ Only continue if you trust this code.`,
       type: "userMessage",
       text: displayText,
       chips: displayChips,
-      steer: true,
+      steer: true
     });
 
     const rpcText = images.length ? displayText : built.text;
@@ -5832,7 +5794,7 @@ Only continue if you trust this code.`,
       metaEnabled: session.feedbackMetaEnabled,
       commandsAdvertise: session.feedbackCommandsAdvertise,
       latchedUnsupported: session.feedbackUnsupported,
-      userEnabled: this.thumbsFeedbackEnabled(),
+      userEnabled: this.thumbsFeedbackEnabled()
     });
     if (session.feedbackAvailable === available) return;
     session.feedbackAvailable = available;
@@ -5949,7 +5911,7 @@ Only continue if you trust this code.`,
       const result = await client.submitFeedback({
         ratingValue: rating,
         clientType: feedbackClientType(!!this.host.canSwitchWorkspaceFolder),
-        clientVersion: this.context.extensionVersion,
+        clientVersion: this.context.extensionVersion
       });
       if (result === "unsupported") {
         this.latchFeedbackUnavailable(session);
@@ -6024,7 +5986,7 @@ Only continue if you trust this code.`,
         uploadedFiles: [...new Set([...(prev.uploadedFiles ?? []), ...parentUploads])],
         contextUsed: parentMeta.contextUsed,
         contextWindow: parentMeta.contextWindow,
-        contextPendingCompact: parentMeta.contextPendingCompact,
+        contextPendingCompact: parentMeta.contextPendingCompact
       };
       // A fork of a worktree session stays in that worktree — carry the binding.
       // It's a second conversation branch sharing the checkout (like the Agent
@@ -6036,7 +5998,7 @@ Only continue if you trust this code.`,
       }
       await this.state.update(SESSION_META_KEY, {
         ...overrides,
-        [r.newSessionId]: carried,
+        [r.newSessionId]: carried
       });
       this.sessionCache.delete(r.newSessionId); // customName changes displayName without touching mtime
 
@@ -6104,7 +6066,7 @@ Only continue if you trust this code.`,
     const { client, gen, activeSessionId, userMessageCount } = session;
     if (session.provider !== "grok") {
       await this.rewindFromClientCheckpoints(session, {
-        userBubbleIndex, bubbleText: text, totalUserBubbles, edit: true,
+        userBubbleIndex, bubbleText: text, totalUserBubbles, edit: true
       });
       return;
     }
@@ -6112,7 +6074,7 @@ Only continue if you trust this code.`,
       const points = await client.listRewindPoints();
       if (points === "unsupported") {
         await this.rewindFromClientCheckpoints(session, {
-          userBubbleIndex, bubbleText: text, totalUserBubbles, edit: true,
+          userBubbleIndex, bubbleText: text, totalUserBubbles, edit: true
         });
         return;
       }
@@ -6148,7 +6110,7 @@ Only continue if you trust this code.`,
           title: "Edit this message?",
           body: editRewindConfirmMessage(target, true, gitStatus),
           confirmLabel: "Edit",
-          danger: true,
+          danger: true
         });
         if (!ok) return;
       }
@@ -6167,11 +6129,11 @@ Only continue if you trust this code.`,
       }
       const result = await client.executeRewind({
         targetPromptIndex: target.promptIndex,
-        mode: "all",
+        mode: "all"
       });
       if (result === "unsupported") {
         await this.rewindFromClientCheckpoints(session, {
-          userBubbleIndex, bubbleText: text, totalUserBubbles, edit: true,
+          userBubbleIndex, bubbleText: text, totalUserBubbles, edit: true
         });
         return;
       }
@@ -6276,7 +6238,7 @@ Only continue if you trust this code.`,
     const { client, gen, activeSessionId, userMessageCount } = session;
     if (session.provider !== "grok") {
       await this.rewindFromClientCheckpoints(session, {
-        userBubbleIndex, bubbleText, totalUserBubbles, edit: false,
+        userBubbleIndex, bubbleText, totalUserBubbles, edit: false
       });
       return;
     }
@@ -6284,7 +6246,7 @@ Only continue if you trust this code.`,
       const points = await client.listRewindPoints();
       if (points === "unsupported") {
         await this.rewindFromClientCheckpoints(session, {
-          userBubbleIndex, bubbleText, totalUserBubbles, edit: false,
+          userBubbleIndex, bubbleText, totalUserBubbles, edit: false
         });
         return;
       }
@@ -6331,14 +6293,14 @@ Only continue if you trust this code.`,
             label: formatRewindPointLabel(p, visiblePosition.get(p.promptIndex)),
             description: p.hasFileChanges ? "files" : undefined,
             detail: formatRewindPointDetail(p),
-            point: p,
+            point: p
           }));
         const pick = await this.host.showQuickPick(items, {
           // Execute discards the chosen message too, not just what follows it.
           placeHolder: "Rewind past which message? (it and everything after it are discarded)",
           ignoreFocusOut: true,
           matchOnDescription: true,
-          matchOnDetail: true,
+          matchOnDetail: true
         });
         if (!pick) return;
         target = pick.point;
@@ -6354,7 +6316,7 @@ Only continue if you trust this code.`,
           title: "Rewind past this message?",
           body: rewindConfirmMessage(target, "all", gitStatus),
           confirmLabel: "Rewind",
-          danger: true,
+          danger: true
         });
         if (!ok) return;
       }
@@ -6370,11 +6332,11 @@ Only continue if you trust this code.`,
       }
       const result = await client.executeRewind({
         targetPromptIndex: target.promptIndex,
-        mode: "all",
+        mode: "all"
       });
       if (result === "unsupported") {
         await this.rewindFromClientCheckpoints(session, {
-          userBubbleIndex, bubbleText, totalUserBubbles, edit: false,
+          userBubbleIndex, bubbleText, totalUserBubbles, edit: false
         });
         return;
       }
@@ -6530,7 +6492,7 @@ Only continue if you trust this code.`,
       },
       realpath: (candidate) => fs.realpathSync(candidate),
       homeDir: os.homedir(),
-      findInSubtree: (root, rel) => this.findInWorkspaceSubtree(root, rel),
+      findInSubtree: (root, rel) => this.findInWorkspaceSubtree(root, rel)
     });
     return { ref, path: resolved };
   }
@@ -6544,7 +6506,7 @@ Only continue if you trust this code.`,
       path: wt.path,
       label: wt.label,
       sourceGitRoot: wt.sourceRepo || fallbackSourceGitRoot,
-      id: wt.id,
+      id: wt.id
     };
   }
 
@@ -6559,8 +6521,8 @@ Only continue if you trust this code.`,
         ...(overrides[id] ?? {}),
         worktreePath: wt.path,
         worktreeLabel: wt.label,
-        sourceGitRoot: wt.sourceGitRoot,
-      },
+        sourceGitRoot: wt.sourceGitRoot
+      }
     });
   }
 
@@ -6732,7 +6694,7 @@ Only continue if you trust this code.`,
       // discovered from.
       trustedCwds: [...this.openWorkspaceFolders(), ...this.extraProjectFolders()],
       worktreeLabels,
-      log: (m) => this.host.appendLine(m),
+      log: (m) => this.host.appendLine(m)
     });
     // Tombstoned folders are dropped HERE, at the single source, not in the
     // display list. `localTrustedSessionCwds` reads this catalog directly on VS
@@ -6805,7 +6767,7 @@ Only continue if you trust this code.`,
             // Stored choices are non-empty ids; missing/invalid → "" for none.
             color: colorChoice && (REPO_COLOR_IDS as readonly string[]).includes(colorChoice)
               ? colorChoice
-              : "",
+              : ""
           });
         }
       }
@@ -6851,7 +6813,7 @@ Only continue if you trust this code.`,
     for (const p of worktreeCwdsForRepo({
       repoCwd,
       repoGitRoot: gitRootForPath(repoCwd, defaultFs) ?? repoCwd,
-      worktrees: known,
+      worktrees: known
     })) {
       add(p);
     }
@@ -6934,7 +6896,7 @@ Only continue if you trust this code.`,
       type: "sessionType",
       sessionId: session.activeSessionId ?? "",
       sessionType: session.sessionType,
-      locked: this.sessionTypeIsLocked(session),
+      locked: this.sessionTypeIsLocked(session)
     });
     this.postSessionDelegation(session);
   }
@@ -6958,7 +6920,7 @@ Only continue if you trust this code.`,
           provider: t.provider,
           name: t.displayName,
           eligible: true,
-          ...(t.models ? { models: t.models.map((m) => ({ id: m.id, ...(m.efforts ? { efforts: m.efforts } : {}) })) } : {}),
+          ...(t.models ? { models: t.models.map((m) => ({ id: m.id, ...(m.efforts ? { efforts: m.efforts } : {}) })) } : {})
         })),
         ...listing.ineligible.map((row) => ({ provider: row.provider, name: providerDisplayName(row.provider), eligible: false, reason: row.message })),
       ];
@@ -6969,7 +6931,7 @@ Only continue if you trust this code.`,
       value,
       ...(enabled && session.client && session.companionsMcpInjected === false ? { needsRestart: true } : {}),
       targets,
-      roles,
+      roles
     });
   }
 
@@ -6983,7 +6945,7 @@ Only continue if you trust this code.`,
       const overrides = this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
       void this.state.update(SESSION_META_KEY, {
         ...overrides,
-        [id]: { ...(overrides[id] ?? {}), subagentsEnabled: enabled, spawnPolicy },
+        [id]: { ...(overrides[id] ?? {}), subagentsEnabled: enabled, spawnPolicy }
       });
       this.sessionCache.delete(id);
     }
@@ -7022,8 +6984,8 @@ Only continue if you trust this code.`,
           ? { sessionTypeLockedAt: session.sessionTypeLockedAt }
           : {}),
         ...(crewRunId ? { crewRunId } : {}),
-        ...(workflowName ? { workflowName } : {}),
-      },
+        ...(workflowName ? { workflowName } : {})
+      }
     });
     this.sessionCache.delete(id);
   }
@@ -7094,7 +7056,7 @@ Only continue if you trust this code.`,
           ? session.sessionType === "crew"
             ? "This session is locked to Crew mode. Start a new session to use Agent."
             : "This session is locked to Agent mode. Start a new session to use Crew."
-          : "Unknown session type.",
+          : "Unknown session type."
       });
       // Re-assert the truth so a webview that drew the wrong control corrects.
       this.postSessionType(session);
@@ -7142,12 +7104,12 @@ Only continue if you trust this code.`,
       crewFileClaims: () => self.crewFileClaims(),
       mcpOps: {
         hostPipe: () => self.hostPipe(),
-        reservedMcpIdentityFor: (s) => self.reservedMcpIdentityFor(s),
+        reservedMcpIdentityFor: (s) => self.reservedMcpIdentityFor(s)
       },
       worktreeOps: {
         createCrewWorktree: (cwd, b) => self.createCrewWorktree(cwd, b),
         applyCrewWorktree: (s, wt) => self.applyCrewWorktree(s, wt),
-        worktreeLocal: () => self.worktreeLocal(),
+        worktreeLocal: () => self.worktreeLocal()
       },
       lifecycleOps: {
         emitWorkflowRun: (s) => self.emitWorkflowRun(s),
@@ -7162,9 +7124,9 @@ Only continue if you trust this code.`,
         maybeGenerateTitle: (s) => self.maybeGenerateTitle(s),
         postSessionName: (s) => self.postSessionName(s),
         postSessionsList: () => self.postSessionsList(),
-        sessionCacheDelete: (id) => self.sessionCache.delete(id),
+        sessionCacheDelete: (id) => self.sessionCache.delete(id)
       },
-      getOverride: (name) => ((self as any).getOverride ? (self as any).getOverride(name) : (self as any)[name]),
+      getOverride: (name) => ((self as any).getOverride ? (self as any).getOverride(name) : (self as any)[name])
     };
   }
 
@@ -7529,7 +7491,7 @@ Only continue if you trust this code.`,
           if (at > newest) newest = at;
         }
         return newest;
-      },
+      }
     });
     if (!expired.length) return;
     const next: RepoArchives = { ...archives };
@@ -7547,7 +7509,7 @@ Only continue if you trust this code.`,
     // when canArchiveRepos (already applied inside localRepoCatalogEntries).
     const localEntries = this.localRepoCatalogEntries().map((entry) => ({
       ...entry,
-      defaultProvider: this.defaultProviderForProject(entry.cwd),
+      defaultProvider: this.defaultProviderForProject(entry.cwd)
     }));
     const activeCwd = this.sessionCwd(this.focused);
     const selectedKey = normalizeRepoPath(this.selectedHistoryCwd());
@@ -7586,7 +7548,7 @@ Only continue if you trust this code.`,
       // What the EDITOR has open, sent alongside the selection rather than
       // instead of it — the rail needs both to say "you are working here, your
       // window is there".
-      workspaceCwd: this.workspaceRoot() || "",
+      workspaceCwd: this.workspaceRoot() || ""
     });
   }
 
@@ -7656,7 +7618,7 @@ Only continue if you trust this code.`,
       cwd: hit.cwd,
       entries: list.entries,
       dots: list.dots,
-      total: list.total,
+      total: list.total
     };
   }
 
@@ -7790,7 +7752,7 @@ Only continue if you trust this code.`,
         worktreePath: session.worktree?.path,
         worktreeSourceRoot: session.worktree?.sourceGitRoot,
         activeRoot: this.workspaceRoot(),
-        isAuthorized: (cwd) => this.isAuthorizedCwd(cwd),
+        isAuthorized: (cwd) => this.isAuthorizedCwd(cwd)
       });
     }
     add(this.sessionCwd(session));
@@ -7856,7 +7818,7 @@ Only continue if you trust this code.`,
         canSelectFolders: true,
         canSelectFiles: false,
         canSelectMany: false,
-        openLabel: "Add Project",
+        openLabel: "Add Project"
       });
       folder = picked?.[0];
     }
@@ -7947,7 +7909,7 @@ Only continue if you trust this code.`,
     return {
       type: "projectSetup",
       root: displayPath(this.projectRootPath(), this.projectHomeDir()),
-      ...extra,
+      ...extra
     };
   }
 
@@ -7956,7 +7918,7 @@ Only continue if you trust this code.`,
     if (!s) {
       return {
         connected: false,
-        cliPresent: true,
+        cliPresent: true
       };
     }
     return {
@@ -7965,7 +7927,7 @@ Only continue if you trust this code.`,
       ...(s.envTokenInForce ? { envTokenInForce: true } : {}),
       ...(s.error ? { error: true } : {}),
       cliPresent: s.cliPresent,
-      ...(s.message ? { message: s.message } : {}),
+      ...(s.message ? { message: s.message } : {})
     };
   }
 
@@ -8068,7 +8030,7 @@ Only continue if you trust this code.`,
       if (fs.existsSync(dest)) {
         this.postProjectSetup({
           error: `${path.basename(dest)} is already in ${displayPath(root, this.projectHomeDir())}. Pick a different folder name.`,
-          collision: path.basename(dest),
+          collision: path.basename(dest)
         });
         return;
       }
@@ -8128,7 +8090,7 @@ Only continue if you trust this code.`,
     const install = githubCliInstallCommand(process.platform);
     if (!install) {
       this.postProjectSetup({
-        error: `Install the GitHub CLI from ${GITHUB_CLI_DOWNLOAD}, then try again.`,
+        error: `Install the GitHub CLI from ${GITHUB_CLI_DOWNLOAD}, then try again.`
       });
       return;
     }
@@ -8148,7 +8110,7 @@ Only continue if you trust this code.`,
       type: "githubRepos",
       repos: result.repos,
       ...(result.truncated ? { truncated: true } : {}),
-      ...(result.error ? { error: result.error } : {}),
+      ...(result.error ? { error: result.error } : {})
     });
   }
 
@@ -8164,7 +8126,7 @@ Only continue if you trust this code.`,
       this.githubConnection = {
         ...current,
         error: true,
-        message: githubEnvTokenBlocksSignOutMessage(name),
+        message: githubEnvTokenBlocksSignOutMessage(name)
       };
       this.postGithubState();
       return;
@@ -8174,7 +8136,7 @@ Only continue if you trust this code.`,
       this.githubConnection = {
         ...(current ?? { ...DISCONNECTED_GITHUB, login: login || "" }),
         error: true,
-        message: result.error,
+        message: result.error
       };
       this.postGithubState();
       return;
@@ -8427,7 +8389,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     this.emit(session, {
       type: "onboarding",
       state: "no-project",
-      platform: process.platform,
+      platform: process.platform
     });
     this.postRepoCatalog();
     this.postSessionsList();
@@ -8549,7 +8511,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     const key = normalizeRepoPath(hit.cwd);
     await this.state.update(REPO_ARCHIVES_KEY, {
       ...archives,
-      [key]: { cwd: hit.cwd, at: Date.now(), archived },
+      [key]: { cwd: hit.cwd, at: Date.now(), archived }
     });
     this.postRepoCatalog();
   }
@@ -8647,7 +8609,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     if (!text) return Promise.resolve();
     return this.updateSessionMeta((current) => ({
       ...current,
-      [id]: { ...(current[id] ?? {}), queuedDraft: text },
+      [id]: { ...(current[id] ?? {}), queuedDraft: text }
     }));
   }
 
@@ -8736,7 +8698,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
           ...cached,
           customName: overrides[id]?.customName,
           displayName: overrides[id]?.customName?.trim() || cached.rawSummary || cached.displayName,
-          pinnedAt: overrides[id]?.pinnedAt,
+          pinnedAt: overrides[id]?.pinnedAt
         });
       }
       const wanted = new Set(ids.filter((id) => !adapterIds.has(id)));
@@ -8926,7 +8888,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         { label: `SVG — for light background${mark("light")}`, description: "transparent, dark ink", fmt: "svgLight" },
       ];
       const pick = await this.host.showQuickPick(items, {
-        placeHolder: `Export ${base} as…`,
+        placeHolder: `Export ${base} as…`
       });
       if (!pick) return;
 
@@ -9061,7 +9023,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       .map((session) => ({
         id: session.activeSessionId,
         name: this.sessionDisplayName(session) || "a background conversation",
-        text: queuedSendsText(session.queuedSends),
+        text: queuedSendsText(session.queuedSends)
       }));
 
     for (const affected of affectedSessions) {
@@ -9129,13 +9091,13 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       if (!queued.id) {
         this.emitLocalTransient(draftNoticeTarget, {
           type: "error",
-          text: `${providerName} was signed out while ${queued.name} had an unsaved draft:\n\n${queued.text}`,
+          text: `${providerName} was signed out while ${queued.name} had an unsaved draft:\n\n${queued.text}`
         });
         continue;
       }
       this.emitLocalTransient(draftNoticeTarget, {
         type: "error",
-        text: `${providerName} was signed out while “${queued.name}” had a draft. It is saved — open that conversation to get it back.`,
+        text: `${providerName} was signed out while “${queued.name}” had a draft. It is saved — open that conversation to get it back.`
       });
     }
 
@@ -9191,7 +9153,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
           type: "onboarding",
           state: "provider-connected",
           platform: process.platform,
-          provider,
+          provider
         });
       };
       if (adopted.has(session)) {
@@ -9266,8 +9228,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     // Window reload and extension deactivation both land here. Every
     // outstanding delegation call is settled and every child cancelled — a
     // subagent that outlives its editor is spending a subscription for nobody.
-    this.companionsChannel?.dispose();
-    this.companionsChannel = undefined;
+    this._subagentHost?.dispose();
     // Last, and only here: both protocols hold sockets on it, and each one's
     // own dispose has just settled what it owed.
     this.hostPipeMux?.dispose();
@@ -9362,7 +9323,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       managed: false,
       realPath,
       packageName: CLI_NPM_PACKAGE[provider],
-      targetVersion: provider === "codex" ? CODEX_MANAGED_VERSION : undefined,
+      targetVersion: provider === "codex" ? CODEX_MANAGED_VERSION : undefined
     });
     const quote = (value: string) => `"${value.replace(/"/g, '\\"')}"`;
     const command = plan.kind === "npm"
@@ -9391,7 +9352,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     if (!cached || cached.cliVersion === version) return;
     await this.state.update(PROVIDER_MODEL_CACHE_KEY, {
       ...cache,
-      [provider]: { ...cached, cliVersion: version },
+      [provider]: { ...cached, cliVersion: version }
     } satisfies ProviderModelCache);
     this.host.appendLine(`[${provider}] CLI ${cached.cliVersion ?? "unknown"} -> ${version}; re-reading the model catalog`);
     await this.reprobeProviderCredentials(provider);
@@ -9405,7 +9366,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       try {
         const { stdout } = await execGrokCli(cliPath, ["--version"], {
           timeout: 30_000,
-          windowsHide: true,
+          windowsHide: true
         });
         const version = parseCodexVersionOutput(stdout ?? "");
         if (!version) throw new Error("unrecognized version output");
@@ -9432,7 +9393,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       try {
         const { stdout } = await execGrokCli(cliPath, ["--version"], {
           timeout: 30_000,
-          windowsHide: true,
+          windowsHide: true
         });
         const version = parseClaudeVersionOutput(stdout ?? "");
         if (!version) throw new Error("unrecognized version output");
@@ -9481,7 +9442,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       try {
         const { stdout } = await execGrokCli(cliPath, ["--version"], {
           timeout: 30_000,
-          windowsHide: true,
+          windowsHide: true
         });
         const version = parseGeminiVersionOutput(stdout ?? "");
         if (!version) throw new Error("unrecognized version output");
@@ -9576,7 +9537,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       readOnce: () => this.readGrokVersion(cliPath),
       sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
       identity: readCliBinaryIdentity(cliPath),
-      cache,
+      cache
     });
     if (nextCache) void this.state.update(CLI_VERSION_CACHE_KEY, nextCache);
     const parsed = parseGrokVersion(versionOutput);
@@ -9599,7 +9560,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         planModeVersionVerified: true,
         planModeUnavailableReason: decision.reason,
         usedCache,
-        cliVersion,
+        cliVersion
       };
     }
     // Unverified: log + optional toast once at session start; a later Plan pick
@@ -9620,7 +9581,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       planModeVersionVerified: false,
       planModeUnavailableReason: decision.reason,
       usedCache,
-      cliVersion,
+      cliVersion
     };
   }
 
@@ -9633,7 +9594,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       type: "planModeAvailability",
       available: compatibility.planModeAvailable,
       reason: compatibility.planModeUnavailableReason,
-      recheckable: !compatibility.planModeAvailable && !compatibility.planModeVersionVerified,
+      recheckable: !compatibility.planModeAvailable && !compatibility.planModeVersionVerified
     });
     this.emit(session, {
       type: "providerCapabilities",
@@ -9642,8 +9603,8 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         planModeAvailable: compatibility.planModeAvailable,
         cliVerified: compatibility.planModeVersionVerified,
         planModeUnavailableReason: compatibility.planModeUnavailableReason,
-        steeringSupported: session.client?.supportsInterject?.(),
-      }),
+        steeringSupported: session.client?.supportsInterject?.()
+      })
     });
   }
 
@@ -9742,7 +9703,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         current: info.currentVersion ?? null,
         latest: info.latestVersion ?? null,
         updateAvailable: !!info.updateAvailable,
-        policy,
+        policy
       });
     } catch (e) {
       this.host.appendLine(`grok update --check failed: ${(e as Error).message}`);
@@ -9948,8 +9909,8 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
           ...(next[newId] ?? {}),
           worktreePath: oldMeta.worktreePath,
           worktreeLabel: oldMeta.worktreeLabel,
-          sourceGitRoot: oldMeta.sourceGitRoot,
-        },
+          sourceGitRoot: oldMeta.sourceGitRoot
+        }
       };
     }
     void this.state.update(SESSION_META_KEY, next);
@@ -10096,7 +10057,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         // provider's missing-CLI copy.
         state: this.usableProviders().length ? missingProviderState(target.provider) : "connect-agent",
         platform: process.platform,
-        provider: target.provider,
+        provider: target.provider
       });
       return undefined;
     }
@@ -10278,7 +10239,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         type: "onboarding",
         state: missingProviderState(session.provider),
         platform: process.platform,
-        provider: session.provider,
+        provider: session.provider
       });
       return undefined;
     }
@@ -10318,8 +10279,8 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         provider: session.provider,
         capabilities: allProviderCapabilities(session.provider, {
           planModeAvailable: true,
-          cliVerified: true,
-        }),
+          cliVerified: true
+        })
       });
     }
     clock.record("version", clock.elapsed(versionAt), versionNote);
@@ -10335,7 +10296,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         session.worktree = {
           path: o.worktreePath,
           label: o.worktreeLabel || path.basename(o.worktreePath),
-          sourceGitRoot: o.sourceGitRoot || this.workspaceRoot(),
+          sourceGitRoot: o.sourceGitRoot || this.workspaceRoot()
         };
       }
     }
@@ -10371,7 +10332,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       mcpServers: async () => supportsClientMcpServers(session.provider) ? this.hostMcpServersFor(session) : [],
       ...(session.provider === "grok"
         ? { grokVersion: grokHandshakeVersion, grokVersionVerified }
-        : { backend: this.createProviderBackend(session.provider, effort) }),
+        : { backend: this.createProviderBackend(session.provider, effort) })
     });
     session.client = client;
     this.syncHumanWait(session);
@@ -10426,8 +10387,8 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
           init: { protocolVersion: init?.protocolVersion },
           // Host-confirmed at initialize by the backend (upstream 2f67d9a):
           // the webview stops guessing Steer from a provider list.
-          steeringSupported: client.supportsInterject?.() ?? false,
-        },
+          steeringSupported: client.supportsInterject?.() ?? false
+        }
       });
     });
     client.on("session", (res) => {
@@ -10440,8 +10401,8 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
           [res.sessionId]: {
             ...(current[res.sessionId] ?? {}),
             provider: session.provider,
-            providerCwd: cwd,
-          },
+            providerCwd: cwd
+          }
         }));
       }
       this.emit(session, {
@@ -10450,7 +10411,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         models: this.modelsForSession(session, client.availableModels, client.currentModelId, !resumeId || (session.historyEventCount === 0 && session.userMessageCount === 0)),
         currentModelId: client.currentModelId,
         worktree: !!session.worktree,
-        provider: session.provider,
+        provider: session.provider
       });
       if (session.provider === "grok") {
         const metaEnabled = parseFeedbackEnabledMeta(res);
@@ -10554,7 +10515,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
           type: "userMessageChunk",
           text,
           timestampMs: agentTimestampMsFromMeta(meta),
-          images: historyImagePreviews(text, this.imageStagingDir(), this.sessionCwd(session)),
+          images: historyImagePreviews(text, this.imageStagingDir(), this.sessionCwd(session))
         });
         return;
       }
@@ -10604,7 +10565,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
           session.replayUserRaw,
           this.imageStagingDir(),
           this.sessionCwd(session),
-        ),
+        )
       });
     });
     client.on("thoughtChunk", (text: string) => {
@@ -10658,7 +10619,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     const emitReplayedCommandOutput = (call: unknown) => {
       const replayed = commandOutputForToolCall(call, {
         replaying: session.replaying,
-        rememberedCommands: replayedCommandsByToolCallId,
+        rememberedCommands: replayedCommandsByToolCallId
       });
       if (!replayed) return;
       const id = typeof (call as { toolCallId?: unknown })?.toolCallId === "string"
@@ -10706,7 +10667,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         const remembered = this.rememberAdapterContext(session, occupancy !== undefined ? { occupancy } : {});
         this.emit(session, {
           type: "promptComplete",
-          meta: { ...gated, totalTokens: remembered?.used ?? gated.totalTokens },
+          meta: { ...gated, totalTokens: remembered?.used ?? gated.totalTokens }
         });
       } else {
         if (
@@ -10737,7 +10698,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         // Window only. Occupancy is remembered from prompt size / compact,
         // never from billed usage_update.used.
         this.rememberAdapterContext(session, {
-          ...(typeof window === "number" && Number.isFinite(window) && window > 0 ? { window } : {}),
+          ...(typeof window === "number" && Number.isFinite(window) && window > 0 ? { window } : {})
         });
         return;
       }
@@ -10751,7 +10712,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       this.emit(session, {
         type: "contextUsage",
         ...(typeof used === "number" && Number.isFinite(used) && used > 0 ? { used } : {}),
-        ...(typeof window === "number" && Number.isFinite(window) && window > 0 ? { window } : {}),
+        ...(typeof window === "number" && Number.isFinite(window) && window > 0 ? { window } : {})
       });
     });
     client.on("subscriptionUsage", (windows: SubscriptionWindow[]) => {
@@ -10772,7 +10733,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         this.rememberAdapterContext(session, {
           occupancy: used,
           compacted: true,
-          ...(typeof window === "number" && Number.isFinite(window) && window > 0 ? { window } : {}),
+          ...(typeof window === "number" && Number.isFinite(window) && window > 0 ? { window } : {})
         });
         return;
       }
@@ -10812,7 +10773,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         const err = (u as { error?: unknown })?.error;
         this.emit(session, {
           type: "autoCompactNotice",
-          text: typeof err === "string" && err.trim() ? `Compaction failed: ${err.trim()}` : "Compaction failed.",
+          text: typeof err === "string" && err.trim() ? `Compaction failed: ${err.trim()}` : "Compaction failed."
         });
       }
       const compactKind = compactEventKind(u);
@@ -10860,7 +10821,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
             type: "subagentUpdate",
             update: u,
             timestampMs,
-            ...(turnDurationMs !== undefined ? { turnDurationMs, turnStatus: "completed" as const } : {}),
+            ...(turnDurationMs !== undefined ? { turnDurationMs, turnStatus: "completed" as const } : {})
           });
         }
         return;
@@ -10909,7 +10870,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         toolCallId: req.toolCallId,
         answer: (answers, annotations) => client.respondQuestion(req.id, answers, annotations),
         cancel: () => client.respondQuestionCancelled(req.id),
-        abandon: () => { /* the CLI settled its own request; saying more would be a stale reply */ },
+        abandon: () => { /* the CLI settled its own request; saying more would be a stale reply */ }
       });
     });
     client.on("exit", (code) => {
@@ -10937,7 +10898,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       this.emit(session, {
         type: "exit",
         code,
-        ...(turnIsInFlight(session) ? this.turnEndFields(session, "failed") : {}),
+        ...(turnIsInFlight(session) ? this.turnEndFields(session, "failed") : {})
       });
       if (session.queuedSends.length) {
         session.queuedSendCommit = undefined;
@@ -11038,8 +10999,8 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
                     text: planText,
                     verdict: undefined as any,
                     planPath: snapshot?.path,
-                    planName: snapshot?.name,
-                  }],
+                    planName: snapshot?.name
+                  }]
                 });
                 session.lastPlanText = planText;
               } catch (e) {
@@ -11183,7 +11144,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
             this.postLocal({
               type: "hostNotice",
               level: "warning",
-              text: `Sensitive file(s) detected in workspace (${sensitive.slice(0, 3).join(", ")}). Configure exclusions in ~/.grok/config.toml.`,
+              text: `Sensitive file(s) detected in workspace (${sensitive.slice(0, 3).join(", ")}). Configure exclusions in ~/.grok/config.toml.`
             });
           }
         }
@@ -11298,7 +11259,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
           text:
             `Failed to start Grok: ${msg}. This matches the Grok CLI 0.2.61–0.2.70 stdio ` +
             `regression (issue #22, fixed after 0.2.70). Workaround: run ` +
-            `\`grok update --version ${GROK_STDIO_DOWNGRADE_TARGET}\` in a terminal, then start a new session.`,
+            `\`grok update --version ${GROK_STDIO_DOWNGRADE_TARGET}\` in a terminal, then start a new session.`
         });
       } else if (isResumeNotFound(err)) {
         // The person asked for a conversation and got the adapter's own words
@@ -11316,7 +11277,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
             `This conversation could not be opened. It may never have recorded `
             + `anything, or ${providerDisplayName(session.provider)} may not have `
             + `finished starting — try opening it again, and start a new `
-            + `conversation if it stays this way.`,
+            + `conversation if it stays this way.`
         });
       } else {
         this.emit(session, { type: "error", text: `Failed to start ${providerDisplayName(session.provider)}: ${msg}` });
@@ -11543,7 +11504,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       case "refreshContextDetails":
         if (session.provider === "grok" || session.provider === "gemini") {
           void this.refreshContextFromSessionInfo(session, session.gen, {
-            force: session.sessionInfoStale,
+            force: session.sessionInfoStale
           });
         }
         break;
@@ -11621,8 +11582,8 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
             await this.host.openTextFile(p, {
               selection: {
                 start: { line: startLine, character: 0 },
-                end: { line: endLine, character: Number.MAX_SAFE_INTEGER },
-              },
+                end: { line: endLine, character: Number.MAX_SAFE_INTEGER }
+              }
             });
           } catch {
             void this.host.openResource(p);
@@ -11824,7 +11785,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         session.questionDrafts.set(msg.requestId, {
           answers: msg.answers ?? {},
           annotations: msg.annotations ?? {},
-          complete: msg.complete === true,
+          complete: msg.complete === true
         });
         break;
       }
@@ -11873,7 +11834,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
           // Editing preserves createdAt, so the schedule anchor does not jump
           // when someone fixes a typo in the prompt.
           createdAt: prior?.createdAt ?? Date.now(),
-          models: this.routineModelOptions(),
+          models: this.routineModelOptions()
         });
         if (!result.ok) {
           this.routineError = { id: msg.id, message: result.error };
@@ -11920,7 +11881,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
           routineId: target.id,
           windowKey: key,
           startedAt: now,
-          outcome: "running",
+          outcome: "running"
         });
         await this.runRoutine(target, key, now);
         break;
@@ -12125,8 +12086,8 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
           target: {
             ...(rule.provider ? { provider: rule.provider } : {}),
             ...(rule.model ? { model: rule.model } : {}),
-            ...(rule.effort ? { effort: rule.effort } : {}),
-          },
+            ...(rule.effort ? { effort: rule.effort } : {})
+          }
         }));
         await this.host.getConfiguration("companions").update("subagents.routing", rules, "global");
         this.host.appendLine(`[companions] routing: ${rules.length} rule(s)`);
@@ -12234,7 +12195,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       case "connectMcpConnector":
         await this.connectMcpConnector(msg.id, {
           key: typeof msg.key === "string" ? msg.key : undefined,
-          readOnly: typeof msg.readOnly === "boolean" ? msg.readOnly : undefined,
+          readOnly: typeof msg.readOnly === "boolean" ? msg.readOnly : undefined
         });
         break;
       case "disconnectMcpConnector":
@@ -12337,7 +12298,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
           title: "OpenAI voice API key",
           prompt: "An OpenAI API-platform key is required; Codex / ChatGPT sign-in does not include transcription. Saved in host settings. Empty clears the override.",
           password: true,
-          placeHolder: "OpenAI API key",
+          placeHolder: "OpenAI API key"
         });
         if (value === undefined) break;
         const cfg = this.host.getConfiguration("grok", messageCwd);
@@ -12386,7 +12347,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
             type: "onboarding",
             state: missingProviderState(provider),
             platform: process.platform,
-            provider,
+            provider
           });
           break;
         }
@@ -12402,7 +12363,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         const term = this.host.createTerminal({
           name: `${providerDisplayName(provider)} Login`,
           shellPath: cliPath,
-          shellArgs: loginArgs,
+          shellArgs: loginArgs
         });
         term.show();
         // The terminal is outside the host protocol, so completion cannot be
@@ -12447,7 +12408,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
           state: providerLoginState(provider),
           platform: process.platform,
           provider,
-          launched: true,
+          launched: true
         });
         break;
       }
@@ -12458,7 +12419,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
             type: "onboarding",
             state: missingProviderState(provider),
             platform: process.platform,
-            provider,
+            provider
           });
           break;
         }
@@ -12649,7 +12610,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       },
       mkdir: async (absPath) => {
         await this.host.fs.createDirectory(Uri.file(absPath));
-      },
+      }
     };
   }
 
@@ -12722,11 +12683,11 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       label: f.label,
       description: f.exists ? undefined : "Will be created",
       detail: f.path,
-      file: f,
+      file: f
     }));
     const picked = await this.host.showQuickPick(picks, {
       title: "Add as rule",
-      placeHolder: "Select a rule file to append to",
+      placeHolder: "Select a rule file to append to"
     });
     if (!picked) return;
     const dateStamp = new Date().toISOString().slice(0, 10);
@@ -12755,7 +12716,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       this.postMcpServers({
         type: "mcpServers",
         servers: this.mcpServersView,
-        warning: MCP_GLOBAL_SCOPE_WARNING,
+        warning: MCP_GLOBAL_SCOPE_WARNING
       });
     }
   }
@@ -12763,7 +12724,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
   private postMcpServers(message: Extract<HostMsg, { type: "mcpServers" }>): void {
     const view = {
       ...message,
-      servers: this.mcpServersView,
+      servers: this.mcpServersView
     };
     this.post(view);
     void this.settingsEditor?.webview.postMessage(view);
@@ -12782,8 +12743,8 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         errorId: this.mcpConnectError?.id,
         error: this.mcpConnectError?.message,
         keySet: new Set((this.mcpConnectorKeys ?? new Map()).keys()),
-        lapsed: this.lapsedOAuthConnectors(store),
-      }),
+        lapsed: this.lapsedOAuthConnectors(store)
+      })
     };
   }
 
@@ -12812,7 +12773,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       cwd,
       provider: "grok" as const,
       grokHome: resolveGrokHome(process.env),
-      userHome: process.env.USERPROFILE || process.env.HOME || os.homedir(),
+      userHome: process.env.USERPROFILE || process.env.HOME || os.homedir()
     };
     const files: { layer: "project" | "user"; path: string; names: string[] }[] = [];
     for (const filePath of mcpConfigPaths(opts)) {
@@ -12821,7 +12782,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         files.push({
           layer: mcpConfigLayer(filePath, opts),
           path: filePath,
-          names: collectReservedMcpIdentity(fs.readFileSync(filePath, "utf8")).names,
+          names: collectReservedMcpIdentity(fs.readFileSync(filePath, "utf8")).names
         });
       } catch {
         // Unreadable configs must not block the inventory page.
@@ -12829,7 +12790,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     }
     return {
       nameLayer: collectMcpNameLayers(files),
-      nameFile: collectMcpNameFiles(files),
+      nameFile: collectMcpNameFiles(files)
     };
   }
 
@@ -12837,7 +12798,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     return mcpSettingsServersForCwd({
       servers,
       catalogCwd: this.mcpServersCwd,
-      nameCatalogFor: (cwd) => this.mcpNameCatalogFor(cwd),
+      nameCatalogFor: (cwd) => this.mcpNameCatalogFor(cwd)
     });
   }
 
@@ -12848,7 +12809,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       cwd,
       provider: session.provider,
       grokHome: resolveGrokHome(process.env),
-      userHome: process.env.USERPROFILE || process.env.HOME || os.homedir(),
+      userHome: process.env.USERPROFILE || process.env.HOME || os.homedir()
     })) {
       try {
         if (!fs.existsSync(filePath)) continue;
@@ -12951,7 +12912,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         id,
         message: this.mcpConnectingId === id
           ? "Sign-in is already in progress. Finish the browser prompt, or wait for it to time out."
-          : `Already connecting ${this.mcpConnectingId}. Wait for that to finish.`,
+          : `Already connecting ${this.mcpConnectingId}. Wait for that to finish.`
       };
       this.postMcpConnectors();
       return;
@@ -12978,7 +12939,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         command: npx.command,
         args: mcpRemoteArgs(endpoint, undefined, metadata?.path),
         shell: npx.shell,
-        env: npx.env,
+        env: npx.env
       });
       if (this.mcpConnectingId !== id) return;
       if (!result.ok) {
@@ -13042,11 +13003,11 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         command: npx.command,
         args: mcpRemoteArgs(endpoint, undefined, undefined, {
           authorization: true,
-          readOnly: opts.readOnly === true || (!incoming && store[id]?.readOnly === true),
+          readOnly: opts.readOnly === true || (!incoming && store[id]?.readOnly === true)
         }),
         shell: npx.shell,
         env: withAuthHeaderEnv(npx.env, token),
-        auth: "key",
+        auth: "key"
       });
       if (this.mcpConnectingId !== id) return;
       if (!result.ok) {
@@ -13149,7 +13110,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       type: "mcpServers",
       servers: this.mcpServersView,
       loading: true,
-      warning: MCP_GLOBAL_SCOPE_WARNING,
+      warning: MCP_GLOBAL_SCOPE_WARNING
     });
     const grokConnected = this.connectedProviders().includes("grok");
     const grok = await this.grokSessionForMcpList(session);
@@ -13165,7 +13126,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         error: grokConnected
           ? "Could not load MCP servers from Grok."
           : "Connect Grok to inspect MCP servers.",
-        warning: MCP_GLOBAL_SCOPE_WARNING,
+        warning: MCP_GLOBAL_SCOPE_WARNING
       });
       return;
     }
@@ -13180,7 +13141,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         this.postMcpServers({
           type: "mcpServers",
           servers: [],
-          warning: MCP_GLOBAL_SCOPE_WARNING,
+          warning: MCP_GLOBAL_SCOPE_WARNING
         });
         return;
       }
@@ -13192,7 +13153,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       this.postMcpServers({
         type: "mcpServers",
         servers: this.mcpServersView,
-        warning: MCP_GLOBAL_SCOPE_WARNING,
+        warning: MCP_GLOBAL_SCOPE_WARNING
       });
     } catch (error) {
       const detail = errorDetail(error);
@@ -13201,7 +13162,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         type: "mcpServers",
         servers: [],
         error: detail || "Could not load MCP servers from Grok.",
-        warning: MCP_GLOBAL_SCOPE_WARNING,
+        warning: MCP_GLOBAL_SCOPE_WARNING
       });
     }
   }
@@ -13317,7 +13278,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         total: 0,
         hasMore: false,
         nextOffset: offset,
-        query: opts?.query ?? "",
+        query: opts?.query ?? ""
       };
     }
     cwd = listCwd;
@@ -13377,7 +13338,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       hasMore: query ? nextOffset < total : combinedPage?.hasMore ?? false,
       nextOffset,
       ...(!query && combinedPage ? { providerCursor: combinedPage.providerCursor } : {}),
-      query,
+      query
     };
   }
 
@@ -13417,7 +13378,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       cwd,
       env: { ...process.env },
       backend,
-      log: (message) => this.host.appendLine(message),
+      log: (message) => this.host.appendLine(message)
     });
     try {
       await client.start();
@@ -13434,7 +13395,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         if (typeof previous.activeAt === "number") continue;
         stableOverrides[entry.sessionId] = {
           ...previous,
-          activeAt: adapterListEntry(entry, {}, provider, Date.now()).updatedAt,
+          activeAt: adapterListEntry(entry, {}, provider, Date.now()).updatedAt
         };
       }
       const entries = result.sessions.map((entry) => adapterListEntry(entry, stableOverrides, provider));
@@ -13457,7 +13418,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
             activeAt: typeof previous.activeAt === "number"
               ? previous.activeAt
               : stableOverrides[entry.sessionId]?.activeAt,
-            ...(!previous.customName && autoName ? { autoName } : {}),
+            ...(!previous.customName && autoName ? { autoName } : {})
           };
           if (JSON.stringify(updated) !== JSON.stringify(previous)) {
             next[entry.sessionId] = updated;
@@ -13494,7 +13455,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         total: 0,
         hasMore: false,
         nextOffset: offset,
-        query: opts?.query ?? "",
+        query: opts?.query ?? ""
       };
     }
     cwd = listCwd;
@@ -13514,7 +13475,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     const index = mergeSessionIndexes(
       repoCwds.map((c) => ({
         cwd: c,
-        entries: indexSessions({ fs: defaultFs, grokHome, cwd: c, log }),
+        entries: indexSessions({ fs: defaultFs, grokHome, cwd: c, log })
       })),
     );
     const mtimeById = new Map(index.map((e) => [e.id, e.mtimeMs]));
@@ -13651,7 +13612,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       total,
       hasMore,
       nextOffset,
-      query: opts?.query ?? "",
+      query: opts?.query ?? ""
     };
   }
 
@@ -13715,7 +13676,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       sessionId: id,
       name,
       cwd,
-      ...(owner && !pathsEqual(owner, cwd) ? { repoCwd: owner } : {}),
+      ...(owner && !pathsEqual(owner, cwd) ? { repoCwd: owner } : {})
     };
     if (session === this.focused) this.postLocal(message);
   }
@@ -13750,7 +13711,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       createdAt: ts,
       numMessages: session.userMessageCount,
       modelId: undefined,
-      provider: session.provider,
+      provider: session.provider
     };
   }
 
@@ -13817,7 +13778,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
           return {
             ...entry,
             customName,
-            displayName: customName || entry.rawSummary || next[id]?.autoName || `Untitled (${new Date(entry.updatedAt).toLocaleDateString()})`,
+            displayName: customName || entry.rawSummary || next[id]?.autoName || `Untitled (${new Date(entry.updatedAt).toLocaleDateString()})`
           };
         }));
       }
@@ -13970,7 +13931,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
           cwd,
           env: { ...process.env },
           backend,
-          log: (message) => this.host.appendLine(message),
+          log: (message) => this.host.appendLine(message)
         }));
         if (temporary) await temporary.start();
         await client.deleteSession(id);
@@ -14001,7 +13962,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
           fs: defaultFs,
           grokHome: resolveGrokHome(process.env),
           cwd,
-          id,
+          id
         });
       } catch (e) {
         this.host.appendLine(`[sessions] delete failed for ${id}: ${(e as Error).message}`);
@@ -14117,7 +14078,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     // Count via the cheap stat-only index — no need to parse every summary just to confirm.
     const repoEntries = mergeSessionIndexes(repoCwds.map((sessionCwd) => ({
       cwd: sessionCwd,
-      entries: indexSessions({ fs: defaultFs, grokHome, cwd: sessionCwd }),
+      entries: indexSessions({ fs: defaultFs, grokHome, cwd: sessionCwd })
     })));
     const adapterEntries = adapterEntriesEligibleForClear(
       [
@@ -14150,7 +14111,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
           fs: defaultFs,
           grokHome,
           cwd: sessionCwd,
-          exceptIds: protectedIds,
+          exceptIds: protectedIds
         })) removedIds.add(id);
       } catch (e) {
         this.host.appendLine(
@@ -14175,7 +14136,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
           cwd,
           env: { ...process.env },
           backend,
-          log: (message) => this.host.appendLine(message),
+          log: (message) => this.host.appendLine(message)
         });
         await client.start();
         for (const entry of entries) {
@@ -14253,7 +14214,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       canSelectFiles: true,
       canSelectFolders: false,
       canSelectMany: true,
-      openLabel: "Add to chat",
+      openLabel: "Add to chat"
     });
     if (!picked || picked.length === 0) return;
     for (const filePath of picked) {
@@ -14326,7 +14287,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
   private openWorkspaceFileEntries(): Array<{ rel: string; abs: string }> {
     return this.host.openWorkspaceTextFiles().map((e) => ({
       rel: normalizeRelPath(e.rel),
-      abs: e.abs,
+      abs: e.abs
     }));
   }
 
@@ -14354,7 +14315,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     if (backend === "xai") return this.resolveVoiceApiKey(cwd);
     return resolveOpenAiVoiceKey({
       setting: this.voiceSetting(cwd, "voiceOpenAiApiKey", ""),
-      env: { ...process.env, ...this.readDotEnv(cwd) },
+      env: { ...process.env, ...this.readDotEnv(cwd) }
     });
   }
 
@@ -14367,7 +14328,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       codex: pickSttBackend({ ...state, provider: "codex" }) ?? null,
       claude: pickSttBackend({ ...state, provider: "claude" }) ?? null,
       gemini: pickSttBackend({ ...state, provider: "gemini" }) ?? null,
-      muse: pickSttBackend({ ...state, provider: "muse" }) ?? null,
+      muse: pickSttBackend({ ...state, provider: "muse" }) ?? null
     } };
   }
 
@@ -14494,14 +14455,14 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
           provider: session.provider,
           connectorCount: Object.keys(this.connectedConnectorStore()).length,
           worktree: !!session.worktree,
-          returningInstall: returningInstall,
+          returningInstall: returningInstall
         },
         {
           appVersion,
           osName: osNameFromPlatform(process.platform),
           osVersion: os.release(),
           locale: this.host.language || "",
-          isDebug: !this.context.isProduction,
+          isDebug: !this.context.isProduction
         },
         randomUUID(),
         new Date().toISOString(),
@@ -14523,7 +14484,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       value,
       sendPhrase: this.voiceSetting(cwd, "voiceSendPhrase", DEFAULT_SEND_PHRASE),
       keyterms: sanitizeVoiceKeyterms(this.voiceSetting(cwd, "voiceKeyterms", [])),
-      backendState: this.voiceBackendState(cwd, provider),
+      backendState: this.voiceBackendState(cwd, provider)
     };
   }
 
@@ -14701,7 +14662,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       platform: process.platform,
       pathEnv: process.env.PATH,
       isFile: (p) => statKindSafe(p) === "file",
-      isDirectory: (p) => statKindSafe(p) === "dir",
+      isDirectory: (p) => statKindSafe(p) === "dir"
     });
     if (!resolvedFfmpeg.ok) {
       void this.reportFfmpegProblem(resolvedFfmpeg);
@@ -14844,7 +14805,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         device: ctx.device,
         keyterms: ctx.keyterms,
         language: ctx.language,
-        log: (m) => this.host.appendLine(m),
+        log: (m) => this.host.appendLine(m)
       });
       if (!isCurrent()) { streamer.cancel(); return; }
       this.postLocal({ type: "voiceState", status: "listening" });
@@ -15361,7 +15322,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     const files = [...new Set([...(cur.uploadedFiles ?? []), ...uploaded])];
     await this.state.update(SESSION_META_KEY, {
       ...overrides,
-      [sid]: { ...cur, uploadedFiles: files },
+      [sid]: { ...cur, uploadedFiles: files }
     });
   }
 
@@ -15580,7 +15541,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       }
       chip = makeTerminalChip({
         label: capture.label,
-        bytes: Buffer.byteLength(capture.text, "utf8"),
+        bytes: Buffer.byteLength(capture.text, "utf8")
       });
     }
     session.chips.push(chip);
@@ -15675,7 +15636,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     this.emit(session, {
       type: "agentError",
       text: "Stopped. The agent didn't answer the stop request, so its process is being restarted. This conversation is intact.",
-      ...this.turnEndFields(session, "cancelled"),
+      ...this.turnEndFields(session, "cancelled")
     });
     const client = await this.startSession(session.activeSessionId, session);
     // Another restart can overtake this one while it is starting. Then the
@@ -15688,7 +15649,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       endTurn(session, token);
       this.emit(session, {
         type: "agentError",
-        text: "The agent's process couldn't be restarted. Send again to start it.",
+        text: "The agent's process couldn't be restarted. Send again to start it."
       });
       this.setStatus(session, "error");
     }
@@ -15719,7 +15680,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     if (bare) {
       this.emit(session, {
         type: "error",
-        text: "Grok is mid-turn — that command was not run. Try again when the turn finishes.",
+        text: "Grok is mid-turn — that command was not run. Try again when the turn finishes."
       });
       return;
     }
@@ -15891,7 +15852,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       // The whole point of the chip split: the diagnostics and terminal state
       // read HERE, after every attachment await, not the state that existed
       // when the chip was staged.
-      contextChipPayload: this.contextChipPayloads(chips),
+      contextChipPayload: this.contextChipPayloads(chips)
     };
     // AP-16 §6.8. Parsed from the composer text, stripped out of it, and
     // appended as one block AFTER the context envelope so it cannot knock a
@@ -15966,7 +15927,7 @@ ${directives.block}`;
           models: this.modelsForSession(session, session.client.availableModels, session.client.currentModelId, false),
           currentModelId: session.client.currentModelId,
           worktree: !!session.worktree,
-          provider: session.provider,
+          provider: session.provider
         });
       }
       // Image-only first message: leave the title source empty so grok's own
@@ -16003,7 +15964,7 @@ ${directives.block}`;
       if (slashCommand === "compact" && session.provider === "gemini") {
         this.emit(session, {
           type: "messageChunk",
-          text: "Antigravity manages and compacts context automatically in the background. No manual compaction is needed — you can continue chatting normally.",
+          text: "Antigravity manages and compacts context automatically in the background. No manual compaction is needed — you can continue chatting normally."
         });
         if (endTurn(session, turn)) {
           if (!turnIsInFlight(session)) this.emit(session, { type: "agentEnd" });
@@ -16166,7 +16127,7 @@ ${directives.block}`;
       title: limitOfferTitle(kind, source),
       text: `${rateLimitNoticeText(err)} ${limitOfferHint(kind, targets.length > 0)}`,
       recommended,
-      ...this.turnEndFields(session, "failed"),
+      ...this.turnEndFields(session, "failed")
     });
     this.noteLiveTurnEnded(session);
     this.setStatus(session, "error");
@@ -16184,7 +16145,7 @@ ${directives.block}`;
       id,
       text: CONTEXT_OVERFLOW_TEXT,
       canCompact: providerCapability(session.provider, "manualCompact").state !== "no",
-      ...this.turnEndFields(session, "failed"),
+      ...this.turnEndFields(session, "failed")
     });
     this.noteLiveTurnEnded(session);
     this.setStatus(session, "error");
@@ -16237,13 +16198,13 @@ ${directives.block}`;
         id: offer.id,
         action: "continue",
         target: chosen.id,
-        targetName: chosen.name,
+        targetName: chosen.name
       });
       this.host.appendLine(`[limit] switching ${offer.source} → ${chosen.id} (${offer.kind})`);
       this.emit(session, {
         type: "hostNotice",
         level: "info",
-        text: switchTranscriptLine(offer.source, chosen.id),
+        text: switchTranscriptLine(offer.source, chosen.id)
       });
       session.provider = chosen.id;
       session.keepTranscriptOnStart = true;
@@ -16506,7 +16467,7 @@ ${directives.block}`;
         moveViewHint: shouldShowMoveViewHint({
           hostAcceptedSecondarySideBar: this.host.canUseSecondarySideBar,
           canRelocateView: this.host.canRelocateView,
-          pickerAlreadyUsed: this.state.get<boolean>(MOVE_VIEW_HINT_USED_KEY) === true,
+          pickerAlreadyUsed: this.state.get<boolean>(MOVE_VIEW_HINT_USED_KEY) === true
         }),
         showOutput: this.host.canShowOutput,
         // OPT-IN: unpackaged desktop only. Gear → Advanced offers the control so
@@ -16535,8 +16496,8 @@ ${directives.block}`;
         // flags and keeps offering only the picker.
         createProject: this.canAddProjectFolder(),
         cloneProject: this.canAddProjectFolder(),
-        removeProjectFolder: this.canAddProjectFolder(),
-      },
+        removeProjectFolder: this.canAddProjectFolder()
+      }
     };
   }
 
@@ -16556,7 +16517,7 @@ ${directives.block}`;
     for (const provider of this.connectedProviders()) void this.probeProviderVersion(provider);
     this.post({
       type: "summarizeRepliesAloud",
-      value: this.host.getConfiguration("grok").get<boolean>("summarizeRepliesAloud", true),
+      value: this.host.getConfiguration("grok").get<boolean>("summarizeRepliesAloud", true)
     });
     // Sync the active-editor context chip into the fresh webview (the config
     // gate + no-editor case live inside refreshImplicitChip).
@@ -16654,13 +16615,13 @@ ${directives.block}`;
         mimeType: chip.mimeType ?? "image/png",
         data: bytes.toString("base64"),
         path: chip.path,
-        relPath: chip.originRelPath,
+        relPath: chip.originRelPath
       };
     } catch (e) {
       if (gen !== session.gen) return "gone";
       this.emit(session, {
         type: "agentError",
-        text: `Could not read ${chip.relPath} (${(e as Error).message}). Remove the attachment and try again.`,
+        text: `Could not read ${chip.relPath} (${(e as Error).message}). Remove the attachment and try again.`
       });
       return "failed";
     }
@@ -16698,8 +16659,8 @@ ${directives.block}`;
             ? { ...chip, ...(fs.existsSync(chip.path)
               ? { previewSrc: webview.asWebviewUri(Uri.file(chip.path)), fullId: this.registerFullImage(chip.path) }
               : {}) }
-            : chip) } : {}),
-        })),
+            : chip) } : {})
+        }))
       };
     }
     if (message.type === "userMessageChunk" && message.images) {
@@ -16707,7 +16668,7 @@ ${directives.block}`;
         ...message,
         images: message.images.map((image) => image.path && fs.existsSync(image.path)
           ? { ...image, previewSrc: webview.asWebviewUri(Uri.file(image.path)), fullId: this.registerFullImage(image.path) }
-          : image),
+          : image)
       };
     }
     return message;
@@ -16952,7 +16913,7 @@ ${directives.block}`;
         session.userMessageCount = userMessageCount;
         const usageLog = entries.map((entry) => ({
           ...entry,
-          usage: entry.usage ? { ...entry.usage } : undefined,
+          usage: entry.usage ? { ...entry.usage } : undefined
         }));
         const usage = enforceCompleteSessionCost(
           sumUsage(usageLog),
@@ -16965,8 +16926,8 @@ ${directives.block}`;
           [id]: {
             ...(overrides[id] ?? {}),
             usage,
-            usageLog,
-          },
+            usageLog
+          }
         });
       },
       restartUsageSession: async (id, mode, summaryUsage) => {
@@ -17029,7 +16990,7 @@ ${directives.block}`;
             removeCount += 1;
             lastRemovePath = worktreePath;
             throw new Error("test-probe-stop");
-          },
+          }
         } as unknown as AcpClient;
         return {
           applyCount: () => applyCount,
@@ -17038,7 +16999,7 @@ ${directives.block}`;
           lastRemovePath: () => lastRemovePath,
           restore: () => {
             this.focused = prev;
-          },
+          }
         };
       },
       isolateFromInstalledGrok: () => {
@@ -17050,7 +17011,7 @@ ${directives.block}`;
       provisionFakeGrok: (cliPath) => {
         const previous = {
           cliPath: this.cliPath,
-          connected: this.providerConnections().grok === true,
+          connected: this.providerConnections().grok === true
         };
         this.cliPath = cliPath;
         this.setProviderConnectedInMemory("grok", true);
@@ -17061,7 +17022,7 @@ ${directives.block}`;
       },
       // Asking for the sweep by name means now — see the `force` note there.
       sweepEmptySessions: (cwd) => this.sweepEmptySessions(cwd, { force: true }),
-      workspaceRoot: () => this.workspaceRoot(),
+      workspaceRoot: () => this.workspaceRoot()
     };
   }
 
@@ -17182,7 +17143,7 @@ ${directives.block}`;
       onStart: () => this.emit(session, { type: "historyReplay", active: true }),
       onFinish: () => {
         this.emit(session, { type: "historyReplay", active: false });
-      },
+      }
     });
   }
 
@@ -17290,7 +17251,7 @@ ${directives.block}`;
       resolve,
       reject,
       expiresAt: Date.now() + GrokSidebar.SESSION_LOAD_RESERVATION_TTL_MS,
-      timer,
+      timer
     };
     this.sessionLoadReservations.set(id, reservation);
     return { reservation, joined: false };
@@ -17608,7 +17569,7 @@ ${directives.block}`;
         summary: typeof raw?.session_summary === "string" ? raw.session_summary : "",
         generatedTitle: typeof raw?.generated_title === "string" ? raw.generated_title : "",
         chatHistory,
-        historyUnreadable,
+        historyUnreadable
       });
       if (!empty) {
         // Cache only a verdict reached from evidence. A locked file makes this
@@ -17707,7 +17668,7 @@ ${directives.block}`;
     const doomed = selectReapable(candidates, {
       maxLive: GrokSidebar.MAX_LIVE_SESSIONS,
       idleTtlMs: GrokSidebar.IDLE_TTL_MS,
-      now: Date.now(),
+      now: Date.now()
     });
     for (const c of doomed) void this.disposeSession(c.session);
   }
@@ -17910,7 +17871,7 @@ ${directives.block}`;
           cwd,
           env: { ...process.env },
           backend,
-          log: (message) => this.host.appendLine(message),
+          log: (message) => this.host.appendLine(message)
         });
         await client.start();
       }
@@ -17987,7 +17948,7 @@ ${directives.block}`;
           : compacted && !cur.contextPendingCompact && cur.contextUsed
             ? { contextUsed: cur.contextUsed }
             : {}),
-        ...(compacted ? { compacted: true } : {}),
+        ...(compacted ? { compacted: true } : {})
       },
     ]);
     const sessionUsage = enforceCompleteSessionCost(
@@ -18000,7 +17961,7 @@ ${directives.block}`;
     }
     return this.state.update(SESSION_META_KEY, {
       ...overrides,
-      [id]: { ...cur, usage: sessionUsage, usageLog },
+      [id]: { ...cur, usage: sessionUsage, usageLog }
     });
   }
 
@@ -18013,7 +17974,7 @@ ${directives.block}`;
     const rawUsage = persisted?.usageLog ? sumUsage(usageLog) : persisted?.usage;
     return {
       usageLog,
-      usage: enforceCompleteSessionCost(rawUsage, usageLog, userMessageCount),
+      usage: enforceCompleteSessionCost(rawUsage, usageLog, userMessageCount)
     };
   }
 
@@ -18074,7 +18035,7 @@ ${directives.block}`;
       this.emit(session, {
         type: "contextUsage",
         used: usage.used,
-        ...(usage.window ? { window: usage.window } : {}),
+        ...(usage.window ? { window: usage.window } : {})
       });
     } else if (next.contextWindow) {
       this.emit(session, { type: "contextUsage", window: next.contextWindow });
@@ -18094,7 +18055,7 @@ ${directives.block}`;
         this.emit(session, {
           type: "contextUsage",
           used: usage.used,
-          ...(usage.window ? { window: usage.window } : {}),
+          ...(usage.window ? { window: usage.window } : {})
         });
       }
       return;
@@ -18190,7 +18151,7 @@ ${directives.block}`;
       messageTokens: info.messageTokens,
       freeTokens: info.freeTokens,
       autoCompactThresholdPercent: info.autoCompactThresholdPercent,
-      compactionCount: info.compactionCount,
+      compactionCount: info.compactionCount
     });
     if (info.autoCompactThresholdPercent !== undefined) session.compactThresholdReported = info.autoCompactThresholdPercent;
     if (info.compactionCount !== undefined) session.compactionCount = info.compactionCount;
@@ -18228,7 +18189,7 @@ ${directives.block}`;
       used,
       window,
       threshold: effective!,
-      canCompact: providerCapability(session.provider, "manualCompact").state !== "no",
+      canCompact: providerCapability(session.provider, "manualCompact").state !== "no"
     });
   }
 
@@ -18573,7 +18534,7 @@ ${directives.block}`;
       trustedCwds,
       metaWorktreePath: o?.worktreePath,
       cachedCwd: o?.providerCwd ?? this.sessionCache.get(id)?.entry.cwd,
-      sameCwd: pathsEqual,
+      sameCwd: pathsEqual
     });
     const cwd = isAdapterProvider(this.focused.provider)
       ? candidates.find((candidate) => trustedCwds.some((trusted) => pathsEqual(candidate, trusted)))
@@ -18581,7 +18542,7 @@ ${directives.block}`;
           fs: defaultFs,
           grokHome: resolveGrokHome(process.env),
           id,
-          candidates,
+          candidates
         });
     if (!cwd) {
       this.host.appendLine(
@@ -18599,7 +18560,7 @@ ${directives.block}`;
       this.focused.worktree = {
         path: o.worktreePath,
         label: o.worktreeLabel || path.basename(o.worktreePath),
-        sourceGitRoot: o.sourceGitRoot || this.workspaceRoot(),
+        sourceGitRoot: o.sourceGitRoot || this.workspaceRoot()
       };
     } else {
       const hit = matchWorktreeForCwd(cwd, worktreesForRepo(this.worktreeCache, this.workspaceRoot(), { includeDead: true }));
@@ -18608,7 +18569,7 @@ ${directives.block}`;
           path: hit.path,
           label: hit.label,
           sourceGitRoot: hit.sourceRepo || this.workspaceRoot(),
-          id: hit.id,
+          id: hit.id
         };
       }
     }
@@ -18841,7 +18802,7 @@ ${directives.block}`;
     const grokSub = this.companionsSetting<string>("grok.subagents.enabled", "default");
     Object.assign(env, grokSubagentEnv({
       ...(grokSub === "on" ? { enabled: true } : grokSub === "off" ? { enabled: false } : {}),
-      maxConcurrent: Number(this.companionsSetting<number>("grok.subagents.maxConcurrent", 0)) || 0,
+      maxConcurrent: Number(this.companionsSetting<number>("grok.subagents.maxConcurrent", 0)) || 0
     }, env));
 
     if (Object.keys(dotEnv).length > 0) {
@@ -18929,7 +18890,7 @@ ${directives.block}`;
         } catch {
           return false;
         }
-      },
+      }
     });
   }
 
@@ -18958,7 +18919,7 @@ ${directives.block}`;
       localResourceRoots: [
         Uri.joinPath(this.context.extensionUri, "media"),
         Uri.joinPath(this.context.extensionUri, "resources"),
-      ],
+      ]
     });
     if (!panel) return;
     this.settingsEditor = panel;
@@ -18966,7 +18927,7 @@ ${directives.block}`;
       if (this.settingsEditor === panel) this.settingsEditor = undefined;
     });
     panel.webview.html = this.getSettingsHtml(panel.webview, {
-      category: targetCategory,
+      category: targetCategory
     });
     panel.webview.onDidReceiveMessage((raw) => {
       const msg = raw as WebviewMsg;

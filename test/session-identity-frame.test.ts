@@ -33,10 +33,23 @@ const src = readFileSync(
   path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "sidebar.ts"),
   "utf8",
 );
+const sessionCatalogSrc = readFileSync(
+  path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "session-catalog.ts"),
+  "utf8",
+);
 
 function methodBody(signature: string): string {
-  const start = src.indexOf(signature);
+  const inCatalog = signature.includes("focusSession");
+  const bareSig = signature.replace(/private\s+/, "");
+  const source = inCatalog ? sessionCatalogSrc : src;
+  const target = inCatalog ? bareSig : signature;
+  const start = source.indexOf(target);
   expect(start, `${signature} not found`).toBeGreaterThan(-1);
+  if (inCatalog) {
+    const match = source.slice(start + target.length).search(/\n  (?:async\s+|private\s+|[a-zA-Z0-9_]+\s*\()/);
+    const next = match < 0 ? source.length : start + target.length + match;
+    return source.slice(start, next);
+  }
   const end = src.indexOf("\n  private ", start + 1);
   return src.slice(start, end === -1 ? undefined : end);
 }

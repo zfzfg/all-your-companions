@@ -15,6 +15,8 @@ import { Session, sessionHasWorkInFlight, turnIsInFlight } from "../src/session"
 
 const sidebarSrc = () =>
   fs.readFileSync(path.join(__dirname, "..", "src", "sidebar.ts"), "utf8");
+const projectFoldersSrc = () =>
+  fs.readFileSync(path.join(__dirname, "..", "src", "project-folders.ts"), "utf8");
 
 describe("sessionHasWorkInFlight", () => {
   it("is false for an idle session — closing that folder costs nothing", () => {
@@ -86,10 +88,12 @@ describe("sessionHasWorkInFlight", () => {
 
 describe("close-folder guard wiring", () => {
   it("asks before it removes, not after", () => {
-    const src = sidebarSrc();
+    const sidebar = sidebarSrc();
+    expect(sidebar).toContain("removeProjectFolder");
+    const src = projectFoldersSrc();
     const start = src.indexOf("async removeProjectFolder(");
     expect(start).toBeGreaterThan(0);
-    const body = src.slice(start, src.indexOf("private sessionsBoundToFolder", start));
+    const body = src.slice(start, src.indexOf("public sessionsBoundToFolder", start));
 
     const asked = body.indexOf("sessionHasWorkInFlight");
     const removed = body.indexOf("removeWorkspaceFolder(target)");
@@ -105,9 +109,11 @@ describe("close-folder guard wiring", () => {
     // Two independently-computed lists would drift, and the one that drifts
     // silently is the warning — you would be told nothing is running while the
     // revoke disposes a working session.
-    const src = sidebarSrc();
-    expect(src).toContain("private sessionsBoundToFolder(");
-    const revokeStart = src.indexOf("private revokeClosedProjectFolder(");
+    const sidebar = sidebarSrc();
+    expect(sidebar).toContain("private sessionsBoundToFolder(");
+    const src = projectFoldersSrc();
+    expect(src).toContain("sessionsBoundToFolder(");
+    const revokeStart = src.indexOf("public revokeClosedProjectFolder(");
     const revokeBody = src.slice(revokeStart, revokeStart + 1200);
     expect(revokeBody).toContain("this.sessionsBoundToFolder(closedCwd)");
   });

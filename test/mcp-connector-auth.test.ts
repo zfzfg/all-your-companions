@@ -53,9 +53,9 @@ class FakeProc extends EventEmitter {
 
 describe("sidebar connect wiring", () => {
   it("hands the child npxSpawnPlan's env, not the stripped process.env", () => {
-    const src = readFileSync(new URL("../src/sidebar.ts", import.meta.url), "utf8");
-    const start = src.indexOf("private async connectMcpConnector(");
-    const end = src.indexOf("private async disconnectMcpConnector(");
+    const src = readFileSync(new URL("../src/voice-and-mcp.ts", import.meta.url), "utf8");
+    const start = src.indexOf("public async connectMcpConnector(");
+    const end = src.indexOf("public async disconnectMcpConnector(");
     const body = src.slice(start, end);
     expect(start).toBeGreaterThan(-1);
     expect(end).toBeGreaterThan(start);
@@ -66,51 +66,51 @@ describe("sidebar connect wiring", () => {
     expect(body).not.toContain("quoteSpawnArgs");
     expect(body).toContain("withAuthHeaderEnv(npx.env, token)");
     expect(body).toContain('auth: "key"');
-    expect(body).toContain("this.context.secrets.store");
+    expect(body).toContain("this.deps.context.secrets.store");
     expect(body).toContain("mcpConnectorSecretKey");
   });
 
   it("disconnect of a key connector deletes HostSecrets and the connected record", () => {
-    const src = readFileSync(new URL("../src/sidebar.ts", import.meta.url), "utf8");
-    const start = src.indexOf("private async disconnectMcpConnector(");
-    const end = src.indexOf("private findLiveGrokSession(", start);
+    const src = readFileSync(new URL("../src/voice-and-mcp.ts", import.meta.url), "utf8");
+    const start = src.indexOf("public async disconnectMcpConnector(");
+    const end = src.indexOf("public findLiveGrokSession(", start);
     const body = src.slice(start, end);
     expect(start).toBeGreaterThan(-1);
     expect(end).toBeGreaterThan(start);
     expect(body).toContain("forgetConnectorKey");
     expect(body).toContain("disconnectConnector");
     expect(body).toContain("MCP_CONNECTORS_KEY");
-    const forgetStart = src.indexOf("private async forgetConnectorKey(");
-    const forgetEnd = src.indexOf("private async connectMcpConnector(", forgetStart);
+    const forgetStart = src.indexOf("public async forgetConnectorKey(");
+    const forgetEnd = src.indexOf("public async connectMcpConnector(", forgetStart);
     const forget = src.slice(forgetStart, forgetEnd);
     expect(forgetStart).toBeGreaterThan(-1);
     expect(forgetEnd).toBeGreaterThan(forgetStart);
-    expect(forget).toContain("this.context.secrets.delete");
+    expect(forget).toContain("this.deps.context.secrets.delete");
     expect(forget).toContain("mcpConnectorSecretKey");
   });
 
   it("loading keys never writes grok.mcpConnectors, including when a secret read fails", () => {
-    const src = readFileSync(new URL("../src/sidebar.ts", import.meta.url), "utf8");
-    const start = src.indexOf("private async loadMcpConnectorKeys(");
-    const end = src.indexOf("private async forgetConnectorKey(", start);
+    const src = readFileSync(new URL("../src/voice-and-mcp.ts", import.meta.url), "utf8");
+    const start = src.indexOf("public async loadMcpConnectorKeys(");
+    const end = src.indexOf("public async forgetConnectorKey(", start);
     const load = src.slice(start, end);
     expect(start).toBeGreaterThan(-1);
     expect(end).toBeGreaterThan(start);
-    expect(load).toContain("this.context.secrets.get");
+    expect(load).toContain("this.deps.context.secrets.get");
     expect(load).toContain("mcpConnectorSecretKey");
     expect(load).toContain("could not read");
     expect(load).toContain("this.postMcpConnectors");
     expect(load).not.toContain("disconnectConnector");
     expect(load).not.toContain("forgetConnectorKey");
-    expect(load).not.toContain("this.state.update");
+    expect(load).not.toContain("this.deps.state.update");
     expect(load).not.toContain("MCP_CONNECTORS_KEY");
     expect(load).not.toContain("connectedConnectorStore");
   });
 
   it("session/new Stripe entry also carries static OAuth client metadata", () => {
-    const src = readFileSync(new URL("../src/sidebar.ts", import.meta.url), "utf8");
-    const start = src.indexOf("private async hostMcpServersFor(");
-    const end = src.indexOf("private async loadMcpConnectorKeys(");
+    const src = readFileSync(new URL("../src/voice-and-mcp.ts", import.meta.url), "utf8");
+    const start = src.indexOf("public async hostMcpServersFor(");
+    const end = src.indexOf("public lapsedOAuthConnectors(", start);
     const body = src.slice(start, end);
     expect(start).toBeGreaterThan(-1);
     expect(end).toBeGreaterThan(start);
@@ -121,7 +121,7 @@ describe("sidebar connect wiring", () => {
     expect(body).toContain("this.connectedConnectorStore");
     expect(body).not.toContain("quoteSpawnArgs");
     expect(body).not.toContain("disconnectConnector");
-    expect(body).not.toContain("this.state.update");
+    expect(body).not.toContain("this.deps.state.update");
   });
 });
 

@@ -109,7 +109,7 @@ import {
 } from "./target-eligibility";
 import { findStage, type WorkflowDefinition } from "./workflow";
 import { isGeneratorOnlyTool } from "./workflow-generator";
-import { bindStageSession, type WorkflowRunStore } from "./workflow-run";
+import { bindStageSession } from "./workflow-run";
 import { SESSION_META_KEY } from "./worktree-host";
 
 export const SUBAGENT_INDEX_KEY = "companions.subagents.index";
@@ -178,27 +178,64 @@ export interface SubagentState {
 }
 
 export class SubagentHost {
-  private companionsChannel?: CompanionsHostServer;
+  public companionsChannel?: CompanionsHostServer;
   private maxDepthClampReported = false;
-  private childRelayTable?: ChildRelayTable<Session>;
+  public childRelayTable?: ChildRelayTable<Session>;
   private stallWatch?: ReturnType<typeof setInterval>;
   private runningChildrenTimer?: ReturnType<typeof setTimeout>;
   private pendingSubagentApprovals?: Map<string, (answer: { approved: boolean; adjusted?: Record<string, unknown> }) => void>;
-  private subagentDeadlines?: Map<string, PausableDeadline>;
+  public subagentDeadlines?: Map<string, PausableDeadline>;
   private subagentTimers?: Map<string, ReturnType<typeof setTimeout>>;
 
   public state?: SubagentState;
 
   constructor(public readonly deps: SubagentHostDeps) {}
 
+  public dispose(): void {
+    if (this.stallWatch) {
+      clearInterval(this.stallWatch);
+      this.stallWatch = undefined;
+    }
+    if (this.runningChildrenTimer) {
+      clearTimeout(this.runningChildrenTimer);
+      this.runningChildrenTimer = undefined;
+    }
+    if (this.subagentTimers) {
+      for (const timer of this.subagentTimers.values()) {
+        clearTimeout(timer);
+      }
+      this.subagentTimers.clear();
+    }
+    this.companionsChannel?.dispose();
+    this.companionsChannel = undefined;
+  }
+
   private getOverride<T extends (...args: any[]) => any>(name: string): T | undefined {
     return this.deps.getOverride?.(name);
   }
 
-  public get subagents(): SubagentRegistry { return this.subagentStore().registry; }
-  public get reports(): Map<string, string> { return this.subagentStore().reports; }
-  public get waiters(): Map<string, Array<() => void>> { return this.subagentStore().waiters; }
-  public get outcomes(): Map<string, any> { return this.subagentStore().outcomes; }
+  public get subagents(): SubagentRegistry {
+    const override = this.getOverride<any>("subagents");
+    if (override !== undefined) {
+      return typeof override === "function" ? override() : override;
+    }
+    return this.subagentStore().registry;
+  }
+  public get reports(): Map<string, string> {
+    const override = this.getOverride<any>("subagentReports");
+    if (override !== undefined) return typeof override === "function" ? override() : override;
+    return this.subagentStore().reports;
+  }
+  public get waiters(): Map<string, Array<() => void>> {
+    const override = this.getOverride<any>("subagentWaiters");
+    if (override !== undefined) return typeof override === "function" ? override() : override;
+    return this.subagentStore().waiters;
+  }
+  public get outcomes(): Map<string, any> {
+    const override = this.getOverride<any>("subagentOutcomes");
+    if (override !== undefined) return typeof override === "function" ? override() : override;
+    return this.subagentStore().outcomes;
+  }
 
   public subagentStore(): SubagentState {
     if (!this.state) {
@@ -223,7 +260,7 @@ export class SubagentHost {
 
   public poolSessionById(sessionId: string | undefined): Session | undefined {
     if (!sessionId) return undefined;
-    for (const session of this.deps.pool) {
+    for (const session of (this.deps.pool ?? [])) {
       if (session.activeSessionId === sessionId) return session;
     }
     return undefined;
@@ -702,10 +739,12 @@ export class SubagentHost {
   }
 
   public companions(): CompanionsHostServer {
+    const override = this.getOverride<typeof this.companions>("companions");
+    if (override) return override();
     if (!this.companionsChannel) {
       this.companionsChannel = new CompanionsHostServer({
         mux: this.deps.mcpOps.hostPipe(),
-        scriptPath: path.join(this.deps.context.extensionUri.fsPath, "resources", "mcp", "companions-server.cjs"),
+        scriptPath: path.join(this.deps.context?.extensionUri?.fsPath ?? "", "resources", "mcp", "companions-server.cjs"),
         log: (message) => this.deps.host.appendLine(message),
         onCall: (token, call) => {
           const session = this.sessionForCompanionsToken(token);
@@ -727,7 +766,7 @@ export class SubagentHost {
   }
 
   public sessionForCompanionsToken(token: string): Session | undefined {
-    for (const session of this.deps.pool) {
+    for (const session of (this.deps.pool ?? [])) {
       if (session.companionsToken === token) return session;
     }
     return undefined;
@@ -740,6 +779,8 @@ export class SubagentHost {
   }
 
   public async companionsMcpServer(session: Session): Promise<AcpMcpStdioServer | undefined> {
+    const override = this.getOverride<typeof this.companionsMcpServer>("companionsMcpServer");
+    if (override) return override(session);
     const hidden = session.pendingHiddenChild?.hiddenReason
       ?? this.deps.sessionTypeMetaFor(session)?.hiddenReason;
     const stored = this.deps.sessionTypeMetaFor(session)?.subagentsEnabled;
@@ -776,6 +817,8 @@ export class SubagentHost {
   }
 
   public subagentMaxDepth(): 1 | 2 {
+    const override = this.getOverride<typeof this.subagentMaxDepth>("subagentMaxDepth");
+    if (override) return override();
     const { depth, clamped } = resolveMaxDepth(
       this.deps.companionsSetting<number>("subagents.maxDepth", 1),
     );
@@ -790,6 +833,8 @@ export class SubagentHost {
   }
 
   public stageMayDelegate(session: Session): boolean {
+    const override = this.getOverride<typeof this.stageMayDelegate>("stageMayDelegate");
+    if (override) return override(session);
     if (!this.deps.companionsSetting<boolean>("crew.stagesMayUseSubagents", false)) return false;
     return session.stageAllowsSubagents === true;
   }
@@ -798,6 +843,8 @@ export class SubagentHost {
     session: Session,
     mode: "delegate" | "generator",
   ): Promise<AcpMcpStdioServer | undefined> {
+    const override = this.getOverride<typeof this.spawnCompanionsServer>("spawnCompanionsServer");
+    if (override) return override(session, mode);
     if (providerCapability(session.provider, "hostMcp").state !== "yes") {
       this.noteCompanionsSkip(session, "host-mcp-unproven");
       return undefined;

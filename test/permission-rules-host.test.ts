@@ -9,7 +9,7 @@ import { GrokSidebar } from "../src/sidebar";
 import { Session } from "../src/session";
 import type { PermissionRequest } from "../src/acp";
 
-const sidebarSrc = readFileSync(new URL("../src/sidebar.ts", import.meta.url), "utf8");
+const providerSessionSrc = readFileSync(new URL("../src/provider-session.ts", import.meta.url), "utf8");
 
 function harness() {
   const posted: unknown[] = [];
@@ -83,9 +83,9 @@ const PLAN_REVIEW: PermissionRequest = {
 
 describe("hook placement", () => {
   it("applies rules after the plan-gate block and before emitting the card", () => {
-    const method = sidebarSrc.slice(
-      sidebarSrc.indexOf("private handlePermissionRequest("),
-      sidebarSrc.indexOf("private applyPermissionRules("),
+    const method = providerSessionSrc.slice(
+      providerSessionSrc.indexOf("public handlePermissionRequest("),
+      providerSessionSrc.indexOf("public applyPermissionRules("),
     );
     const gate = method.indexOf("shouldRejectPermission");
     const rules = method.indexOf("this.applyPermissionRules");

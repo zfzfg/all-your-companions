@@ -403,11 +403,13 @@ describe("cancellation", () => {
 
 describe("source pins", () => {
   const sidebarSrc = readFileSync(new URL("../src/sidebar.ts", import.meta.url), "utf8");
+  const sessionStartSrc = readFileSync(new URL("../src/session-start.ts", import.meta.url), "utf8");
+  const inboundSrc = readFileSync(new URL("../src/sidebar-inbound.ts", import.meta.url), "utf8");
 
   it("consumes the start overrides on the newSession path and never live-switches", () => {
-    const body = sidebarSrc.slice(
-      sidebarSrc.indexOf("const startOverrides = session.startOverrides;"),
-      sidebarSrc.indexOf("clock.record(\"new\", clock.elapsed(newAt))"),
+    const body = sessionStartSrc.slice(
+      sessionStartSrc.indexOf("const startOverrides = session.startOverrides;"),
+      sessionStartSrc.indexOf("clock.record(\"new\", clock.elapsed(newAt))"),
     );
     expect(body).toContain("session.startOverrides = undefined;");
     expect(body).toContain("await client.newSession(defaultModel || undefined)");
@@ -420,19 +422,19 @@ describe("source pins", () => {
   });
 
   it("intercepts /agent ahead of the queued-send bookkeeping", () => {
-    const sendCase = sidebarSrc.slice(
-      sidebarSrc.indexOf('      case "send":'),
-      sidebarSrc.indexOf("let queuedSendCommit"),
+    const sendCase = inboundSrc.slice(
+      inboundSrc.indexOf('      case "send":'),
+      inboundSrc.indexOf("await this.deps.composer.handleSend(msg.text"),
     );
-    expect(sendCase).toContain("this.handleAgentCommand(msg.text, session)");
+    expect(sendCase).toContain("this.deps.composer.handleAgentCommand(msg.text, session)");
   });
 
   it("routes Stop to the role run before the session's own cancel", () => {
-    const cancelCase = sidebarSrc.slice(
-      sidebarSrc.indexOf('      case "cancel": {'),
-      sidebarSrc.indexOf('await session.client?.cancel("user Stop click")'),
+    const cancelCase = inboundSrc.slice(
+      inboundSrc.indexOf('      case "cancel": {'),
+      inboundSrc.indexOf('await session.client?.cancel("user Stop click")'),
     );
-    expect(cancelCase).toContain("this.cancelAgentRun(session)");
+    expect(cancelCase).toContain("this.deps.sessions.cancelAgentRun(session)");
   });
 });
 
@@ -555,7 +557,8 @@ describe("fault injection on the run-artefact stream", () => {
 });
 
 describe("async boundaries in the send path", () => {
-  const sidebarSrc = readFileSync(new URL("../src/sidebar.ts", import.meta.url), "utf8");
+  const inboundSrc = readFileSync(new URL("../src/sidebar-inbound.ts", import.meta.url), "utf8");
+  const sessionStartSrc = readFileSync(new URL("../src/session-start.ts", import.meta.url), "utf8");
 
   /** Drop `//` and block comments so a rule EXPLAINED in prose is not read
    *  as a violation of itself. */
@@ -569,20 +572,20 @@ describe("async boundaries in the send path", () => {
   // `npm run test:integration` went red. Both call sites must parse
   // synchronously and await only on a hit.
   it("parses /agent synchronously in the composer path", () => {
-    const sendCase = sidebarSrc.slice(
-      sidebarSrc.indexOf('      case "send":'),
-      sidebarSrc.indexOf("let queuedSendCommit"),
+    const sendCase = inboundSrc.slice(
+      inboundSrc.indexOf('      case "send":'),
+      inboundSrc.indexOf("await this.deps.composer.handleSend(msg.text"),
     );
     expect(sendCase).toContain('if (parseAgentCommand(msg.text).kind !== "none") {');
     expect(sendCase).not.toMatch(/if \(await this\.handleAgentCommand/);
   });
 
   it("parses /agent synchronously in the handleSend backstop", () => {
-    const head = sidebarSrc.slice(
-      sidebarSrc.indexOf("const session = target ?? this.focused;"),
-      sidebarSrc.indexOf(
+    const head = sessionStartSrc.slice(
+      sessionStartSrc.indexOf("const session = target ?? this.deps.getFocused();"),
+      sessionStartSrc.indexOf(
         "await this.waitForSessionStart(session);",
-        sidebarSrc.indexOf("const session = target ?? this.focused;"),
+        sessionStartSrc.indexOf("const session = target ?? this.deps.getFocused();"),
       ),
     );
     expect(head).toContain('if (parseAgentCommand(text).kind !== "none") {');

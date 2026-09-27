@@ -22,6 +22,8 @@ import { sessionScopedRoots } from "../src/auth-roots";
 
 const sidebarSrc = () =>
   fs.readFileSync(path.join(__dirname, "..", "src", "sidebar.ts"), "utf8");
+const sessionStartSrc = () =>
+  fs.readFileSync(path.join(__dirname, "..", "src", "session-start.ts"), "utf8");
 
 const ALWAYS = '[ui]\npermission_mode = "always-approve"\n';
 const ASK = '[ui]\npermission_mode = "ask"\n';
@@ -73,8 +75,8 @@ describe("who turned auto-approve on", () => {
 
 describe("consent gate wiring", () => {
   it("asks before the session starts, and declining starts nothing", () => {
-    const src = sidebarSrc();
-    const start = src.indexOf("private async startSessionBody(");
+    const src = sessionStartSrc();
+    const start = src.indexOf("public async startSessionBody(");
     expect(start).toBeGreaterThan(0);
     // Wide enough to reach ++session.gen past startSession's early-return
     // blocks as they grow; the assertions below still pin the ordering, the
@@ -195,7 +197,7 @@ describe("desktop file roots are session-scoped", () => {
 
 describe("host confirmation on the messages that run something", () => {
   it("guards both execute-class handlers", () => {
-    const src = sidebarSrc();
+    const src = fs.readFileSync(path.join(__dirname, "..", "src", "sidebar-inbound.ts"), "utf8");
     for (const handler of ['case "runInstallCmd"', 'case "updateGrok"']) {
       const start = src.indexOf(handler);
       expect(start).toBeGreaterThan(0);

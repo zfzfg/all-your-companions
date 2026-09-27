@@ -2,42 +2,44 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const sidebar = readFileSync(new URL("../src/sidebar.ts", import.meta.url), "utf8");
+const providerSessionSrc = readFileSync(new URL("../src/provider-session.ts", import.meta.url), "utf8");
+const sessionStartSrc = readFileSync(new URL("../src/session-start.ts", import.meta.url), "utf8");
 const reviewHost = readFileSync(new URL("../src/review-host.ts", import.meta.url), "utf8");
 const session = readFileSync(new URL("../src/session.ts", import.meta.url), "utf8");
 const primer = readFileSync(new URL("../src/grok-primer.ts", import.meta.url), "utf8");
 const acp = readFileSync(new URL("../src/acp.ts", import.meta.url), "utf8");
 
-const start = sidebar.indexOf("  private handleExitPlan(");
-const end = sidebar.indexOf("  private recoverUnavailablePlanMode(", start);
-const handleExitPlan = sidebar.slice(start, end);
+const start = providerSessionSrc.indexOf("  public handleExitPlan(");
+const end = providerSessionSrc.indexOf("  public queueInFlightPlanCommentsOnExit(", start);
+const handleExitPlan = providerSessionSrc.slice(start, end);
 const abandonStart = handleExitPlan.indexOf('    if (verdict === "abandoned") {');
-const abandonEnd = handleExitPlan.indexOf("    // Calling the async method", abandonStart);
+const abandonEnd = handleExitPlan.indexOf("    const inFlightComment = feedback", abandonStart);
 const abandonVerdict = handleExitPlan.slice(abandonStart, abandonEnd);
 const nativeVerdicts = handleExitPlan.slice(abandonEnd);
 const postStart = reviewHost.indexOf("async postExitPlanRequest(");
 const postEnd = reviewHost.indexOf("async withPlanReviewPaths", postStart);
 const postExitPlanRequest = reviewHost.slice(postStart, postEnd);
-const sessionStart = sidebar.indexOf("  private async startSession(");
-const sessionStartEnd = sidebar.indexOf("    // Worktree sessions pin cwd", sessionStart);
-const startSessionSetup = sidebar.slice(sessionStart, sessionStartEnd);
-const recoveryStart = sidebar.indexOf("  private recoverUnavailablePlanMode(");
-const recoveryEnd = sidebar.indexOf("  /** Persist this plan", recoveryStart);
-const recoverUnavailablePlanMode = sidebar.slice(recoveryStart, recoveryEnd);
-const handleSendStart = sidebar.indexOf("  private async handleSend(");
-const handleSendEnd = sidebar.indexOf("  /**\n   * Recover from an expired-token", handleSendStart);
-const handleSend = sidebar.slice(handleSendStart, handleSendEnd);
-const exitPlanListenerStart = sidebar.indexOf('    client.on("exitPlanRequest"');
-const exitPlanListenerEnd = sidebar.indexOf('    client.on("questionRequest"', exitPlanListenerStart);
-const exitPlanListener = sidebar.slice(exitPlanListenerStart, exitPlanListenerEnd);
-const modeChangedStart = sidebar.indexOf('    client.on("modeChanged"');
-const modeChangedEnd = sidebar.indexOf('    client.on("commandsUpdate"', modeChangedStart);
-const modeChangedListener = sidebar.slice(modeChangedStart, modeChangedEnd);
-const restoreStart = sidebar.indexOf("        const decision = decideRestoreState(saved)");
-const restoreEnd = sidebar.indexOf("        // Seed the context donut", restoreStart);
-const restorePlanState = sidebar.slice(restoreStart, restoreEnd);
-const exitHandlerStart = sidebar.indexOf('    client.on("exit", (code) => {');
-const exitHandlerEnd = sidebar.indexOf('    client.on("stderr"', exitHandlerStart);
-const exitHandler = sidebar.slice(exitHandlerStart, exitHandlerEnd);
+const sessionStart = sessionStartSrc.indexOf("  public async startSessionBody(");
+const sessionStartEnd = sessionStartSrc.indexOf("  private async performSessionHandshake(", sessionStart);
+const startSessionSetup = sessionStartSrc.slice(sessionStart, sessionStartEnd);
+const recoveryStart = providerSessionSrc.indexOf("  public recoverUnavailablePlanMode(");
+const recoveryEnd = providerSessionSrc.indexOf("  public handlePermissionRequest(", recoveryStart);
+const recoverUnavailablePlanMode = providerSessionSrc.slice(recoveryStart, recoveryEnd);
+const handleSendStart = sessionStartSrc.indexOf("  public async handleSend(");
+const handleSendEnd = sessionStartSrc.indexOf("  private reapPool(): void", handleSendStart);
+const handleSend = sessionStartSrc.slice(handleSendStart, handleSendEnd);
+const exitPlanListenerStart = sessionStartSrc.indexOf('    client.on("exitPlanRequest"');
+const exitPlanListenerEnd = sessionStartSrc.indexOf('    client.on("questionRequest"', exitPlanListenerStart);
+const exitPlanListener = sessionStartSrc.slice(exitPlanListenerStart, exitPlanListenerEnd);
+const modeChangedStart = sessionStartSrc.indexOf('    client.on("modeChanged"');
+const modeChangedEnd = sessionStartSrc.indexOf('    client.on("commandsUpdate"', modeChangedStart);
+const modeChangedListener = sessionStartSrc.slice(modeChangedStart, modeChangedEnd);
+const restoreStart = sessionStartSrc.indexOf("      const decision = decideRestoreState(saved)");
+const restoreEnd = sessionStartSrc.indexOf("    // Seed the context donut", restoreStart);
+const restorePlanState = sessionStartSrc.slice(restoreStart, restoreEnd);
+const exitHandlerStart = sessionStartSrc.indexOf('    client.on("exit", (code) => {');
+const exitHandlerEnd = sessionStartSrc.indexOf("  private async loadOrResumeSession(", exitHandlerStart);
+const exitHandler = sessionStartSrc.slice(exitHandlerStart, exitHandlerEnd);
 
 describe("native plan verdict orchestration", () => {
   it("accepts each verdict only for a host-owned pending request in that Session", () => {
@@ -60,8 +62,8 @@ describe("native plan verdict orchestration", () => {
   it("settles approval state and interjects feedback before releasing native exit_plan_mode outcomes", () => {
     // Approval restores remembered Auto-accept via the injected Host config surface
     // (was `vscode.workspace.getConfiguration` before the host extraction).
-    const restoreYolo = handleExitPlan.indexOf("session.autoApprove = this.host.getConfiguration");
-    const dropGate = handleExitPlan.indexOf("this.setPlanActive(session, false)", restoreYolo);
+    const restoreYolo = handleExitPlan.indexOf("session.autoApprove = this.deps.host.getConfiguration");
+    const dropGate = handleExitPlan.indexOf("this.deps.uiOps.setPlanActive(session, false)", restoreYolo);
     const interject = nativeVerdicts.indexOf("client.interject(feedback");
     const respond = nativeVerdicts.indexOf("client.respondExitPlan(requestId, verdict)");
     const commit = nativeVerdicts.indexOf("commitVerdict()", respond);
@@ -85,18 +87,18 @@ describe("native plan verdict orchestration", () => {
     expect(failedBranch).not.toContain("commitVerdict()");
     expect(failedBranch).not.toContain("resolveCard()");
     expect(handleExitPlan).not.toMatch(/planVerdictPending|planVerdictFailed/);
-    expect(handleExitPlan).toContain('this.setStatus(session, "needs-you")');
+    expect(handleExitPlan).toContain('this.deps.uiOps.setStatus(session, "needs-you")');
   });
 
   it("keeps reject in Plan and makes abandon land in Agent, not remembered YOLO", () => {
-    expect(handleExitPlan).toMatch(/else if \(verdict === "rejected"\) \{\s+session\.autoApprove = false;\s+this\.setPlanActive\(session, true\);/);
+    expect(handleExitPlan).toMatch(/else if \(verdict === "rejected"\) \{\s+session\.autoApprove = false;\s+this\.deps\.uiOps\.setPlanActive\(session, true\);/);
     expect(handleExitPlan).toContain("explicit Cancel lands in Agent");
-    expect(handleExitPlan).toMatch(/session\.autoApprove = false;\s+this\.setPlanActive\(session, false\);/);
+    expect(handleExitPlan).toMatch(/session\.autoApprove = false;\s+this\.deps\.uiOps\.setPlanActive\(session, false\);/);
   });
 
   it("lets native abandon settle and queues its comment exactly once without interjecting", () => {
     const respond = abandonVerdict.indexOf("client.respondExitPlan(requestId, verdict)");
-    const queue = abandonVerdict.indexOf("this.divertRacingSend(session, feedback, false)");
+    const queue = abandonVerdict.indexOf("this.deps.uiOps.divertRacingSend(session, feedback, false)");
 
     expect(respond).toBeGreaterThan(-1);
     expect(queue).toBeGreaterThan(respond);
@@ -107,7 +109,7 @@ describe("native plan verdict orchestration", () => {
 
   it("keeps the queued abandon comment out of the planning turn", () => {
     const commit = handleExitPlan.indexOf("commitVerdict()", abandonStart);
-    const queue = handleExitPlan.indexOf("this.divertRacingSend(session, feedback, false)", abandonStart);
+    const queue = handleExitPlan.indexOf("this.deps.uiOps.divertRacingSend(session, feedback, false)", abandonStart);
 
     expect(commit).toBeGreaterThan(-1);
     expect(queue).toBeGreaterThan(commit);
@@ -119,7 +121,7 @@ describe("native plan verdict orchestration", () => {
   });
 
   it("queues unchanged approve/reject comments only when interject is unsupported or fails", () => {
-    expect(nativeVerdicts.match(/this\.divertRacingSend\(session, feedback, false\)/g)).toHaveLength(2);
+    expect(nativeVerdicts.match(/this\.deps\.uiOps\.divertRacingSend\(session, feedback, false\)/g)).toHaveLength(2);
     expect(nativeVerdicts).toContain('result === "ok"');
     expect(nativeVerdicts).toContain('text: feedback, chips: [], steer: true');
   });
@@ -145,7 +147,7 @@ describe("native plan verdict orchestration", () => {
 
   it("recovers pending feedback before a controlled restart invalidates its generation", () => {
     const recover = startSessionSetup.indexOf(
-      "this.queueInFlightPlanCommentsOnExit(session, replacedClient, session.gen)",
+      "this.deps.sessionLifecycleOps.queueInFlightPlanCommentsOnExit(session, replacedClient, session.gen)",
     );
     const bump = startSessionSetup.indexOf("const gen = ++session.gen");
     const clear = startSessionSetup.indexOf("session.inFlightPlanComments.clear()", bump);
@@ -192,7 +194,7 @@ describe("native plan verdict orchestration", () => {
   });
 
   it("acknowledges only after an abandon comment is queued", () => {
-    const queue = abandonVerdict.indexOf("this.divertRacingSend(session, feedback, false)");
+    const queue = abandonVerdict.indexOf("this.deps.uiOps.divertRacingSend(session, feedback, false)");
     const resolve = abandonVerdict.indexOf("resolveCard()", queue);
     expect(queue).toBeGreaterThan(-1);
     expect(resolve).toBeGreaterThan(queue);
@@ -224,33 +226,33 @@ describe("unavailable Plan recovery", () => {
   it("follows a writable adapter mode without lowering grok's client gate", () => {
     expect(modeChangedListener).toContain("!client.usesClientPlanGate");
     expect(modeChangedListener).toContain("applyAgentModeToHostPlan(id, false)");
-    expect(modeChangedListener).toContain("this.setPlanActive(session, next.planActive)");
-    const grokDescriptive = modeChangedListener.slice(modeChangedListener.indexOf("} else if (session === this.focused)"));
-    expect(grokDescriptive).toContain("this.postMode()");
+    expect(modeChangedListener).toContain("this.deps.reviewAndPlanOps.setPlanActive(session, next.planActive)");
+    const grokDescriptive = modeChangedListener.slice(modeChangedListener.indexOf("} else if (session === this.deps.getFocused())"));
+    expect(grokDescriptive).toContain("this.deps.reviewAndPlanOps.postMode()");
     expect(grokDescriptive).not.toContain("this.setPlanActive(session, false)");
   });
 
   it("raises the gate but defers recovery while session/load is replaying", () => {
-    const raise = modeChangedListener.indexOf("this.setPlanActive(session, true)");
+    const raise = modeChangedListener.indexOf("this.deps.reviewAndPlanOps.setPlanActive(session, true)");
     const unavailable = modeChangedListener.indexOf("if (!session.planModeAvailable)", raise);
     const defer = modeChangedListener.indexOf("if (session.replaying) return", unavailable);
-    const recover = modeChangedListener.indexOf("this.recoverUnavailablePlanMode", defer);
+    const recover = modeChangedListener.indexOf("this.deps.reviewAndPlanOps.recoverUnavailablePlanMode", defer);
 
     expect(raise).toBeGreaterThan(-1);
     expect(unavailable).toBeGreaterThan(raise);
     expect(defer).toBeGreaterThan(unavailable);
     expect(recover).toBeGreaterThan(defer);
-    expect(restorePlanState).toContain("this.recoverUnavailablePlanMode(session, client, gen)");
+    expect(restorePlanState).toContain("this.deps.reviewAndPlanOps.recoverUnavailablePlanMode(session, client, gen)");
   });
 
   it("cancels a live untrusted planning turn and requires both settlement and Agent mode", () => {
-    const raise = recoverUnavailablePlanMode.indexOf("this.setPlanActive(session, true)");
+    const raise = recoverUnavailablePlanMode.indexOf("this.deps.uiOps.setPlanActive(session, true)");
     const cancel = recoverUnavailablePlanMode.indexOf('client.cancel("unavailable Plan recovery")');
     const setMode = recoverUnavailablePlanMode.indexOf("client.setMode(ACT_MODE_ID)");
     const modeConfirmed = recoverUnavailablePlanMode.indexOf("recovery.modeConfirmed = true", setMode);
     const requireMode = recoverUnavailablePlanMode.indexOf("!recovery.modeConfirmed");
     const requireSettlement = recoverUnavailablePlanMode.indexOf("!recovery.turnSettled", requireMode);
-    const lower = recoverUnavailablePlanMode.indexOf("this.setPlanActive(session, false)", requireSettlement);
+    const lower = recoverUnavailablePlanMode.indexOf("this.deps.uiOps.setPlanActive(session, false)", requireSettlement);
     expect(raise).toBeGreaterThan(-1);
     expect(cancel).toBeGreaterThan(raise);
     expect(setMode).toBeGreaterThan(raise);
@@ -259,7 +261,7 @@ describe("unavailable Plan recovery", () => {
     expect(requireSettlement).toBeGreaterThan(requireMode);
     expect(lower).toBeGreaterThan(requireSettlement);
     expect(recoverUnavailablePlanMode).toContain("planModeRecoveryAttempt");
-    expect(handleSend).toContain("this.settleUnavailablePlanTurn(session, client, gen)");
+    expect(handleSend).toContain("this.deps.reviewAndPlanOps.settleUnavailablePlanTurn(session, client, gen)");
   });
 
   it("tells the user the gate stays raised when returning to Agent fails", () => {
@@ -271,8 +273,8 @@ describe("unavailable Plan recovery", () => {
 
   it("rejects unavailable exit-plan requests without exposing the native verdict card", () => {
     const availability = exitPlanListener.indexOf("if (!session.planModeAvailable)");
-    const reject = exitPlanListener.indexOf("this.recoverUnavailablePlanMode(session, client, gen, req.id)");
-    const post = exitPlanListener.indexOf("this.postExitPlanRequest(req, session, gen)");
+    const reject = exitPlanListener.indexOf("this.deps.reviewAndPlanOps.recoverUnavailablePlanMode(session, client, gen, req.id)");
+    const post = exitPlanListener.indexOf("this.deps.reviewAndPlanOps.postExitPlanRequest(req, session, gen)");
     expect(availability).toBeGreaterThan(-1);
     expect(reject).toBeGreaterThan(availability);
     expect(post).toBeGreaterThan(reject);
@@ -282,6 +284,6 @@ describe("unavailable Plan recovery", () => {
   it("does not lower a restored unavailable Plan session before Agent is confirmed", () => {
     expect(restorePlanState).toContain("const unavailablePlan = !session.planModeAvailable");
     expect(restorePlanState).toContain('client.currentModeId === "plan"');
-    expect(restorePlanState).toContain("this.recoverUnavailablePlanMode(session, client, gen)");
+    expect(restorePlanState).toContain("this.deps.reviewAndPlanOps.recoverUnavailablePlanMode(session, client, gen)");
   });
 });

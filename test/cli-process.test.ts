@@ -14,16 +14,20 @@ describe("grok CLI process invocation", () => {
 
   it("keeps every one-shot sidebar invocation on the shared wrapper", () => {
     const sidebar = readFileSync(new URL("../src/sidebar.ts", import.meta.url), "utf8");
-    expect(sidebar).not.toMatch(/\bexecFile(?:Async)?\s*\(/);
-    expect(sidebar).not.toMatch(/execGrokCli\([^\n]*\["mcp"/);
-    expect(sidebar).toContain('client.listMcpServers()');
+    const providerSession = readFileSync(new URL("../src/provider-session.ts", import.meta.url), "utf8");
+    const voiceAndMcp = readFileSync(new URL("../src/voice-and-mcp.ts", import.meta.url), "utf8");
+    const cliUpdateHost = readFileSync(new URL("../src/cli-update-host.ts", import.meta.url), "utf8");
+    const combined = sidebar + providerSession + voiceAndMcp + cliUpdateHost;
+    expect(combined).not.toMatch(/\bexecFile(?:Async)?\s*\(/);
+    expect(combined).not.toMatch(/execGrokCli\([^\n]*\["mcp"/);
+    expect(combined).toContain('client.listMcpServers()');
     // Pinned so a NEW one-shot invocation has to be noticed rather than slipped
     // in — which is what this count is for.
     // The tenth is `muse --version` (the Muse provider port).
-    expect(sidebar.match(/execGrokCli\s*\(/g)).toHaveLength(10);
-    expect(sidebar).toMatch(/execGrokCli\(cliPath, \["--version"\],[\s\S]*parseCodexVersionOutput/);
-    expect(sidebar).toMatch(/execGrokCli\(cliPath, \["--version"\],[\s\S]*parseClaudeVersionOutput/);
-    expect(sidebar).toMatch(/execGrokCli\(cliPath, \["--version"\],[\s\S]*parseGeminiVersionOutput/);
+    expect(combined.match(/execGrokCli\s*\(/g)).toHaveLength(10);
+    expect(combined).toMatch(/execGrokCli\(cliPath, \["--version"\],[\s\S]*parseCodexVersionOutput/);
+    expect(combined).toMatch(/execGrokCli\(cliPath, \["--version"\],[\s\S]*parseClaudeVersionOutput/);
+    expect(combined).toMatch(/execGrokCli\(cliPath, \["--version"\],[\s\S]*parseGeminiVersionOutput/);
   });
 
   it("shares the same shim predicate with the ACP spawn path", () => {

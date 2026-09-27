@@ -12,26 +12,24 @@ import {
 } from "../src/cli-locator";
 
 const sidebar = readFileSync(new URL("../src/sidebar.ts", import.meta.url), "utf8");
-const updateStart = sidebar.indexOf("  private async maybeUpdateCliOnUpgrade(");
-const updateEnd = sidebar.indexOf("  /**", updateStart + 5);
-const update = sidebar.slice(updateStart, updateEnd);
-const compatibilityStart = sidebar.indexOf("  private async planModeCompatibility(");
-const compatibilityEnd = sidebar.indexOf("  /**", compatibilityStart + 5);
-const compatibility = sidebar.slice(compatibilityStart, compatibilityEnd);
+const sessionStartFile = readFileSync(new URL("../src/session-start.ts", import.meta.url), "utf8");
+const providerSessionFile = readFileSync(new URL("../src/provider-session.ts", import.meta.url), "utf8");
+const updateStart = providerSessionFile.indexOf("  public async maybeUpdateCliOnUpgrade(");
+const updateEnd = providerSessionFile.indexOf("  public async planModeCompatibility(", updateStart);
+const update = providerSessionFile.slice(updateStart, updateEnd);
+const compatibilityStart = providerSessionFile.indexOf("  public async planModeCompatibility(");
+const compatibilityEnd = providerSessionFile.indexOf("  public applyPlanModeCompatibility(", compatibilityStart);
+const compatibility = providerSessionFile.slice(compatibilityStart, compatibilityEnd);
 const pinStart = sidebar.indexOf("  private async maybePinBrokenCli(");
 const pinEnd = sidebar.indexOf("  /**", pinStart + 5);
 const pin = sidebar.slice(pinStart, pinEnd);
-const setModeStart = sidebar.indexOf("  async setMode(");
-const setModeEnd = sidebar.indexOf("  /** Resolve a plan-review card", setModeStart);
-const setMode = sidebar.slice(setModeStart, setModeEnd);
-const sessionStart = sidebar.slice(
-  sidebar.indexOf("  private async startSession("),
-  sidebar.indexOf("    // Worktree sessions pin cwd", sidebar.indexOf("  private async startSession(")),
-);
-const fullSessionStart = sidebar.slice(
-  sidebar.indexOf("  private async startSession("),
-  sidebar.indexOf("  private async onMessage(", sidebar.indexOf("  private async startSession(")),
-);
+const setModeStart = providerSessionFile.indexOf("  public async setMode(");
+const setModeEnd = providerSessionFile.indexOf("  public handleExitPlan(", setModeStart);
+const setMode = providerSessionFile.slice(setModeStart, setModeEnd);
+const startupStart = sessionStartFile.indexOf("  public async startSessionBody(");
+const startupEnd = sessionStartFile.indexOf("  private wireSessionListeners(", startupStart);
+const sessionStart = sessionStartFile.slice(startupStart, startupEnd);
+const fullSessionStart = sessionStart;
 
 describe("CLI startup compatibility", () => {
   it("has no startup freshness cache or background update check", () => {
@@ -53,8 +51,8 @@ describe("CLI startup compatibility", () => {
     // Same store, different accessor: CLI_UPDATE_VERSION_KEY is not one of the
     // keys that moved to ~/.grok, so it still lands in globalState. See
     // persisted-state.ts.
-    expect(update).toContain("this.state.update(CLI_UPDATE_VERSION_KEY, current)");
-    expect(sessionStart).toContain("await this.maybeUpdateCliOnUpgrade(cliPath)");
+    expect(update).toContain("this.deps.state.update(CLI_UPDATE_VERSION_KEY, current)");
+    expect(sessionStart).toContain("await this.deps.providerOps.maybeUpdateCliOnUpgrade(cliPath)");
   });
 
   it("bounds the silent update at 20s and spends it ONCE per extension version", () => {
@@ -68,14 +66,14 @@ describe("CLI startup compatibility", () => {
     // No conditional around the marker write: a failed attempt still counts.
     expect(update).not.toContain("updateFailed");
     const finallyBlock = update.slice(update.indexOf("} finally {"));
-    expect(finallyBlock).toMatch(/void this\.state\.update\(CLI_UPDATE_VERSION_KEY, current\);/);
+    expect(finallyBlock).toMatch(/void this\.deps\.state\.update\(CLI_UPDATE_VERSION_KEY, current\);/);
     expect(finallyBlock).not.toMatch(/if\s*\(/);
   });
 
   it("keeps version gating separate from all update orchestration", () => {
     expect(compatibility).toContain("resolvePlanModeAvailability");
     expect(compatibility).toContain("readCliBinaryIdentity(cliPath)");
-    expect(compatibility).toContain("this.readGrokVersion(cliPath)");
+    expect(compatibility).toContain("this.deps.providerOps.readGrokVersion(cliPath)");
     expect(compatibility).toContain("CLI_VERSION_CACHE_KEY");
     expect(compatibility).not.toContain("runGrokUpdate");
     expect(compatibility).not.toContain("execGrokCli");
@@ -88,9 +86,9 @@ describe("CLI startup compatibility", () => {
     expect(pin).toContain('this.downgradeBrokenCli(cliPath, detected, "proactive")');
     expect(sidebar).toContain('reason: "proactive" | "reactive"');
 
-    const update = sessionStart.indexOf("await this.maybeUpdateCliOnUpgrade(cliPath)");
-    const proactivePin = sessionStart.indexOf("await this.maybePinBrokenCli(cliPath)", update);
-    const compatibilityCheck = sessionStart.indexOf("await this.planModeCompatibility(cliPath)", proactivePin);
+    const update = sessionStart.indexOf("await this.deps.providerOps.maybeUpdateCliOnUpgrade(cliPath)");
+    const proactivePin = sessionStart.indexOf("await this.deps.providerOps.maybePinBrokenCli(cliPath)", update);
+    const compatibilityCheck = sessionStart.indexOf("await this.deps.reviewAndPlanOps.planModeCompatibility(cliPath)", proactivePin);
     expect(proactivePin).toBeGreaterThan(update);
     expect(compatibilityCheck).toBeGreaterThan(proactivePin);
   });
@@ -99,8 +97,8 @@ describe("CLI startup compatibility", () => {
     expect(compatibility).toContain("planModeAvailable: false");
     expect(compatibility).toContain("planModeVersionVerified: true");
     expect(compatibility).toContain("decision.reason");
-    expect(sessionStart).toContain("this.applyPlanModeCompatibility(session, compatibility)");
-    expect(sidebar).toContain('type: "planModeAvailability"');
+    expect(sessionStart).toContain("this.deps.reviewAndPlanOps.applyPlanModeCompatibility(session, compatibility)");
+    expect(providerSessionFile).toContain('type: "planModeAvailability"');
     expect(setMode).toContain('modeId === "plan" && !session.planModeAvailable');
     expect(setMode).toContain("session.planModeUnavailableReason");
     expect(setMode).toContain("!session.planModeAvailable && session.planActive");
@@ -123,7 +121,7 @@ describe("CLI startup compatibility", () => {
 
   it("re-enables Plan for a later session that meets the floor", () => {
     expect(compatibility).toContain("planModeVersionVerified: decision.verified");
-    expect(sessionStart).toContain("this.applyPlanModeCompatibility(session, compatibility)");
+    expect(sessionStart).toContain("this.deps.reviewAndPlanOps.applyPlanModeCompatibility(session, compatibility)");
   });
 
   it("does not treat a cache substitute as a verified Plan decision", () => {
@@ -138,7 +136,7 @@ describe("CLI startup compatibility", () => {
     expect(sessionStart).toMatch(
       /grokHandshakeVersion = grokVersionVerified\s*\?\s*compatibility\.cliVersion\s*:\s*undefined/,
     );
-    expect(fullSessionStart).toContain("grokVersion: grokHandshakeVersion, grokVersionVerified");
+    expect(fullSessionStart).toContain("grokVersion: handshake.grokHandshakeVersion, grokVersionVerified: handshake.grokVersionVerified");
     expect(fullSessionStart).not.toMatch(/grokHandshakeVersion = compatibility\.cliVersion\s*;/);
   });
 
@@ -146,7 +144,7 @@ describe("CLI startup compatibility", () => {
     const capture = fullSessionStart.indexOf("const replacedClient = session.client");
     const clear = fullSessionStart.indexOf("session.client = undefined", capture);
     const dispose = fullSessionStart.indexOf("await replacedClient.dispose()", clear);
-    const update = fullSessionStart.indexOf("await this.maybeUpdateCliOnUpgrade(cliPath)", dispose);
+    const update = fullSessionStart.indexOf("await this.deps.providerOps.maybeUpdateCliOnUpgrade(cliPath)", dispose);
 
     expect(capture).toBeGreaterThan(-1);
     expect(clear).toBeGreaterThan(capture);
@@ -158,7 +156,7 @@ describe("CLI startup compatibility", () => {
     const capture = fullSessionStart.indexOf("const replacedClient = session.client");
     const clear = fullSessionStart.indexOf("session.client = undefined", capture);
     const dispose = fullSessionStart.indexOf("await replacedClient.dispose()", clear);
-    const lookup = fullSessionStart.indexOf("const cliPath = this.locateProvider(session.provider)", dispose);
+    const lookup = fullSessionStart.indexOf("this.deps.providerOps.locateProvider(session.provider)", dispose);
     expect(dispose).toBeGreaterThan(clear);
     expect(lookup).toBeGreaterThan(dispose);
     expect(fullSessionStart.slice(clear, dispose)).not.toMatch(/\breturn(?:\s+undefined)?;/);

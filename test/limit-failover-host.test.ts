@@ -11,7 +11,8 @@ import { Session } from "../src/session";
 import { RATE_LIMITED_ERROR_CODE } from "../src/acp-dispatch";
 import { switchTranscriptLine } from "../src/limit-errors";
 
-const sidebarSrc = readFileSync(new URL("../src/sidebar.ts", import.meta.url), "utf8");
+const sessionStartSrc = readFileSync(new URL("../src/session-start.ts", import.meta.url), "utf8");
+const turnEditSrc = readFileSync(new URL("../src/turn-edit.ts", import.meta.url), "utf8");
 
 function harness() {
   const posted: unknown[] = [];
@@ -33,18 +34,18 @@ function harness() {
 
 describe("prompt-failure path hangs the card in front of auth recovery", () => {
   it("classifies the limit and returns before recoverAuthAndResend", () => {
-    const catchStart = sidebarSrc.indexOf("const e = err as any;");
-    const catchEnd = sidebarSrc.indexOf("if (await this.recoverAuthAndResend", catchStart);
-    const catchBlock = sidebarSrc.slice(catchStart, catchEnd);
-    expect(catchBlock).toContain("this.surfaceLimitError(session, e, text, sentChips)");
+    const catchStart = sessionStartSrc.indexOf("const e = err as any;");
+    const catchEnd = sessionStartSrc.indexOf("if (await this.deps.turnAndSendOps.recoverAuthAndResend", catchStart);
+    const catchBlock = sessionStartSrc.slice(catchStart, catchEnd);
+    expect(catchBlock).toContain("this.deps.turnAndSendOps.surfaceLimitError(session, e, text, sentChips)");
     expect(catchBlock).not.toContain("recoverAuthAndResend");
-    expect(sidebarSrc).toContain("if (this.surfaceLimitError(session, e2, displayText, chips)) return true");
+    expect(turnEditSrc).toContain("if (this.surfaceLimitError(session, e2, displayText, chips)) return true");
   });
 
   it("Continue starts a fresh session on the target (no resume of the exhausted id)", () => {
-    const method = sidebarSrc.slice(
-      sidebarSrc.indexOf("private async answerLimitOffer"),
-      sidebarSrc.indexOf("private async recoverAuthAndResend"),
+    const method = turnEditSrc.slice(
+      turnEditSrc.indexOf("public async answerLimitOffer"),
+      turnEditSrc.indexOf("public async recoverAuthAndResend"),
     );
     expect(method).toContain("this.startSession(undefined, session)");
     expect(method).toContain("session.keepTranscriptOnStart = true");
@@ -54,8 +55,8 @@ describe("prompt-failure path hangs the card in front of auth recovery", () => {
   });
 
   it("keeps the transcript across the failover start", () => {
-    expect(sidebarSrc).toContain("const keepTranscript = session.keepTranscriptOnStart === true");
-    expect(sidebarSrc).toContain("if (!keepTranscript) session.buffer = []");
+    expect(sessionStartSrc).toContain("const keepTranscript = session.keepTranscriptOnStart === true");
+    expect(sessionStartSrc).toContain("if (!keepTranscript) session.buffer = []");
   });
 });
 

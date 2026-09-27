@@ -9,11 +9,24 @@ import { sessionsDirFor, type SessionListEntry } from "../src/sessions";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const sidebar = fs.readFileSync(path.join(root, "src", "sidebar.ts"), "utf8").replace(/\r\n/g, "\n");
+const sessionStartSrc = fs.readFileSync(path.join(root, "src", "session-start.ts"), "utf8").replace(/\r\n/g, "\n");
 const providerSetupSrc = fs.readFileSync(path.join(root, "src", "provider-setup.ts"), "utf8").replace(/\r\n/g, "\n");
+const sessionCatalogSrc = fs.readFileSync(path.join(root, "src", "session-catalog.ts"), "utf8").replace(/\r\n/g, "\n");
+const turnEditSrc = fs.readFileSync(path.join(root, "src", "turn-edit.ts"), "utf8").replace(/\r\n/g, "\n");
 
 function methodBody(signature: string): string {
-  const start = sidebar.indexOf(signature);
+  const bareSig = signature.replace(/private\s+/, "");
+  const inCatalog = sessionCatalogSrc.includes(bareSig);
+  const inTurnEdit = turnEditSrc.includes(bareSig);
+  const source = inCatalog ? sessionCatalogSrc : (inTurnEdit ? turnEditSrc : sidebar);
+  const target = inCatalog || inTurnEdit ? bareSig : signature;
+  const start = source.indexOf(target);
   expect(start, `${signature} must exist`).toBeGreaterThan(-1);
+  if (inCatalog || inTurnEdit) {
+    const match = source.slice(start + target.length).search(/\n  (?:async\s+|private\s+|public\s+|[a-zA-Z0-9_]+\s*\()/);
+    const next = match < 0 ? source.length : start + target.length + match;
+    return source.slice(start, next);
+  }
   const next = sidebar.indexOf("\n  private ", start + signature.length);
   return sidebar.slice(start, next < 0 ? sidebar.length : next);
 }
@@ -88,8 +101,11 @@ describe("multi-provider review regressions", () => {
 
   it("routes every sidebar Codex discovery through the class-owned locator", () => {
     expect(providerSetupSrc.match(/locateCodexCli\(/g)).toHaveLength(1);
-    const start = methodBody("private async startSessionBody(");
-    expect(start).toContain("this.locateProvider(session.provider)");
+    const startAt = sessionStartSrc.indexOf("public async startSessionBody(");
+    expect(startAt, "public async startSessionBody( must exist").toBeGreaterThan(-1);
+    const startEnd = sessionStartSrc.indexOf("\n  private ", startAt + 1);
+    const start = sessionStartSrc.slice(startAt, startEnd < 0 ? sessionStartSrc.length : startEnd);
+    expect(start).toContain("this.deps.providerOps.locateProvider(session.provider)");
     expect(start).not.toContain("locateCodexCli(");
     const owner = providerSetupSrc.slice(
       providerSetupSrc.indexOf("locateProvider(provider: AcpProvider):"),
@@ -140,8 +156,9 @@ describe("multi-provider review regressions", () => {
     const reprobe = providerSetupSrc.slice(reprobeStart, reprobeEnd > 0 ? reprobeEnd : undefined);
     expect(reprobe).toContain('if (provider === "codex")');
     expect(reprobe).toContain("this.warmConnectedCodexModels()");
-    const recheck = sidebar.slice(sidebar.indexOf('case "recheckConnection":'), sidebar.indexOf('case "logout":'));
-    expect(recheck).toContain("await this.reprobeProviderCredentials(provider)");
+    const inboundSrc = fs.readFileSync(path.join(root, "src", "sidebar-inbound.ts"), "utf8").replace(/\r\n/g, "\n");
+    const recheck = inboundSrc.slice(inboundSrc.indexOf('case "recheckConnection":'), inboundSrc.indexOf('case "logout":'));
+    expect(recheck).toContain("await this.deps.providers.reprobeProviderCredentials(provider)");
   });
 
   it("refuses to clear adapter history that could not be refreshed", () => {
@@ -239,7 +256,8 @@ describe("multi-provider review regressions", () => {
       "warning",
       "This Codex conversation can only use Codex models. Start a new conversation to switch to Grok.",
     );
-    expect(sidebar.slice(sidebar.indexOf('case "setModel":'), sidebar.indexOf('case "installCodex":')))
+    const inboundForModel = fs.readFileSync(path.join(root, "src", "sidebar-inbound.ts"), "utf8");
+    expect(inboundForModel.slice(inboundForModel.indexOf('case "setModel":'), inboundForModel.indexOf('case "installCodex":')))
       .toContain("providerForRequestedModel");
   });
 });
@@ -294,11 +312,11 @@ describe("deleting a conversation the provider refuses", () => {
     // read this code as "empty" and started a fresh session on it, which opens
     // a blank transcript and tells the person their conversation never held
     // anything — while it sits on disk. Reverted; this pins the reason.
-    const at = sidebar.indexOf("isResumeNotFound(err)");
+    const at = sessionStartSrc.indexOf("isResumeNotFound(err)");
     expect(at).toBeGreaterThan(-1);
     // Bounded to THIS branch: the next one legitimately quotes the adapter,
     // which is correct for a failure we cannot describe better.
-    const branch = sidebar.slice(at, sidebar.indexOf("} else {", at));
+    const branch = sessionStartSrc.slice(at, sessionStartSrc.indexOf("} else {", at));
     expect(branch).not.toContain("newSession(");
     expect(branch).not.toContain("activeSessionId =");
     expect(branch).not.toContain("hasHistory =");

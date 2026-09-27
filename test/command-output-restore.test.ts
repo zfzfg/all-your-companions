@@ -1,16 +1,16 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-const sidebar = readFileSync(new URL("../src/sidebar.ts", import.meta.url), "utf8");
+const sessionStart = readFileSync(new URL("../src/session-start.ts", import.meta.url), "utf8");
 const chat = readFileSync(new URL("../media/chat.js", import.meta.url), "utf8");
 
-const toolCallStart = sidebar.indexOf("    const replayedCommandOutputs = new Set<string>();");
-const toolCallEnd = sidebar.indexOf('    client.on("plan"', toolCallStart);
-const replayHook = sidebar.slice(toolCallStart, toolCallEnd);
+const toolCallStart = sessionStart.indexOf("    const replayedCommandOutputs = new Set<string>();");
+const toolCallEnd = sessionStart.indexOf('    client.on("plan"', toolCallStart);
+const replayHook = sessionStart.slice(toolCallStart, toolCallEnd);
 
-const commandDoneStart = sidebar.indexOf('    client.on("commandDone"');
-const commandDoneEnd = sidebar.indexOf('    client.on("permissionRequest"', commandDoneStart);
-const commandDone = sidebar.slice(commandDoneStart, commandDoneEnd);
+const commandDoneStart = sessionStart.indexOf('    client.on("commandDone"');
+const commandDoneEnd = sessionStart.indexOf('    client.on("permissionRequest"', commandDoneStart);
+const commandDone = sessionStart.slice(commandDoneStart, commandDoneEnd);
 
 describe("session/load commandOutput restore wiring (#44)", () => {
   it("hydrates commandOutput from a replayed tool_call / tool_call_update", () => {
@@ -18,7 +18,7 @@ describe("session/load commandOutput restore wiring (#44)", () => {
     expect(replayHook).toContain("commandOutputForToolCall(call, {");
     expect(replayHook).toContain("replaying: session.replaying");
     expect(replayHook).toContain("rememberedCommands: replayedCommandsByToolCallId");
-    expect(replayHook).toContain('this.emit(session, { type: "commandOutput", ...replayed })');
+    expect(replayHook).toContain('this.deps.emit(session, { type: "commandOutput", ...replayed })');
     expect(replayHook).toContain("prepareMcpToolCall");
     expect(replayHook).toContain("emitReplayedCommandOutput(prepared.call)");
     expect(replayHook.indexOf('client.on("toolCall"')).toBeGreaterThan(-1);
@@ -26,7 +26,7 @@ describe("session/load commandOutput restore wiring (#44)", () => {
       replayHook.indexOf("emitToolCallEvent"),
     );
     expect(replayHook.indexOf('client.on("toolCallUpdate"')).toBeGreaterThan(-1);
-    expect(replayHook).toContain('this.emit(session, { type, call: prepared.call })');
+    expect(replayHook).toContain('this.deps.emit(session, { type, call: prepared.call })');
   });
 
   it("leaves the live terminal commandDone path on the same cap, not the replay helper", () => {

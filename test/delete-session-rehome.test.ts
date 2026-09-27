@@ -191,7 +191,7 @@ describe("minting a blank session reuses an unused empty one", () => {
 });
 
 describe("the cold-neighbour cases the first tests missed", () => {
-  const src = readFileSync("src/sidebar.ts", "utf8");
+  const sessionCatalogSrc = readFileSync("src/session-catalog.ts", "utf8");
 
   it("does not park the conversation it just deleted", () => {
     // Re-homing opens the neighbour, and a COLD neighbour falls through to
@@ -201,22 +201,23 @@ describe("the cold-neighbour cases the first tests missed", () => {
     // directory — so the deleted conversation reappeared. Every earlier test
     // here seeded a LIVE sibling, which returns before parkFocused, so none of
     // them could see it.
-    const at = src.indexOf("private parkFocused()");
+    const at = sessionCatalogSrc.indexOf("parkFocused(): void {");
     expect(at).toBeGreaterThan(-1);
-    const body = src.slice(at, at + 1600);
+    const body = sessionCatalogSrc.slice(at, at + 1600);
     const guard = body.indexOf("if (cur.deleted) return;");
-    const park = body.indexOf("this.pool.add(cur);");
+    const park = body.indexOf("this.deps.getPool().add(cur);");
     expect(guard).toBeGreaterThan(-1);
     expect(park).toBeGreaterThan(-1);
     expect(guard).toBeLessThan(park);
     // And the flag is set where the deletion happens, not inferred later.
-    expect(src).toContain("if (live) live.deleted = true;");
+    expect(sessionCatalogSrc).toContain("if (live) live.deleted = true;");
   });
 
 });
 
 describe("what the reuse and neighbour rules refuse to assume", () => {
   const src = readFileSync("src/sidebar.ts", "utf8");
+  const sessionCatalogSrc = readFileSync("src/session-catalog.ts", "utf8");
 
   it("never adopts a conversation it only saw in a list", () => {
     // `numMessages` is HARDCODED to 0 for every Codex and Claude row
@@ -272,13 +273,15 @@ describe("what the reuse and neighbour rules refuse to assume", () => {
     // The guarded failure never changed: focus left on a deleted, disposed
     // session, so the view looks attached and the next send resumes a dead id.
     // Anywhere else the person lands is fine.
-    const at = src.indexOf("THE ONLY QUESTION");
+    const at = sessionCatalogSrc.indexOf("THE ONLY QUESTION");
     expect(at).toBeGreaterThan(-1);
-    const branch = src.slice(at, at + 1800);
-    expect(branch).toContain("const viewNeedsHome = this.viewIsOnDeleted(id);");
-    expect(branch).toContain("await this.startSession();");
+    const branch = sessionCatalogSrc.slice(at, at + 1800);
+    expect(branch).toMatch(
+      /const viewNeedsHome = (?:this|this\.deps\.lifecycleOps)\.viewIsOnDeleted\(id\);/,
+    );
+    expect(branch).toMatch(/await (?:this|this\.deps\.lifecycleOps)\.startSession\(\);/);
     // Neither discarded proxy may come back.
-    expect(src).not.toContain("this.focused.activeSessionId !== neighbour.id");
-    expect(src).not.toContain("if (!tookUs)");
+    expect(sessionCatalogSrc).not.toContain("this.focused.activeSessionId !== neighbour.id");
+    expect(sessionCatalogSrc).not.toContain("if (!tookUs)");
   });
 });

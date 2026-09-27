@@ -26,6 +26,12 @@ import { pathsEqual } from "../src/worktree";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const sidebarSrc = () =>
   fs.readFileSync(path.join(root, "src", "sidebar.ts"), "utf8");
+const sessionStartSrc = () =>
+  fs.readFileSync(path.join(root, "src", "session-start.ts"), "utf8");
+const sessionCatalogSrc = () =>
+  fs.readFileSync(path.join(root, "src", "session-catalog.ts"), "utf8");
+const projectFoldersSrc = () =>
+  fs.readFileSync(path.join(root, "src", "project-folders.ts"), "utf8");
 
 describe("cwdIsAuthorized", () => {
   it("accepts only exact members of the authorized set", () => {
@@ -159,28 +165,32 @@ describe("sidebar close-revocation wiring (source)", () => {
     expect(src).toContain("invalidateImageHandlesUnder");
     expect(src).toContain("isImagePathAuthorizedNow");
 
-    const removeStart = src.indexOf("async removeProjectFolder(");
+    const pfSrc = projectFoldersSrc();
+    const removeStart = pfSrc.indexOf("async removeProjectFolder(");
     expect(removeStart).toBeGreaterThan(0);
-    const removeEnd = src.indexOf("private revokeClosedProjectFolder", removeStart);
-    const removeBody = src.slice(removeStart, removeEnd);
+    const removeEnd = pfSrc.indexOf("public sessionsBoundToFolder", removeStart);
+    const removeBody = pfSrc.slice(removeStart, removeEnd);
     // Revoke must run after successful removeWorkspaceFolder, before UI rehome.
     expect(removeBody).toContain("revokeClosedProjectFolder(target)");
     expect(removeBody).toContain("removeWorkspaceFolder(target)");
 
 
     // startSession refuses unauthorized target.cwd even with resumeId.
-    const startStart = src.indexOf("private async startSessionBody(");
+    const startSrc = sessionStartSrc();
+    const startStart = startSrc.indexOf("public async startSessionBody(");
     // A SEARCH BOUND, not a measurement: it only has to reach past the
     // method's prologue. 1200 stopped doing that the moment the open clock
     // added a few lines at the top, and the gate it looks for (at ~1460 chars)
-    // read as deleted when it had merely moved.
-    const startBody = src.slice(startStart, startStart + 2400);
+    // read as deleted when it had merely moved. The body now lives in
+    // session-start.ts; 4000 still clears the unauthorized-cwd refusal.
+    const startBody = startSrc.slice(startStart, startStart + 4000);
     expect(startBody).toContain("isAuthorizedCwd(target.cwd)");
     expect(startBody).toContain("refused startSession");
 
     // requestImageOriginal revalidates.
-    const imgStart = src.indexOf('case "requestImageOriginal"');
-    const imgBody = src.slice(imgStart, imgStart + 800);
+    const inbound = fs.readFileSync(path.join(root, "src", "sidebar-inbound.ts"), "utf8");
+    const imgStart = inbound.indexOf('case "requestImageOriginal"');
+    const imgBody = inbound.slice(imgStart, imgStart + 800);
     expect(imgBody).toContain("isImagePathAuthorizedNow");
 
     // Mutation: if revoke is only a catalog refresh, the test fails.
@@ -204,11 +214,11 @@ describe("sidebar close-revocation wiring (source)", () => {
   });
 
   it("every outbound list builder enforces authorizedListCwd at build time", () => {
-    const src = sidebarSrc();
+    const cat = sessionCatalogSrc();
     // buildSessionsList: gate before disk scan.
-    const listStart = src.indexOf("private buildSessionsList(");
-    const listEnd = src.indexOf("private sessionDisplayName(", listStart);
-    const listBody = src.slice(listStart, listEnd > listStart ? listEnd : listStart + 800);
+    const listStart = cat.indexOf("buildSessionsList(");
+    const listEnd = cat.indexOf("buildGrokSessionsList(", listStart);
+    const listBody = cat.slice(listStart, listEnd > listStart ? listEnd : listStart + 800);
     expect(listBody).toContain("authorizedListCwd");
     expect(listBody).toContain("authorizedSessionCwds");
     // Empty list when unauthorized (no indexSessions for closed cwd).
@@ -216,14 +226,14 @@ describe("sidebar close-revocation wiring (source)", () => {
     expect(listBody).toContain("entries: []");
 
     // buildPinnedSessions: skip unauthorized pin buckets.
-    const pinStart = src.indexOf("private buildPinnedSessions(");
-    const pinEnd = src.indexOf("private postPinnedSessions(", pinStart);
-    const pinBody = src.slice(pinStart, pinEnd);
+    const pinStart = cat.indexOf("buildPinnedSessions(");
+    const pinEnd = cat.indexOf("postPinnedSessions(", pinStart);
+    const pinBody = cat.slice(pinStart, pinEnd);
     expect(pinBody).toContain("authorizedListCwd");
     expect(pinBody).toContain("filterEntriesByAuthorizedCwd");
 
     // localRepoCatalogEntries remains the catalog source (open folders desktop).
-    expect(src).toContain("localRepoCatalogEntries");
+    expect(cat).toContain("localRepoCatalogEntries");
   });
 
 
@@ -239,16 +249,16 @@ describe("sidebar close-revocation wiring (source)", () => {
 
 
   it("revokeClosedProjectFolder cancels voice for the closed folder", () => {
-    const src = sidebarSrc();
-    const revokeStart = src.indexOf("private revokeClosedProjectFolder(");
-    const revokeBody = src.slice(revokeStart, revokeStart + 900);
+    const pfSrc = projectFoldersSrc();
+    const revokeStart = pfSrc.indexOf("public revokeClosedProjectFolder(");
+    const revokeBody = pfSrc.slice(revokeStart, revokeStart + 900);
     expect(revokeBody).toContain("revokeVoiceForClosedFolder");
 
-    const voiceStart = src.indexOf("private revokeVoiceForClosedFolder(");
+    const voiceStart = pfSrc.indexOf("public revokeVoiceForClosedFolder(");
     expect(voiceStart).toBeGreaterThan(0);
-    const voiceBody = src.slice(voiceStart, voiceStart + 1200);
+    const voiceBody = pfSrc.slice(voiceStart, voiceStart + 1200);
     expect(voiceBody).toContain("stopVoiceInput");
-    expect(voiceBody).toContain("localVoiceCwd");
-    expect(voiceBody).toContain("localVoiceCredentialCwd");
+    expect(voiceBody).toMatch(/getLocalVoiceCwd|localVoiceCwd/);
+    expect(voiceBody).toMatch(/getLocalVoiceCredentialCwd|localVoiceCredentialCwd/);
   });
 });

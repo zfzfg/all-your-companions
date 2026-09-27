@@ -135,15 +135,15 @@ describe("insertActiveMention accepts non-file schemes (regression #1)", () => {
 
     // Source gate: accepts opts.uri (portable Uri) end-to-end — never opts.path
     // string rebuilt with Uri.file (drops remote authority for Send File).
-    const src = readFileSync(path.join(root, "src", "sidebar.ts"), "utf8");
+    const src = readFileSync(path.join(root, "src", "implicit-context.ts"), "utf8");
     const start = src.indexOf("insertActiveMention(");
     expect(start).toBeGreaterThan(-1);
     // To the end of the method, not a fixed byte window: a comment added inside
     // it pushed the line these assertions are about past the old 2000-char cut,
     // and the test then failed for a reason that had nothing to do with the
     // regression it guards.
-    const end = src.indexOf("\n  newSession(", start);
-    expect(end, "insertActiveMention must still be followed by newSession").toBeGreaterThan(start);
+    const end = src.indexOf("\n  public addContextSourceChip(", start);
+    expect(end, "insertActiveMention must still be followed by addContextSourceChip").toBeGreaterThan(start);
     const body = src.slice(start, end);
     expect(body).toMatch(/opts\?\s*\.\s*uri\s*\?\?\s*editor\?\s*\.\s*document\s*\.\s*uri/);
     expect(body).toMatch(/pathUri\?\.fsPath|pathUri\.fsPath/);
@@ -218,10 +218,10 @@ describe("asRelativePath takes Uri (remote identity)", () => {
   });
 
   it("sidebar passes Uri into asRelativePath, not a plain abs path", () => {
-    const sidebar = readFileSync(path.join(root, "src", "sidebar.ts"), "utf8");
-    expect(sidebar).not.toMatch(/asRelativePath\(\s*absPath\s*\)/);
-    expect(sidebar).not.toMatch(/asRelativePath\(\s*abs\s*\)/);
-    expect(sidebar).toMatch(/asRelativePath\(\s*pathUri\s*\)|asRelativePath\(\s*uri\s*\)|asRelativePath\(\s*editor\.document\.uri\s*\)/);
+    const src = readFileSync(path.join(root, "src", "implicit-context.ts"), "utf8");
+    expect(src).not.toMatch(/asRelativePath\(\s*absPath\s*\)/);
+    expect(src).not.toMatch(/asRelativePath\(\s*abs\s*\)/);
+    expect(src).toMatch(/asRelativePath\(\s*pathUri\s*\)|asRelativePath\(\s*uri\s*\)|asRelativePath\(\s*editor\.document\.uri\s*\)/);
   });
 });
 
@@ -243,7 +243,9 @@ describe("typed Host command surface (design #5)", () => {
   it("sidebar uses typed methods and never executeCommand", () => {
     const sidebar = readFileSync(path.join(root, "src", "sidebar.ts"), "utf8");
     const review = readFileSync(path.join(root, "src", "review-host.ts"), "utf8");
-    const hostCode = `${sidebar}\n${review}`;
+    const inbound = readFileSync(path.join(root, "src", "sidebar-inbound.ts"), "utf8");
+    const voice = readFileSync(path.join(root, "src", "voice-and-mcp.ts"), "utf8");
+    const hostCode = `${sidebar}\n${review}\n${inbound}\n${voice}`;
     expect(hostCode).not.toMatch(/\.executeCommand\s*\(/);
     expect(hostCode).not.toMatch(/executeCommand\(\s*["']vscode\.open["']/);
     expect(hostCode).not.toMatch(/executeCommand\(\s*["']vscode\.diff["']/);
@@ -252,13 +254,13 @@ describe("typed Host command surface (design #5)", () => {
     expect(hostCode).not.toMatch(/executeCommand\(\s*["']workbench\.action\.openSettings["']/);
     expect(hostCode).not.toMatch(/executeCommand\(\s*["']grok\.(link|unlink)Remote["']/);
     expect(hostCode).toMatch(/\.openDiff\(/);
-    expect(sidebar).toMatch(/\.openResource\(/);
-    expect(sidebar).toMatch(/\.openGlobalConfig\(/);
-    expect(sidebar).toMatch(/\.openProjectConfig\(/);
-    expect(sidebar).toMatch(/\.openHostResolvedPath\(/);
-    expect(sidebar).toMatch(/\.setContext\(/);
-    expect(sidebar).toMatch(/\.relocateView\(/);
-    expect(sidebar).toMatch(/\.openSettings\(/);
+    expect(hostCode).toMatch(/\.openResource\(/);
+    expect(hostCode).toMatch(/\.openGlobalConfig\(/);
+    expect(hostCode).toMatch(/\.openProjectConfig\(/);
+    expect(hostCode).toMatch(/\.openHostResolvedPath\??\.?\(/);
+    expect(hostCode).toMatch(/\.setContext\(/);
+    expect(hostCode).toMatch(/\.relocateView\(/);
+    expect(hostCode).toMatch(/\.openSettings\(/);
   });
 });
 
@@ -472,23 +474,23 @@ describe("untitledTextOpenOptions (View all language passthrough)", () => {
   });
 
   it("sidebar initialState supplies commandLanguage from the host shell dialect", () => {
-    const src = readFileSync(path.join(root, "src", "sidebar.ts"), "utf8");
+    const src = readFileSync(path.join(root, "src", "sidebar-state-host.ts"), "utf8");
     expect(src).toMatch(/commandLanguageForDialect\(\s*resolvedTerminalShellDialect\(\)\s*\)/);
     expect(src).toMatch(/commandLanguage\s*\?\s*\{\s*commandLanguage\s*\}/);
   });
 
   it("sidebar initialState forwards previewInApp from the host capability", () => {
-    const src = readFileSync(path.join(root, "src", "sidebar.ts"), "utf8");
-    expect(src).toMatch(/previewInApp:\s*this\.host\.canPreviewInApp/);
+    const src = readFileSync(path.join(root, "src", "sidebar-state-host.ts"), "utf8");
+    expect(src).toMatch(/previewInApp:\s*(?:this\.)?deps\.host\.canPreviewInApp/);
   });
 
   it("sidebar initialState forwards settingsEditor from the host capability", () => {
-    const src = readFileSync(path.join(root, "src", "sidebar.ts"), "utf8");
-    expect(src).toMatch(/settingsEditor:\s*this\.host\.canOpenSettingsEditor/);
+    const src = readFileSync(path.join(root, "src", "sidebar-state-host.ts"), "utf8");
+    expect(src).toMatch(/settingsEditor:\s*(?:this\.)?deps\.host\.canOpenSettingsEditor/);
   });
 
   it("sidebar advertises mcpSettings only when the host opts in", () => {
-    const src = readFileSync(path.join(root, "src", "sidebar.ts"), "utf8");
+    const src = readFileSync(path.join(root, "src", "sidebar-state-host.ts"), "utf8");
     expect(src).toMatch(/canShowMcpSettings\s*\?\s*\{\s*mcpSettings:\s*true\s*\}/);
   });
 });

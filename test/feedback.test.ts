@@ -131,16 +131,18 @@ describe("availability", () => {
 
   it("threads grok.thumbsFeedback through the host without latching a setting-off click", () => {
     const src = readFileSync(new URL("../src/sidebar.ts", import.meta.url), "utf8");
+    const turnEditSrc = readFileSync(new URL("../src/turn-edit.ts", import.meta.url), "utf8");
+    const inbound = readFileSync(new URL("../src/sidebar-inbound.ts", import.meta.url), "utf8");
     expect(src).toContain("userEnabled: this.thumbsFeedbackEnabled()");
-    expect(src).toContain('update("thumbsFeedback"');
+    expect(inbound).toContain('update("thumbsFeedback"');
     expect(src).toMatch(/affectsConfiguration\("grok\.thumbsFeedback"\)/);
-    const start = src.indexOf("private async handleTurnFeedback(");
-    const end = src.indexOf("private async forkFocusedSession", start);
+    const start = turnEditSrc.indexOf("public async handleTurnFeedback(");
+    const end = turnEditSrc.indexOf("public async forkFocusedSession", start);
     expect(start).toBeGreaterThan(-1);
     expect(end).toBeGreaterThan(start);
-    const body = src.slice(start, end);
-    expect(body).toContain("if (!this.thumbsFeedbackEnabled())");
-    expect(body.indexOf("if (!this.thumbsFeedbackEnabled())")).toBeLessThan(body.indexOf("latchFeedbackUnavailable"));
+    const body = turnEditSrc.slice(start, end);
+    expect(body).toMatch(/if \(!this\.(?:deps\.feedbackOps\.)?thumbsFeedbackEnabled\(\)\)/);
+    expect(body.search(/if \(!this\.(?:deps\.feedbackOps\.)?thumbsFeedbackEnabled\(\)\)/)).toBeLessThan(body.indexOf("latchFeedbackUnavailable"));
   });
 
   it("treats the disabled internal_error as a capability gap, not a send failure", () => {

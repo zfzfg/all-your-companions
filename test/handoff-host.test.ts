@@ -337,7 +337,8 @@ describe("the run itself is AP-10's, unchanged", () => {
 });
 
 describe("async boundaries in the send path", () => {
-  const sidebarSrc = readFileSync(new URL("../src/sidebar.ts", import.meta.url), "utf8");
+  const inboundSrc = readFileSync(new URL("../src/sidebar-inbound.ts", import.meta.url), "utf8");
+  const sessionStartSrc = readFileSync(new URL("../src/session-start.ts", import.meta.url), "utf8");
 
   /** Drop comments so a rule EXPLAINED in prose is not read as a violation
    *  of itself — the sentence above the guard uses the word "await". */
@@ -350,24 +351,24 @@ describe("async boundaries in the send path", () => {
   // duplicate-dequeue and turn-in-flight races. Pinned for the new commands
   // too, because without a pin the next crew AP reintroduces it.
   it("parses the handoff commands synchronously in the composer path", () => {
-    const sendCase = sidebarSrc.slice(
-      sidebarSrc.indexOf('      case "send":'),
-      sidebarSrc.indexOf("let queuedSendCommit"),
+    const sendCase = inboundSrc.slice(
+      inboundSrc.indexOf('      case "send":'),
+      inboundSrc.indexOf("await this.deps.composer.handleSend(msg.text"),
     );
     expect(sendCase).toContain('if (parseHandoffCommand(msg.text).kind !== "none") {');
     expect(sendCase).not.toMatch(/if \(await this\.handleHandoffCommand/);
   });
 
   it("parses them synchronously in the handleSend backstop, with no await ahead", () => {
-    const start = sidebarSrc.indexOf("const session = target ?? this.focused;");
-    const head = sidebarSrc.slice(start, sidebarSrc.indexOf("await this.waitForSessionStart(session);", start));
+    const start = sessionStartSrc.indexOf("const session = target ?? this.deps.getFocused();");
+    const head = sessionStartSrc.slice(start, sessionStartSrc.indexOf("await this.waitForSessionStart(session);", start));
     expect(head).toContain('if (parseHandoffCommand(text).kind !== "none") {');
     // Comments stripped, then the `/agent` guard's own await removed: that
     // one is conditional (it runs only for an actual `/agent`) and so is not
     // the hazard. What must not appear is an UNCONDITIONAL await ahead of
     // this guard.
     const beforeGuard = stripComments(head.slice(0, head.indexOf("if (parseHandoffCommand(text)")))
-      .replace(/await this\.handleAgentCommand\([^)]*\);/g, "");
+      .replace(/await this\.(?:deps\.workflowCommandsOps\.)?handleAgentCommand\([^)]*\);/g, "");
     expect(beforeGuard).not.toMatch(/\bawait\b/);
   });
 });

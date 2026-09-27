@@ -188,9 +188,9 @@ describe("MCP inventory catalog", () => {
   });
 
   it("classifies Grok inventory against Grok config files even if Codex or Claude is focused", () => {
-    const src = readFileSync(new URL("../src/sidebar.ts", import.meta.url), "utf8");
-    const start = src.indexOf("private mcpNameCatalogFor(");
-    const end = src.indexOf("private filterMcpServers(", start);
+    const src = readFileSync(new URL("../src/voice-and-mcp.ts", import.meta.url), "utf8");
+    const start = src.indexOf("public mcpNameCatalogFor(");
+    const end = src.indexOf("public filterMcpServers(", start);
     const body = src.slice(start, end);
     expect(start).toBeGreaterThan(-1);
     expect(end).toBeGreaterThan(start);
@@ -199,48 +199,49 @@ describe("MCP inventory catalog", () => {
     // Host-inject reserved identity stays provider-specific; only the Grok
     // inventory tagger is pinned to grok.
     const reserved = src.slice(
-      src.indexOf("private reservedMcpIdentityFor("),
-      src.indexOf("private async hostMcpServersFor("),
+      src.indexOf("public reservedMcpIdentityFor("),
+      src.indexOf("public async hostMcpServersFor("),
     );
     expect(reserved).toContain("provider: session.provider");
   });
 
   it("stamps the catalog cwd at read time and stores the classified view", () => {
-    const src = readFileSync(new URL("../src/sidebar.ts", import.meta.url), "utf8");
+    const src = readFileSync(new URL("../src/voice-and-mcp.ts", import.meta.url), "utf8");
     const refresh = src.slice(
-      src.indexOf("private async refreshMcpServers("),
-      src.indexOf("private historyCwdFor("),
+      src.indexOf("public async refreshMcpServers("),
+      src.indexOf("public isServableFromDisk("),
     );
-    expect(refresh).toContain("this.mcpServersCwd = this.sessionCwd(grok)");
+    expect(refresh).toContain("this.mcpServersCwd = this.deps.voiceOps.sessionCwd(grok)");
     expect(refresh).toContain("this.grokSessionForMcpList(session)");
     expect(refresh).toContain("this.mcpServersView = this.filterMcpServers(this.mcpServers)");
     expect(refresh).not.toContain('session.provider === "grok" ? session.client');
     const helper = src.slice(
-      src.indexOf("private async grokSessionForMcpList("),
-      src.indexOf("private async refreshMcpServers("),
+      src.indexOf("public async grokSessionForMcpList("),
+      src.indexOf("public async refreshMcpServers("),
     );
     expect(helper).toContain('startSession(undefined, grok, "ensure")');
     expect(helper).toContain("grokSessionForMcpListInFlight");
     expect(helper).not.toContain("disposeSession");
     expect(helper).not.toContain("removeSessionFromDisk");
     const tag = src.slice(
-      src.indexOf("private filterMcpServers("),
-      src.indexOf("private reservedMcpIdentityFor("),
+      src.indexOf("public filterMcpServers("),
+      src.indexOf("public reservedMcpIdentityFor("),
     );
     expect(tag).toContain("mcpSettingsServersForCwd");
     expect(tag).toContain("catalogCwd: this.mcpServersCwd");
     expect(tag).not.toContain("viewCwd");
     expect(tag).not.toContain("sameCwd");
     expect(tag).not.toContain("mcpNameCatalogFor(session)");
-    const notify = src.slice(
-      src.indexOf('client.on("mcpNotification"'),
-      src.indexOf('client.on("xaiNotification"'),
+    const sessionStartSrc = readFileSync(new URL("../src/session-start.ts", import.meta.url), "utf8");
+    const notify = sessionStartSrc.slice(
+      sessionStartSrc.indexOf('client.on("mcpNotification"'),
+      sessionStartSrc.indexOf('client.on("xaiNotification"'),
     );
-    expect(notify).toContain("this.applyMcpNotification(session, method, params)");
+    expect(notify).toContain("this.deps.sessionLifecycleOps.applyMcpNotification(session, method, params)");
     expect(notify).not.toContain("mcpServersCwd");
     const apply = src.slice(
-      src.indexOf("private applyMcpNotification("),
-      src.indexOf("private postMcpServers("),
+      src.indexOf("public applyMcpNotification("),
+      src.indexOf("public postMcpServers("),
     );
     const reservedAt = apply.indexOf("reservedFromMcpInventory");
     const cwdGuardAt = apply.indexOf("this.mcpServersCwd");
@@ -453,12 +454,12 @@ describe("MCP catalog classified against the workspace it was read from", () => 
   });
 
   it("posts the stored classified view, not the incoming payload", () => {
-    const src = readFileSync(new URL("../src/sidebar.ts", import.meta.url), "utf8");
+    const src = readFileSync(new URL("../src/voice-and-mcp.ts", import.meta.url), "utf8");
     const post = src.slice(
-      src.indexOf("private postMcpServers("),
-      src.indexOf("private connectedConnectorStore("),
+      src.indexOf("public postMcpServers("),
+      src.indexOf("public connectedConnectorStore("),
     );
-    expect(post).toContain("this.post(view)");
+    expect(post).toContain(".post(view)");
 
     const proto = GrokSidebar.prototype as unknown as {
       postMcpServers(message: { type: "mcpServers"; servers: Array<{ name: string }>; warning: string }): void;

@@ -7,7 +7,7 @@ import { bootWebview, dispatch, click, Posted } from "./webview-harness";
 
 const $ = (doc: Document, id: string) => doc.getElementById(id) as HTMLElement;
 const types = (posted: Posted[]) => posted.map((p) => p.type);
-const sidebarSrc = readFileSync(new URL("../src/sidebar.ts", import.meta.url), "utf8");
+const voiceSrc = readFileSync(new URL("../src/voice-and-mcp.ts", import.meta.url), "utf8");
 
 describe("voice control mic button", () => {
   it("starts idle showing the mic icon", () => {
@@ -244,11 +244,11 @@ describe("voice control: live streaming transcription", () => {
 
 describe("voice control: continuous listening + queue (hands-free)", () => {
   it("forwards an empty parsed utterance so a bare send phrase can submit the local draft", () => {
-    const commit = sidebarSrc.slice(
-      sidebarSrc.indexOf("private commitVoiceStream"),
-      sidebarSrc.indexOf("private async finalizeVoiceStream"),
+    const commit = voiceSrc.slice(
+      voiceSrc.indexOf("public commitVoiceStream"),
+      voiceSrc.indexOf("public async finalizeVoiceStream"),
     );
-    expect(commit).toContain('this.postLocal({ type: "voiceSubmit", text: text.trim() });');
+    expect(commit).toContain('postLocal({ type: "voiceSubmit", text: text.trim() })');
     expect(commit).not.toContain("if (text.trim())");
   });
 
@@ -428,7 +428,7 @@ describe("voice control: API-key setup hint", () => {
   });
 
   it("host setup guidance accepts either vendor and explains API access", () => {
-    const setup = sidebarSrc.slice(sidebarSrc.indexOf("private async promptVoiceKeySetup"), sidebarSrc.indexOf("private rejectVoiceStart"));
+    const setup = voiceSrc.slice(voiceSrc.indexOf("public async promptVoiceKeySetup"), voiceSrc.indexOf("public rejectVoiceStart"));
     expect(setup).toContain("showInformationMessage");
     expect(setup).toContain("OPENAI_API_KEY");
     expect(setup).toContain("xAI key / Grok sign-in");
