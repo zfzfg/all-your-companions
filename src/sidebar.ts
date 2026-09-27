@@ -140,13 +140,13 @@ import { VoiceRecorder } from "./voice-recorder";
 import { VoiceStreamer } from "./voice-streamer";
 import { summarizeForSpeech } from "./speech-summary";
 import type { PromptResultMeta, PromptUsage, SessionInfoContext } from "./acp-dispatch";
-import { DEFAULT_COMPACT_THRESHOLD, GROK_COMPACT_ENV, compactEventKind, compactSummaryPreview, compactThresholdMismatch, compactThresholdMismatchNotice, grokCompactThresholdEnv, normalizeCompactThreshold, shouldOfferNearFull } from "./grok-compaction";
+import { DEFAULT_COMPACT_THRESHOLD, GROK_COMPACT_ENV, compactEventKind, compactSummaryPreview, grokCompactThresholdEnv, normalizeCompactThreshold } from "./grok-compaction";
 
 import { ChildRelayTable, type RelayKind, type RelayOrigin } from "./child-relay";
 import { normalizeStallWarningSec, type PausableDeadline } from "./child-watch";
 import { subagentTurnSummary } from "./companion-subagents";
 import { bothDelegationsHint, grokSubagentEnv } from "./grok-subagent-env";
-import { MediaRef, adapterCompactSignal, adapterContextOccupancy, agentTimestampMsFromMeta, autoCompactStartedNote, childStreamFromRoute, commandOutputForToolCall, commandOutputFromLiveTerminal, contextUsedFromCompactNotification, enforceCompleteSessionCost, errorDetail, gateZeroTokenMeta, isCredentialError, isIncompatibleAgentError, isResumeNotFound, isSubagentLifecycleUpdate, occupancyFromAdapterTurn, parseSessionInfoContext, permissionOutcomeFor, promptErrorText, rateLimitNoticeText, replayedTurnDuration, sessionInfoCacheFresh, sumUsage, summarizeBackgroundCommand, turnStatusFromPromptResult, usageIsRealMeasurement, type TurnEndStatus, type UpdateRoute } from "./acp-dispatch";
+import { MediaRef, agentTimestampMsFromMeta, autoCompactStartedNote, childStreamFromRoute, commandOutputForToolCall, commandOutputFromLiveTerminal, contextUsedFromCompactNotification, enforceCompleteSessionCost, errorDetail, gateZeroTokenMeta, isCredentialError, isIncompatibleAgentError, isResumeNotFound, isSubagentLifecycleUpdate, permissionOutcomeFor, promptErrorText, rateLimitNoticeText, replayedTurnDuration, sumUsage, summarizeBackgroundCommand, turnStatusFromPromptResult, type TurnEndStatus, type UpdateRoute } from "./acp-dispatch";
 import { createMcpPrepareState, prepareMcpToolCall } from "./mcp-tool";
 import { configWriteTarget, rememberedEffort, startsInYolo, withRememberedEffort, type EffortPrefs } from "./mode-prefs";
 import { oauthShadowsXaiApiKey } from "./auth-recovery";
@@ -156,7 +156,6 @@ import {
   isContextOverflowError,
   limitOfferHint,
   limitOfferTargets,
-  freePercentFromWindows,
   limitOfferTitle,
   recommendedLimitAction
 } from "./limit-errors";
@@ -171,8 +170,8 @@ import {
 } from "./welcome-tips";
 import { ProjectFolders } from "./project-folders";
 import type { GithubAuthState } from "./github-auth";
-import { SubscriptionUsageBinding, SubscriptionUsageCache, subscriptionCredentialContext, type SubscriptionWindow } from "./subscription-usage";
-import { readCodexSubscriptionWindows } from "./codex-usage";
+import type { SubscriptionUsageCache, SubscriptionWindow } from "./subscription-usage";
+import { UsageHost, createUsageHost } from "./usage-host";
 import { providerConfigFiles, type ProviderConfigFile } from "./provider-config";
 import { readWorkflowCompletion } from "./workflow-state";
 import { CliUpdateHost, createCliUpdateHost } from "./cli-update-host";
@@ -332,7 +331,6 @@ import {
   RepoListEntry,
   RepoPins,
   capAutoName,
-  capUsageLog,
   capSessionMetaAutoNames,
   carrySessionName,
   clearSessions,
@@ -350,9 +348,7 @@ import {
   normalizeRepoPath,
   orderedResumeCwdCandidates,
   persistSessionContext,
-  persistedContextUsage,
   contextUsageFromLog,
-  readContextUsage,
   relativePathWithin,
   readSessionEntries,
   expiredArchiveChoiceKeys,
@@ -723,7 +719,8 @@ export class GrokSidebar {
   private reaper?: ReturnType<typeof setInterval>;
   private oauthShadowWarningShown = false;
   /** K-02: the threshold-mismatch notice shows once per window. */
-  private compactMismatchNoticeShown = false;
+  get compactMismatchNoticeShown(): boolean { return this.usageHost.compactMismatchNoticeShown; }
+  set compactMismatchNoticeShown(v: boolean) { this.usageHost.compactMismatchNoticeShown = v; }
   private get chips(): ContextChip[] { return this.focused.chips; }
   private set chips(value: ContextChip[]) { this.focused.chips = value; }
   /** Attachment-staging ops still in flight — see trackAttach. */
@@ -914,6 +911,16 @@ export class GrokSidebar {
     return this._cliUpdateHost ??= this.createCliUpdateHost();
   }
   set cliUpdateHost(value: CliUpdateHost) { this._cliUpdateHost = value; }
+
+  /** Usage subsystem */
+  private _usageHost?: UsageHost;
+  get usageHost(): UsageHost {
+    return this._usageHost ??= this.createUsageHost();
+  }
+  set usageHost(value: UsageHost) { this._usageHost = value; }
+
+  get subscriptionUsageCaches(): Map<string, SubscriptionUsageCache> | undefined { return this.usageHost.subscriptionUsageCaches; }
+  set subscriptionUsageCaches(v: Map<string, SubscriptionUsageCache> | undefined) { this.usageHost.subscriptionUsageCaches = v; }
   get mcpServers(): McpServerView[] { return this.voiceAndMcp.mcpServers; }
   set mcpServers(v: McpServerView[]) { this.voiceAndMcp.mcpServers = v; }
   get mcpServersCwd(): string | undefined { return this.voiceAndMcp.mcpServersCwd; }
@@ -1150,6 +1157,20 @@ export class GrokSidebar {
       postRoutines: () => self.postRoutines(),
       handleSend: (prompt: string, isSteer: boolean, session: Session) => self.handleSend(prompt, isSteer, session),
       getOverride: (name: string) => self.sidebarTestOverride(name),
+    });
+  }
+
+  private createUsageHost(): UsageHost {
+    const self = this;
+    return createUsageHost({
+      get host() { return self.host; },
+      get state() { return self.state; },
+      emit: (session, msg) => self.emit(session, msg),
+      sessionCwd: (session) => self.sessionCwd(session),
+      readDotEnv: (cwd) => self.readDotEnv(cwd),
+      getFocused: () => self.focused,
+      getPool: () => (self.pool ? self.pool.values() : []),
+      getOverride: (name: string) => self.sidebarTestOverride(name)
     });
   }
 
@@ -1616,6 +1637,7 @@ export class GrokSidebar {
     this._voiceAndMcp = this.createVoiceAndMcp();
     this._projectFolders = this.createProjectFolders();
     this._cliUpdateHost = this.createCliUpdateHost();
+    this._usageHost = this.createUsageHost();
     this.providerConnectionState = this.migrateProviderConnections();
     this.focused.provider = this.defaultProviderForProject(this.workspaceRoot());
     context.subscriptions.push(
@@ -13201,357 +13223,81 @@ ${directives.block}`;
    * it: grok reports usage per prompt and `signals.json` keeps only context size.
    */
   private accumulateUsage(session: Session, meta: PromptResultMeta): PromiseLike<void> | undefined {
-    const measured = usageIsRealMeasurement(meta);
-    // One line per billed turn, in the Output panel, for every agent. The
-    // donut answers "how full is the context"; this answers "what did that
-    // cost", which is the question a session limit actually raises — and it
-    // is the only per-turn record that survives the conversation being closed.
-    // `research/usage-report.cjs` adds up a saved log.
-    if (measured) {
-      const u = meta.usage ?? {};
-      this.host.appendLine(
-        `[usage] ${session.provider} turn`
-        + ` in=${u.inputTokens ?? meta.inputTokens ?? 0}`
-        + ` out=${u.outputTokens ?? meta.outputTokens ?? 0}`
-        + ` reasoning=${u.reasoningTokens ?? meta.reasoningTokens ?? 0}`
-        + ` cacheRead=${u.cachedReadTokens ?? meta.cachedReadTokens ?? 0}`
-        + ` cacheWrite=${u.cachedWriteTokens ?? meta.cachedWriteTokens ?? 0}`
-        + ` total=${u.totalTokens ?? meta.totalTokens ?? 0}`
-        + ` model=${meta.modelId ?? session.client?.currentModelId ?? "?"}`,
-      );
-    }
-    // totalTokens:0 is the CLI's reliable no-inference result for native slash
-    // turns such as /compact. Record that successful prompt as covered without
-    // counting its stale usage siblings. A real inference with missing usage is
-    // NOT covered: its cost is unknown, so the aggregate must remain withheld.
-    if (!measured && meta.totalTokens !== 0) return;
-    const id = session.activeSessionId;
-    if (!id) return;
-    const overrides = this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
-    const cur = overrides[id] ?? {};
-    const occupancy = this.adapterTurnOccupancy(session, meta);
-    const compacted = isAdapterProvider(session.provider) && session.adapterCompactThisTurn;
-    const usageLog = capUsageLog([
-      ...(cur.usageLog ?? []),
-      {
-        afterUserMessage: session.userMessageCount,
-        afterHistoryEvent: session.historyEventCount,
-        usage: measured ? meta.usage : undefined,
-        ...(occupancy !== undefined
-          ? { contextUsed: occupancy }
-          : compacted && !cur.contextPendingCompact && cur.contextUsed
-            ? { contextUsed: cur.contextUsed }
-            : {}),
-        ...(compacted ? { compacted: true } : {})
-      },
-    ]);
-    const sessionUsage = enforceCompleteSessionCost(
-      sumUsage(usageLog),
-      usageLog,
-      session.userMessageCount,
-    );
-    if (measured) {
-      this.emit(session, { type: "usage", turn: meta.usage, session: sessionUsage, afterUserMessage: session.userMessageCount, afterHistoryEvent: session.historyEventCount });
-    }
-    return this.state.update(SESSION_META_KEY, {
-      ...overrides,
-      [id]: { ...cur, usage: sessionUsage, usageLog }
-    });
+    return this.usageHost.accumulateUsage(session, meta);
   }
 
   private persistedUsageLedger(sessionId: string, userMessageCount: number): {
     usageLog: NonNullable<SessionMetaOverrides[string]["usageLog"]>;
     usage: PromptUsage | undefined;
   } {
-    const persisted = this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {})[sessionId];
-    const usageLog = [...(persisted?.usageLog ?? [])];
-    const rawUsage = persisted?.usageLog ? sumUsage(usageLog) : persisted?.usage;
-    return {
-      usageLog,
-      usage: enforceCompleteSessionCost(rawUsage, usageLog, userMessageCount)
-    };
+    return this.usageHost.persistedUsageLedger(sessionId, userMessageCount);
   }
 
-  /** Seed a (re)opened session's cumulative billing from our own globalState and
-   *  push it, so the popover survives a reload. No stored total (an older session
-   *  or a pre-usage CLI) posts nothing — the popover shows context only. */
   private restoreUsage(session: Session): void {
-    const id = session.activeSessionId;
-    if (!id) return;
-    // Re-derive from the id-keyed ledger instead of trusting an aggregate that may have summed
-    // cost-bearing turns over historical turns where cost was not recorded.
-    const stored = this.persistedUsageLedger(id, session.userMessageCount).usage;
-    if (!stored) return;
-    this.emit(session, { type: "usage", session: stored, afterUserMessage: session.userMessageCount, afterHistoryEvent: session.historyEventCount });
+    return this.usageHost.restoreUsage(session);
   }
 
   private noteAdapterCompactSignal(session: Session, update: unknown): void {
-    if (session.replaying || !isAdapterProvider(session.provider)) return;
-    const signal = adapterCompactSignal(update);
-    if (!signal) return;
-    if (signal === "failed") {
-      session.compactUsageArmed = false;
-      session.adapterCompactThisTurn = false;
-      this.rememberAdapterContext(session, { compactFailed: true });
-      return;
-    }
-    session.adapterCompactThisTurn = true;
-    session.compactUsageArmed = signal === "completed";
-    this.rememberAdapterContext(session, { compacted: true });
+    return this.usageHost.noteAdapterCompactSignal(session, update);
   }
 
-  /**
-   * Largest single call in this turn, never Claude's summed PromptResponse.
-   * A compact turn must not feed that sum back over getContextUsage.
-   */
   private adapterTurnOccupancy(session: Session, meta: PromptResultMeta): number | undefined {
-    if (!usageIsRealMeasurement(meta) || session.adapterCompactThisTurn) return undefined;
-    return occupancyFromAdapterTurn(adapterContextOccupancy(meta.usage), session.adapterTurnCallUsed);
+    return this.usageHost.adapterTurnOccupancy(session, meta);
   }
 
-  /**
-   * Remember adapter occupancy and push it to the donut. Prompt size is the
-   * conversation; a later smaller prompt is not, unless a compact just armed
-   * a reset. Grok never enters here.
-   */
   private rememberAdapterContext(
     session: Session,
     event: Parameters<typeof persistSessionContext>[1],
   ): { used?: number; window?: number } | undefined {
-    if (!isAdapterProvider(session.provider)) return undefined;
-    const id = session.activeSessionId;
-    if (!id) return undefined;
-    const overrides = this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
-    const next = persistSessionContext(overrides[id] ?? {}, event);
-    void this.state.update(SESSION_META_KEY, { ...overrides, [id]: next });
-    const usage = persistedContextUsage(next);
-    if (usage) {
-      this.emit(session, {
-        type: "contextUsage",
-        used: usage.used,
-        ...(usage.window ? { window: usage.window } : {})
-      });
-    } else if (next.contextWindow) {
-      this.emit(session, { type: "contextUsage", window: next.contextWindow });
-    }
-    return { used: next.contextUsed, window: next.contextWindow };
+    return this.usageHost.rememberAdapterContext(session, event);
   }
 
-  /** Push the context size to the webview — chiefly the cold-restore source
-   *  before any turn has run. Grok reads signals.json; Claude/Codex read the
-   *  remembered prompt occupancy. Best-effort: no readable count, no message. */
   private emitContextUsage(session: Session): void {
-    const id = session.activeSessionId;
-    if (!id) return;
-    if (isAdapterProvider(session.provider)) {
-      const usage = persistedContextUsage(this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {})[id]);
-      if (usage) {
-        this.emit(session, {
-          type: "contextUsage",
-          used: usage.used,
-          ...(usage.window ? { window: usage.window } : {})
-        });
-      }
-      return;
-    }
-    const cwd = this.sessionCwd(session);
-    const usage = readContextUsage({ fs: defaultFs, grokHome: resolveGrokHome(process.env), cwd, id });
-    if (usage) this.emit(session, { type: "contextUsage", used: usage.used, window: usage.window });
+    return this.usageHost.emitContextUsage(session);
   }
 
-  private subscriptionUsageCaches?: Map<string, SubscriptionUsageCache>;
-
-  /**
-   * Account capacity (#159, upstream 084dedf, 48942e1). Grok answers on
-   * request, Claude pushes on a rate-limit event, Codex is read from its own
-   * rollout file. Keyed by an opaque digest of the credential context, so a
-   * different login never inherits another's numbers.
-   */
   private bindSubscriptionUsage(session: Session, env: NodeJS.ProcessEnv): void {
-    const provider = session.provider;
-    if (provider !== "grok" && provider !== "claude" && provider !== "codex") {
-      session.subscriptionUsage = undefined;
-      return;
-    }
-    const cwd = this.sessionCwd(session);
-    const key = subscriptionCredentialContext(provider, env);
-    const caches = this.subscriptionUsageCaches ??= new Map();
-    // Claude can log in through an opaque OS keychain: keep its observations
-    // process-local. Grok and Codex write their login to a file the key hashes.
-    let cache = provider === "claude" ? new SubscriptionUsageCache() : caches.get(key);
-    if (!cache) caches.set(key, cache = new SubscriptionUsageCache());
-    session.subscriptionUsage = new SubscriptionUsageBinding(cache, key, () =>
-      subscriptionCredentialContext(provider, provider === "grok"
-        ? { ...process.env, ...this.readDotEnv(cwd) } : process.env));
+    return this.usageHost.bindSubscriptionUsage(session, env);
   }
 
-  /** Free share of a provider's tightest known window, from any live binding. */
   private measuredFreePercent(provider: AcpProvider): number | undefined {
-    for (const session of new Set([this.focused, ...(this.pool ?? [])])) {
-      if (session?.provider !== provider || !session.subscriptionUsage) continue;
-      const free = freePercentFromWindows(session.subscriptionUsage.snapshot());
-      if (free !== undefined) return free;
-    }
-    return undefined;
+    return this.usageHost.measuredFreePercent(provider);
   }
 
   private invalidateSubscriptionUsage(provider: AcpProvider): void {
-    for (const [key, cache] of this.subscriptionUsageCaches ?? []) {
-      if (key.startsWith(`${provider}:`)) {
-        cache.invalidate();
-        this.subscriptionUsageCaches!.delete(key);
-      }
-    }
-    for (const session of new Set([this.focused, ...(this.pool ?? [])])) {
-      if (session?.provider !== provider || !session.subscriptionUsage) continue;
-      session.subscriptionUsage.invalidate();
-      this.publishSubscriptionUsage(session);
-    }
+    return this.usageHost.invalidateSubscriptionUsage(provider);
   }
 
   private publishSubscriptionUsage(session: Session): void {
-    this.emit(session, { type: "subscriptionUsage", windows: session.subscriptionUsage?.snapshot() ?? [] });
+    return this.usageHost.publishSubscriptionUsage(session);
   }
 
-  /** On session start and a real popover open, never on a timer: a billing
-   *  read re-arms a prompt's idle timer, so polling would hold a hung prompt. */
   private async refreshSubscriptionUsage(session: Session): Promise<void> {
-    const binding = session.subscriptionUsage;
-    const client = session.client;
-    this.publishSubscriptionUsage(session);
-    if (!binding) return;
-    if (session.provider === "codex") {
-      await binding.refresh(async () => readCodexSubscriptionWindows({ codexHome: resolveCodexHome(process.env) }));
-    } else if (session.provider === "grok") {
-      if (!client?.sessionId) return;
-      await binding.refresh(() => client.getSubscriptionUsage());
-    } else return;
-    if (session.client === client && session.subscriptionUsage === binding) this.publishSubscriptionUsage(session);
+    return this.usageHost.refreshSubscriptionUsage(session);
   }
 
-  /** Publish a control-plane session/info snapshot without touching accounting. */
   private emitSessionInfoContext(session: Session, info: SessionInfoContext): void {
-    session.lastSessionInfoAt = Date.now();
-    session.lastSessionInfoUsed = info.used;
-    session.sessionInfoStale = false;
-    this.emit(session, {
-      type: "contextUsage",
-      used: info.used,
-      window: info.window,
-      categories: info.categories,
-      systemPromptTokens: info.systemPromptTokens,
-      toolDefinitionsTokens: info.toolDefinitionsTokens,
-      toolDefinitionsCount: info.toolDefinitionsCount,
-      messageTokens: info.messageTokens,
-      freeTokens: info.freeTokens,
-      autoCompactThresholdPercent: info.autoCompactThresholdPercent,
-      compactionCount: info.compactionCount
-    });
-    if (info.autoCompactThresholdPercent !== undefined) session.compactThresholdReported = info.autoCompactThresholdPercent;
-    if (info.compactionCount !== undefined) session.compactionCount = info.compactionCount;
-    this.checkCompactThreshold(session, info.autoCompactThresholdPercent);
+    return this.usageHost.emitSessionInfoContext(session, info);
   }
 
-  /** K-02: the first snapshot of a Grok process tells whether the env was honoured. Never silent. */
   private checkCompactThreshold(session: Session, reported: number | undefined): void {
-    if (session.provider !== "grok" || session.compactThresholdChecked || reported === undefined) return;
-    session.compactThresholdChecked = true;
-    const desired = session.compactThresholdRequested;
-    if (!compactThresholdMismatch(desired, reported)) return;
-    const text = compactThresholdMismatchNotice(desired!, reported);
-    this.host.appendLine(`[context] ${text}`);
-    if (this.compactMismatchNoticeShown) return;
-    this.compactMismatchNoticeShown = true;
-    this.emit(session, { type: "hostNotice", level: "warning", text });
+    return this.usageHost.checkCompactThreshold(session, reported);
   }
 
-  /** K-04: a few points before the threshold, let the user decide instead of the CLI. */
   private maybeOfferNearFull(session: Session, used: number | undefined, window: number | undefined, threshold: number | undefined): void {
-    if (used === undefined || window === undefined) return;
-    const effective = threshold ?? session.compactThresholdReported;
-    if (session.provider === "muse") return;
-    let mode: "ask" | "off" = "ask";
-    try {
-      mode = this.host.getConfiguration("companions").get<string>("context.nearFullPrompt", "ask") === "off" ? "off" : "ask";
-    } catch { /* default */ }
-    if (!shouldOfferNearFull({ used, window, thresholdPercent: effective, armed: session.nearFullArmed, mode })) return;
-    // Live only: a session in the background keeps its prompt armed for later.
-    if (session !== this.focused) return;
-    session.nearFullArmed = false;
-    this.emit(session, {
-      type: "nearFullPrompt",
-      used,
-      window,
-      threshold: effective!,
-      canCompact: providerCapability(session.provider, "manualCompact").state !== "no"
-    });
+    return this.usageHost.maybeOfferNearFull(session, used, window, threshold);
   }
 
-  /**
-   * Read Grok's structured context meter. This is intentionally separate from
-   * the adapter usageLog/contextUsageFromLog seam: those entries reconstruct
-   * Claude/Codex occupancy and never describe Grok's live categories.
-   */
   private async refreshContextFromSessionInfo(
     session: Session,
     gen: number,
     opts: { force?: boolean } = {},
   ): Promise<boolean> {
-    if ((session.provider !== "grok" && session.provider !== "gemini") || gen !== session.gen || session.sessionInfoUnsupported) return false;
-    const client = session.client;
-    if (!client?.sessionId) return false;
-    if (!opts.force && !session.sessionInfoStale && sessionInfoCacheFresh(session.lastSessionInfoAt, Date.now())) {
-      return false;
-    }
-    try {
-      const info = await client.getSessionInfo();
-      if (gen !== session.gen) return false;
-      if (info === "unsupported") {
-        session.sessionInfoUnsupported = true;
-        return false;
-      }
-      this.emitSessionInfoContext(session, info);
-      return true;
-    } catch (error) {
-      this.host.appendLine(`[context] session/info failed: ${(error as Error).message}`);
-      return false;
-    }
+    return this.usageHost.refreshContextFromSessionInfo(session, gen, opts);
   }
 
-  /**
-   * Post-compact compatibility chain: live notification → session/info →
-   * legacy `/session-info`. The prompt fallback is only permitted after the
-   * RPC explicitly returned -32601; a transient RPC error must not manufacture
-   * a hidden model turn.
-   */
   private async refreshContextAfterCompact(client: AcpClient, session: Session, gen: number): Promise<void> {
-    if (await this.refreshContextFromSessionInfo(session, gen, { force: true })) return;
-    if (gen !== session.gen || !session.sessionInfoUnsupported) return;
-    if (!client.availableCommands.some((command) => command?.name === "session-info")) return;
-    // NOT while somebody else's turn is running.
-    //
-    // This is a real `session/prompt`, and a second prompt ends the active one.
-    // The compact path released its turn token before the RPC above, so another
-    // tab can have started a genuine turn during that await — and sending this
-    // would cancel it mid-work, silently, to refresh a context number. The
-    // guards further down run only after this returns and cannot undo it.
-    //
-    // Skipping costs a stale context reading until the next turn refreshes it.
-    // That is the cheaper of the two by a wide margin.
-    if (turnIsInFlight(session)) return;
-    session.suppressContent = true;
-    session.captureAgentText = "";
-    try {
-      await client.prompt("/session-info");
-      if (gen !== session.gen) return;
-      const info = parseSessionInfoContext(session.captureAgentText);
-      if (info) this.emit(session, { type: "contextUsage", used: info.used, window: info.window });
-    } catch (error) {
-      this.host.appendLine(`[compact] hidden /session-info failed: ${(error as Error).message}`);
-    } finally {
-      if (gen === session.gen) session.suppressContent = false;
-      session.captureAgentText = undefined;
-    }
+    return this.usageHost.refreshContextAfterCompact(client, session, gen);
   }
 
   /** Clear a session's unread badge (it's being opened/viewed) and refresh its dot. */

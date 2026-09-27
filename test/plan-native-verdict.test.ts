@@ -8,6 +8,7 @@ const reviewHost = readFileSync(new URL("../src/review-host.ts", import.meta.url
 const session = readFileSync(new URL("../src/session.ts", import.meta.url), "utf8");
 const primer = readFileSync(new URL("../src/grok-primer.ts", import.meta.url), "utf8");
 const acp = readFileSync(new URL("../src/acp.ts", import.meta.url), "utf8");
+const usageHost = readFileSync(new URL("../src/usage-host.ts", import.meta.url), "utf8");
 
 const start = providerSessionSrc.indexOf("  public handleExitPlan(");
 const end = providerSessionSrc.indexOf("  public queueInFlightPlanCommentsOnExit(", start);
@@ -201,7 +202,7 @@ describe("native plan verdict orchestration", () => {
   });
 
   it("persists the shared history-event coordinate for plans, permissions, and usage", () => {
-    expect(sidebar.match(/afterHistoryEvent: session\.historyEventCount/g)?.length).toBeGreaterThanOrEqual(3);
+    expect((sidebar + usageHost).match(/afterHistoryEvent: session\.historyEventCount/g)?.length).toBeGreaterThanOrEqual(3);
     expect(session).toContain("historyEventCount = 0");
   });
 

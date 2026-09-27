@@ -67,7 +67,7 @@ export interface UsageHostDeps {
 }
 
 export class UsageHost {
-  private subscriptionUsageCaches?: Map<string, SubscriptionUsageCache>;
+  public subscriptionUsageCaches?: Map<string, SubscriptionUsageCache>;
   public compactMismatchNoticeShown = false;
 
   constructor(private readonly deps: UsageHostDeps) {}
