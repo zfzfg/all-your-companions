@@ -8,6 +8,7 @@ import {
   type CliCompatibilityResult,
   ACT_MODE_ID,
 } from "./provider-session";
+import { VoiceAndMcp, type VoiceStreamContext } from "./voice-and-mcp";
 import { WebviewHtml } from "./webview-html";
 import { QuestionHost } from "./question-host";
 import { ReviewHost } from "./review-host";
@@ -33,7 +34,6 @@ import { Uri, disposeAll, shouldRehydrateOnWebviewReady } from "./host";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { spawn } from "node:child_process";
 import { AcpClient, EffortLevel, ExitPlanRequest, PermissionRequest, QuestionRequest } from "./acp";
 import type { AcpProvider } from "./acp-backend";
 import { isAdapterProvider, isAcpProvider } from "./acp-backend";
@@ -131,11 +131,20 @@ import {
   type QuestionResponder
 } from "./session";
 import { buildReapCandidates, selectReapable, computeDot, Dot } from "./session-pool";
-import { resolveVoiceKey, extractGrokAuthKey, parseVoiceCommand, buildSttKeyterms, voiceSettingForRepo, voiceSettingWriteTarget, sanitizeVoiceSendPhrase, sanitizeVoiceKeyterms, voiceConfiguredFingerprint, DEFAULT_SEND_PHRASE } from "./voice";
-import { VoiceRecorder, transcribeAudio, resolveWindowsAudioDevice } from "./voice-recorder";
+import {
+  resolveVoiceKey,
+  extractGrokAuthKey,
+  voiceSettingWriteTarget,
+  sanitizeVoiceSendPhrase,
+  sanitizeVoiceKeyterms,
+  pickSttBackend,
+  resolveOpenAiVoiceKey,
+  type SttBackend,
+  type SttPreference,
+  type VoiceBackendState
+} from "./voice";
+import { VoiceRecorder } from "./voice-recorder";
 import { VoiceStreamer } from "./voice-streamer";
-import { pickSttBackend, resolveOpenAiVoiceKey, SttBackend, SttPreference, VoiceBackendState, parseFinalVoiceCommand } from "./voice";
-import { OPENAI_STT_MODEL } from "./openai-voice";
 import { summarizeForSpeech } from "./speech-summary";
 import type { PromptResultMeta, PromptUsage, SessionInfoContext } from "./acp-dispatch";
 import { DEFAULT_COMPACT_THRESHOLD, GROK_COMPACT_ENV, compactEventKind, compactSummaryPreview, compactThresholdMismatch, compactThresholdMismatchNotice, grokCompactThresholdEnv, normalizeCompactThreshold, shouldOfferNearFull } from "./grok-compaction";
@@ -252,7 +261,6 @@ import {
   extFromMime,
   isImageChip,
   isImplicitChip,
-  isVisionImagePath,
   isVisionMime,
   makeExplicitChip,
   makeImageChip,
@@ -336,7 +344,7 @@ import {
   shouldShowAlwaysApproveNotice
 } from "./grok-config";
 import { sessionScopedRoots } from "./auth-roots";
-import { fileUriToPath, parseFileRef, shouldReadFileInline } from "./file-ref";
+import { parseFileRef } from "./file-ref";
 import {
   retainedUploadDirectories,
   stagedUploadDirectory,
@@ -415,16 +423,10 @@ import {
 } from "./companion-subagents";
 import { listEligibleTargets, resolveTarget, type EligibilityInput, type EligibilityResult, type RefusalCode, type RosterEntry, type SpawnLimits } from "./target-eligibility";
 import {
-  base64DecodedByteLength,
-  isTrustedCodexGeneratedImagePath,
   isTrustedGeneratedMediaPath,
-  MAX_INLINE_MEDIA_BYTES,
   resolveChatOpenFilePath
 } from "./media-serve";
 import {
-  describeFfmpegProblem,
-  ffmpegInstallHint,
-  resolveConfiguredFfmpeg,
   type FfmpegResolution
 } from "./ffmpeg-locate";
 import {
@@ -468,44 +470,15 @@ import {
   parseAppPurpose,
   type AppPurpose
 } from "./app-purpose";
-import { MCP_GLOBAL_SCOPE_WARNING, mergeMcpNotification, parseMcpListResponse, mcpSettingsServersForCwd, type McpServerView } from "./mcp";
-import {
-  MCP_CONNECTORS_KEY,
-  MAX_CONNECTOR_KEY_CHARS,
-  TIER1_CONNECTORS,
-  bearerAuthorizationHeader,
-  collectMcpNameFiles,
-  collectMcpNameLayers,
-  collectReservedMcpIdentity,
-  connectConnector,
-  connectorById,
-  connectorViews,
-  disconnectConnector,
-  hostMcpServers,
-  isConnectorId,
-  isKeyConnector,
-  mcpConfigLayer,
-  mcpConfigPaths,
-  mcpConnectorSecretKey,
-  mcpRemoteArgs,
-  mergeReserved,
-  parseConnectedConnectorStore,
-  reservedFromMcpInventory,
-  withAuthHeaderEnv,
-  type ConnectedConnectorStore,
-  type ConnectorDef,
-  type ConnectorId,
-  type ReservedMcpIdentity,
-  type AcpMcpStdioServer
+import { type McpServerView } from "./mcp";
+import type {
+  ConnectedConnectorStore,
+  ConnectorDef,
+  ConnectorId,
+  ReservedMcpIdentity,
+  AcpMcpStdioServer
 } from "./mcp-connectors";
 import { AskUserServer } from "./ask-user-server";
-import {
-  authorizeMcpRemote,
-  connectorsLackingOAuthToken,
-  npxSpawnPlan,
-  persistConnectorOAuthClientMetadata,
-  writeOAuthClientMetadataFile
-} from "./mcp-connector-auth";
 
 // HostMsg (host -> webview) and WebviewMsg (webview -> host) both live in
 // src/protocol.ts now — the single source of truth for the message contract,
@@ -653,20 +626,6 @@ class GrokDiffContentProvider implements HostTextDocumentContentProvider {
   }
   delete(...uris: Uri[]): void {
     for (const uri of uris) this.contents.delete(uri.toString());
-  }
-}
-
-/**
- * What a path is, without throwing. Distinguishing "file" from "dir" is the
- * point: pointing grok.ffmpegPath at a directory fails with EACCES rather than
- * ENOENT, which reads as a permissions problem and is not one.
- */
-function statKindSafe(p: string): "file" | "dir" | "none" {
-  try {
-    const st = fs.statSync(p);
-    return st.isFile() ? "file" : st.isDirectory() ? "dir" : "none";
-  } catch {
-    return "none";
   }
 }
 
@@ -823,29 +782,30 @@ export class GrokSidebar {
   }>();
   private editorWatcher?: HostDisposable;
   private terminalManager = new TerminalManager();
-  private voiceRecorder = new VoiceRecorder();
-  private voiceTempPath?: string;
-  private voiceBatchCtx?: { backend: SttBackend; key: string };
-  private voiceStreamer?: VoiceStreamer;
-  private voiceStoppingStreamer?: VoiceStreamer;
-  private voiceFinalizing = false;
-  /** Invalidates async voice callbacks after a manual discard or session swap. */
-  private voiceGeneration = 0;
-  // Stored so a "grok send" can transparently restart a fresh stream (each
-  // message = one clean utterance) without re-resolving the mic device.
-  private voiceStreamCtx?: {
-    key: string;
-    backend: SttBackend;
-    model: string;
-    ffmpegPath: string;
-    device?: string;
-    phrase: string;
-    keyterms: string[];
-    language?: string;
-    generation: number;
-  };
-  private localVoiceCwd?: string;
-  private localVoiceCredentialCwd?: string;
+  get voiceRecorder(): VoiceRecorder { return this.voiceAndMcp.voiceRecorder; }
+  set voiceRecorder(v: VoiceRecorder) { this.voiceAndMcp.voiceRecorder = v; }
+  get voiceTempPath(): string | undefined { return this.voiceAndMcp.voiceTempPath; }
+  set voiceTempPath(v: string | undefined) { this.voiceAndMcp.voiceTempPath = v; }
+  get voiceBatchCtx(): { backend: SttBackend; key: string } | undefined { return this.voiceAndMcp.voiceBatchCtx; }
+  set voiceBatchCtx(v: { backend: SttBackend; key: string } | undefined) { this.voiceAndMcp.voiceBatchCtx = v; }
+  get voiceStreamer(): VoiceStreamer | undefined { return this.voiceAndMcp.voiceStreamer; }
+  set voiceStreamer(v: VoiceStreamer | undefined) { this.voiceAndMcp.voiceStreamer = v; }
+  get voiceStoppingStreamer(): VoiceStreamer | undefined { return this.voiceAndMcp.voiceStoppingStreamer; }
+  set voiceStoppingStreamer(v: VoiceStreamer | undefined) { this.voiceAndMcp.voiceStoppingStreamer = v; }
+  get voiceFinalizing(): boolean { return this.voiceAndMcp.voiceFinalizing; }
+  set voiceFinalizing(v: boolean) { this.voiceAndMcp.voiceFinalizing = v; }
+  get voiceGeneration(): number { return this.voiceAndMcp.voiceGeneration; }
+  set voiceGeneration(v: number) { this.voiceAndMcp.voiceGeneration = v; }
+  get voiceStreamCtx(): VoiceStreamContext | undefined { return this.voiceAndMcp.voiceStreamCtx; }
+  set voiceStreamCtx(v: VoiceStreamContext | undefined) { this.voiceAndMcp.voiceStreamCtx = v; }
+  get localVoiceCwd(): string | undefined { return this.voiceAndMcp.localVoiceCwd; }
+  set localVoiceCwd(v: string | undefined) { this.voiceAndMcp.localVoiceCwd = v; }
+  get localVoiceCredentialCwd(): string | undefined { return this.voiceAndMcp.localVoiceCredentialCwd; }
+  set localVoiceCredentialCwd(v: string | undefined) { this.voiceAndMcp.localVoiceCredentialCwd = v; }
+  get lastVoiceConfiguredByCwd(): Map<string, boolean> { return this.voiceAndMcp.lastVoiceConfiguredByCwd; }
+  set lastVoiceConfiguredByCwd(v: Map<string, boolean>) { this.voiceAndMcp.lastVoiceConfiguredByCwd = v; }
+  get lastPostedVoiceConfigured(): Map<string, string> { return this.voiceAndMcp.lastPostedVoiceConfigured; }
+  set lastPostedVoiceConfigured(v: Map<string, string>) { this.voiceAndMcp.lastPostedVoiceConfigured = v; }
   private configWatcher?: HostDisposable;
   /** Cold session/load claims the persisted id before ACP has emitted `session`. */
   private readonly sessionLoadReservations = new Map<string, SessionLoadReservation>();
@@ -890,21 +850,6 @@ export class GrokSidebar {
   set providerRefreshInFlight(v: boolean) { this.providerSetup.providerRefreshInFlight = v; }
   get loginReprobeTimers(): Map<AcpProvider, NodeJS.Timeout> { return this.providerSetup.loginReprobeTimers; }
   set loginReprobeTimers(v: Map<AcpProvider, NodeJS.Timeout>) { this.providerSetup.loginReprobeTimers = v; }
-  /** Last `postVoiceConfigured` result per normalized cwd. Same send-path
-   *  rule: a cwd with no entry is unknown and the field is omitted, never
-   *  coerced to false. Rebuilt on each refresh so removed keys cannot serve
-   *  stale `true` forever. */
-  private lastVoiceConfiguredByCwd = new Map<string, boolean>();
-  /**
-   * Last posted `voiceConfigured` fingerprint per destination (`local` or
-   * `remote:<clientId>`). The auth.json watcher matches a null filename, so
-   * every grok write under `~/.grok` used to fan identical frames to every
-   * phone. Writers seed or invalidate: snapshot and credential-failure seed
-   * so a skipped watcher post cannot starve a fresh tab or swallow a later
-   * genuine change; a replaced renderer drops its entry (`forgetPostedVoiceConfigured`)
-   * because the new JS state starts unconfigured.
-   */
-  private lastPostedVoiceConfigured = new Map<string, string>();
   /** VS Code settings tab. Desktop/remote keep the in-page overlay. */
   private settingsEditor?: HostEditorWebview;
   private static readonly SETTINGS_PANEL_TYPES = new Set<WebviewMsg["type"]>([
@@ -985,27 +930,25 @@ export class GrokSidebar {
   ]);
   /** Last `gh api user` snapshot. Refreshed after connect / sign-out. */
   private githubConnection?: GithubAuthState;
-  /** Complete Grok inventory from the last `_x.ai/mcp/list`. Unfiltered — `hostMcpServers` dedup still needs project servers. */
-  private mcpServers: McpServerView[] = [];
-  /**
-   * Workspace the current `mcpServers` was read from. Classification uses this
-   * at read time only; the stored global-only view is then rendered anywhere.
-   */
-  private mcpServersCwd: string | undefined;
-  /**
-   * Global-only tagged view of the last catalog read. Project-file rows were
-   * filtered against `mcpServersCwd`; this is safe to render for any workspace.
-   */
-  private mcpServersView: McpServerView[] = [];
-  private mcpListSupported: boolean | undefined;
-  private grokMcpReserved: ReservedMcpIdentity = { names: [], urls: [] };
-  private mcpConnectingId: ConnectorId | undefined;
-  private mcpConnectError: { id: ConnectorId; message: string } | undefined;
-  /** In-memory PAT cache for key-auth connectors. Never written to PersistedState. */
-  private readonly mcpConnectorKeys = new Map<string, string>();
+  get mcpServers(): McpServerView[] { return this.voiceAndMcp.mcpServers; }
+  set mcpServers(v: McpServerView[]) { this.voiceAndMcp.mcpServers = v; }
+  get mcpServersCwd(): string | undefined { return this.voiceAndMcp.mcpServersCwd; }
+  set mcpServersCwd(v: string | undefined) { this.voiceAndMcp.mcpServersCwd = v; }
+  get mcpServersView(): McpServerView[] { return this.voiceAndMcp.mcpServersView; }
+  set mcpServersView(v: McpServerView[]) { this.voiceAndMcp.mcpServersView = v; }
+  get mcpListSupported(): boolean | undefined { return this.voiceAndMcp.mcpListSupported; }
+  set mcpListSupported(v: boolean | undefined) { this.voiceAndMcp.mcpListSupported = v; }
+  get grokMcpReserved(): ReservedMcpIdentity { return this.voiceAndMcp.grokMcpReserved; }
+  set grokMcpReserved(v: ReservedMcpIdentity) { this.voiceAndMcp.grokMcpReserved = v; }
+  get mcpConnectingId(): ConnectorId | undefined { return this.voiceAndMcp.mcpConnectingId; }
+  set mcpConnectingId(v: ConnectorId | undefined) { this.voiceAndMcp.mcpConnectingId = v; }
+  get mcpConnectError(): { id: ConnectorId; message: string } | undefined { return this.voiceAndMcp.mcpConnectError; }
+  set mcpConnectError(v: { id: ConnectorId; message: string } | undefined) { this.voiceAndMcp.mcpConnectError = v; }
+  get mcpConnectorKeys(): Map<string, string> { return this.voiceAndMcp.mcpConnectorKeys as Map<string, string>; }
+  set mcpConnectorKeys(v: Map<string, string>) { this.voiceAndMcp.mcpConnectorKeys = v as Map<ConnectorId, string>; }
+  get grokSessionForMcpListInFlight(): Promise<Session | undefined> | undefined { return this.voiceAndMcp.grokSessionForMcpListInFlight; }
+  set grokSessionForMcpListInFlight(v: Promise<Session | undefined> | undefined) { this.voiceAndMcp.grokSessionForMcpListInFlight = v; }
   private readonly mcpConnectorKeysReady: Promise<void>;
-  /** Overlapping Connectors reads share one lazy Grok start. */
-  private grokSessionForMcpListInFlight: Promise<Session | undefined> | undefined;
   private grokVersionProbe?: Promise<string>;
   private codexVersionProbe?: Promise<string>;
   private claudeVersionProbe?: Promise<string>;
@@ -1104,6 +1047,7 @@ export class GrokSidebar {
   private _turnEdit?: TurnEdit;
   private _agentAuthoring?: AgentAuthoring;
   private _providerSession?: ProviderSession;
+  private _voiceAndMcp?: VoiceAndMcp;
 
   /** Real instances set these in the constructor. Prototype stubs used by tests
    *  never run it, so the first delegating call builds the collaborator. */
@@ -1143,6 +1087,60 @@ export class GrokSidebar {
     return this._providerSession ??= this.createProviderSession();
   }
   set providerSession(value: ProviderSession) { this._providerSession = value; }
+  get voiceAndMcp(): VoiceAndMcp {
+    return this._voiceAndMcp ??= this.createVoiceAndMcp();
+  }
+  set voiceAndMcp(value: VoiceAndMcp) { this._voiceAndMcp = value; }
+
+  private createVoiceAndMcp(): VoiceAndMcp {
+    const self = this;
+    return new VoiceAndMcp({
+      get host() { return self.host; },
+      get state() { return self.state; },
+      get context() {
+        return {
+          secrets: self.context?.secrets ?? {
+            get: async () => undefined,
+            store: async () => {},
+            delete: async () => {},
+          },
+          globalStorageUri: self.context?.globalStorageUri ?? { fsPath: "" },
+        };
+      },
+      getFocused: () => self.focused,
+      getPool: () => self.pool,
+      getOverride: (name: string) => self.sidebarTestOverride(name),
+      voiceOps: {
+        sessionCwd: (session) => self.sessionCwd(session),
+        workspaceRoot: () => self.workspaceRoot(),
+        defaultProviderForProject: (cwd) => self.defaultProviderForProject(cwd),
+        resolveSttApiKey: (cwd, backend) => self.resolveSttApiKey(cwd, backend),
+        voiceBackendState: (cwd, provider) => self.voiceBackendState(cwd, provider),
+        openSettingsEditor: (tab) => self.openSettingsEditor(tab),
+        postLocal: (msg) => self.postLocal(msg),
+        post: (msg) => self.post(msg),
+      },
+      mcpOps: {
+        connectedProviders: () => self.connectedProviders(),
+        newLocalSession: () => self.newLocalSession(),
+        setSessionCwd: (session, cwd, root) => self.setSessionCwd(session, cwd, root ?? self.workspaceRoot()),
+        startSession: (id, target, mode) => self.startSession(id, target, mode),
+        askUserMcpServer: (session) => self.askUserMcpServer(session),
+        companionsMcpServer: (session) => self.companionsMcpServer(session),
+        noteCompanionsSkip: (session, reason) => self.noteCompanionsSkip(session, reason),
+        postWelcomeTips: () => self.postWelcomeTips(),
+        getSettingsWebview: () => self.settingsEditor?.webview,
+      },
+      mediaOps: {
+        emit: (session, msg) => self.emit(session, msg),
+        getViewWebview: () => self.view?.webview,
+        isImagePathAuthorizedNow: (path, session) => self.isImagePathAuthorizedNow(path, session),
+        registerFullImage: (path) => self.registerFullImage(path),
+        importImageFromDisk: (path, owner) => self.importImageFromDisk(path, owner),
+        postChips: (session) => self.postChips(session),
+      },
+    });
+  }
 
   private createProviderSession(): ProviderSession {
     const self = this;
@@ -1509,6 +1507,7 @@ export class GrokSidebar {
       (line) => this.host.appendLine(line),
     );
     this._providerSession = this.createProviderSession();
+    this._voiceAndMcp = this.createVoiceAndMcp();
     this.providerConnectionState = this.migrateProviderConnections();
     this.focused.provider = this.defaultProviderForProject(this.workspaceRoot());
     context.subscriptions.push(
@@ -6586,149 +6585,15 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
    * Best-effort: a failure just drops the media rather than breaking the turn.
    */
   private async postGeneratedMedia(m: MediaRef, session: Session, gen: number): Promise<void> {
-    try {
-      if (m.kind === "data") {
-        // Same 8 MiB bound as the file-path fallback — ACP inline blocks used
-        // to bypass it and could still balloon the DOM / relay.
-        const decoded = base64DecodedByteLength(m.data);
-        if (decoded > MAX_INLINE_MEDIA_BYTES) {
-          this.host.appendLine(
-            `[media] refused oversized inline media (${decoded} > ${MAX_INLINE_MEDIA_BYTES})`,
-          );
-          return;
-        }
-        this.emit(session, { type: "media", media: m.media, src: `data:${m.mimeType};base64,${m.data}` });
-        return;
-      }
-      if (m.kind === "uri") {
-        this.emit(session, { type: "media", media: m.media, url: m.uri });
-        return;
-      }
-      // Provenance is mandatory before either serving or reading. In particular,
-      // a failed Codex generated_images containment check must never fall through
-      // to the data-URI branch and deliver arbitrary bytes to a remote.
-      if (!this.isServableFromDisk(m.path, session.provider)) {
-        this.host.appendLine(`[media] refused generated media path outside its trusted root`);
-        return;
-      }
-      const mime = m.mimeType || guessMediaMime(m.path);
-      // Trusted session media: stream from disk when the webview can.
-      const webview = this.view?.webview;
-      if (webview) {
-        const src = webview.asWebviewUri(Uri.file(m.path));
-        // Copy image needs pixels; mint a handle through the same predicate
-        // the fetch will ask, or the button would enable and then fail.
-        const fullId = m.media === "image" && m.path && this.isImagePathAuthorizedNow(m.path, session)
-          ? this.registerFullImage(m.path)
-          : undefined;
-        this.emit(session, { type: "media", media: m.media, src, mimeType: mime, path: m.path, fullId });
-        return;
-      }
-      // The path passed canonical containment but this surface has no served
-      // webview root. Inline only that trusted file, with the ordinary size cap.
-      const bytes = await this.host.fs.readFile(Uri.file(m.path));
-      if (gen !== session.gen) return;
-      if (bytes.byteLength > MAX_INLINE_MEDIA_BYTES) {
-        this.host.appendLine(
-          `[media] refused oversized media for data: inline (${bytes.byteLength} > ${MAX_INLINE_MEDIA_BYTES}): ${m.path}`,
-        );
-        return;
-      }
-      const b64 = Buffer.from(bytes).toString("base64");
-      this.emit(session, { type: "media", media: m.media, src: `data:${mime};base64,${b64}`, path: m.path });
-    } catch (e) {
-      this.host.appendLine(`[media] failed to forward generated media: ${(e as Error).message}`);
-    }
+    return this.voiceAndMcp.postGeneratedMedia(m, session, gen);
   }
 
-  /**
-   * True when `p` is trusted generated media under the Grok home: realpath
-   * stays inside `~/.grok` and the path matches sessions/…/images|videos/.
-   * Lexical-only checks would let a symlink escape and still pass.
-   */
   private isServableFromDisk(p: string, provider: AcpProvider = "grok"): boolean {
-    try {
-      if (provider === "codex") {
-        return isTrustedCodexGeneratedImagePath(
-          p,
-          resolveCodexHome(process.env),
-          (candidate) => fs.realpathSync(candidate),
-        );
-      }
-      const home = resolveGrokHome();
-      return isTrustedGeneratedMediaPath(p, home, (candidate) => fs.realpathSync(candidate));
-    } catch {
-      return false;
-    }
+    return this.voiceAndMcp.isServableFromDisk(p, provider);
   }
 
-  /**
-   * Save or open a math/diagram export from the webview. "open" writes the WYSIWYG
-   * PNG into extension storage and opens it in VS Code's image preview. "download"
-   * offers a quick-pick — PNG (VS Code theme background) or a transparent SVG tuned
-   * for a dark or light background — then a save dialog. The webview pre-renders all
-   * variants (the SVG light/dark differ: math recolors, mermaid re-themes).
-   */
-  private async exportExpr(msg: {
-    action: string;
-    kind: string;
-    current?: string;
-    svg?: string;
-    png?: string;
-    svgDark?: string;
-    svgLight?: string;
-  }, session: Session): Promise<void> {
-    try {
-      const base = msg.kind === "mermaid" ? "diagram" : "equation";
-      const toBytes = (png?: string) =>
-        png ? Buffer.from(png.split(",")[1] ?? "", "base64") : null;
-
-      if (msg.action === "open") {
-        const pngBytes = toBytes(msg.png);
-        // Node fs against globalStorage's fsPath — same as v3.1.0 (extension host
-        // sees the remote disk when running remotely).
-        const dir = path.join(this.context.globalStorageUri.fsPath, "exports");
-        fs.mkdirSync(dir, { recursive: true });
-        const stamp = Date.now();
-        const file = path.join(dir, `${base}-${stamp}.${pngBytes ? "png" : "svg"}`);
-        fs.writeFileSync(file, pngBytes ?? (msg.svg ?? ""), pngBytes ? undefined : "utf8");
-        // Host-created path under globalStorage — not a renderer-supplied path.
-        await this.host.openHostResolvedPath(file);
-        return;
-      }
-
-      // download: let the user pick the format/variant (two SVG variants share the
-      // .svg extension, so a save-dialog filter can't distinguish them — quick-pick).
-      const mark = (which: string) => (msg.current === which ? "  (current theme)" : "");
-      const items = [
-        { label: "PNG", description: "raster, VS Code theme background", fmt: "png" },
-        { label: `SVG — for dark background${mark("dark")}`, description: "transparent, light ink", fmt: "svgDark" },
-        { label: `SVG — for light background${mark("light")}`, description: "transparent, dark ink", fmt: "svgLight" },
-      ];
-      const pick = await this.host.showQuickPick(items, {
-        placeHolder: `Export ${base} as…`
-      });
-      if (!pick) return;
-
-      const ext = pick.fmt === "png" ? "png" : "svg";
-      const defaultName = `${base}.${ext}`;
-      const defaultPath = path.join(this.sessionCwd(session), defaultName);
-      const filters: Record<string, string[]> =
-        ext === "png" ? { "PNG image": ["png"] } : { "SVG image": ["svg"] };
-      const target = await this.host.showSaveDialog({ defaultPath, filters });
-      if (!target) return;
-
-      if (pick.fmt === "png") {
-        const pngBytes = toBytes(msg.png);
-        fs.writeFileSync(target, pngBytes ?? Buffer.from(msg.svgDark ?? "", "utf8"));
-      } else {
-        const svg = pick.fmt === "svgDark" ? msg.svgDark : msg.svgLight;
-        fs.writeFileSync(target, svg ?? "", "utf8");
-      }
-    } catch (e) {
-      this.host.appendLine(`[export] failed: ${(e as Error).message}`);
-      void this.host.showErrorMessage(`Export failed: ${(e as Error).message}`);
-    }
+  private async exportExpr(msg: Parameters<VoiceAndMcp["exportExpr"]>[0], session: Session): Promise<void> {
+    return this.voiceAndMcp.exportExpr(msg, session);
   }
 
   /**
@@ -10269,269 +10134,62 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     await this.refreshRuleFiles(session);
   }
 
-  /**
-   * Merge a live MCP notification into reserved identity first so dedup does
-   * not wait on a catalog read, then into the stored inventory only when there
-   * is no catalog yet or the notifying session is that catalog's source.
-   */
   private applyMcpNotification(session: Session, method: string, params: unknown): void {
-    if (this.mcpListSupported === false) return;
-    const next = mergeMcpNotification(this.mcpServers, method, params);
-    this.grokMcpReserved = reservedFromMcpInventory(next, this.connectedConnectorStore());
-    if (this.mcpServersCwd && !pathsEqual(this.sessionCwd(session), this.mcpServersCwd)) return;
-    this.mcpServers = next;
-    this.mcpServersView = this.filterMcpServers(this.mcpServers);
-    if (this.mcpListSupported === true) {
-      this.postMcpServers({
-        type: "mcpServers",
-        servers: this.mcpServersView,
-        warning: MCP_GLOBAL_SCOPE_WARNING
-      });
-    }
+    this.voiceAndMcp.applyMcpNotification(session, method, params);
   }
 
   private postMcpServers(message: Extract<HostMsg, { type: "mcpServers" }>): void {
-    const view = {
-      ...message,
-      servers: this.mcpServersView
-    };
-    this.post(view);
-    void this.settingsEditor?.webview.postMessage(view);
+    this.voiceAndMcp.postMcpServers(message);
   }
 
   private connectedConnectorStore(): ConnectedConnectorStore {
-    return parseConnectedConnectorStore(this.state.get(MCP_CONNECTORS_KEY, {}));
+    return this.voiceAndMcp.connectedConnectorStore();
   }
 
   private mcpConnectorsMessage(): Extract<HostMsg, { type: "mcpConnectors" }> {
-    const store = this.connectedConnectorStore();
-    return {
-      type: "mcpConnectors",
-      connectors: connectorViews(store, {
-        connectingId: this.mcpConnectingId,
-        errorId: this.mcpConnectError?.id,
-        error: this.mcpConnectError?.message,
-        keySet: new Set((this.mcpConnectorKeys ?? new Map()).keys()),
-        lapsed: this.lapsedOAuthConnectors(store)
-      })
-    };
+    return this.voiceAndMcp.mcpConnectorsMessage();
   }
 
   private postMcpConnectors(): void {
-    const message = this.mcpConnectorsMessage();
-    this.post(message);
-    void this.settingsEditor?.webview.postMessage(message);
-    // Same reasoning as postRoutines: the connector count feeds the tip pool and
-    // has just changed. This is also the initial-state call site, so a fresh
-    // webview gets its first tip frame here without a separate trigger.
-    this.postWelcomeTips();
+    this.voiceAndMcp.postMcpConnectors();
   }
 
   private mcpNameCatalogFor(cwd: string): {
     nameLayer: Map<string, "project" | "user">;
     nameFile: Map<string, string>;
   } {
-    // `this.mcpServers` is Grok's inventory (`refreshMcpServers` only reads
-    // it through a Grok session). Classify against Grok's config files even
-    // when the focused conversation is Codex or Claude — otherwise project
-    // `.mcp.json` / `.grok/config.toml` are skipped and those rows fall
-    // through as user-level and appear on a page that is grok.com + user
-    // config only. The cwd is the catalog's source workspace, never the
-    // receiving/focused session's.
-    const opts = {
-      cwd,
-      provider: "grok" as const,
-      grokHome: resolveGrokHome(process.env),
-      userHome: process.env.USERPROFILE || process.env.HOME || os.homedir()
-    };
-    const files: { layer: "project" | "user"; path: string; names: string[] }[] = [];
-    for (const filePath of mcpConfigPaths(opts)) {
-      try {
-        if (!fs.existsSync(filePath)) continue;
-        files.push({
-          layer: mcpConfigLayer(filePath, opts),
-          path: filePath,
-          names: collectReservedMcpIdentity(fs.readFileSync(filePath, "utf8")).names
-        });
-      } catch {
-        // Unreadable configs must not block the inventory page.
-      }
-    }
-    return {
-      nameLayer: collectMcpNameLayers(files),
-      nameFile: collectMcpNameFiles(files)
-    };
+    return this.voiceAndMcp.mcpNameCatalogFor(cwd);
   }
 
   private filterMcpServers(servers: readonly McpServerView[] = this.mcpServers): McpServerView[] {
-    return mcpSettingsServersForCwd({
-      servers,
-      catalogCwd: this.mcpServersCwd,
-      nameCatalogFor: (cwd) => this.mcpNameCatalogFor(cwd)
-    });
+    return this.voiceAndMcp.filterMcpServers(servers);
   }
 
-  private reservedMcpIdentityFor(session: Session): ReservedMcpIdentity {
-    const cwd = this.sessionCwd(session);
-    const parts: ReservedMcpIdentity[] = [];
-    for (const filePath of mcpConfigPaths({
-      cwd,
-      provider: session.provider,
-      grokHome: resolveGrokHome(process.env),
-      userHome: process.env.USERPROFILE || process.env.HOME || os.homedir()
-    })) {
-      try {
-        if (!fs.existsSync(filePath)) continue;
-        parts.push(collectReservedMcpIdentity(fs.readFileSync(filePath, "utf8")));
-      } catch {
-        // Unreadable configs must not block session/new.
-      }
-    }
-    if (session.provider === "grok") parts.push(this.grokMcpReserved);
-    return mergeReserved(...parts);
+  private reservedMcpIdentityFor(session: Session = this.focused): ReservedMcpIdentity {
+    return this.voiceAndMcp.reservedMcpIdentityFor(session);
   }
 
-  private async hostMcpServersFor(session: Session) {
-    // Shared record is refreshSync'd from disk; the PAT cache is not. Re-read
-    // this host's own HostSecrets, then take the disk-fresh record. The
-    // secret does not travel.
-    await this.loadMcpConnectorKeys();
-    const store = this.connectedConnectorStore();
-    const keyAuth: Record<string, string> = {};
-    for (const [id, token] of this.mcpConnectorKeys ?? []) {
-      if (store[id]) keyAuth[id] = token;
-    }
-    const servers = hostMcpServers(
-      store,
-      this.reservedMcpIdentityFor(session),
-      persistConnectorOAuthClientMetadata(store),
-      keyAuth,
-      this.lapsedOAuthConnectors(store),
-    );
-    // AP-05. Appended here rather than inside hostMcpServers because that
-    // function is pure and this one owns a live pipe.
-    //
-    // Nothing about this may keep a session from starting: `mcpServers` is
-    // resolved inside `session/new`, so a throw here would surface as a session
-    // that never opens. A pipe that cannot bind — a locked-down machine, an
-    // unwritable tmpdir, a host with no extension root — costs this session its
-    // question cards and nothing else.
-    try {
-      const askUser = await this.askUserMcpServer(session);
-      if (askUser) servers.push(askUser);
-    } catch (error) {
-      this.host.appendLine(`[ask_user] not offering the question tool: ${(error as Error).message}`);
-    }
-    // AP-16, and guarded for the same reason as AP-05 above: `mcpServers` is
-    // resolved inside `session/new`, so a throw here would surface as a session
-    // that never opens. A pipe that cannot bind costs this session its
-    // delegation tools and nothing else (§6.4.1).
-    try {
-      const companions = await this.companionsMcpServer(session);
-      if (companions) servers.push(companions);
-    } catch (error) {
-      this.host.appendLine(`[companions] not offering delegation: ${(error as Error).message}`);
-      if (!session.companionsMcpInjected) this.noteCompanionsSkip(session, "pipe-failed");
-    }
-    return servers;
+  private async hostMcpServersFor(session: Session): Promise<any[]> {
+    return this.voiceAndMcp.hostMcpServersFor(session);
   }
 
-  /**
-   * Connectors we withhold from `session/new` because their token is gone.
-   *
-   * Read fresh rather than cached: a person can finish a sign-in in the browser
-   * between two sessions, and a cached "lapsed" would keep the connector off
-   * until the window was reloaded. It is one readdir and a few existsSync calls.
-   */
   private lapsedOAuthConnectors(store = this.connectedConnectorStore()): ReadonlySet<string> {
-    return connectorsLackingOAuthToken({ store });
+    return this.voiceAndMcp.lapsedOAuthConnectors(store);
   }
 
   private async loadMcpConnectorKeys(): Promise<void> {
-    for (const connector of TIER1_CONNECTORS) {
-      if (!isKeyConnector(connector)) continue;
-      try {
-        const value = await this.context.secrets.get(mcpConnectorSecretKey(connector.id));
-        const trimmed = typeof value === "string" ? value.trim() : "";
-        if (trimmed) this.mcpConnectorKeys.set(connector.id, trimmed);
-        else this.mcpConnectorKeys.delete(connector.id);
-      } catch (error) {
-        this.host.appendLine(`[mcp] could not read ${connector.id} connector key: ${(error as Error).message}`);
-      }
-    }
-    this.postMcpConnectors();
+    return this.voiceAndMcp.loadMcpConnectorKeys();
   }
 
   private async forgetConnectorKey(id: ConnectorId): Promise<void> {
-    this.mcpConnectorKeys.delete(id);
-    try {
-      await this.context.secrets.delete(mcpConnectorSecretKey(id));
-    } catch (error) {
-      this.host.appendLine(`[mcp] could not delete ${id} connector key: ${(error as Error).message}`);
-    }
+    return this.voiceAndMcp.forgetConnectorKey(id);
   }
 
   private async connectMcpConnector(
     id: string,
     opts: { key?: string; readOnly?: boolean } = {},
   ): Promise<void> {
-    if (!isConnectorId(id)) return;
-    if (this.mcpConnectingId) {
-      this.mcpConnectError = {
-        id,
-        message: this.mcpConnectingId === id
-          ? "Sign-in is already in progress. Finish the browser prompt, or wait for it to time out."
-          : `Already connecting ${this.mcpConnectingId}. Wait for that to finish.`
-      };
-      this.postMcpConnectors();
-      return;
-    }
-    const connector = connectorById(id);
-    if (!connector) return;
-    const store = this.connectedConnectorStore();
-    const endpoint = store[id]?.endpoint || connector.endpoint;
-    if (isKeyConnector(connector)) {
-      await this.connectKeyMcpConnector(connector, endpoint, opts);
-      return;
-    }
-    this.mcpConnectingId = id;
-    this.mcpConnectError = undefined;
-    this.postMcpConnectors();
-    const npx = npxSpawnPlan(process.platform);
-    let metadata: { path: string; dispose: () => void } | undefined;
-    try {
-      if (connector.oauthScope?.trim()) {
-        metadata = writeOAuthClientMetadataFile(connector.oauthScope.trim());
-      }
-      const result = await authorizeMcpRemote({
-        spawn,
-        command: npx.command,
-        args: mcpRemoteArgs(endpoint, undefined, metadata?.path),
-        shell: npx.shell,
-        env: npx.env
-      });
-      if (this.mcpConnectingId !== id) return;
-      if (!result.ok) {
-        this.mcpConnectError = { id, message: result.message };
-        return;
-      }
-      // Re-read rather than writing the pre-await snapshot. The browser flow
-      // takes as long as the user takes, other rows stay actionable throughout,
-      // and `store` was captured before it began — so a Disconnect during
-      // sign-in would be undone by this write, silently handing every later
-      // agent a connector the user had explicitly removed.
-      await this.state.update(
-        MCP_CONNECTORS_KEY,
-        connectConnector(this.connectedConnectorStore(), id, endpoint),
-      );
-      this.mcpConnectError = undefined;
-    } catch (error) {
-      this.mcpConnectError = { id, message: (error as Error).message || "Could not connect." };
-    } finally {
-      try { metadata?.dispose(); } catch { /* best-effort */ }
-      if (this.mcpConnectingId === id) this.mcpConnectingId = undefined;
-      this.postMcpConnectors();
-    }
+    return this.voiceAndMcp.connectMcpConnector(id, opts);
   }
 
   private async connectKeyMcpConnector(
@@ -10539,201 +10197,23 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     endpoint: string,
     opts: { key?: string; readOnly?: boolean },
   ): Promise<void> {
-    const id = connector.id;
-    const incoming = typeof opts.key === "string" ? opts.key.trim() : "";
-    if (incoming.length > MAX_CONNECTOR_KEY_CHARS) {
-      this.mcpConnectError = { id, message: "That token is too long." };
-      this.postMcpConnectors();
-      return;
-    }
-    const token = incoming || this.mcpConnectorKeys.get(id) || "";
-    const store = this.connectedConnectorStore();
-    if (typeof opts.readOnly === "boolean" && !incoming && store[id] && this.mcpConnectorKeys.has(id)) {
-      await this.state.update(
-        MCP_CONNECTORS_KEY,
-        connectConnector(store, id, endpoint, opts.readOnly),
-      );
-      this.mcpConnectError = undefined;
-      this.postMcpConnectors();
-      return;
-    }
-    if (!token) {
-      this.mcpConnectError = { id, message: "Paste a personal access token to connect." };
-      this.postMcpConnectors();
-      return;
-    }
-    this.mcpConnectingId = id;
-    this.mcpConnectError = undefined;
-    this.postMcpConnectors();
-    const npx = npxSpawnPlan(process.platform);
-    try {
-      const result = await authorizeMcpRemote({
-        spawn,
-        command: npx.command,
-        args: mcpRemoteArgs(endpoint, undefined, undefined, {
-          authorization: true,
-          readOnly: opts.readOnly === true || (!incoming && store[id]?.readOnly === true)
-        }),
-        shell: npx.shell,
-        env: withAuthHeaderEnv(npx.env, token),
-        auth: "key"
-      });
-      if (this.mcpConnectingId !== id) return;
-      if (!result.ok) {
-        this.mcpConnectError = { id, message: result.message };
-        return;
-      }
-      const header = bearerAuthorizationHeader(token);
-      if (header) {
-        await this.context.secrets.store(mcpConnectorSecretKey(id), token);
-        this.mcpConnectorKeys.set(id, token);
-      }
-      const readOnly = opts.readOnly === true
-        || (typeof opts.readOnly !== "boolean" && this.connectedConnectorStore()[id]?.readOnly === true);
-      await this.state.update(
-        MCP_CONNECTORS_KEY,
-        connectConnector(this.connectedConnectorStore(), id, endpoint, readOnly),
-      );
-      this.mcpConnectError = undefined;
-    } catch {
-      // Secret-store errors are not a response channel for credential values.
-      this.mcpConnectError = { id, message: "Could not save this connector's key. Try connecting again." };
-    } finally {
-      if (this.mcpConnectingId === id) this.mcpConnectingId = undefined;
-      this.postMcpConnectors();
-    }
+    return this.voiceAndMcp.connectKeyMcpConnector(connector, endpoint, opts);
   }
 
   private async disconnectMcpConnector(id: string): Promise<void> {
-    if (!isConnectorId(id)) return;
-    if (this.mcpConnectingId === id) return;
-    const connector = connectorById(id);
-    if (isKeyConnector(connector)) await this.forgetConnectorKey(id);
-    await this.state.update(MCP_CONNECTORS_KEY, disconnectConnector(this.connectedConnectorStore(), id));
-    if (this.mcpConnectError?.id === id) this.mcpConnectError = undefined;
-    this.postMcpConnectors();
+    return this.voiceAndMcp.disconnectMcpConnector(id);
   }
 
-  /**
-   * Live Grok ACP session to read `_x.ai/mcp/list` through. Prefers any pooled
-   * Grok conversation that already has a client — the focused session may be
-   * Codex or Claude. Does not mint a session.
-   */
   private findLiveGrokSession(): Session | undefined {
-    const seen = new Set<Session>();
-    for (const candidate of [this.focused, ...this.pool]) {
-      if (!candidate || seen.has(candidate)) continue;
-      seen.add(candidate);
-      if (candidate.provider === "grok" && candidate.client) return candidate;
-    }
-    return undefined;
+    return this.voiceAndMcp.findLiveGrokSession();
   }
 
-  /**
-   * Session for the Connectors inventory. Reuses a live Grok client when one
-   * exists; otherwise, if Grok is connected, starts an empty Grok session
-   * (Connectors page only — never on boot). Overlapping callers await the same
-   * in-flight start — a newly created session is not in `pool` until startup
-   * completes. Empty-session recycling owns the rest: we do not dispose it here.
-   */
   private async grokSessionForMcpList(requester: Session): Promise<Session | undefined> {
-    const live = this.findLiveGrokSession();
-    if (live) return live;
-    if (this.grokSessionForMcpListInFlight) return this.grokSessionForMcpListInFlight;
-    if (!this.connectedProviders().includes("grok")) return undefined;
-    const pending = (async (): Promise<Session | undefined> => {
-      const seen = new Set<Session>();
-      let grok: Session | undefined;
-      for (const candidate of [this.focused, ...this.pool]) {
-        if (!candidate || seen.has(candidate)) continue;
-        seen.add(candidate);
-        if (candidate.provider === "grok") {
-          grok = candidate;
-          break;
-        }
-      }
-      if (!grok) {
-        grok = this.newLocalSession();
-        grok.provider = "grok";
-        this.setSessionCwd(grok, this.sessionCwd(requester), this.workspaceRoot());
-      }
-      await this.startSession(undefined, grok, "ensure");
-      return grok.client ? grok : undefined;
-    })();
-    this.grokSessionForMcpListInFlight = pending;
-    // `then(clear, clear)` rather than `finally`: an ACP start can reject, and
-    // the promise `finally` derives would carry that rejection with nothing
-    // attached to it. Callers await `pending` itself, never the derived one.
-    const clear = () => {
-      if (this.grokSessionForMcpListInFlight === pending) {
-        this.grokSessionForMcpListInFlight = undefined;
-      }
-    };
-    void pending.then(clear, clear);
-    return pending;
+    return this.voiceAndMcp.grokSessionForMcpList(requester);
   }
 
-  /** Read MCP inventory through a Grok ACP session, not necessarily the focused one. */
-  private async refreshMcpServers(session: Session): Promise<void> {
-    this.postMcpServers({
-      type: "mcpServers",
-      servers: this.mcpServersView,
-      loading: true,
-      warning: MCP_GLOBAL_SCOPE_WARNING
-    });
-    const grokConnected = this.connectedProviders().includes("grok");
-    const grok = await this.grokSessionForMcpList(session);
-    const client = grok?.client;
-    if (!grok || !client) {
-      this.mcpListSupported = undefined;
-      this.mcpServers = [];
-      this.mcpServersCwd = undefined;
-      this.mcpServersView = [];
-      this.postMcpServers({
-        type: "mcpServers",
-        servers: [],
-        error: grokConnected
-          ? "Could not load MCP servers from Grok."
-          : "Connect Grok to inspect MCP servers.",
-        warning: MCP_GLOBAL_SCOPE_WARNING
-      });
-      return;
-    }
-    try {
-      const result = await client.listMcpServers();
-      if (grok.client !== client) return;
-      if (result === "unsupported") {
-        this.mcpListSupported = false;
-        this.mcpServers = [];
-        this.mcpServersCwd = undefined;
-        this.mcpServersView = [];
-        this.postMcpServers({
-          type: "mcpServers",
-          servers: [],
-          warning: MCP_GLOBAL_SCOPE_WARNING
-        });
-        return;
-      }
-      this.mcpListSupported = true;
-      this.mcpServers = parseMcpListResponse(result);
-      this.mcpServersCwd = this.sessionCwd(grok) || undefined;
-      this.mcpServersView = this.filterMcpServers(this.mcpServers);
-      this.grokMcpReserved = reservedFromMcpInventory(this.mcpServers, this.connectedConnectorStore());
-      this.postMcpServers({
-        type: "mcpServers",
-        servers: this.mcpServersView,
-        warning: MCP_GLOBAL_SCOPE_WARNING
-      });
-    } catch (error) {
-      const detail = errorDetail(error);
-      this.host.appendLine(`[mcp] _x.ai/mcp/list failed: ${detail}`);
-      this.postMcpServers({
-        type: "mcpServers",
-        servers: [],
-        error: detail || "Could not load MCP servers from Grok.",
-        warning: MCP_GLOBAL_SCOPE_WARNING
-      });
-    }
+  private async refreshMcpServers(session: Session = this.focused): Promise<void> {
+    return this.voiceAndMcp.refreshMcpServers(session);
   }
 
   /**
@@ -12044,71 +11524,42 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
   }
 
   private rememberVoiceConfigured(cwd: string, value: boolean): void {
-    this.lastVoiceConfiguredByCwd.set(normalizeRepoPath(cwd), value);
+    this.voiceAndMcp.rememberVoiceConfigured(cwd, value);
   }
 
-  private voiceConfiguredMsg(cwd: string, value: boolean, provider: AcpProvider = this.focused.provider): Extract<HostMsg, { type: "voiceConfigured" }> {
-    return {
-      type: "voiceConfigured",
-      value,
-      sendPhrase: this.voiceSetting(cwd, "voiceSendPhrase", DEFAULT_SEND_PHRASE),
-      keyterms: sanitizeVoiceKeyterms(this.voiceSetting(cwd, "voiceKeyterms", [])),
-      backendState: this.voiceBackendState(cwd, provider)
-    };
+  private voiceConfiguredMsg(
+    cwd: string,
+    value: boolean,
+    provider: AcpProvider = this.focused.provider,
+  ): Extract<HostMsg, { type: "voiceConfigured" }> {
+    return this.voiceAndMcp.voiceConfiguredMsg(cwd, value, provider);
   }
 
-  /** Record that this destination already has `payload`. Watcher posts skip a match. */
   private seedPostedVoiceConfigured(
     destKey: string,
     payload: Extract<HostMsg, { type: "voiceConfigured" }>,
   ): void {
-    this.lastPostedVoiceConfigured.set(destKey, voiceConfiguredFingerprint(payload));
+    this.voiceAndMcp.seedPostedVoiceConfigured(destKey, payload);
   }
 
-  /** A replaced renderer is a new destination — drop the old view's cache entry. */
   private forgetPostedVoiceConfigured(destKey: string): void {
-    this.lastPostedVoiceConfigured?.delete(destKey);
+    this.voiceAndMcp.forgetPostedVoiceConfigured(destKey);
   }
 
-  /**
-   * Post `voiceConfigured` unless this destination already received an identical
-   * frame. Returns whether a frame went out.
-   */
   private deliverVoiceConfigured(
     destKey: string,
     payload: Extract<HostMsg, { type: "voiceConfigured" }>,
     send: () => void,
   ): boolean {
-    const fp = voiceConfiguredFingerprint(payload);
-    if (this.lastPostedVoiceConfigured.get(destKey) === fp) return false;
-    this.seedPostedVoiceConfigured(destKey, payload);
-    send();
-    return true;
+    return this.voiceAndMcp.deliverVoiceConfigured(destKey, payload, send);
   }
 
   private postVoiceConfigured(): void {
-    const cwd = this.sessionCwd(this.focused);
-    const configured = !!this.voiceBackendState(cwd, this.focused.provider).backend;
-    const localMsg = this.voiceConfiguredMsg(cwd, configured, this.focused.provider);
-    // Refresh = rebuild: only the cwds this pass actually resolved stay in the
-    // map. Point-writes between refreshes (voice-start failure paths) are
-    // fresh by definition; accumulation is what made stale `true` immortal.
-    this.lastVoiceConfiguredByCwd.clear();
-    this.rememberVoiceConfigured(cwd, configured);
-    this.deliverVoiceConfigured("local", localMsg, () => {
-      this.postLocal(localMsg);
-      void this.settingsEditor?.webview.postMessage(localMsg);
-    });
+    this.voiceAndMcp.postVoiceConfigured();
   }
 
   private voiceSetting<T>(cwd: string, key: string, fallback: T): T {
-    const cfg = this.host.getConfiguration("grok", cwd);
-    return voiceSettingForRepo(
-      cfg.get<T>(key),
-      cfg.inspect<T>(key),
-      this.host.isInWorkspace(cwd),
-      fallback,
-    );
+    return this.voiceAndMcp.voiceSetting(cwd, key, fallback);
   }
 
   private async mentionFileIndexForCwd(cwd: string): Promise<{ rels: string[]; absByRel: Map<string, string> }> {
@@ -12136,157 +11587,30 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     return value;
   }
 
-  /** Show actionable guidance for setting up the voice API key. */
   private async promptVoiceKeySetup(): Promise<void> {
-    const pick = await this.host.showInformationMessage(
-      "Voice needs a credential for the selected backend. Set an OpenAI API key (grok.voiceOpenAiApiKey / OPENAI_API_KEY), or use an xAI key / Grok sign-in. Codex and ChatGPT sign-in do not include transcription API access.",
-      "Open Settings",
-      "Get a Key",
-    );
-    if (pick === "Open Settings") {
-      if (this.host.canOpenSettingsEditor) await this.openSettingsEditor("voice");
-      else await this.host.openSettings("grok.voice");
-    } else if (pick === "Get a Key") {
-      await this.host.openExternal("https://platform.openai.com/api-keys");
-    }
+    return this.voiceAndMcp.promptVoiceKeySetup();
   }
 
-  /** Begin recording the microphone (in the extension host — the webview can't
-   *  reach the mic). The webview has already flipped its button to "listening";
-   *  on any setup failure we send `voiceError` to reset it. */
   private rejectVoiceStart(): void {
-    this.postLocal({ type: "voiceError" });
-    void this.host.showWarningMessage("Voice control is already active.");
+    this.voiceAndMcp.rejectVoiceStart();
   }
 
   private claimVoice(cwd: string): boolean {
-    if (this.localVoiceCwd) return false;
-    this.localVoiceCwd = cwd;
-    return true;
+    return this.voiceAndMcp.claimVoice(cwd);
   }
 
   private releaseVoice(cwd?: string): void {
-    if (!cwd || cwd === this.localVoiceCwd) this.localVoiceCwd = undefined;
+    this.voiceAndMcp.releaseVoice(cwd);
   }
 
-  /**
-   * Say what is actually wrong, and offer the action that fixes it.
-   *
-   * The old dialog offered only "Open Settings", which is a dead end when
-   * ffmpeg is not installed — it sends you to a text field to name a file that
-   * does not exist. Every new macOS user who clicked the mic before installing
-   * ffmpeg met that.
-   *
-   * The install is offered but never run: pre-fill a terminal and let the user
-   * press Enter. Installing software on someone's machine is their decision,
-   * and when it fails the output is in front of them instead of swallowed.
-   */
   private async reportFfmpegProblem(problem: Extract<FfmpegResolution, { ok: false }>): Promise<void> {
-    const hasBrew = ["/opt/homebrew/bin/brew", "/usr/local/bin/brew"].some(
-      (p) => statKindSafe(p) === "file",
-    );
-    const hint =
-      problem.reason === "not-installed" ? ffmpegInstallHint(process.platform, hasBrew) : undefined;
-    const message = describeFfmpegProblem(problem, hint);
-    this.host.appendLine(`[voice] ${message}`);
-
-    // Only offered where the package manager installs into a directory already
-    // on PATH, so the running editor sees it without a restart. See
-    // ffmpegInstallHint.
-    const actions = hint?.offerToRun ? ["Install ffmpeg", "Open Settings"] : ["Open Settings"];
-    const pick = await this.host.showErrorMessage(message, ...actions);
-
-    if (pick === "Install ffmpeg" && hint) {
-      const term = this.host.createTerminal("Install ffmpeg");
-      term.sendText(hint.command, false); // false = do NOT press Enter for them
-      term.show();
-      return;
-    }
-    if (pick === "Open Settings") await this.host.openSettings("grok.ffmpegPath");
+    return this.voiceAndMcp.reportFfmpegProblem(problem);
   }
 
   private async handleVoiceStart(session: Session = this.focused): Promise<void> {
-    const cwd = this.sessionCwd(session);
-    const credentialCwd = this.sessionCwd(session);
-    const backend = this.voiceBackendState(credentialCwd, session.provider).backend;
-    const key = backend && this.resolveSttApiKey(credentialCwd, backend);
-    if (!key || !backend) {
-      void this.promptVoiceKeySetup();
-      this.postLocal({ type: "voiceError" });
-      return;
-    }
-    if (!this.claimVoice(cwd)) {
-      this.rejectVoiceStart();
-      return;
-    }
-    const generation = ++this.voiceGeneration;
-    this.localVoiceCredentialCwd = credentialCwd;
-    const cfg = this.host.getConfiguration("grok");
-    // Resolve before spawning. A stripped GUI PATH, a Cellar directory pasted
-    // out of `brew info`, and "not installed at all" are three problems with
-    // three different fixes, and the ENOENT/EACCES from spawn cannot tell them
-    // apart — so the old code reported all of them as "ffmpeg was not found"
-    // and offered Open Settings, which helps with none of them.
-    const resolvedFfmpeg = resolveConfiguredFfmpeg(cfg.get<string>("ffmpegPath", ""), {
-      platform: process.platform,
-      pathEnv: process.env.PATH,
-      isFile: (p) => statKindSafe(p) === "file",
-      isDirectory: (p) => statKindSafe(p) === "dir"
-    });
-    if (!resolvedFfmpeg.ok) {
-      void this.reportFfmpegProblem(resolvedFfmpeg);
-      this.releaseVoice(cwd);
-      this.localVoiceCredentialCwd = undefined;
-      this.postLocal({ type: "voiceError" });
-      return;
-    }
-    const ffmpegPath = resolvedFfmpeg.path;
-    const device = cfg.get<string>("voiceInputDevice", "") || undefined;
-
-    // Streaming (default): live transcription over the STT WebSocket, so "grok
-    // send" can submit hands-free without a stop-click. Batch is opt-in.
-    if (cfg.get<boolean>("voiceStreaming", true)) {
-      await this.startVoiceStream(key, ffmpegPath, device, cwd, generation, backend);
-      return;
-    }
-
-    this.voiceBatchCtx = { backend, key };
-    const tmp = path.join(os.tmpdir(), `grok-voice-${Date.now()}.wav`);
-    try {
-      await this.voiceRecorder.start({ ffmpegPath, outputPath: tmp, device, log: (m) => this.host.appendLine(m) });
-      if (generation !== this.voiceGeneration) {
-        this.voiceRecorder.cancel();
-        try { fs.unlinkSync(tmp); } catch { /* best effort */ }
-        return;
-      }
-      this.voiceTempPath = tmp;
-      this.postLocal({ type: "voiceState", status: "listening" });
-    } catch (e) {
-      if (generation !== this.voiceGeneration) {
-        try { fs.unlinkSync(tmp); } catch { /* best effort */ }
-        return;
-      }
-      const msg = (e as Error).message;
-      this.host.appendLine(`[voice] start failed: ${msg}`);
-      // ffmpeg-missing is the common, fixable case — offer a jump to its setting.
-      if (/ffmpeg/i.test(msg)) {
-        const pick = await this.host.showErrorMessage(msg, "Open Settings");
-        if (pick === "Open Settings") {
-          await this.host.openSettings("grok.ffmpegPath");
-        }
-      } else {
-        this.host.showErrorMessage(msg);
-      }
-      this.releaseVoice(cwd);
-      this.localVoiceCwd = undefined;
-      this.localVoiceCredentialCwd = undefined;
-      this.postLocal({ type: "voiceError" });
-    }
+    return this.voiceAndMcp.handleVoiceStart(session);
   }
 
-  /** Begin a hands-free streaming session. Resolves the mic device once, then
-   *  opens a stream; each "grok send" commits the message and restarts a fresh
-   *  stream so the mic keeps listening with zero clicks. */
   private async startVoiceStream(
     key: string,
     ffmpegPath: string,
@@ -12295,268 +11619,27 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     generation: number,
     backend: SttBackend,
   ): Promise<void> {
-    const phrase = this.voiceSetting(cwd, "voiceSendPhrase", DEFAULT_SEND_PHRASE);
-    const keyterms = buildSttKeyterms(
-      phrase,
-      this.voiceSetting<string[]>(cwd, "voiceKeyterms", []),
-    );
-    const language = this.voiceSetting(cwd, "voiceLanguage", "").trim() || undefined;
-    // Resolve the Windows mic once so per-message restarts don't re-enumerate.
-    let resolved = device;
-    if (process.platform === "win32" && !resolved) {
-      try { resolved = await resolveWindowsAudioDevice(ffmpegPath, (m) => this.host.appendLine(m)); } catch { /* streamer surfaces it */ }
-    }
-    if (generation !== this.voiceGeneration) return;
-    const model = this.voiceSetting(cwd, "voiceOpenAiModel", OPENAI_STT_MODEL);
-    this.voiceStreamCtx = { key, backend, model, ffmpegPath, device: resolved, phrase, keyterms, language, generation };
-    this.voiceFinalizing = false;
-    await this.openVoiceStream();
+    return this.voiceAndMcp.startVoiceStream(key, ffmpegPath, device, cwd, generation, backend);
   }
 
-  /** Open (or re-open after a "grok send") a streaming session from the stored
-   *  context. Late events from a superseded streamer are ignored via identity. */
   private async openVoiceStream(): Promise<void> {
-    const ctx = this.voiceStreamCtx;
-    if (!ctx) return;
-    // Re-resolve the credential on each (re)open so a "grok send" hands-free
-    // reconnect picks up a token the CLI refreshed mid-session, rather than
-    // reusing a possibly-stale cached one (Codex #7). Keep the old key if the
-    // fresh read comes back empty — it'll 401 with the source-aware guidance.
-    const cwd = this.localVoiceCredentialCwd ?? this.workspaceRoot();
-    const fresh = this.resolveSttApiKey(cwd, ctx.backend);
-    if (fresh) ctx.key = fresh;
-    const streamer = new VoiceStreamer();
-    this.voiceStreamer = streamer;
-    const isCurrent = () =>
-      this.voiceStreamer === streamer && ctx.generation === this.voiceGeneration;
-
-    streamer.on("partial", (ev: { text: string; speechFinal: boolean }) => {
-      if (!isCurrent()) return;
-      this.postLocal({ type: "voicePartial", text: ev.text });
-      // A finished utterance ending in the send phrase → submit + keep listening.
-      if (ev.speechFinal && ctx.phrase) {
-        const parsed = parseVoiceCommand(ev.text, ctx.phrase);
-        if (parsed.send) this.commitVoiceStream(parsed.text);
-      }
-    });
-    streamer.on("ended", () => {
-      // Stream ended on its own (long silence hit the ffmpeg cap, or a device
-      // drop): finalize whatever we have and go idle. The user re-clicks to resume.
-      if (isCurrent()) void this.finalizeVoiceStream();
-    });
-    streamer.on("error", (e: Error) => {
-      if (!isCurrent()) return;
-      streamer.cancel();
-      this.host.appendLine(`[voice] stream error: ${e.message}`);
-      if (!this.voiceFinalizing) {
-        if (/\b(401|403)\b|rejected/i.test(e.message)) {
-          void this.host.showErrorMessage(e.message, "Open Settings").then((pick) => {
-            if (pick === "Open Settings") void this.host.openSettings(ctx.backend === "openai" ? "grok.voiceOpenAiApiKey" : "grok.voiceApiKey");
-          });
-        } else {
-          this.host.showErrorMessage(`Voice transcription failed: ${e.message}`);
-        }
-        this.postLocal({ type: "voiceError" });
-      }
-      this.voiceStreamer = undefined;
-      this.voiceStreamCtx = undefined;
-      this.releaseVoice(this.localVoiceCwd);
-      this.localVoiceCwd = undefined;
-      this.localVoiceCredentialCwd = undefined;
-    });
-
-    try {
-      await streamer.start({
-        ffmpegPath: ctx.ffmpegPath,
-        apiKey: ctx.key,
-        backend: ctx.backend,
-        model: ctx.model,
-        device: ctx.device,
-        keyterms: ctx.keyterms,
-        language: ctx.language,
-        log: (m) => this.host.appendLine(m)
-      });
-      if (!isCurrent()) { streamer.cancel(); return; }
-      this.postLocal({ type: "voiceState", status: "listening" });
-    } catch (e) {
-      if (!isCurrent()) return;
-      this.voiceStreamer = undefined;
-      this.voiceStreamCtx = undefined;
-      const msg = (e as Error).message;
-      this.host.appendLine(`[voice] stream start failed: ${msg}`);
-      if (/ffmpeg/i.test(msg)) {
-        const pick = await this.host.showErrorMessage(msg, "Open Settings");
-        if (pick === "Open Settings") {
-          await this.host.openSettings("grok.ffmpegPath");
-        }
-      } else if (/\b(401|403)\b|rejected/i.test(msg)) {
-        // Auth handshake rejection — msg is already the source-aware guidance
-        // (re-login or set a dedicated key); offer the settings shortcut.
-        const pick = await this.host.showErrorMessage(msg, "Open Settings");
-        if (pick === "Open Settings") {
-          await this.host.openSettings(ctx.backend === "openai" ? "grok.voiceOpenAiApiKey" : "grok.voiceApiKey");
-        }
-      } else {
-        this.host.showErrorMessage(msg);
-      }
-      this.releaseVoice(this.localVoiceCwd);
-      this.localVoiceCwd = undefined;
-      this.localVoiceCredentialCwd = undefined;
-      this.postLocal({ type: "voiceError" });
-    }
+    return this.voiceAndMcp.openVoiceStream();
   }
 
-  /** "grok send": submit the message and KEEP listening by restarting a fresh
-   *  stream (each message = one clean utterance). No clicks needed. */
   private commitVoiceStream(text: string): void {
-    const ctx = this.voiceStreamCtx;
-    if (!ctx || ctx.generation !== this.voiceGeneration) return;
-    const old = this.voiceStreamer;
-    this.voiceStreamer = undefined; // detach so late events are ignored
-    old?.cancel();
-    this.postLocal({ type: "voiceSubmit", text: text.trim() });
-    void this.openVoiceStream(); // reuses cached device → fast restart
+    this.voiceAndMcp.commitVoiceStream(text);
   }
 
-  /** Stop streaming entirely (manual click, or a self-ended stream): finalize the
-   *  remaining transcript and return to idle. */
   private async finalizeVoiceStream(): Promise<void> {
-    if (this.voiceFinalizing) return;
-    const generation = this.voiceGeneration;
-    this.voiceFinalizing = true;
-    const streamer = this.voiceStreamer;
-    this.voiceStreamer = undefined;
-    const ctx = this.voiceStreamCtx;
-    this.voiceStreamCtx = undefined;
-    if (!streamer) { this.voiceFinalizing = false; return; }
-    this.voiceStoppingStreamer = streamer;
-    this.postLocal({ type: "voiceState", status: "transcribing" });
-    let finalText = "";
-    let completed = true;
-    try { finalText = await streamer.stop(); } catch (err) {
-      completed = false;
-      finalText = streamer.transcript;
-      if (generation === this.voiceGeneration) void this.host.showErrorMessage((err as Error).message);
-    }
-    if (this.voiceStoppingStreamer === streamer) this.voiceStoppingStreamer = undefined;
-    if (generation !== this.voiceGeneration) {
-      this.voiceFinalizing = false;
-      return;
-    }
-    const cwd = this.localVoiceCredentialCwd ?? this.workspaceRoot();
-    const phrase = ctx?.phrase ?? this.voiceSetting(cwd, "voiceSendPhrase", DEFAULT_SEND_PHRASE);
-    const { text, send } = parseFinalVoiceCommand(finalText, completed ? streamer.finalizedTranscript : "", phrase);
-    this.voiceFinalizing = false;
-    this.releaseVoice(this.localVoiceCwd);
-    this.localVoiceCwd = undefined;
-    this.localVoiceCredentialCwd = undefined;
-    if (!text && !send) {
-      this.postLocal({ type: "voiceError" });
-      return;
-    }
-    this.postLocal({ type: "voiceTranscript", text, send });
+    return this.voiceAndMcp.finalizeVoiceStream();
   }
 
-  /** Hard-stop any voice capture (no transcript) and reset the mic to idle.
-   *  Called on session switch/restart so listening never bleeds across sessions. */
   private stopVoiceInput(session?: Session): void {
-    if (!session || session === this.focused) {
-      const wasActive =
-        !!this.localVoiceCwd ||
-        !!this.voiceStreamer ||
-        !!this.voiceStreamCtx ||
-        this.voiceRecorder.active ||
-        this.voiceFinalizing ||
-        !!this.voiceTempPath;
-      this.voiceGeneration += 1;
-      this.voiceStreamer?.cancel();
-      this.voiceStoppingStreamer?.cancel();
-      this.voiceStoppingStreamer = undefined;
-      this.voiceStreamer = undefined;
-      this.voiceStreamCtx = undefined;
-      this.voiceFinalizing = false;
-      this.voiceRecorder.cancel();
-      try { if (this.voiceTempPath) fs.unlinkSync(this.voiceTempPath); } catch { /* best effort */ }
-      this.voiceTempPath = undefined;
-      this.voiceBatchCtx = undefined;
-      this.releaseVoice(this.localVoiceCwd);
-      this.localVoiceCwd = undefined;
-      this.localVoiceCredentialCwd = undefined;
-      if (wasActive) this.postLocal({ type: "voiceState", status: "idle" });
-    }
+    this.voiceAndMcp.stopVoiceInput(session);
   }
 
-  /** Stop recording, transcribe with the pinned backend, and fill the composer. */
   private async handleVoiceStop(): Promise<void> {
-    const generation = this.voiceGeneration;
-    // Streaming path: finalize the live stream.
-    if (this.voiceStreamer) {
-      await this.finalizeVoiceStream();
-      return;
-    }
-    if (!this.voiceRecorder.active) {
-      if (this.localVoiceCwd) this.stopVoiceInput();
-      this.postLocal({ type: "voiceError" });
-      return;
-    }
-    const cwd = this.localVoiceCredentialCwd ?? this.workspaceRoot();
-    const batch = this.voiceBatchCtx;
-    const key = batch && (this.resolveSttApiKey(cwd, batch.backend) || batch.key);
-    if (!key) {
-      this.voiceRecorder.cancel();
-      this.releaseVoice(this.localVoiceCwd);
-      this.localVoiceCwd = undefined;
-      this.localVoiceCredentialCwd = undefined;
-      this.postLocal({ type: "voiceError" });
-      return;
-    }
-    let wavPath: string;
-    try {
-      wavPath = await this.voiceRecorder.stop();
-      if (generation !== this.voiceGeneration) {
-        try { fs.unlinkSync(wavPath); } catch { /* best effort */ }
-        return;
-      }
-    } catch (e) {
-      if (generation !== this.voiceGeneration) return;
-      this.host.appendLine(`[voice] stop failed: ${(e as Error).message}`);
-      this.host.showErrorMessage(`Voice recording failed: ${(e as Error).message}`);
-      this.releaseVoice(this.localVoiceCwd);
-      this.localVoiceCwd = undefined;
-      this.localVoiceCredentialCwd = undefined;
-      this.postLocal({ type: "voiceError" });
-      return;
-    }
-    const tempPath = this.voiceTempPath;
-    this.postLocal({ type: "voiceState", status: "transcribing" });
-    try {
-      const raw = await transcribeAudio(wavPath, key, (m) => this.host.appendLine(m), batch?.backend);
-      if (generation !== this.voiceGeneration) return;
-      // Strip a trailing "grok send" (configurable) so dictation can submit
-      // hands-free. The webview inserts `text` and, if `send`, fires the send.
-      const sendPhrase = this.voiceSetting(cwd, "voiceSendPhrase", DEFAULT_SEND_PHRASE);
-      const { text, send } = parseVoiceCommand(raw, sendPhrase);
-      if (!text && !send) {
-        this.host.showInformationMessage("Voice control: nothing was transcribed (silence?).");
-        this.postLocal({ type: "voiceError" });
-        return;
-      }
-      this.postLocal({ type: "voiceTranscript", text, send });
-    } catch (e) {
-      if (generation !== this.voiceGeneration) return;
-      this.host.appendLine(`[voice] transcription failed: ${(e as Error).message}`);
-      this.host.showErrorMessage((e as Error).message);
-      this.postLocal({ type: "voiceError" });
-    } finally {
-      try { if (tempPath) fs.unlinkSync(tempPath); } catch { /* best effort */ }
-      if (this.voiceTempPath === tempPath) this.voiceTempPath = undefined;
-      if (this.voiceBatchCtx === batch) {
-        this.voiceBatchCtx = undefined;
-        this.releaseVoice(this.localVoiceCwd);
-        this.localVoiceCwd = undefined;
-        this.localVoiceCredentialCwd = undefined;
-      }
-    }
+    return this.voiceAndMcp.handleVoiceStop();
   }
 
   private async openDiffEditor(
@@ -13005,53 +12088,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     shiftHeld: boolean,
     owner: AttachmentOwner = () => this.focused,
   ): Promise<Session | undefined> {
-    // The webview posts the raw file:// URI (it has no path library); accept a
-    // plain path too so older webview builds degrade instead of breaking.
-    let absPath = dropped;
-    if (/^file:\/\//i.test(dropped)) {
-      try {
-        absPath = fileUriToPath(dropped);
-      } catch {
-        return;
-      }
-    }
-    if (!fs.existsSync(absPath)) return;
-    if (!shiftHeld && isVisionImagePath(absPath)) {
-      try {
-        const imported = await this.importImageFromDisk(absPath, owner);
-        if (imported === undefined) return undefined; // tab gone — not a path chip either
-        if (imported) return imported;
-      } catch (e) {
-        this.host.appendLine(`[image] import failed for ${absPath}: ${(e as Error).message}`);
-      }
-      // Oversized / unreadable-as-image → fall through to a plain path chip,
-      // the pre-vision behavior (grok decides how to consume the path).
-    }
-    const session = owner();
-    if (!session) return undefined; // asking tab gone — drop, never redirect
-    const relPath = normalizeRelPath(path.relative(this.sessionCwd(session), absPath));
-    if (shiftHeld) {
-      // Only read the whole file (to count lines for an inline selection) when
-      // it's small enough not to freeze the host thread. Large files fall back
-      // to a plain no-selection chip.
-      let totalLines: number | undefined;
-      try {
-        if (shouldReadFileInline(fs.statSync(absPath).size)) {
-          totalLines = fs.readFileSync(absPath, "utf8").split("\n").length;
-        }
-      } catch {
-        /* fall back to a no-selection chip */
-      }
-      session.chips.push(
-        totalLines != null
-          ? makeExplicitChip(absPath, relPath, 1, totalLines)
-          : makeExplicitChip(absPath, relPath),
-      );
-    } else {
-      session.chips.push(makeExplicitChip(absPath, relPath));
-    }
-    this.postChips(session);
-    return session;
+    return this.voiceAndMcp.addDroppedFile(dropped, shiftHeld, owner);
   }
 
   // ── Context chips: diagnostics and terminal (AP-03) ──────────────────────

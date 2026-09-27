@@ -3,7 +3,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { spawn } from "node:child_process";
 import { Uri } from "./host";
-import type { Session } from "./session";
+import type { Session, SessionStartIntent } from "./session";
+import type { CompanionsSkipReason } from "./companion-subagents";
 import type { AcpProvider } from "./acp-backend";
 import {
   type HostMsg,
@@ -144,10 +145,10 @@ export interface VoiceAndMcpMcpOps {
   connectedProviders(): AcpProvider[];
   newLocalSession(): Session;
   setSessionCwd(session: Session, cwd: string, root?: string): void;
-  startSession(id?: string, target?: Session, mode?: string): Promise<any>;
+  startSession(id?: string, target?: Session, mode?: SessionStartIntent): Promise<any>;
   askUserMcpServer(session: Session): Promise<any>;
   companionsMcpServer(session: Session): Promise<any>;
-  noteCompanionsSkip(session: Session, reason: string): void;
+  noteCompanionsSkip(session: Session, reason: CompanionsSkipReason): void;
   postWelcomeTips(): void;
   getSettingsWebview(): { postMessage(msg: any): Thenable<boolean> | Promise<boolean> } | undefined;
 }
@@ -207,7 +208,7 @@ function guessMediaMime(p: string): string {
 
 export class VoiceAndMcp {
   // ── Voice State ──────────────────────────────────────────────────────────
-  public voiceRecorder = new VoiceRecorder();
+  public voiceRecorder: any = new VoiceRecorder();
   public voiceGeneration = 0;
   public voiceStreamer: VoiceStreamer | undefined;
   public voiceStoppingStreamer: VoiceStreamer | undefined;
