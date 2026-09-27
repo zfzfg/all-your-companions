@@ -466,6 +466,7 @@ The full pedagogical write-up lives in
 | [src/session-start.ts](../src/session-start.ts) | Session startup and outbound send (`startSession`, `startSessionBody`, `handleSend`). The sidebar keeps the method names and delegates through `SessionStartDeps` |
 | [src/session-catalog.ts](../src/session-catalog.ts) | Session catalog, repo discovery, pinned sessions, history navigation, delete, clear-all, sweep, rename, focus and open. The sidebar keeps the method names and delegates through `SessionCatalogDeps` |
 | [src/turn-edit.ts](../src/turn-edit.ts) | Turn steering, feedback, fork, edit, rewind, limit offers and auth recovery. The sidebar keeps its entry points and delegates through `TurnEditDeps` |
+| [src/agent-authoring.ts](../src/agent-authoring.ts) | Agent roles, handoff, workflow authoring and generator tools. The sidebar keeps its entry points and delegates through `AgentAuthoringDeps` |
 | [src/sidebar-inbound.ts](../src/sidebar-inbound.ts) | Inbound webview `switch (msg.type)`, split across session, workflow, tooling, settings and project routers. `onMessage` in the sidebar only forwards |
 | [src/workflow-stage-runner.ts](../src/workflow-stage-runner.ts) | Crew workflow stages, gate actions and step execution. The sidebar delegates and keeps `handleCrewCommand` |
 | [src/subagent-host.ts](../src/subagent-host.ts) | Companion subagents, child relay and turn hold. The sidebar delegates and keeps the method names |
@@ -923,6 +924,7 @@ every turn.
 | `src/session-start.ts` | Session startup and `handleSend`. Slash commands are parsed synchronously before `waitForSessionStart`; an unconditional await ahead of that guard suspends every ordinary send. `SessionStartDeps` stays at or under 25 members. The sidebar keeps the method names and delegates |
 | `src/session-catalog.ts` | Session catalog, repo discovery, pinned sessions, history navigation, delete, clear-all, sweep, rename, focus and open. `SessionCatalogDeps` stays at or under 25 members (10 top-level + 5 ops bags). The sidebar keeps the method names and delegates |
 | `src/turn-edit.ts` | Turn steering, feedback, fork, edit, rewind, limit offers and auth recovery. `TurnEditDeps` has narrow operation groups and the sidebar keeps thin forwarding methods |
+| `src/agent-authoring.ts` | Agent roles, handoff, workflow authoring and generator tools. `AgentAuthoringDeps` has narrow operation groups and the sidebar keeps thin forwarding methods |
 | `src/sidebar-inbound.ts` | The webview `switch` lives here, one router per domain. `openUrl` and `openUpdateRelease` fall through together and must stay in the same router. `SidebarInboundDeps` stays at or under 25 members by grouping calls into ops bags |
 | `src/workflow-stage-runner.ts` | Crew stage execution and gate actions. `handleCrewCommand` stays on the sidebar as a forwarder so existing source pins and callers keep the name |
 | `src/subagent-host.ts` | Companion subagents, the child relay and the parent turn hold. Getters that tests overwrite (`subagents`, `companions`) must keep a setter or an override hook |

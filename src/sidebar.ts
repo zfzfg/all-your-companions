@@ -1,6 +1,7 @@
 import { WorktreeHost, SESSION_META_KEY } from "./worktree-host";
 import { ProviderSetup } from "./provider-setup";
 import { TurnEdit, createTurnEdit } from "./turn-edit";
+import { AgentAuthoring, createAgentAuthoring } from "./agent-authoring";
 import { WebviewHtml } from "./webview-html";
 import { QuestionHost } from "./question-host";
 import { ReviewHost } from "./review-host";
@@ -139,7 +140,7 @@ import { OPENAI_STT_MODEL } from "./openai-voice";
 import { summarizeForSpeech } from "./speech-summary";
 import type { PromptResultMeta, PromptUsage, SessionInfoContext } from "./acp-dispatch";
 import { DEFAULT_COMPACT_THRESHOLD, GROK_COMPACT_ENV, compactEventKind, compactSummaryPreview, compactThresholdMismatch, compactThresholdMismatchNotice, grokCompactThresholdEnv, normalizeCompactThreshold, shouldOfferNearFull } from "./grok-compaction";
-import { renderFreshSessionPrompt } from "./handoff";
+
 import { ChildRelayTable, type RelayKind, type RelayOrigin } from "./child-relay";
 import { normalizeStallWarningSec, type PausableDeadline } from "./child-watch";
 import { subagentTurnSummary } from "./companion-subagents";
@@ -294,36 +295,12 @@ import {
 } from "./queued-send";
 
 import { EXTENSION_HOST_SLASH_COMMANDS, matchSlashCommand, parseAgentCommand, parseCrewCommand, parseHandoffCommand, parseSubagentsCommand } from "./slash-filter";
-import {
-  cancelCrewRun
-} from "./crew";
-import {
-  CREW_PRESETS_DIR,
-  loadCrewPresets,
-  presetToStageGraph,
-  type CrewPresetSet
-} from "./crew-preset";
-import {
-  workflowToMermaid,
-  type WorkflowDefinition
-} from "./workflow";
-import { validateWorkflowDefinition, validateWorkflowRaw, type ValidateWorkflowContext } from "./workflow-validate";
-import { draftFromUnknown, validateWorkflowDraft, workflowToDraft, type WorkflowDraft } from "./workflow-write";
-import {
-  acceptSubmission,
-  COMPANIONS_LIST_ROLES_TOOL,
-  COMPANIONS_LIST_WORKFLOWS_TOOL,
-  COMPANIONS_SUBMIT_WORKFLOW_TOOL,
-  COMPANIONS_VALIDATE_WORKFLOW_TOOL,
-  COMPANIONS_WORKFLOW_SCHEMA_TOOL,
-  extractCompanionsWorkflow,
-  generatorMetaPrompt,
-  makeGeneratorState,
-  recordValidation,
-  workflowArg,
-  WORKFLOW_AUTHORING_GUIDE,
-  type GeneratorState
-} from "./workflow-generator";
+
+import { CREW_PRESETS_DIR, loadCrewPresets, type CrewPresetSet } from "./crew-preset";
+import { type WorkflowDefinition } from "./workflow";
+import { type ValidateWorkflowContext } from "./workflow-validate";
+import { type WorkflowDraft } from "./workflow-write";
+
 import {
   applyGateAction,
   historySubtitle,
@@ -337,47 +314,12 @@ import {
   type HandoffPacket,
   type HandoffPlanStep
 } from "./workflow-handoff";
-import {
-  presetToDraft,
-  roleToDraft,
-  validateAgentRoleDraft,
-  validateCrewFlowDraft,
-  type AgentRoleDraft,
-  type CrewFlowDraft,
-  type RoleScope
-} from "./agent-role-write";
+import { type AgentRoleDraft, type CrewFlowDraft, type RoleScope } from "./agent-role-write";
 import { FileClaimStore } from "./file-claims";
-import {
-  AGENT_ROLES_DIR,
-  findAgentRole,
-  isValidRoleName,
-  loadAgentRoles,
-  rolePermissionsToRules,
-  validateRoleModel,
-  type AgentRole,
-  type AgentRoleSet
-} from "./agent-roles";
-import {
-  RESULT_FORMAT,
-  makeBriefing,
-  parseResult,
-  reconcileFiles,
-  renderBriefing,
-  renderResult,
-  roleForbidden,
-  type AgentResult,
-  type Briefing,
-  type BriefingInput,
-  type FileReconciliation
-} from "./briefing";
-import {
-  defaultRoleFor,
-  deriveBriefing,
-  handoffLabel,
-  type HandoffKind,
-  type ThreadContext
-} from "./handoff";
-import { AgentRunStore, formatRunCost, type AgentRunTrigger } from "./agent-run";
+import { AGENT_ROLES_DIR, loadAgentRoles, type AgentRole, type AgentRoleSet } from "./agent-roles";
+import { type AgentResult, type BriefingInput, type FileReconciliation } from "./briefing";
+import { type HandoffKind, type ThreadContext } from "./handoff";
+import { AgentRunStore, type AgentRunTrigger } from "./agent-run";
 import {
   MENTION_INDEX_LIMIT,
   MENTION_INDEX_TTL_MS,
@@ -468,13 +410,7 @@ import {
   type SessionType,
   type SessionTypeMeta
 } from "./session-type";
-import {
-  COMPANIONS_LIST_TOOL,
-  normalizeListArguments,
-  type AwaitArguments,
-  type ListArguments,
-  type SpawnArguments
-} from "./companions-protocol";
+import { type AwaitArguments, type ListArguments, type SpawnArguments } from "./companions-protocol";
 import { CompanionsHostServer, type CompanionsCall } from "./companions-server";
 import { HostPipeMux } from "./host-pipe-mux";
 import {
@@ -485,17 +421,7 @@ import {
   formatSubagentDiagnosis,
   type CompanionsSkipReason
 } from "./companion-subagents";
-import {
-  EFFORT_ORDER,
-  parseRoutingRules,
-  listEligibleTargets,
-  resolveTarget,
-  type EligibilityInput,
-  type EligibilityResult,
-  type RefusalCode,
-  type RosterEntry,
-  type SpawnLimits
-} from "./target-eligibility";
+import { listEligibleTargets, resolveTarget, type EligibilityInput, type EligibilityResult, type RefusalCode, type RosterEntry, type SpawnLimits } from "./target-eligibility";
 import {
   base64DecodedByteLength,
   isTrustedCodexGeneratedImagePath,
@@ -1208,6 +1134,7 @@ export class GrokSidebar {
   private _providerSetup?: ProviderSetup;
   private _workflowStageRunner?: WorkflowStageRunner;
   private _turnEdit?: TurnEdit;
+  private _agentAuthoring?: AgentAuthoring;
 
   /** Real instances set these in the constructor. Prototype stubs used by tests
    *  never run it, so the first delegating call builds the collaborator. */
@@ -1239,6 +1166,67 @@ export class GrokSidebar {
     return this._turnEdit ??= this.createTurnEdit();
   }
   set turnEdit(value: TurnEdit) { this._turnEdit = value; }
+  get agentAuthoring(): AgentAuthoring {
+    return this._agentAuthoring ??= this.createAgentAuthoring();
+  }
+  set agentAuthoring(value: AgentAuthoring) { this._agentAuthoring = value; }
+
+  private createAgentAuthoring(): AgentAuthoring {
+    const self = this;
+    return createAgentAuthoring({
+      get host() { return self.host; },
+      get state() { return self.state; },
+      getOverride: (name: string) => self.sidebarTestOverride(name),
+      getFocused: () => self.focused,
+      setFocused: (session) => { self.focused = session; },
+      getPool: () => self.pool,
+      getAgentRuns: () => self.agentRuns,
+      sessionOps: {
+        sessionCwd: (...args) => self.sessionCwd(...args),
+        setSessionCwd: (session, cwd, root) => self.setSessionCwd(session, cwd, root ?? self.workspaceRoot()),
+        workspaceRoot: () => self.workspaceRoot(),
+        newLocalSession: () => self.newLocalSession(),
+        startSession: (...args) => self.startSession(...args),
+        handleSend: (...args) => self.handleSend(...args),
+        parkFocused: () => self.parkFocused(),
+        postSessionsList: () => self.postSessionsList(),
+        sessionTypeMetaFor: (...args) => self.sessionTypeMetaFor(...args),
+        buildThreadContext: (...args) => self.buildThreadContext(...args),
+        persistedUsageLedger: (sessionId, count) => self.persistedUsageLedger(sessionId, count ?? 0),
+        markHiddenChildSession: (...args) => self.markHiddenChildSession(...args),
+        noteChildStarted: (...args) => self.noteChildStarted(...args),
+        closeChildRelays: (...args) => self.closeChildRelays(...args),
+        postRunningChildren: () => self.postRunningChildren(),
+        teardownEmptySession: (...args) => self.teardownEmptySession(...args),
+        cancelSubagentsOf: (...args) => self.cancelSubagentsOf(...args),
+        setStatus: (...args) => self.setStatus(...args),
+        companionsList: (...args) => self.companionsList(...args),
+      },
+      uiOps: {
+        emit: (...args) => self.emit(...args),
+        postLocal: (...args) => self.postLocal(...args),
+        postToSettingsEditor: (msg) => { void self.settingsEditor?.webview.postMessage(msg); },
+        confirmInChat: (...args) => self.confirmInChat(...args),
+        postSessionName: (...args) => self.postSessionName(...args),
+        deleteSessionCache: (id) => { self.sessionCache.delete(id); },
+      },
+      providerOps: {
+        usableProviders: () => self.usableProviders(),
+        connectedProviders: () => self.connectedProviders(),
+        subagentRoster: () => self.subagentRoster(),
+        subagentsEnabledGlobally: () => self.subagentsEnabledGlobally(),
+        companionSettingsView: () => self.companionSettingsView(),
+        defaultWorkflowName: () => self.defaultWorkflowName(),
+        companionsSetting: (key, fallback) => self.companionsSetting(key, fallback),
+      },
+      companionOps: {
+        agentRoleSet: (...args) => self.agentRoleSet(...args),
+        crewPresetSet: (...args) => self.crewPresetSet(...args),
+        companionsRoot: (...args) => self.companionsRoot(...args),
+        logAgentRun: (...args) => self.logAgentRun(...args),
+      },
+    });
+  }
 
   private createTurnEdit(): TurnEdit {
     const self = this;
@@ -1809,35 +1797,12 @@ export class GrokSidebar {
    * outside opinion.
    */
   private resolveRoleProvider(role: AgentRole, caller: Session): { provider: AcpProvider } | { error: string } {
-    const usable = this.usableProviders();
-    if (!usable.length) return { error: "No companion is connected, so there is nothing to run a role on." };
-    // Checked BEFORE "the role's own provider is usable": for a BUILT-IN the
-    // provider is only a placeholder, so a reviewer whose placeholder happens
-    // to match the caller would otherwise never look elsewhere — which is the
-    // exact failure this preference exists to prevent.
-    if (role.preferDifferentProvider && role.source === "builtin") {
-      const elsewhere = usable.find((candidate) => candidate !== caller.provider);
-      if (elsewhere) return { provider: elsewhere };
-    }
-    if (usable.includes(role.provider)) return { provider: role.provider };
-    // A role from a FILE — project or global — named its provider on purpose,
-    // and only a built-in's is a placeholder. Swapping either of the first two
-    // would defeat the point of pinning a reviewer to a second opinion.
-    if (role.source !== "builtin") {
-      return {
-        error:
-          `Role \`${role.name}\` runs on ${providerDisplayName(role.provider)}, which is not connected. `
-          + `Connect it, or change its companion in Settings → Agents & Crew `
-          + `(\`${role.path ?? AGENT_ROLES_DIR}\`).`
-      };
-    }
-    return { provider: usable.includes(caller.provider) ? caller.provider : usable[0] };
+    return this.agentAuthoring.resolveRoleProvider(role, caller);
   }
 
   /** Post a plain line into the calling thread and log it. */
   private agentNotice(session: Session, level: "info" | "warning", text: string): void {
-    this.host.appendLine(`[agent] ${text}`);
-    this.emit(session, { type: "hostNotice", level, text });
+    return this.agentAuthoring.agentNotice(session, level, text);
   }
 
   /**
@@ -1889,116 +1854,7 @@ export class GrokSidebar {
    * fall through to an ordinary send.
    */
   private async handleAgentCommand(text: string, session: Session): Promise<boolean> {
-    const parsed = parseAgentCommand(text);
-    if (parsed.kind === "none") return false;
-
-    const cwd = this.sessionCwd(session);
-    const set = this.agentRoleSet(cwd);
-    // Broken role files are reported every time rather than once: the user is
-    // usually mid-edit on the file that is broken.
-    for (const problem of set.problems) this.agentNotice(session, "warning", problem.message);
-
-    this.emit(session, { type: "userMessage", text, chips: [] });
-
-    if (parsed.kind === "list") {
-      const lines = set.roles.map((role) => {
-        const where = role.source === "builtin"
-          ? "built-in"
-          : `${role.path ?? role.source}${role.overrides ? `, overrides ${role.overrides}` : ""}`;
-        const mode = role.mode === "plan" ? "Plan mode" : "Agent mode";
-        return `- \`/agent ${role.name}\` — **${role.name}** (${mode}, ${where})\n  ${role.whenToUse}`;
-      });
-      this.agentNotice(
-        session,
-        "info",
-        [
-          `### Available Agent Roles`,
-          `Run any role in its own session with \`/agent <name> <task>\`. Click a role below to paste it:`,
-          ``,
-          ...lines,
-          ``,
-          `---`,
-          `**Configuring Roles:** Open **Settings (⚙) → Agents & Crew** to set each role's companion, model and scope — `
-          + `or write the file yourself as \`${AGENT_ROLES_DIR}/<name>.md\` (this project) or \`~/${AGENT_ROLES_DIR}/<name>.md\` (every project).`,
-        ].join("\n"),
-      );
-      return true;
-    }
-    if (parsed.kind === "error") {
-      this.agentNotice(session, "warning", parsed.message);
-      return true;
-    }
-
-    const { name, task } = parsed.command;
-    const role = findAgentRole(set, name);
-    if (!role) {
-      this.agentNotice(
-        session,
-        "warning",
-        `There is no role \`${name}\`. Available: ${set.roles.map((entry) => entry.name).join(", ")}. `
-        + `Define your own as \`${AGENT_ROLES_DIR}/${name}.md\`.`,
-      );
-      return true;
-    }
-    // One role at a time in stage 1. A second `/agent` would need a second
-    // card, a second Stop target and a second cost line; stage 4 is where
-    // parallelism gets the isolation that makes it safe.
-    if (session.agentRun) {
-      this.agentNotice(
-        session,
-        "warning",
-        `Role \`${session.agentRun.roleName}\` is still running. Stop it first, or wait for its card.`,
-      );
-      return true;
-    }
-    const resolved = this.resolveRoleProvider(role, session);
-    if ("error" in resolved) {
-      this.agentNotice(session, "warning", resolved.error);
-      return true;
-    }
-    const provider = resolved.provider;
-    // Model against provider — never a silent fall back to the default. An
-    // unwarmed cache reports `checked: false` and the run proceeds, because
-    // "we do not know the model list" is not "the model is wrong".
-    if (provider === role.provider) {
-      const cache = this.state.get<ProviderModelCache>(PROVIDER_MODEL_CACHE_KEY, {})[provider];
-      const verdict = validateRoleModel(role, cache?.models, providerDisplayName(provider));
-      if (!verdict.ok) {
-        this.agentNotice(session, "warning", verdict.message);
-        return true;
-      }
-      if (!verdict.checked && role.model) {
-        this.host.appendLine(
-          `[agent] ${providerDisplayName(provider)} model list is not warmed yet — `
-          + `role \`${role.name}\` model '${role.model}' not verified.`,
-        );
-      }
-    }
-
-    await this.runAgentRole(
-      { ...role, provider },
-      {
-        goal: task,
-        task,
-        acceptance:
-          "The task above is done, or the reason it could not be done is stated in the result. "
-          + "Nothing outside the task has been changed.",
-        // Paths, never contents (§5.4). The caller's attached file chips are
-        // the one thing a typed `/agent` knows about the user's focus, so they
-        // are what the role gets pointed at. A derived run (AP-11) knows more
-        // and says so in its own provenance block.
-        files: session.chips.filter((chip) => !chip.hidden && chip.relPath).map((chip) => chip.relPath),
-        decisions: [
-          "This role was commissioned from an existing conversation that you are not in and cannot see. "
-          + "Everything you were told is in this briefing.",
-        ],
-        forbidden: roleForbidden({ ...role, provider }),
-        returnFormat: RESULT_FORMAT
-      },
-      "command",
-      session,
-    );
-    return true;
+    return this.agentAuthoring.handleAgentCommand(text, session);
   }
 
   /**
@@ -2067,365 +1923,25 @@ export class GrokSidebar {
     /** AP-16: the child's whole reply, for `await` with `action: "read"`. */
     rawReply?: string;
   }> {
-    const cwd = coords?.cwd ?? this.sessionCwd(caller);
-    const runId = coords?.runId ?? this.agentRuns.newRunId();
-    const step = coords?.step ?? 1;
-    const startedAt = Date.now();
-
-    // The coordinates belong to the RUN, so they are stamped here and never
-    // passed in: a caller that could choose its own runId could collide with
-    // one already on disk. Everything above them is the caller's — that split
-    // is what lets `/agent` (typed task) and AP-11 (derived task) share this
-    // one function instead of growing a second, thinner copy of it.
-    const briefing: Briefing = makeBriefing({ ...brief, runId, step });
-    const reuse = coords?.continueSession && coords.continueMessage?.trim()
-      && this.pool.has(coords.continueSession) && coords.continueSession.client
-      ? coords.continueSession
-      : undefined;
-    const briefMarkdown = reuse ? coords!.continueMessage!.trim() : renderBriefing(briefing, role);
-
-    // A per-plan-step walk or a panel member writes `step-NN` artefacts, so
-    // its runs never overwrite the stage's own `stage-NN` result (C-12, C-13).
-    const artifactKind = coords?.stage && !coords.stage.subStep ? "stage" as const : "step" as const;
-    try {
-      this.agentRuns.writeBrief(runId, step, briefMarkdown, artifactKind);
-    } catch (error) {
-      // The brief IS the run. Without it on disk there is nothing to read back
-      // and nothing for a later step to build on, so this is where it stops.
-      this.agentNotice(
-        caller,
-        "warning",
-        `Could not write the briefing for run ${runId}: ${(error as Error).message}. The role was not started.`,
-      );
-      return {
-        outcome: "failed",
-        filesReported: [],
-        filesObserved: [],
-        durationMs: 0,
-        detail: (error as Error).message,
-        summary: "",
-        planEntries: []
-      };
-    }
-    this.logAgentRun({
-      at: startedAt,
-      runId,
-      step,
-      role: role.name,
-      provider: role.provider,
-      ...(role.model ? { model: role.model } : {}),
-      event: "briefed"
-    });
-
-    // Said plainly on the card when a review lands on the companion that just
-    // did the work: it is still a fresh session with only the briefing, which
-    // is a real review — but it is the weakest grade of one, and the label has
-    // to match (§5.10). Only ever a note; the run is not blocked.
-    const caution = role.preferDifferentProvider && role.provider === caller.provider
-      ? `This ran on ${providerDisplayName(role.provider)}, the same companion as this conversation — `
-        + `a fresh session with only the briefing, but not an outside opinion. `
-        + `Connect a second companion for a stronger review.`
-      : undefined;
-
-    const roleSession = reuse ?? this.newLocalSession();
-    const overlay = rolePermissionsToRules(role);
-    if (!reuse) {
-      roleSession.provider = role.provider;
-      roleSession.startOverrides = {
-        ...(role.model ? { model: role.model } : {}),
-        ...(role.effort ? { effort: role.effort } : {}),
-        ...(role.mode ? { mode: role.mode } : {})
-      };
-      this.setSessionCwd(roleSession, cwd, this.workspaceRoot());
-      this.pool.add(roleSession);
-    }
-    if (overlay.length) roleSession.rolePermissionRules = overlay;
-    const tokensBefore = reuse?.activeSessionId
-      ? this.persistedUsageLedger(reuse.activeSessionId, reuse.userMessageCount).usage?.totalTokens
-      : undefined;
-    const subagentCoords = coords?.subagent;
-    const stageCoords = coords?.stage;
-    const generatorCoords = coords?.generator;
-    // AP-16 §6.6 point 1 / AP-17 D5: stamped BEFORE the first turn, so no
-    // history refresh can race the child into the list.
-    if (subagentCoords && !reuse) this.markHiddenChildSession(roleSession, caller, subagentCoords.subagentId);
-    if (stageCoords && !reuse) {
-      this.markHiddenChildSession(
-        roleSession,
-        caller,
-        `${coords?.runId ?? runId}:${stageCoords.stageId}`,
-        "crew-stage",
-      );
-      // §7.9. Half the answer; `companions.crew.stagesMayUseSubagents` is the
-      // other half, and `companionsMcpServer` requires both.
-      roleSession.stageAllowsSubagents = stageCoords.allowSubagents === true;
-      if (stageCoords.scope) roleSession.stageScope = [...stageCoords.scope];
-    }
-    if (generatorCoords) {
-      this.markHiddenChildSession(roleSession, caller, generatorCoords.requestId, "workflow-generator");
-      const gen = this.generatorStore();
-      if (gen.requestId === generatorCoords.requestId) gen.roleSession = roleSession;
-    }
-    const subagentHandle = subagentCoords
-      ? { subagentId: subagentCoords.subagentId, roleSession, cancelled: false }
-      : undefined;
-    const liveHandle = (coords?.live || stageCoords) && !subagentCoords && !generatorCoords
-      ? { runId, step, roleName: role.name, roleSession, cancelled: false }
-      : undefined;
-    if (subagentHandle) {
-      // Deliberately NOT `caller.agentRun`: that slot is one-at-a-time, and it
-      // is what makes Stop stop a `/agent`. Several subagents run at once, and
-      // the parent turn's own state is managed by the D20 bookkeeping instead.
-      caller.subagentLive = [...(caller.subagentLive ?? []), subagentHandle];
-    } else if (liveHandle) {
-      caller.crewLive = [...(caller.crewLive ?? []), liveHandle];
-    } else if (!generatorCoords) {
-      caller.agentRun = { runId, step, roleName: role.name, roleSession, cancelled: false };
-      this.setStatus(caller, "working");
-      this.emit(caller, { type: "setBusy", value: true });
-    }
-    const roleCancelled = () =>
-      !!(subagentHandle?.cancelled
-        || liveHandle?.cancelled
-        || (generatorCoords && this.generatorStore().cancelled)
-        || (!subagentHandle && !generatorCoords && caller.agentRun?.cancelled)
-        || (!subagentHandle && caller.crewRun?.status === "cancelled"));
-    // A subagent announces itself on its own card, not as a line in the
-    // parent's transcript — §6.11 is explicit that a child's output never
-    // reaches the parent's own transcript text.
-    if (!subagentCoords && !stageCoords && !generatorCoords) {
-      this.agentNotice(
-        caller,
-        "info",
-        `Running role \`${role.name}\` on ${providerDisplayName(role.provider)}`
-        + `${role.model ? ` (${role.model})` : ""} in its own session — run ${runId}, step ${step}.`,
-      );
-    }
-
-    let reply = "";
-    roleSession.agentTextTap = (chunk) => {
-      reply += chunk;
-      if (!generatorCoords) return;
-      const store = this.generatorStore();
-      const now = Date.now();
-      if (store.requestId !== generatorCoords.requestId || now - store.lastProgressAt < 400) return;
-      store.lastProgressAt = now;
-      this.postWorkflowGenerator({
-        status: "running",
-        requestId: generatorCoords.requestId,
-        progress: reply.slice(-500)
-      });
-    };
-    let outcome: "completed" | "failed" | "cancelled" = "completed";
-    let detail: string | undefined;
-    try {
-      const client = reuse?.client ?? await this.startSession(undefined, roleSession);
-      if (!client) {
-        outcome = "failed";
-        detail = `${providerDisplayName(role.provider)} could not start a session for this role.`;
-      } else if (roleCancelled()) {
-        outcome = "cancelled";
-        detail = "Stopped before the briefing was sent.";
-      } else {
-        if (!reuse) this.nameAgentRoleSession(roleSession, role, runId, step);
-        this.noteChildStarted(caller, roleSession, subagentCoords?.subagentId);
-        await this.handleSend(briefMarkdown, false, roleSession);
-        if (roleCancelled()) {
-          outcome = "cancelled";
-          detail = "Stopped while the role was working.";
-        } else if (roleSession.status === "error") {
-          outcome = "failed";
-          detail = "The role's turn ended in an error — open its session for the message.";
-        }
-      }
-    } catch (error) {
-      outcome = "failed";
-      detail = (error as Error).message;
-    } finally {
-      roleSession.agentTextTap = undefined;
-      // A child that ended with a relayed card still open: close it upstairs.
-      this.closeChildRelays(roleSession);
-      this.postRunningChildren();
-    }
-
-    const result = parseResult(reply);
-    // The role's own list, measured against what the host's diff machinery
-    // actually recorded for that session (AP-09's blocks). A self-report is
-    // the weakest link in the format; this is the only evidence available
-    // about it, and both halves travel so neither is mistaken for the other.
-    const snapshot = reviewCenterSnapshot(roleSession.reviewBlocks, String(roleSession.userMessageCount));
-    // A continued session reports what THIS turn changed; a fresh one has one turn.
-    const observed = (reuse ? filesForScope(snapshot, "turn") : snapshot).map((file) => file.path);
-    const reconciliation = reconcileFiles(result.files, observed);
-    // Stopped before it said anything: this run produced nothing, so it leaves
-    // nothing behind — no result file, no directory holding an unanswered
-    // brief, and above all no empty "New session" in the rail. The card still
-    // appears; the user asked for a role and is owed an answer about it.
-    const producedNothing = outcome === "cancelled" && !reply.trim();
-    if (producedNothing) {
-      this.discardAgentRoleSession(roleSession);
-    } else {
-      try {
-        const resultPath = this.agentRuns.writeResult(runId, step, renderResult(result, reply, reconciliation), artifactKind);
-        this.host.appendLine(`[agent] run ${runId} step ${step}: ${resultPath}`);
-      } catch (error) {
-        this.host.appendLine(`[agent] could not write the result for run ${runId}: ${(error as Error).message}`);
-      }
-    }
-
-    const roleSessionId = roleSession.activeSessionId;
-    const ledgerUsage = roleSessionId
-      ? this.persistedUsageLedger(roleSessionId, roleSession.userMessageCount).usage
-      : undefined;
-    // X-05: a continued session's numbers are this turn's, not the session's.
-    const usage = ledgerUsage && reuse && typeof tokensBefore === "number" && typeof ledgerUsage.totalTokens === "number"
-      ? { ...ledgerUsage, totalTokens: Math.max(0, ledgerUsage.totalTokens - tokensBefore) }
-      : ledgerUsage;
-    const durationMs = Date.now() - startedAt;
-
-    if (subagentHandle) {
-      caller.subagentLive = (caller.subagentLive ?? []).filter((h) => h !== subagentHandle);
-    } else if (liveHandle) {
-      caller.crewLive = (caller.crewLive ?? []).filter((h) => h !== liveHandle);
-    } else if (!generatorCoords) {
-      caller.agentRun = undefined;
-      this.setStatus(caller, outcome === "failed" ? "error" : "done");
-      this.emit(caller, { type: "setBusy", value: false });
-    }
-    // A companion subagent renders as its own card (§6.11) and must not also
-    // produce an `/agent` result card — one run, one card. Same for a crew
-    // stage and the workflow generator: the settings preview is the surface.
-    if (subagentCoords || stageCoords || generatorCoords) {
-      return {
-        outcome,
-        filesReported: result.files,
-        filesObserved: observed,
-        ...(usage?.costUsdTicks !== undefined ? { costUsdTicks: usage.costUsdTicks } : {}),
-        ...(usage?.totalTokens !== undefined ? { totalTokens: usage.totalTokens } : {}),
-        durationMs,
-        ...(roleSessionId ? { sessionId: roleSessionId } : {}),
-        ...(detail ? { detail } : {}),
-        summary: result.summary,
-        planEntries: roleSession.planEntries,
-        reconciliation,
-        parsed: result,
-        rawReply: reply
-      };
-    }
-    this.emit(caller, {
-      type: "agentResult",
-      id: `${runId}-${step}`,
-      runId,
-      step,
-      role: role.name,
-      provider: role.provider,
-      providerName: providerDisplayName(role.provider),
-      ...(role.model ? { model: role.model } : {}),
-      ...(role.effort ? { effort: role.effort } : {}),
-      ...(role.mode ? { mode: role.mode } : {}),
-      cost: formatRunCost(usage?.costUsdTicks, usage?.totalTokens),
-      durationMs,
-      outcome,
-      summary: result.summary,
-      files: result.files,
-      open: result.open,
-      failed: result.failed,
-      ...(reconciliation.unreported.length ? { unreported: reconciliation.unreported } : {}),
-      ...(reconciliation.claimedOnly.length ? { claimedOnly: reconciliation.claimedOnly } : {}),
-      ...(caution ? { caution } : {}),
-      // What started this run. Additive and carried as a value, so a replayed
-      // card still says whether the user typed the task or the host derived it
-      // — which is the difference between a claim they made and one we made
-      // for them.
-      origin: trigger,
-      ...(roleSessionId ? { sessionId: roleSessionId } : {}),
-      cwd,
-      ...(detail ? { detail } : {})
-    });
-    // The closing log line, then — for a run that produced nothing — the
-    // directory itself. In that order: writing the log first and deleting
-    // afterwards is what keeps `discard` from being undone by its own record.
-    if (producedNothing) {
-      this.host.appendLine(`[agent] run ${runId} was stopped before it produced anything; discarded.`);
-      // A chain's step 2+ shares the run directory with earlier paid steps —
-      // discarding it would throw those away. Only step 1 is the whole run.
-      if (step <= 1) {
-        try { this.agentRuns.discard(runId); } catch { /* nothing to clean up */ }
-      }
-    } else {
-      this.logAgentRun({
-        at: Date.now(),
-        runId,
-        step,
-        role: role.name,
-        provider: role.provider,
-        ...(role.model ? { model: role.model } : {}),
-        event: outcome === "completed" ? "finished" : outcome === "cancelled" ? "cancelled" : "failed",
-        ...(roleSessionId ? { sessionId: roleSessionId } : {}),
-        ...(detail ? { detail } : {}),
-        durationMs,
-        ...(usage?.costUsdTicks !== undefined ? { costUsdTicks: usage.costUsdTicks } : {})
-      });
-    }
-    this.postSessionsList();
-    return {
-      outcome,
-      filesReported: result.files,
-      filesObserved: observed,
-      ...(usage?.costUsdTicks !== undefined ? { costUsdTicks: usage.costUsdTicks } : {}),
-      ...(usage?.totalTokens !== undefined ? { totalTokens: usage.totalTokens } : {}),
-      durationMs,
-      ...(roleSessionId ? { sessionId: roleSessionId } : {}),
-      ...(detail ? { detail } : {}),
-      summary: result.summary,
-      planEntries: [...roleSession.planEntries]
-    };
+    return this.agentAuthoring.runAgentRole(role, brief, trigger, caller, coords);
   }
 
   /** Name a role session before its turn, for the reason routines do the same:
    *  an interrupted run still leaves a row, and an untitled one is the hardest
    *  to account for afterwards. */
   private nameAgentRoleSession(roleSession: Session, role: AgentRole, runId: string, step: number): void {
-    const id = roleSession.activeSessionId;
-    if (!id) return;
-    const overrides = this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
-    void this.state.update(SESSION_META_KEY, {
-      ...overrides,
-      [id]: { ...(overrides[id] ?? {}), customName: `${role.name} · ${runId} step ${step}` }
-    });
-    this.sessionCache.delete(id);
-    this.postSessionName(roleSession);
+    return this.agentAuthoring.nameAgentRoleSession(roleSession, role, runId, step);
   }
 
   /** A role session that produced nothing is removed outright — the same path
    *  as an abandoned empty "New session" (see {@link teardownEmptySession}). */
   private discardAgentRoleSession(roleSession: Session): void {
-    if (roleSession.hasHistory) return;
-    this.teardownEmptySession(roleSession);
+    return this.agentAuthoring.discardAgentRoleSession(roleSession);
   }
 
   /** Stop the running role, if any. Returns true when there was one. */
   private cancelAgentRun(caller: Session): boolean {
-    // AP-16 §6.5 point 8: Stop means stop. A parent's running subagents are
-    // cancelled with its turn, whether or not an `/agent` role is also running.
-    this.cancelSubagentsOf(caller, "the user pressed Stop");
-    const run = caller.agentRun;
-    if (caller.crewRun && caller.crewRun.status === "running") {
-      caller.crewRun = cancelCrewRun(caller.crewRun, "Stopped.");
-      this.emitCrewRun(caller);
-    }
-    let stopped = false;
-    if (caller.crewLive?.length) {
-      for (const live of caller.crewLive) {
-        live.cancelled = true;
-        void live.roleSession.client?.cancel("user Stop click (/crew)");
-      }
-      stopped = true;
-    }
-    if (!run) return stopped || !!caller.crewRun;
-    run.cancelled = true;
-    void run.roleSession.client?.cancel("user Stop click (/agent)");
-    return true;
+    return this.agentAuthoring.cancelAgentRun(caller);
   }
 
   private emitCrewRun(session: Session): void {
@@ -2450,105 +1966,19 @@ export class GrokSidebar {
 
   private workflowRuns(): WorkflowRunStore { return this.workflowStageRunner.workflowRuns(); }
 
-  private generatorState?: {
-    requestId: string;
-    cancelled: boolean;
-    state: GeneratorState;
-    roleSession?: Session;
-    caller?: Session;
-    submitted?: ReturnType<typeof acceptSubmission>;
-    compiler?: { provider?: string; model?: string; sourcePrompt?: string; generatedAt?: string };
-    scope: RoleScope;
-    lastProgressAt: number;
-  };
+  private get generatorState(): AgentAuthoring["generatorState"] { return this.agentAuthoring.generatorState; }
+  private set generatorState(value: AgentAuthoring["generatorState"]) { this.agentAuthoring.generatorState = value; }
 
   private generatorStore(): NonNullable<GrokSidebar["generatorState"]> {
-    if (!this.generatorState) {
-      this.generatorState = {
-        requestId: "",
-        cancelled: false,
-        state: makeGeneratorState(""),
-        scope: "project",
-        lastProgressAt: 0
-      };
-    }
-    return this.generatorState;
+    return this.agentAuthoring.generatorStore();
   }
 
   private postWorkflowGenerator(view: import("./protocol").WorkflowGeneratorView): void {
-    const message = { type: "workflowGenerator" as const, ...view };
-    this.postLocal(message);
-    void this.settingsEditor?.webview.postMessage(message);
+    return this.agentAuthoring.postWorkflowGenerator(view);
   }
 
   private handleGeneratorTool(session: Session, call: CompanionsCall): void {
-    const hidden = session.pendingHiddenChild?.hiddenReason
-      ?? this.sessionTypeMetaFor(session)?.hiddenReason;
-    if (hidden !== "workflow-generator") {
-      call.fail("This tool is only available while generating a workflow.");
-      return;
-    }
-    const store = this.generatorStore();
-    const ctx = this.workflowValidateContext({
-      generated: true,
-      allowWrite: store.state.options.allowWrite,
-      maxStages: store.state.options.maxStages
-    });
-    switch (call.tool) {
-      case COMPANIONS_WORKFLOW_SCHEMA_TOOL:
-        call.resolve({ guide: WORKFLOW_AUTHORING_GUIDE });
-        return;
-      case COMPANIONS_LIST_ROLES_TOOL:
-        call.resolve({
-          roles: this.agentRoleSet(this.sessionCwd()).roles.map((role) => ({
-            name: role.name,
-            whenToUse: role.whenToUse,
-            provider: role.source === "builtin" ? undefined : role.provider,
-            ...(role.model ? { model: role.model } : {}),
-            source: role.source
-          }))
-        });
-        return;
-      case COMPANIONS_LIST_TOOL:
-        call.resolve(this.subagentHost.companionsList(session, normalizeListArguments(call.args)));
-        return;
-      case COMPANIONS_LIST_WORKFLOWS_TOOL:
-        call.resolve({
-          workflows: this.crewPresetSet(this.sessionCwd()).presets.map((preset) => ({
-            name: preset.name,
-            title: preset.title || preset.name,
-            whenToUse: preset.whenToUse || "",
-            source: preset.source
-          }))
-        });
-        return;
-      case COMPANIONS_VALIDATE_WORKFLOW_TOOL: {
-        const raw = workflowArg(call.args);
-        const validation = validateWorkflowRaw(raw, ctx);
-        store.state = recordValidation(store.state, raw, validation);
-        call.resolve(validation);
-        return;
-      }
-      case COMPANIONS_SUBMIT_WORKFLOW_TOOL: {
-        const raw = workflowArg(call.args);
-        const accepted = acceptSubmission(raw, ctx, store.compiler);
-        store.submitted = accepted;
-        if (accepted.ok) {
-          call.resolve({ ok: true, name: accepted.workflow.name, warnings: accepted.validation.warnings });
-        } else {
-          call.resolve({
-            ok: false,
-            error: accepted.error,
-            ...(accepted.validation
-              ? { errors: accepted.validation.errors, warnings: accepted.validation.warnings }
-              : {})
-          });
-        }
-        return;
-      }
-      default:
-        call.fail(`Unknown tool: ${call.tool}`);
-    }
+    return this.agentAuthoring.handleGeneratorTool(session, call);
   }
 
   get fileClaims(): FileClaimStore | undefined {
@@ -2875,7 +2305,7 @@ export class GrokSidebar {
    * yields to a dialog the user can sit on for a minute.
    */
   private runningRoleName(session: Session): string | undefined {
-    return session.agentRun?.roleName ?? session.crewLive?.[0]?.roleName;
+    return this.agentAuthoring.runningRoleName(session);
   }
 
   private async startHandoff(
@@ -2884,109 +2314,7 @@ export class GrokSidebar {
     session: Session,
     confirm: boolean,
   ): Promise<void> {
-    const label = handoffLabel(kind);
-    const cwd = this.sessionCwd(session);
-    const set = this.agentRoleSet(cwd);
-    for (const problem of set.problems) this.agentNotice(session, "warning", problem.message);
-
-    const wanted = roleName || defaultRoleFor(kind);
-    const role = findAgentRole(set, wanted);
-    if (!role) {
-      this.agentNotice(
-        session,
-        "warning",
-        `${label} needs a role \`${wanted}\`, and there is none. Available: `
-        + `${set.roles.map((entry) => entry.name).join(", ")}.`,
-      );
-      return;
-    }
-    // One role at a time, same rule and same reason as `/agent`: a second
-    // card, a second Stop target and a second cost line is AP-13's problem.
-    if (session.agentRun) {
-      this.agentNotice(
-        session,
-        "warning",
-        `Role \`${session.agentRun.roleName}\` is still running. Stop it first, or wait for its card.`,
-      );
-      return;
-    }
-
-    // Derive BEFORE resolving a provider or asking anything. A refusal is the
-    // cheapest possible outcome and must not cost a dialog, let alone a
-    // session — and "there is nothing to review" is a real answer, not an
-    // error state.
-    const derived = deriveBriefing(this.buildThreadContext(session, kind));
-    if (derived.kind === "refused") {
-      this.agentNotice(session, "info", `${label}: ${derived.reason}`);
-      return;
-    }
-
-    const resolved = this.resolveRoleProvider(role, session);
-    if ("error" in resolved) {
-      this.agentNotice(session, "warning", resolved.error);
-      return;
-    }
-    const provider = resolved.provider;
-    if (provider === role.provider) {
-      const cache = this.state.get<ProviderModelCache>(PROVIDER_MODEL_CACHE_KEY, {})[provider];
-      const verdict = validateRoleModel(role, cache?.models, providerDisplayName(provider));
-      if (!verdict.ok) {
-        this.agentNotice(session, "warning", verdict.message);
-        return;
-      }
-    }
-
-    const runsOn = `${providerDisplayName(provider)}${role.model ? ` · ${role.model}` : ""}`;
-    if (confirm) {
-      const ok = await this.confirmInChat(session, {
-        title: `${label}: run \`${role.name}\`?`,
-        body:
-          `${runsOn}, in its own session. The briefing is written from this conversation — `
-          + `the goal, the steps reported so far and the files that changed. The conversation `
-          + `itself is not sent.`,
-        confirmLabel: `Run ${role.name}`
-      });
-      // A confirm lost to a reload resolves false, and that is the right way
-      // round: nothing happens, and nothing is billed.
-      if (!ok) return;
-      // Re-checked after the await. The dialog is open for as long as the user
-      // takes, and `/agent` in another window is one click away.
-      const running = this.runningRoleName(session);
-      if (running) {
-        this.agentNotice(
-          session,
-          "warning",
-          `Role \`${running}\` started in the meantime. Stop it first, or wait for its card.`,
-        );
-        return;
-      }
-    }
-
-    // Only the BUTTON path writes this line. A typed command was already
-    // echoed verbatim by handleHandoffCommand — including when it turns out
-    // to be an error, because the user should see what they typed — and
-    // echoing again here put the same request in the transcript twice.
-    if (confirm) {
-      this.emit(session, {
-        type: "userMessage",
-        text: `/${kind} ${role.name}`,
-        chips: []
-      });
-    }
-    await this.runAgentRole(
-      { ...role, provider },
-      {
-        ...derived.briefing,
-        // The role's OWN standing rules are merged in on top of the ones the
-        // derivation set. Duplicates collapse in makeBriefing, and the
-        // kind-specific line (a reviewer may not edit) stays first, where it
-        // is read.
-        forbidden: [...derived.briefing.forbidden, ...roleForbidden({ ...role, provider })],
-        returnFormat: RESULT_FORMAT
-      },
-      kind,
-      session,
-    );
+    return this.agentAuthoring.startHandoff(kind, roleName, session, confirm);
   }
 
   /**
@@ -2995,27 +2323,7 @@ export class GrokSidebar {
    * open steps, changed files — never the transcript.
    */
   private async continueInFreshSession(session: Session): Promise<void> {
-    const derived = deriveBriefing(this.buildThreadContext(session, "handoff"));
-    if (derived.kind === "refused") {
-      this.agentNotice(session, "info", derived.reason);
-      return;
-    }
-    const prompt = renderFreshSessionPrompt(derived.briefing);
-    const provider = session.provider;
-    const model = session.client?.currentModelId;
-    const cwd = this.sessionCwd(session);
-    this.parkFocused();
-    const fresh = this.newLocalSession();
-    this.setSessionCwd(fresh, cwd, this.workspaceRoot());
-    fresh.provider = provider;
-    if (model) fresh.startOverrides = { ...(fresh.startOverrides ?? {}), model };
-    this.focused = fresh;
-    this.pool.add(fresh);
-    this.emit(fresh, { type: "clearMessages" });
-    await this.startSession();
-    this.postSessionsList();
-    this.host.appendLine(`[context] continued in a fresh ${provider} session`);
-    await this.handleSend(prompt, false, fresh);
+    return this.agentAuthoring.continueInFreshSession(session);
   }
 
   /**
@@ -3025,17 +2333,7 @@ export class GrokSidebar {
    * fall through to an ordinary send.
    */
   private async handleHandoffCommand(text: string, session: Session): Promise<boolean> {
-    const parsed = parseHandoffCommand(text);
-    if (parsed.kind === "none") return false;
-    this.emit(session, { type: "userMessage", text, chips: [] });
-    if (parsed.kind === "error") {
-      this.agentNotice(session, "warning", parsed.message);
-      return true;
-    }
-    // Typed, so not confirmed: the user named the action and, if they wanted
-    // one, the role.
-    await this.startHandoff(parsed.handoff, parsed.role, session, false);
-    return true;
+    return this.agentAuthoring.handleHandoffCommand(text, session);
   }
 
   /** Connected models, in the shape the Routines form needs. */
@@ -3107,7 +2405,8 @@ export class GrokSidebar {
 
   /** Last save/delete refusal, shown on the card that caused it. Cleared by
    *  the next successful write, exactly like `routineError`. */
-  private agentRolesError?: { id?: string; message: string };
+  private get agentRolesError(): AgentAuthoring["agentRolesError"] { return this.agentAuthoring.agentRolesError; }
+  private set agentRolesError(value: AgentAuthoring["agentRolesError"]) { this.agentAuthoring.agentRolesError = value; }
 
   /**
    * The whole Agents & Crew page: roles, flows, the companions a role may be
@@ -3118,111 +2417,7 @@ export class GrokSidebar {
    * would hand the user yesterday's definition of a role they just fixed.
    */
   private buildAgentRolesMessage(): Extract<HostMsg, { type: "agentRoles" }> {
-    const cwd = this.sessionCwd();
-    const roleSet = this.agentRoleSet(cwd);
-    const flowSet = this.crewPresetSet(cwd);
-    const cache = this.state.get<ProviderModelCache>(PROVIDER_MODEL_CACHE_KEY, {});
-    const connected = new Set(this.connectedProviders());
-    return {
-      type: "agentRoles",
-      roles: roleSet.roles.map((role) => {
-        // A built-in's `provider` is a PLACEHOLDER the host rewrites at run
-        // time, so painting it would tell the user a role runs on a companion
-        // that is not even connected. Show what would actually answer, and say
-        // it is not a pin.
-        const effective = role.source === "builtin" ? this.effectiveRoleProvider(role) : role.provider;
-        return {
-        name: role.name,
-        provider: effective,
-        providerLabel: providerDisplayName(effective),
-        providerPinned: role.source !== "builtin",
-        ...(role.model ? { model: role.model } : {}),
-        mode: role.mode ?? "agent",
-        scope: role.source,
-        ...(role.overrides ? { overrides: role.overrides } : {}),
-        ...(role.path ? { path: role.path } : {}),
-        whenToUse: role.whenToUse,
-        // Everything is editable — a built-in is edited by materialising it as
-        // a file, which is the only way to pin a companion to one of the five
-        // shipped roles at all.
-        editable: true,
-        // The draft carries the EFFECTIVE provider too: opening a built-in and
-        // pressing Save must pin what the row promised, not the placeholder.
-        draft: { ...roleToDraft(role), provider: effective }
-      };
-      }),
-      flows: flowSet.presets.map((preset) => ({
-        name: preset.name,
-        roles: [...preset.roles],
-        ...(preset.verify ? { verify: preset.verify } : {}),
-        ...(preset.reviewEvery ? { reviewEvery: preset.reviewEvery } : {}),
-        ...(preset.parallel ? { parallel: true } : {}),
-        scope: preset.source,
-        ...(preset.overrides ? { overrides: preset.overrides } : {}),
-        ...(preset.path ? { path: preset.path } : {}),
-        draft: presetToDraft(preset)
-      })),
-      // AP-16 §6.2. Delivered with the roles because the roster editor lives in
-      // the same settings section and needs exactly the same provider + model
-      // data — a second message would be two round trips for one page.
-      subagentRoster: (() => {
-        const roster = this.subagentRoster();
-        const usable = new Set(this.usableProviders());
-        return PROVIDER_ORDER.map((id) => ({
-          id,
-          label: providerDisplayName(id),
-          // Live status, from the same state `usableProviderIds` reads (§6.2).
-          status: usable.has(id)
-            ? ("usable" as const)
-            : connected.has(id)
-              ? ("needs-login" as const)
-              : ("not-connected" as const),
-          enabled: roster[id]?.enabled !== false,
-          allowWrite: roster[id]?.allowWrite !== false,
-          allowedModels: roster[id]?.allowedModels ?? [],
-          defaultModel: roster[id]?.defaultModel ?? "",
-          defaultEffort: roster[id]?.defaultEffort ?? "",
-          maxEffort: roster[id]?.maxEffort ?? "",
-          notes: roster[id]?.notes ?? ""
-        }));
-      })(),
-      subagentsEnabled: this.subagentsEnabledGlobally(),
-      crewStagesMayUseSubagents: this.companionsSetting<boolean>("crew.stagesMayUseSubagents", false),
-      companionSettings: this.companionSettingsView(),
-      // P6 §6.2. The user's own keyword rules, normalized on the way out so the
-      // page never has to reason about a half-written entry.
-      subagentRouting: parseRoutingRules(
-        this.companionsSetting<unknown>("subagents.routing", []),
-      ).map((rule) => ({
-        match: [...rule.match],
-        provider: rule.target.provider ?? "",
-        model: rule.target.model ?? "",
-        effort: rule.target.effort ?? ""
-      })),
-      efforts: [...EFFORT_ORDER],
-      providers: PROVIDER_ORDER.map((id) => ({
-        id,
-        label: providerDisplayName(id),
-        // Shown, never used as a filter: a role pinned to a companion you have
-        // not signed into yet is a reasonable thing to write down, and hiding
-        // the option would make the file look impossible to author.
-        connected: connected.has(id),
-        models: (cache[id]?.models ?? []).map((model) => ({
-          modelId: model.modelId,
-          ...(model.name ? { name: model.name } : {})
-        }))
-      })),
-      problems: [
-        ...roleSet.problems.map((problem) => problem.message),
-        ...flowSet.problems.map((problem) => problem.message),
-      ],
-      cwd,
-      hasProject: !!cwd,
-      ...(this.agentRolesError ? { error: this.agentRolesError.message } : {}),
-      ...(this.agentRolesError?.id ? { errorId: this.agentRolesError.id } : {}),
-      workflows: this.buildWorkflowViews(flowSet, roleSet.roles.map((role) => role.name)),
-      defaultWorkflow: this.defaultWorkflowName()
-    };
+    return this.agentAuthoring.buildAgentRolesMessage();
   }
 
   /**
@@ -3235,15 +2430,7 @@ export class GrokSidebar {
    * there is no truer answer to give.
    */
   private effectiveRoleProvider(role: AgentRole): AcpProvider {
-    const usable = this.usableProviders();
-    if (!usable.length) return role.provider;
-    const caller = this.focused?.provider;
-    if (role.preferDifferentProvider) {
-      const elsewhere = usable.find((candidate) => candidate !== caller);
-      if (elsewhere) return elsewhere;
-    }
-    if (caller && usable.includes(caller)) return caller;
-    return usable[0]!;
+    return this.agentAuthoring.effectiveRoleProvider(role);
   }
 
   public companionsSetting<T>(key: string, fallback: T): T {
@@ -3298,9 +2485,7 @@ export class GrokSidebar {
   }
 
   private postAgentRoles(): void {
-    const message = this.buildAgentRolesMessage();
-    this.postLocal(message);
-    void this.settingsEditor?.webview.postMessage(message);
+    return this.agentAuthoring.postAgentRoles();
   }
 
   /**
@@ -3316,30 +2501,19 @@ export class GrokSidebar {
    * half that writes, called only once a draft is known to be good.
    */
   private companionsWriteDir(scope: RoleScope, kind: "agents" | "crews"): string | undefined {
-    const root = this.companionsRoot(scope, this.sessionCwd());
-    return root ? path.join(root, kind) : undefined;
+    return this.agentAuthoring.companionsWriteDir(scope, kind);
   }
 
   /** Record a refusal against one card and repaint. The page keeps the draft,
    *  so the reason lands on the text that caused it rather than a blank form. */
   private refuseAgentRoles(id: string | undefined, message: string): void {
-    this.agentRolesError = { ...(id ? { id } : {}), message };
-    this.postAgentRoles();
+    return this.agentAuthoring.refuseAgentRoles(id, message);
   }
 
   /** Names already taken in one scope — what a save is checked against. A
    *  built-in name is NOT taken: writing it is how you override the built-in. */
   private agentRoleNamesInScope(scope: RoleScope, kind: "agents" | "crews"): string[] {
-    const root = this.companionsRoot(scope, this.sessionCwd());
-    if (!root) return [];
-    try {
-      return fs
-        .readdirSync(path.join(root, kind))
-        .filter((name) => name.toLowerCase().endsWith(".md"))
-        .map((name) => name.replace(/\.md$/i, "").toLowerCase());
-    } catch {
-      return [];
-    }
+    return this.agentAuthoring.agentRoleNamesInScope(scope, kind);
   }
 
   /**
@@ -3357,146 +2531,30 @@ export class GrokSidebar {
     originalName?: string;
     originalScope?: RoleScope;
   }): void {
-    const previousName = (opts.originalName ?? "").trim().toLowerCase();
-    if (!previousName || !isValidRoleName(previousName)) return;
-    const previousScope = opts.originalScope ?? opts.savedScope;
-    if (previousName === opts.savedName && previousScope === opts.savedScope) return;
-    const root = this.companionsRoot(previousScope, this.sessionCwd());
-    if (!root) return;
-    try {
-      fs.rmSync(path.join(root, opts.kind, `${previousName}.md`), { force: true });
-    } catch {
-      /* the file is already gone, which is the end state this wanted */
-    }
+    return this.agentAuthoring.dropSupersededCompanionFile(opts);
   }
 
   private async handleSaveAgentRole(
     msg: { scope: RoleScope; originalName?: string; originalScope?: RoleScope; draft: AgentRoleDraft },
   ): Promise<void> {
-    const id = agentCardErrorId("role", msg.originalName);
-    const dir = this.companionsWriteDir(msg.scope, "agents");
-    if (!dir) {
-      this.refuseAgentRoles(id, "Open a project folder first — a project role needs somewhere to live.");
-      return;
-    }
-    const cache = this.state.get<ProviderModelCache>(PROVIDER_MODEL_CACHE_KEY, {});
-    const result = validateAgentRoleDraft(msg.draft ?? ({} as AgentRoleDraft), {
-      providers: PROVIDER_ORDER,
-      knownModels: Object.fromEntries(PROVIDER_ORDER.map((id2) => [id2, cache[id2]?.models ?? []])),
-      providerLabel: (provider) => providerDisplayName(provider as AcpProvider),
-      existingNames: this.agentRoleNamesInScope(msg.scope, "agents"),
-      ...(msg.originalName ? { originalName: msg.originalName } : {})
-    });
-    if (!result.ok) {
-      this.refuseAgentRoles(id, result.error);
-      return;
-    }
-    try {
-      fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(path.join(dir, `${result.value.name}.md`), result.text, "utf8");
-      this.dropSupersededCompanionFile({
-        kind: "agents",
-        savedName: result.value.name,
-        savedScope: msg.scope,
-        ...(msg.originalName ? { originalName: msg.originalName } : {}),
-        ...(msg.originalScope ? { originalScope: msg.originalScope } : {})
-      });
-    } catch (error) {
-      this.refuseAgentRoles(id, `Could not write the role file — ${(error as Error).message}`);
-      return;
-    }
-    this.agentRolesError = undefined;
-    this.postAgentRoles();
+    return this.agentAuthoring.handleSaveAgentRole(msg);
   }
 
   private async handleSaveCrewFlow(
     msg: { scope: RoleScope; originalName?: string; originalScope?: RoleScope; draft: CrewFlowDraft },
   ): Promise<void> {
-    const id = agentCardErrorId("flow", msg.originalName);
-    const dir = this.companionsWriteDir(msg.scope, "crews");
-    if (!dir) {
-      this.refuseAgentRoles(id, "Open a project folder first — a project crew flow needs somewhere to live.");
-      return;
-    }
-    const result = validateCrewFlowDraft(msg.draft ?? ({} as CrewFlowDraft), {
-      roleNames: this.agentRoleSet(this.sessionCwd()).roles.map((role) => role.name),
-      existingNames: this.agentRoleNamesInScope(msg.scope, "crews"),
-      ...(msg.originalName ? { originalName: msg.originalName } : {})
-    });
-    if (!result.ok) {
-      this.refuseAgentRoles(id, result.error);
-      return;
-    }
-    try {
-      fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(path.join(dir, `${result.value.name}.md`), result.text, "utf8");
-      this.dropSupersededCompanionFile({
-        kind: "crews",
-        savedName: result.value.name,
-        savedScope: msg.scope,
-        ...(msg.originalName ? { originalName: msg.originalName } : {}),
-        ...(msg.originalScope ? { originalScope: msg.originalScope } : {})
-      });
-    } catch (error) {
-      this.refuseAgentRoles(id, `Could not write the crew flow file — ${(error as Error).message}`);
-      return;
-    }
-    this.agentRolesError = undefined;
-    this.postAgentRoles();
+    return this.agentAuthoring.handleSaveCrewFlow(msg);
   }
 
   private workflowValidateContext(over: Partial<ValidateWorkflowContext> = {}): ValidateWorkflowContext {
-    const cwd = this.sessionCwd();
-    const cache = this.state.get<ProviderModelCache>(PROVIDER_MODEL_CACHE_KEY, {});
-    return {
-      roleNames: this.agentRoleSet(cwd).roles.map((role) => role.name),
-      knownModels: Object.fromEntries(PROVIDER_ORDER.map((id) => [
-        id,
-        {
-          checked: Array.isArray(cache[id]?.models),
-          ids: (cache[id]?.models ?? []).map((model) => model.modelId)
-        },
-      ])),
-      ...over
-    };
+    return this.agentAuthoring.workflowValidateContext(over);
   }
 
   private buildWorkflowViews(
     flowSet: CrewPresetSet,
     roleNames: string[],
   ): import("./protocol").WorkflowManagerView[] {
-    const defaultName = this.defaultWorkflowName();
-    const context = this.workflowValidateContext({ roleNames });
-    return flowSet.presets.map((preset) => {
-      const graph = presetToStageGraph(preset);
-      const validation = validateWorkflowDefinition(graph, context);
-      const hasStages = preset.stages !== undefined || preset.name === "idea-to-done";
-      return {
-        name: preset.name,
-        title: preset.title || graph.title || preset.name,
-        whenToUse: preset.whenToUse || graph.whenToUse || "",
-        scope: preset.source,
-        ...(preset.overrides ? { overrides: preset.overrides } : {}),
-        ...(preset.path ? { path: preset.path } : {}),
-        hasStages,
-        defaultGraph: !hasStages,
-        isDefault: preset.name === defaultName,
-        mermaid: workflowToMermaid(graph),
-        stages: graph.stages.map((stage) => ({
-          id: stage.id,
-          title: stage.title,
-          role: stage.role,
-          profile: stage.profile
-        })),
-        draft: {
-          ...workflowToDraft(graph),
-          body: preset.body,
-          verify: preset.verify ?? graph.defaults.verify
-        },
-        validation,
-        ...(graph.compiler ? { compiler: graph.compiler } : {})
-      };
-    });
+    return this.agentAuthoring.buildWorkflowViews(flowSet, roleNames);
   }
 
   private async handleSaveWorkflow(msg: {
@@ -3506,72 +2564,15 @@ export class GrokSidebar {
     draft: WorkflowDraft;
     setDefault?: boolean;
   }): Promise<void> {
-    const id = agentCardErrorId("workflow", msg.originalName);
-    const dir = this.companionsWriteDir(msg.scope, "crews");
-    if (!dir) {
-      this.refuseAgentRoles(id, "Open a project folder first — a project workflow needs somewhere to live.");
-      return;
-    }
-    const result = validateWorkflowDraft(msg.draft ?? ({} as WorkflowDraft), this.workflowValidateContext({
-      existingNames: this.agentRoleNamesInScope(msg.scope, "crews"),
-      ...(msg.originalName ? { originalName: msg.originalName } : {})
-    }));
-    if (!result.ok) {
-      this.refuseAgentRoles(id, result.error);
-      return;
-    }
-    try {
-      fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(path.join(dir, `${result.workflow.name}.md`), result.text, "utf8");
-      this.dropSupersededCompanionFile({
-        kind: "crews",
-        savedName: result.workflow.name,
-        savedScope: msg.scope,
-        ...(msg.originalName ? { originalName: msg.originalName } : {}),
-        ...(msg.originalScope ? { originalScope: msg.originalScope } : {})
-      });
-    } catch (error) {
-      this.refuseAgentRoles(id, `Could not write the workflow file — ${(error as Error).message}`);
-      return;
-    }
-    if (msg.setDefault) {
-      await this.host.getConfiguration("companions").update("crew.defaultWorkflow", result.workflow.name, "global");
-    }
-    this.agentRolesError = undefined;
-    this.postAgentRoles();
+    return this.agentAuthoring.handleSaveWorkflow(msg);
   }
 
   private postWorkflowValidation(draft: WorkflowDraft): void {
-    const result = validateWorkflowDraft(draft ?? ({} as WorkflowDraft), this.workflowValidateContext());
-    this.postWorkflowGenerator({
-      status: result.ok ? "preview" : "error",
-      requestId: "validate",
-      draft,
-      ...(result.ok ? { mermaid: workflowToMermaid(result.workflow), validation: result.validation } : {}),
-      ...(!result.ok ? {
-        error: result.error,
-        ...(result.validation ? { validation: result.validation } : {})
-      } : {})
-    });
+    return this.agentAuthoring.postWorkflowValidation(draft);
   }
 
   private async handleAddWorkflowStagesBlock(scope: RoleScope, name: string): Promise<void> {
-    const preset = this.crewPresetSet(this.sessionCwd()).presets.find((p) => p.name === name);
-    if (!preset) {
-      this.refuseAgentRoles(agentCardErrorId("workflow", name), "That workflow is not loaded.");
-      return;
-    }
-    if (preset.stages !== undefined) {
-      this.refuseAgentRoles(agentCardErrorId("workflow", name), "This workflow already has a stages block.");
-      return;
-    }
-    const graph = presetToStageGraph(preset);
-    await this.handleSaveWorkflow({
-      scope,
-      originalName: name,
-      originalScope: preset.source === "builtin" ? undefined : preset.source,
-      draft: { ...workflowToDraft(graph), body: preset.body, verify: preset.verify }
-    });
+    return this.agentAuthoring.handleAddWorkflowStagesBlock(scope, name);
   }
 
   private async handleGenerateWorkflow(msg: {
@@ -3586,121 +2587,11 @@ export class GrokSidebar {
     effort?: string;
     refine?: string;
   }): Promise<void> {
-    const description = [msg.description, msg.refine].filter((s) => String(s ?? "").trim()).join("\n\nFeedback: ");
-    if (!description.trim()) {
-      this.postWorkflowGenerator({
-        status: "error",
-        requestId: "generate",
-        error: "Describe how you want this workflow to run."
-      });
-      return;
-    }
-    const previous = this.generatorStore();
-    if (previous.roleSession) {
-      previous.cancelled = true;
-      void previous.roleSession.client?.cancel("a new generation started");
-    }
-    const requestId = `wg_${this.agentRuns.newRunId()}`;
-    const store = this.generatorStore();
-    store.requestId = requestId;
-    store.cancelled = false;
-    store.submitted = undefined;
-    store.scope = msg.scope;
-    store.state = makeGeneratorState(description, {
-      reuseRoles: msg.reuseRoles !== false,
-      newRoles: msg.newRoles === "files" ? "files" : "inline",
-      allowWrite: msg.allowWrite !== false,
-      maxStages: msg.maxStages
-    });
-    const caller = this.focused ?? [...this.pool][0];
-    if (!caller) {
-      this.postWorkflowGenerator({ status: "error", requestId, error: "Open a project first." });
-      return;
-    }
-    store.caller = caller;
-    const usable = this.usableProviders();
-    const storedTarget = this.companionsSetting<{ provider?: string; model?: string; effort?: string }>(
-      "workflows.generator.target",
-      {},
-    );
-    const requestedProvider = msg.provider || (storedTarget?.provider as import("./acp-backend").AcpProvider | undefined);
-    const provider = (requestedProvider && usable.includes(requestedProvider) ? requestedProvider : usable[0])
-      ?? caller.provider;
-    if (!msg.model && storedTarget?.model) msg.model = storedTarget.model;
-    if (!msg.effort && storedTarget?.effort) msg.effort = storedTarget.effort;
-    store.compiler = {
-      provider,
-      ...(msg.model ? { model: msg.model } : {}),
-      sourcePrompt: msg.description.trim(),
-      generatedAt: new Date().toISOString()
-    };
-    this.postWorkflowGenerator({ status: "running", requestId, progress: "Starting the generator…" });
-    const role: import("./agent-roles").AgentRole = {
-      name: "workflow-generator",
-      provider,
-      ...(msg.model ? { model: msg.model } : {}),
-      ...(msg.effort ? { effort: msg.effort } : {}),
-      mode: "agent",
-      whenToUse: "Design a workflow from a description.",
-      source: "builtin",
-      permissions: [{ action: "deny", kind: "edit", pathGlob: "**" }]
-    };
-    const brief = {
-      task: generatorMetaPrompt({ description, options: store.state.options }),
-      goal: description
-    };
-    try {
-      const outcome = await this.runAgentRole(role, brief, "workflow-stage", caller, {
-        runId: requestId,
-        step: 1,
-        generator: { requestId }
-      });
-      if (store.cancelled || store.requestId !== requestId) return;
-      const accepted = store.submitted
-        ?? (outcome.rawReply ? acceptSubmission(
-          extractCompanionsWorkflow(outcome.rawReply) ?? {},
-          this.workflowValidateContext({
-            generated: true,
-            allowWrite: store.state.options.allowWrite,
-            maxStages: store.state.options.maxStages
-          }),
-          store.compiler,
-        ) : undefined);
-      if (accepted && accepted.ok) {
-        this.postWorkflowGenerator({
-          status: "preview",
-          requestId,
-          draft: workflowToDraft(accepted.workflow),
-          mermaid: workflowToMermaid(accepted.workflow),
-          validation: accepted.validation,
-          compiler: store.compiler
-        });
-        return;
-      }
-      this.postWorkflowGenerator({
-        status: "error",
-        requestId,
-        error: accepted && !accepted.ok
-          ? accepted.error
-          : "The generator finished without a valid workflow. Try again, refine, or open the JSON editor.",
-        ...(accepted && !accepted.ok && accepted.validation ? { validation: accepted.validation } : {}),
-        ...(store.state.lastDraft ? { draft: draftFromUnknown(store.state.lastDraft) } : {})
-      });
-    } catch (error) {
-      if (store.cancelled || store.requestId !== requestId) return;
-      this.postWorkflowGenerator({
-        status: "error",
-        requestId,
-        error: (error as Error).message
-      });
-    }
+    return this.agentAuthoring.handleGenerateWorkflow(msg);
   }
 
   private cancelWorkflowGenerate(): void {
-    const store = this.generatorStore();
-    store.cancelled = true;
-    void store.roleSession?.client?.cancel("the user cancelled generation");
-    this.postWorkflowGenerator({ status: "idle", requestId: store.requestId || "generate" });
+    return this.agentAuthoring.cancelWorkflowGenerate();
   }
 
   /**
@@ -3711,24 +2602,7 @@ export class GrokSidebar {
    * than an error — the end state the user asked for already holds.
    */
   private handleDeleteCompanionFile(scope: RoleScope, kind: "agents" | "crews", rawName: string): void {
-    const name = String(rawName ?? "").trim().toLowerCase();
-    if (!isValidRoleName(name)) {
-      this.refuseAgentRoles(undefined, "That is not a name this can delete.");
-      return;
-    }
-    const root = this.companionsRoot(scope, this.sessionCwd());
-    if (!root) {
-      this.refuseAgentRoles(undefined, "There is no project open, so there is no project file to remove.");
-      return;
-    }
-    try {
-      fs.rmSync(path.join(root, kind, `${name}.md`), { force: true });
-    } catch (error) {
-      this.refuseAgentRoles(undefined, `Could not remove ${name}.md — ${(error as Error).message}`);
-      return;
-    }
-    this.agentRolesError = undefined;
-    this.postAgentRoles();
+    return this.agentAuthoring.handleDeleteCompanionFile(scope, kind, rawName);
   }
 
   private postRoutines(): void {
