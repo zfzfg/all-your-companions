@@ -123,7 +123,6 @@ import {
   pendingPermissionOptions,
   preferredPermissionAllowOption,
   rehydrateBusyChrome,
-  sessionHasWorkInFlight,
   sessionReadyForPrompt,
   sessionUiSnapshot,
   turnElapsedMs,
@@ -176,17 +175,8 @@ import {
   withDismissedTip,
   withShownTip
 } from "./welcome-tips";
-import { commandOnPath, runGitClone } from "./git-clone";
-import {
-  DISCONNECTED_GITHUB,
-  githubEnvTokenBlocksSignOutMessage,
-  githubEnvTokenName,
-  listGithubRepositories,
-  loginGithubWithToken,
-  logoutGithub,
-  readGithubAuthState,
-  type GithubAuthState
-} from "./github-auth";
+import { ProjectFolders } from "./project-folders";
+import type { GithubAuthState } from "./github-auth";
 import { SubscriptionUsageBinding, SubscriptionUsageCache, subscriptionCredentialContext, type SubscriptionWindow } from "./subscription-usage";
 import { readCodexSubscriptionWindows } from "./codex-usage";
 import { providerConfigFiles, type ProviderConfigFile } from "./provider-config";
@@ -195,26 +185,6 @@ import { readWorkflowCompletion } from "./workflow-state";
 import { parseMuseVersionOutput } from "./muse-cli-locator";
 import { supportsClientMcpServers } from "./acp-backend";
 import { GitRunGate, type GitTurnBaseline } from "./git-run";
-import {
-  GITHUB_CLI_DOWNLOAD,
-  classifyCloneFailure,
-  cloneDestination,
-  cloneFailureText,
-  cloneUrlError,
-  normalizeCloneUrl,
-  displayPath,
-  githubCliInstallCommand,
-  githubFixFor,
-  githubSignInCommand,
-  offersGithubSetup,
-  projectDestination,
-  projectNameError,
-  PROJECT_ROOT_CHOICE_KEY,
-  legacyProjectRootPath,
-  projectRoot,
-  rememberedRootFor,
-  shouldUseLegacyRoot
-} from "./project-create";
 import {
   GROK_VIEW_ID,
   MOVE_VIEW_HINT_USED_KEY,
@@ -444,10 +414,8 @@ import {
   authorizedListCwd,
   cwdIsAuthorized,
   filterEntriesByAuthorizedCwd,
-  imageHandlesToRevoke,
   imagePathStillAuthorized,
-  pathBoundToClosedFolder,
-  sessionBoundToClosedFolder
+  pathBoundToClosedFolder
 } from "./workspace-auth";
 import {
   historyEventCount,
@@ -928,8 +896,15 @@ export class GrokSidebar {
     "checkGrokUpdate",
     "updateGrok",
   ]);
-  /** Last `gh api user` snapshot. Refreshed after connect / sign-out. */
-  private githubConnection?: GithubAuthState;
+  /** Project folders subsystem */
+  private _projectFolders?: ProjectFolders;
+  get projectFolders(): ProjectFolders {
+    return this._projectFolders ??= this.createProjectFolders();
+  }
+  set projectFolders(value: ProjectFolders) { this._projectFolders = value; }
+
+  get githubConnection(): GithubAuthState | undefined { return this.projectFolders.githubConnection; }
+  set githubConnection(v: GithubAuthState | undefined) { this.projectFolders.githubConnection = v; }
   get mcpServers(): McpServerView[] { return this.voiceAndMcp.mcpServers; }
   set mcpServers(v: McpServerView[]) { this.voiceAndMcp.mcpServers = v; }
   get mcpServersCwd(): string | undefined { return this.voiceAndMcp.mcpServersCwd; }
@@ -1139,6 +1114,73 @@ export class GrokSidebar {
         importImageFromDisk: (path, owner) => self.importImageFromDisk(path, owner),
         postChips: (session) => self.postChips(session),
       },
+    });
+  }
+
+  private createProjectFolders(): ProjectFolders {
+    const self = this;
+    return new ProjectFolders({
+      host: {
+        get canSwitchWorkspaceFolder() { return !!self.host.canSwitchWorkspaceFolder; },
+        workspaceRoot: () => self.workspaceRoot(),
+        openWorkspaceFolders: () => self.openWorkspaceFolders(),
+        showOpenDialog: (opts) => self.host.showOpenDialog(opts),
+        showWarningMessage: (msg, ...args) => self.host.showWarningMessage(msg, ...args),
+        addWorkspaceFolder: (folder) => self.host.addWorkspaceFolder(folder),
+        removeWorkspaceFolder: (folder) => self.host.removeWorkspaceFolder(folder),
+        setActiveWorkspaceFolder: (target) => self.host.setActiveWorkspaceFolder(target),
+        appendLine: (line) => self.host.appendLine(line),
+        createTerminal: (opts) => self.host.createTerminal(opts),
+      },
+      state: {
+        get: <T>(key: string, def?: T) => (def !== undefined ? self.state.get<T>(key, def) : (self.state.get<T>(key) as T)),
+        update: (key: string, val: any) => self.state.update(key, val),
+      },
+      context: {
+        get globalState() { return (self.context?.globalState ?? self.state) as any; },
+        get globalStorageUri() { return self.context?.globalStorageUri ?? { fsPath: "" }; },
+      },
+      sessionOps: {
+        getFocused: () => self.focused,
+        setFocused: (s) => { self.focused = s; },
+        getPool: () => self.pool,
+        newLocalSession: () => self.newLocalSession(),
+        sessionCwd: (s) => self.sessionCwd(s),
+        setSessionCwd: (s, cwd, exp) => self.setSessionCwd(s, cwd, exp),
+        startSession: (id, s, mode) => self.startSession(id, s, mode as SessionStartIntent),
+        parkFocused: () => self.parkFocused(),
+        disposeSession: (s) => self.disposeSession(s),
+        defaultProviderForProject: (cwd) => self.defaultProviderForProject(cwd),
+        isAuthorizedCwd: (cwd) => self.isAuthorizedCwd(cwd),
+      },
+      uiOps: {
+        emit: (s, msg) => self.emit(s, msg),
+        post: (msg) => self.post(msg),
+        postRepoCatalog: () => self.postRepoCatalog(),
+        postSessionsList: () => self.postSessionsList(),
+        getSelectedRepoCwd: () => self.selectedRepoCwd,
+        setSelectedRepoCwd: (cwd) => { self.selectedRepoCwd = cwd; },
+        getSettingsEditorWebview: () => self.settingsEditor?.webview,
+      },
+      catalogOps: {
+        resolveLocalRepoTarget: (cwd) => self.resolveLocalRepoTarget(cwd),
+        workspaceRoot: () => self.workspaceRoot(),
+        extraProjectFolders: () => self.extraProjectFolders(),
+        canAddProjectFolder: () => self.canAddProjectFolder(),
+        getWorktreeCache: () => self.worktreeCache,
+        setWorktreeCache: (w) => { self.worktreeCache = w; },
+        getAuthEpoch: () => self.authEpoch,
+        bumpAuthEpoch: () => ++self.authEpoch,
+      },
+      mediaOps: {
+        getFullImagePaths: () => self.fullImagePaths,
+        getFullImageHandles: () => self.fullImageHandles,
+        getLocalVoiceCwd: () => self.localVoiceCwd,
+        getLocalVoiceCredentialCwd: () => self.localVoiceCredentialCwd,
+        stopVoiceInput: () => self.stopVoiceInput(),
+      },
+      localWorkspaceSwitchQueue: self.localWorkspaceSwitchQueue,
+      getOverride: (name: string) => self.sidebarTestOverride(name),
     });
   }
 
@@ -1508,6 +1550,7 @@ export class GrokSidebar {
     );
     this._providerSession = this.createProviderSession();
     this._voiceAndMcp = this.createVoiceAndMcp();
+    this._projectFolders = this.createProjectFolders();
     this.providerConnectionState = this.migrateProviderConnections();
     this.focused.provider = this.defaultProviderForProject(this.workspaceRoot());
     context.subscriptions.push(
@@ -5450,94 +5493,21 @@ Only continue if you trust this code.`,
    * Desktop only accepts open folders; a closed historical catalog path is refused.
    */
   private async selectRepo(cwd: string): Promise<void> {
-    const hit = this.resolveLocalRepoTarget(cwd);
-    if (!hit) return;
-
-    if (this.host.canSwitchWorkspaceFolder) {
-      await this.switchLocalWorkspaceFolder(hit.cwd);
-      return;
-    }
-
-    this.selectedRepoCwd = hit.cwd;
-    this.postRepoCatalog();
-    this.postSessionsList();
+    return this.projectFolders.selectRepo(cwd);
   }
 
-  /**
-   * Desktop multi-folder: switch the host's active folder for project browsing.
-   * Reuses the host's active-folder path; session selection remains a separate
-   * action.
-   *
-   * Serialized on {@link localWorkspaceSwitchQueue} so concurrent `selectRepo`
-   * cannot interleave. The target cwd is captured once for the whole action —
-   * never re-read from a shared active-root field after an await.
-   */
   private async switchLocalWorkspaceFolder(
     cwd: string,
     options: { warnOnRefusal?: boolean } = {},
   ): Promise<void> {
-    const target = cwd;
-    return this.localWorkspaceSwitchQueue.run(() =>
-      this.switchLocalWorkspaceFolderExclusive(target, options),
-    );
+    return this.projectFolders.switchLocalWorkspaceFolder(cwd, options);
   }
 
   private async switchLocalWorkspaceFolderExclusive(
     target: string,
     options: { warnOnRefusal?: boolean } = {},
   ): Promise<void> {
-    const prevRoot = this.workspaceRoot();
-    // What the LIST depends on: which folder is active, and which project the
-    // rail has selected. Following a session into the project you are already in
-    // moves neither, and rebuilding for that walked the whole session catalog to
-    // produce the list already on screen. Captured before either can move.
-    const prevSelected = this.selectedRepoCwd;
-    const listMayHaveChanged = () =>
-      !pathsEqual(target, prevRoot) || !pathsEqual(prevSelected ?? "", this.selectedRepoCwd ?? "");
-    if (!pathsEqual(target, prevRoot)) {
-      // A rejected host call must abort — never treat setActive as advisory
-      // and then open history / spawn an agent against the refused path.
-      if (!this.host.setActiveWorkspaceFolder(target)) {
-        this.host.appendLine(
-          `[workspace] refused setActiveWorkspaceFolder (not an open folder): ${target}`,
-        );
-        // Explicit project selection is actionable, so keep its warning. A
-        // resume only tries to keep the file-tree view in sync; its session
-        // must still open when the view switch is refused.
-        if (options.warnOnRefusal !== false) {
-          void this.host.showWarningMessage(
-            `That folder is not open in this app:\n${target}`,
-          );
-        }
-        return;
-      }
-    }
-    this.selectedRepoCwd = target;
-    this.postRepoCatalog();
-
-    // Already focused on this folder's live conversation — just refresh chrome.
-    if (pathsEqual(this.sessionCwd(this.focused), target) && this.focused.client) {
-      if (listMayHaveChanged()) this.postSessionsList();
-      return;
-    }
-
-    // Selecting a project shows you what is in it, and touches NOTHING else.
-    //
-    // It used to open that project's newest conversation, so a glance at
-    // another project silently moved you into it and spawned an agent there.
-    // The first fix replaced that with a blank session, which was the same
-    // mistake in a quieter form — the conversation you were reading still went
-    // away. Browsing the rail is not a decision to leave what you are doing:
-    // you must be able to open and fold projects freely while a turn runs, and
-    // come back to it untouched.
-    //
-    // So the focused session is deliberately left alone here. The host's active
-    // folder does move, which is what decides where NEW work lands and which
-    // files the panel lists — but file access is scoped to the asking session
-    // (see desktopAuthRoots), so a conversation in another project keeps
-    // reaching its own files and only its own.
-    this.postRepoCatalog();
-    if (listMayHaveChanged()) this.postSessionsList();
+    return this.projectFolders.switchLocalWorkspaceFolderExclusive(target, options);
   }
 
   /**
@@ -5621,687 +5591,102 @@ Only continue if you trust this code.`,
     ).fsPath;
   }
 
-  /**
-   * Public: desktop File menu / host asks the sidebar to open another folder.
-   * Picks a directory when `cwd` is omitted.
-   */
   async addProjectFolder(cwd?: string): Promise<void> {
-    if (!this.canAddProjectFolder()) return;
-    const wasEmpty =
-      this.host.canSwitchWorkspaceFolder && !this.openWorkspaceFolders().length;
-    let folder = cwd;
-    if (!folder) {
-      const picked = await this.host.showOpenDialog({
-        canSelectFolders: true,
-        canSelectFiles: false,
-        canSelectMany: false,
-        openLabel: "Add Project"
-      });
-      folder = picked?.[0];
-    }
-    if (!folder) return;
-    const resolved = path.resolve(folder);
-    if (!this.host.canSwitchWorkspaceFolder) {
-      // VS Code. The workspace is VS Code's, and `updateWorkspaceFolders` on a
-      // single-folder window converts it to multi-root and restarts the
-      // extension host — conversations included. So the folder joins the rail's
-      // catalog and nothing else moves: the Explorer, the open folder and every
-      // running session stay exactly where they were.
-      await this.rememberExtraProjectFolder(resolved);
-      return;
-    }
-    if (!this.host.addWorkspaceFolder(folder)) {
-      void this.host.showWarningMessage(`Could not open folder:\n${folder}`);
-      return;
-    }
-    this.authEpoch++;
-    await this.switchLocalWorkspaceFolder(resolved);
-    // 0 → 1 folders is not "browse another project" — there is no conversation
-    // to protect. Start one in the folder just added so Add project folder
-    // from the empty state is connect-or-chat, not another dead Starting.
-    if (wasEmpty) {
-      this.setSessionCwd(this.focused, resolved, resolved);
-      if (!this.focused.hasHistory && !this.focused.client) {
-        this.focused.provider = this.defaultProviderForProject(resolved);
-      }
-      await this.startSession(undefined, this.focused, "ensure");
-    }
+    return this.projectFolders.addProjectFolder(cwd);
   }
 
   /* ----------------------------------------------- making a project */
 
-  /**
-   * Home directory the way this host creates folders in it: USERPROFILE on
-   * Windows (HOME is often a git-bash overlay), HOME elsewhere. Never
-   * GROK_HOME — that is the CLI's store, not the user's.
-   */
   private projectHomeDir(): string {
-    return process.env.USERPROFILE || process.env.HOME || os.homedir();
+    return this.projectFolders.projectHomeDir();
   }
 
-  /** The one directory new and cloned projects land in. */
   private projectRootPath(): string {
-    const home = this.projectHomeDir();
-    // Decided ONCE, then written down. Inferring it from the disk every time
-    // cannot distinguish "an old install that also has a folder by the new
-    // name" from "a new install committed to it", and guessing wrong sends an
-    // upgrading user's next project into a second root, away from all their
-    // work. A plain FILE named `~/Grok Build` is not a root either.
-    const remembered = this.context.globalState.get<"legacy" | "current">(
-      PROJECT_ROOT_CHOICE_KEY,
-    );
-    let legacyIsDirectory = false;
-    if (!remembered) {
-      try {
-        const legacy = legacyProjectRootPath(home);
-        legacyIsDirectory = fs.existsSync(legacy) && fs.statSync(legacy).isDirectory();
-      } catch {
-        /* unreadable home — fall through to the current name */
-      }
-    }
-    const useLegacyRoot = shouldUseLegacyRoot({ remembered, legacyIsDirectory });
-    if (!remembered) {
-      // Fire and forget: a failed write costs one more disk look next launch,
-      // and the answer it would record is the same one.
-      void Promise.resolve(
-        this.context.globalState.update(
-          PROJECT_ROOT_CHOICE_KEY,
-          rememberedRootFor(useLegacyRoot),
-        ),
-      ).catch(() => {});
-    }
-    return projectRoot(home, { useLegacyRoot });
+    return this.projectFolders.projectRootPath();
   }
 
-  /**
-   * State of the Add project form.
-   *
-   * `root` goes out as `~/Grok Build`, never the real path: the client needs it
-   * only to show where the folder will be, and a remote has no business
-   * learning the desk's home directory.
-   */
   private projectSetupMessage(
     extra: Omit<Extract<HostMsg, { type: "projectSetup" }>, "type" | "root"> = {},
   ): Extract<HostMsg, { type: "projectSetup" }> {
-    return {
-      type: "projectSetup",
-      root: displayPath(this.projectRootPath(), this.projectHomeDir()),
-      ...extra
-    };
+    return this.projectFolders.projectSetupMessage(extra);
   }
 
   private githubStatePayload(): GithubState {
-    const s = this.githubConnection;
-    if (!s) {
-      return {
-        connected: false,
-        cliPresent: true
-      };
-    }
-    return {
-      connected: s.connected,
-      ...(s.login ? { login: s.login } : {}),
-      ...(s.envTokenInForce ? { envTokenInForce: true } : {}),
-      ...(s.error ? { error: true } : {}),
-      cliPresent: s.cliPresent,
-      ...(s.message ? { message: s.message } : {})
-    };
+    return this.projectFolders.githubStatePayload();
   }
 
   private githubStateMessage(): Extract<HostMsg, { type: "githubState" }> {
-    return { type: "githubState", github: this.githubStatePayload() };
+    return this.projectFolders.githubStateMessage();
   }
 
   private postGithubState(): void {
-    const message = this.githubStateMessage();
-    this.post(message);
-    void this.settingsEditor?.webview.postMessage(message);
+    this.projectFolders.postGithubState();
   }
 
   private async refreshGithubState(): Promise<void> {
-    this.githubConnection = await readGithubAuthState();
-    this.postGithubState();
+    return this.projectFolders.refreshGithubState();
   }
 
   private postProjectSetup(
     extra: Omit<Extract<HostMsg, { type: "projectSetup" }>, "type" | "root"> = {},
   ): void {
-    this.post(this.projectSetupMessage(extra));
+    this.projectFolders.postProjectSetup(extra);
   }
 
-  /**
-   * Make `<root>/<name>` and open it.
-   *
-   * A name, never a path — see src/project-create.ts for why that is the whole
-   * containment model. `mkdir` only: a project is a folder, and `git init` on
-   * something a knowledge-work user just named "Q3 Positioning" would be us
-   * deciding they are writing software.
-   */
   async createProject(name: string): Promise<void> {
-    const nameError = projectNameError(name);
-    if (nameError) {
-      this.postProjectSetup({ error: nameError });
-      return;
-    }
-    const root = this.projectRootPath();
-    const dest = projectDestination(root, name);
-    if (!dest) {
-      // Unreachable via the validator above; kept because "cannot happen" is
-      // how the deleteSession traversal shipped.
-      this.postProjectSetup({ error: "That name can't be used for a folder." });
-      return;
-    }
-    this.postProjectSetup({ busy: "new" });
-    try {
-      // The root itself may not exist: provisionDefaultProjectDir only creates
-      // it on a first run where project discovery found nothing, so anyone
-      // whose checkouts were discovered has never had one.
-      fs.mkdirSync(root, { recursive: true });
-      if (fs.existsSync(dest)) {
-        this.postProjectSetup({ error: `"${name.trim()}" is already in ${displayPath(root, this.projectHomeDir())}.` });
-        return;
-      }
-      fs.mkdirSync(dest);
-    } catch (e) {
-      this.postProjectSetup({ error: `Could not create the folder: ${(e as Error).message}` });
-      return;
-    }
-    await this.addProjectFolder(dest);
-    this.postProjectSetup({ done: true });
+    return this.projectFolders.createProject(name);
   }
 
-  /**
-   * Clone `url` into the same root, under the folder name the URL implies.
-   *
-   * Credentials are git's own — whatever the user's credential helper, SSH
-   * agent or `gh auth login` already set up. Nothing is minted, stored or
-   * forwarded here, which is why this needs no new threat model on a desk
-   * machine.
-   *
-   * `GIT_TERMINAL_PROMPT=0`: without it a private repo makes git block on a
-   * username prompt against a terminal that does not exist, and the form waits
-   * for ever instead of reporting an auth failure it could offer to fix.
-   */
   async cloneProject(url: string, name?: string): Promise<void> {
-    const urlError = cloneUrlError(url);
-    if (urlError) {
-      this.postProjectSetup({ error: urlError });
-      return;
-    }
-    const root = this.projectRootPath();
-    const folderError = name !== undefined ? projectNameError(name) : null;
-    if (folderError) {
-      this.postProjectSetup({ error: folderError, collision: name?.trim() });
-      return;
-    }
-    const dest = name !== undefined
-      ? projectDestination(root, name)
-      : cloneDestination(root, url);
-    if (!dest) {
-      this.postProjectSetup({ error: "That URL doesn't name a repository." });
-      return;
-    }
-    this.postProjectSetup({ busy: "clone" });
-    try {
-      fs.mkdirSync(root, { recursive: true });
-      if (fs.existsSync(dest)) {
-        this.postProjectSetup({
-          error: `${path.basename(dest)} is already in ${displayPath(root, this.projectHomeDir())}. Pick a different folder name.`,
-          collision: path.basename(dest)
-        });
-        return;
-      }
-    } catch (e) {
-      this.postProjectSetup({ error: `Could not create the folder: ${(e as Error).message}` });
-      return;
-    }
-    const trimmed = normalizeCloneUrl(url) ?? url.trim();
-    const failure = await runGitClone(trimmed, dest);
-    if (failure) {
-      // A half-written checkout is worse than none: the next attempt would fail
-      // on "already exists" and the rail would show an empty project.
-      try {
-        if (fs.existsSync(dest)) fs.rmSync(dest, { recursive: true, force: true });
-      } catch {
-        /* leave it — reporting the clone failure matters more */
-      }
-      const kind = classifyCloneFailure(failure);
-      let error = cloneFailureText(kind, failure);
-      let fix: { fix?: "auth-gh" | "install-gh"; fixCommand?: string } = {};
-      if (offersGithubSetup(trimmed, kind)) {
-        const offer = githubFixFor(process.platform, commandOnPath);
-        if (offer.kind === "auth") fix = { fix: "auth-gh" };
-        else if (offer.kind === "install") fix = { fix: "install-gh", fixCommand: offer.command };
-        else {
-          // No gh, and no package manager we could drive either — a Mac with no
-          // Homebrew, or Windows without winget. A button that runs a command
-          // which is not installed either is worse than saying where to get it.
-          error += ` Install the GitHub CLI from ${offer.where} first.`;
-        }
-      }
-      this.postProjectSetup({ error, ...fix });
-      return;
-    }
-    await this.addProjectFolder(dest);
-    this.postProjectSetup({ done: true });
+    return this.projectFolders.cloneProject(url, name);
   }
 
-  /**
-   * Run the GitHub CLI step the failed clone needs, in a terminal: `gh auth
-   * login` asks questions and opens a browser, and a package manager asks for
-   * elevation.
-   */
   async setupGithubCli(action: "install" | "auth"): Promise<void> {
-    // `sendText`, not `shellPath`/`shellArgs`: both of these are command LINES
-    // rather than one binary with arguments. Signing in has to run two commands
-    // in order — see githubSignInCommand for why the second is not optional —
-    // and this is the seam that already exists for exactly that (the desktop
-    // host routes it through planRunCommandInTerminal, which keeps the window
-    // open so the outcome stays readable).
-    if (action === "auth") {
-      const term = this.host.createTerminal({ name: "GitHub sign-in" });
-      term.show();
-      term.sendText(githubSignInCommand(process.platform));
-      return;
-    }
-    const install = githubCliInstallCommand(process.platform);
-    if (!install) {
-      this.postProjectSetup({
-        error: `Install the GitHub CLI from ${GITHUB_CLI_DOWNLOAD}, then try again.`
-      });
-      return;
-    }
-    const term = this.host.createTerminal({ name: "Install GitHub CLI" });
-    term.show();
-    term.sendText(install.display);
+    return this.projectFolders.setupGithubCli(action);
   }
 
   private async listGithubRepos(): Promise<void> {
-    if (!this.githubConnection) this.githubConnection = await readGithubAuthState();
-    if (!this.githubConnection.connected || this.githubConnection.error) {
-      this.post({ type: "githubRepos", repos: [] });
-      return;
-    }
-    const result = await listGithubRepositories();
-    this.post({
-      type: "githubRepos",
-      repos: result.repos,
-      ...(result.truncated ? { truncated: true } : {}),
-      ...(result.error ? { error: result.error } : {})
-    });
+    return this.projectFolders.listGithubRepos();
   }
 
-  /**
-   * Sign out of GitHub. An environment token outranks the keyring and cannot
-   * be cleared from here — the snapshot after logout says so.
-   */
   private async githubSignOut(): Promise<void> {
-    const current = this.githubConnection;
-    const login = current?.login;
-    if (current?.envTokenInForce) {
-      const name = githubEnvTokenName() ?? "GH_TOKEN";
-      this.githubConnection = {
-        ...current,
-        error: true,
-        message: githubEnvTokenBlocksSignOutMessage(name)
-      };
-      this.postGithubState();
-      return;
-    }
-    const result = await logoutGithub(login);
-    if (!result.ok) {
-      this.githubConnection = {
-        ...(current ?? { ...DISCONNECTED_GITHUB, login: login || "" }),
-        error: true,
-        message: result.error
-      };
-      this.postGithubState();
-      return;
-    }
-    await this.refreshGithubState();
+    return this.projectFolders.githubSignOut();
   }
 
-  /**
-   * Paste-a-token path. The token is never logged, never posted back, never
-   * stored by us — gh owns it after `--with-token`.
-   */
   private async githubLoginWithToken(token: string): Promise<void> {
-    const result = await loginGithubWithToken(token);
-    if (!result.ok) {
-      this.host.appendLine("[github] token login failed");
-      const current = this.githubConnection ?? { ...DISCONNECTED_GITHUB };
-      this.githubConnection = { ...current, error: true, message: result.error };
-      this.postGithubState();
-      return;
-    }
-    this.host.appendLine("[github] token login completed");
-    await this.refreshGithubState();
+    return this.projectFolders.githubLoginWithToken(token);
   }
 
-  /**
-   * Record a hand-added folder and show it, without touching the workspace.
-   *
-   * Selecting it afterwards is the half that makes the button feel like the
-   * desktop's: there, adding a project switches to it. Here "switch" is only
-   * the rail's own selection — `selectedRepoCwd`, which `postRepoCatalog` reads
-   * — so the rail lands on the project you just added, expanded and ready, while
-   * VS Code itself has not moved.
-   */
   private async rememberExtraProjectFolder(resolved: string): Promise<void> {
-    let ok = false;
-    try {
-      ok = fs.statSync(resolved).isDirectory();
-    } catch {
-      ok = false;
-    }
-    if (!ok) {
-      void this.host.showWarningMessage(`Not a folder:\n${resolved}`);
-      return;
-    }
-    const key = normalizeRepoPath(resolved);
-    // Already here on its own — the open workspace folder, or a project Grok has
-    // run in. Recording it as hand-added would be a lie with consequences: the
-    // row would gain a Remove action, and removing it tombstones a project that
-    // has other reasons to exist. Worst of all for the OPEN folder, whose access
-    // cannot be revoked at all (`localTrustedSessionCwds` adds `workspaceRoot()`
-    // unconditionally, and every remote gate reads that set) — the row would
-    // vanish while the phone carried on reading and writing it. Just go there.
-    const alreadyListed =
-      !!this.resolveLocalRepoTarget(resolved) ||
-      pathsEqual(resolved, this.workspaceRoot() || "");
-    if (alreadyListed) {
-      await this.selectRepo(resolved);
-      return;
-    }
-    // Adding a folder is the undo for having removed it. Without this the
-    // tombstone would outlive the decision and the picker would appear to do
-    // nothing at all.
-    const tombstones = this.state.get<string[]>(REMOVED_PROJECT_FOLDERS_KEY, []);
-    if (Array.isArray(tombstones) && tombstones.some((c) => normalizeRepoPath(c) === key)) {
-      await this.state.update(
-        REMOVED_PROJECT_FOLDERS_KEY,
-        tombstones.filter((c) => normalizeRepoPath(c) !== key),
-      );
-    }
-    const stored = this.extraProjectFolders();
-    if (!stored.some((c) => normalizeRepoPath(c) === key)) {
-      await this.state.update(EXTRA_PROJECT_FOLDERS_KEY, [...stored, resolved]);
-    }
-    // Already in the catalog by other means (open folder, or Grok has run there)
-    // is not a failure — the user still gets taken to it.
-    await this.selectRepo(resolved);
+    return this.projectFolders.rememberExtraProjectFolder(resolved);
   }
 
-  /**
-   * Take a hand-added folder back out of the rail's catalog (VS Code).
-   *
-   * Deliberately NOT the desktop's revocation: nothing is disposed and no
-   * process is killed, because adding the folder started nothing. It removes
-   * the one reason this folder was listed. If Grok has since run there the row
-   * survives on its own history — same as every other project, and the
-   * conversations are still yours; archive is the way to hide those.
-   */
   private async forgetExtraProjectFolder(cwd?: string): Promise<void> {
-    if (!cwd) return;
-    // Removal is a REVOCATION here too, not a catalog filter. Tombstoning the
-    // row stopped new remote frames but left any agent already running in that
-    // folder executing commands and writing files — while the confirmation said
-    // "Nothing on disk is touched". Same warning and same disposal the desktop
-    // close performs, for the same reason: the user is being asked to end work
-    // they may not know is in flight.
-    const working = this.sessionsBoundToFolder(cwd).filter(sessionHasWorkInFlight);
-    if (working.length) {
-      const many = working.length > 1;
-      const ok = await this.host.showWarningMessage(
-        `Hide "${path.basename(cwd)}"?\n\n` +
-          `${many ? `${working.length} conversations are` : "A conversation is"} still working. ` +
-          `Hiding it ends ${many ? "them" : "it"} and discards the turn in progress.`,
-        { modal: true },
-        "Hide anyway",
-      );
-      if (ok !== "Hide anyway") return;
-    }
-    // Never the open workspace folder. Its authorization does not come from the
-    // catalog — `localTrustedSessionCwds` adds `workspaceRoot()` on its own — so
-    // a tombstone would hide the row while every remote gate kept saying yes.
-    // A revocation that does not revoke is worse than no button at all.
-    if (pathsEqual(cwd, this.workspaceRoot() || "")) {
-      void this.host.showWarningMessage(
-        "This is the folder VS Code has open, so it cannot be removed from the list. " +
-          "Close the folder in VS Code instead.",
-      );
-      return;
-    }
-    const key = normalizeRepoPath(cwd);
-    const stored = this.extraProjectFolders();
-    const next = stored.filter((c) => normalizeRepoPath(c) !== key);
-    if (next.length === stored.length) return;
-    await this.state.update(EXTRA_PROJECT_FOLDERS_KEY, next);
-    // …and the PIN, or this removes nothing.
-    //
-    // `discoverRepos` keeps a pinned cwd in the catalog on its own — "a pin is
-    // durable intent" — and a phone can pin any project it can see. So: add a
-    // folder, pin it from the phone, remove it at the desk, and it came back as
-    // an ordinary catalog row that VS Code trusts, still browsable and editable
-    // from the phone, and now WITHOUT the `added` marker, so the rail no longer
-    // offered to remove it. A revocation that a remote can pre-empt is not one.
-    //
-    // A pin on a folder being removed is not intent to keep it; it is the pin of
-    // a project that is going away.
-    const pins = this.state.get<RepoPins>(REPO_PINS_KEY, {});
-    if (pins[key]) {
-      const nextPins = { ...pins };
-      delete nextPins[key];
-      await this.state.update(REPO_PINS_KEY, nextPins);
-    }
-    // …and a tombstone, or the folder simply comes back. VS Code's catalog is
-    // discovered from Grok's own session history, so anything that has run there
-    // re-adds the row — and a phone can manufacture exactly that by selecting
-    // the project, which starts a session in it. Removal has to outrank
-    // discovery or it is not removal.
-    const tombstones = this.state.get<string[]>(REMOVED_PROJECT_FOLDERS_KEY, []);
-    const list = Array.isArray(tombstones) ? tombstones : [];
-    if (!list.some((c) => normalizeRepoPath(c) === key)) {
-      await this.state.update(REMOVED_PROJECT_FOLDERS_KEY, [...list, cwd]);
-    }
-    // Now that the tombstone is written — so `isAuthorizedCwd` already says no —
-    // end everything that folder still owns: agent processes disposed, remote
-    // ownership on that cwd released, image handles dropped, authEpoch bumped.
-    // Order matters the same way it does on desktop: revoke only once the folder
-    // has left the authorized set, or a concurrent remote send could still route
-    // into a doomed session.
-    this.revokeClosedProjectFolder(cwd);
-    if (!this.pool.has(this.focused) && !this.focused.client) {
-      this.focused = this.newLocalSession();
-      this.emit(this.focused, { type: "clearMessages" });
-    }
-    // The selection may have been pointing at it. postRepoCatalog re-validates
-    // against the catalog it is about to send and moves it if the row is gone.
-    this.postRepoCatalog();
-    this.postSessionsList();
+    return this.projectFolders.forgetExtraProjectFolder(cwd);
   }
 
-  /**
-   * Public: close a project folder from the desktop File menu. Closing is a
-   * **revocation**, not a catalog filter: sessions bound to the folder end and
-   * image handles under it are dropped. Closing the last folder leaves an
-   * empty rail (no re-seed).
-   */
   async removeProjectFolder(cwd?: string): Promise<void> {
-    if (!this.host.canSwitchWorkspaceFolder) {
-      // VS Code: the only thing there is to remove is a folder the user ADDED
-      // by hand. Everything else in the catalog is there because Grok has run
-      // in it, and no button here would change that. Without this the added
-      // folder was permanent — a mistaken or sensitive directory stayed
-      // selectable for ever.
-      await this.forgetExtraProjectFolder(cwd);
-      return;
-    }
-    const target = cwd || this.host.workspaceRoot();
-    if (!target) return;
-    // Closing is a revocation: every session in the folder is disposed and its
-    // agent process killed (hard-killed on Windows). A File-menu item gives no
-    // hint that anything is running, so a mid-turn close would discard the work
-    // silently. Ask first. The revoke recomputes its own list at use time, so
-    // nothing here goes stale across the await.
-    const working = this.sessionsBoundToFolder(target).filter(sessionHasWorkInFlight);
-    if (working.length) {
-      const many = working.length > 1;
-      const ok = await this.host.showWarningMessage(
-        `Close "${path.basename(target)}"?
-
-${many ? `${working.length} conversations are` : "A conversation is"} still working. ` +
-          `Closing ends ${many ? "them" : "it"} and discards the turn in progress.`,
-        { modal: true },
-        "Close anyway",
-      );
-      if (ok !== "Close anyway") return;
-    }
-
-    const activeRoot = this.host.workspaceRoot();
-    const wasActive = !!activeRoot && pathsEqual(target, activeRoot);
-    if (!this.host.removeWorkspaceFolder(target)) {
-      void this.host.showWarningMessage(`Could not close folder:\n${target}`);
-      return;
-    }
-    // Revoke first so a concurrent send cannot still route to a doomed session
-    // after the folder is gone from the open set.
-    this.revokeClosedProjectFolder(target);
-
-    const next = this.host.workspaceRoot();
-    if (wasActive && next) {
-      await this.switchLocalWorkspaceFolder(next);
-    } else if (!next) {
-      // Empty open set — focused may already have been disposed by revoke.
-      // clearMessages alone resets the welcome to "Starting"; without a
-      // follow-on startSession unlock that spinner never clears.
-      if (this.pool.has(this.focused) || this.focused.client) {
-        this.parkFocused();
-      }
-      this.focused = this.newLocalSession();
-      this.selectedRepoCwd = "";
-      this.emit(this.focused, { type: "clearMessages" });
-      this.presentEmptyProjectState(this.focused);
-    } else {
-      // Revoke may have disposed the focused session when it lived in the closed
-      // folder even though another folder remains active.
-      if (!this.pool.has(this.focused) && !this.focused.client) {
-        this.focused = this.newLocalSession();
-      }
-      this.postRepoCatalog();
-      this.postSessionsList();
-    }
+    return this.projectFolders.removeProjectFolder(cwd);
   }
 
-  /**
-   * Desktop with nothing open: unlock the baked "Starting" welcome and name
-   * the problem. startSession used to return here without either, which is
-   * the first-run hang (#116) — grok is inferred connected from ~/.grok, so
-   * postInitialState never shows connect-agent, and the spinner never clears.
-   * Do not spawn against process.cwd() (that is the install directory).
-   */
   private presentEmptyProjectState(session: Session): void {
-    session.priming = false;
-    this.emit(session, { type: "setBusy", value: false });
-    this.emit(session, {
-      type: "onboarding",
-      state: "no-project",
-      platform: process.platform
-    });
-    this.postRepoCatalog();
-    this.postSessionsList();
+    this.projectFolders.presentEmptyProjectState(session);
   }
 
-  /**
-   * Revoke all live capabilities that belonged to a just-closed project folder.
-   * Bumps {@link authEpoch}. Idempotent for a given path once the open set has
-   * already dropped it (isAuthorizedCwd is false for that cwd).
-   */
-  /** Every live session the given folder owns — pool plus focused, worktrees
-   *  included. Both the close warning and the revoke read this, so the set the
-   *  user is warned about is by construction the set that gets disposed. */
   private sessionsBoundToFolder(closedCwd: string): Session[] {
-    const bound: Session[] = [];
-    const seen = new Set<Session>();
-    const consider = (s: Session | undefined) => {
-      if (!s || seen.has(s)) return;
-      seen.add(s);
-      if (
-        sessionBoundToClosedFolder(
-          this.sessionCwd(s),
-          s.worktree?.path,
-          s.worktree?.sourceGitRoot,
-          closedCwd,
-          pathsEqual,
-        )
-      ) {
-        bound.push(s);
-      }
-    };
-    for (const s of this.pool) consider(s);
-    consider(this.focused);
-    return bound;
+    return this.projectFolders.sessionsBoundToFolder(closedCwd);
   }
 
   private revokeClosedProjectFolder(closedCwd: string): void {
-    this.authEpoch++;
-    // Voice first: a completing STT turn must not voiceSubmit / post into a
-    // session that is about to be disposed or rehomed to another project.
-    this.revokeVoiceForClosedFolder(closedCwd);
-
-    const doomed = this.sessionsBoundToFolder(closedCwd);
-
-    for (const s of doomed) void this.disposeSession(s);
-
-    this.invalidateImageHandlesUnder(closedCwd);
-
-    this.worktreeCache = this.worktreeCache.filter(
-      (w) =>
-        !pathsEqual(w.sourceRepo, closedCwd) &&
-        !pathBoundToClosedFolder(w.path, closedCwd, pathsEqual),
-    );
-
-    // Drop worktree meta that pointed at the closed folder so a later resume
-    // cannot re-authorize via overrides alone (trusted set no longer includes it).
-    const overrides = this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
-    let metaChanged = false;
-    const nextMeta: SessionMetaOverrides = { ...overrides };
-    for (const [id, o] of Object.entries(overrides)) {
-      if (
-        (o.worktreePath && pathBoundToClosedFolder(o.worktreePath, closedCwd, pathsEqual)) ||
-        (o.sourceGitRoot && pathsEqual(o.sourceGitRoot, closedCwd))
-      ) {
-        const { worktreePath: _wp, worktreeLabel: _wl, sourceGitRoot: _sg, ...rest } = o;
-        nextMeta[id] = rest;
-        metaChanged = true;
-      }
-    }
-    if (metaChanged) void this.state.update(SESSION_META_KEY, nextMeta);
-
-    this.host.appendLine(`[auth] revoked project folder ${closedCwd} (epoch=${this.authEpoch})`);
+    this.projectFolders.revokeClosedProjectFolder(closedCwd);
   }
 
   private invalidateImageHandlesUnder(closedCwd: string): void {
-    const handles = imageHandlesToRevoke(this.fullImagePaths, closedCwd, pathsEqual);
-    for (const handle of handles) {
-      const p = this.fullImagePaths.get(handle);
-      this.fullImagePaths.delete(handle);
-      if (p && this.fullImageHandles.get(p) === handle) this.fullImageHandles.delete(p);
-    }
+    this.projectFolders.invalidateImageHandlesUnder(closedCwd);
   }
 
-  /**
-   * Cancel voice bound to a just-closed project folder so a late transcript
-   * cannot land on a rehomed session or different focused project.
-   */
   private revokeVoiceForClosedFolder(closedCwd: string): void {
-    if (
-      (this.localVoiceCwd && pathBoundToClosedFolder(this.localVoiceCwd, closedCwd, pathsEqual)) ||
-      (this.localVoiceCredentialCwd &&
-        pathBoundToClosedFolder(this.localVoiceCredentialCwd, closedCwd, pathsEqual))
-    ) {
-      this.stopVoiceInput();
-    }
+    this.projectFolders.revokeVoiceForClosedFolder(closedCwd);
   }
 
   private async toggleRepoPin(cwd: string, pinned: boolean): Promise<void> {
