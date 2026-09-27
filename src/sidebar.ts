@@ -1,5 +1,6 @@
 import { WorktreeHost, SESSION_META_KEY } from "./worktree-host";
 import { ProviderSetup } from "./provider-setup";
+import { TurnEdit, createTurnEdit } from "./turn-edit";
 import { WebviewHtml } from "./webview-html";
 import { QuestionHost } from "./question-host";
 import { ReviewHost } from "./review-host";
@@ -140,13 +141,13 @@ import type { PromptResultMeta, PromptUsage, SessionInfoContext } from "./acp-di
 import { DEFAULT_COMPACT_THRESHOLD, GROK_COMPACT_ENV, compactEventKind, compactSummaryPreview, compactThresholdMismatch, compactThresholdMismatchNotice, grokCompactThresholdEnv, normalizeCompactThreshold, shouldOfferNearFull } from "./grok-compaction";
 import { renderFreshSessionPrompt } from "./handoff";
 import { ChildRelayTable, type RelayKind, type RelayOrigin } from "./child-relay";
-import { normalizeStallWarningSec } from "./child-watch";
+import { normalizeStallWarningSec, type PausableDeadline } from "./child-watch";
 import { subagentTurnSummary } from "./companion-subagents";
 import { bothDelegationsHint, grokSubagentEnv } from "./grok-subagent-env";
-import { MediaRef, adapterCompactSignal, adapterContextOccupancy, agentTimestampMsFromMeta, autoCompactStartedNote, childStreamFromRoute, commandOutputForToolCall, commandOutputFromLiveTerminal, contextUsedFromCompactNotification, enforceCompleteSessionCost, errorDetail, gateZeroTokenMeta, isAuthErrorText, isCredentialError, isIncompatibleAgentError, isResumeNotFound, isSubagentLifecycleUpdate, occupancyFromAdapterTurn, parseSessionInfoContext, permissionOutcomeFor, promptErrorText, rateLimitNoticeText, replayedTurnDuration, sessionInfoCacheFresh, sumUsage, summarizeBackgroundCommand, turnStatusFromPromptResult, usageIsRealMeasurement, type TurnEndStatus, type UpdateRoute } from "./acp-dispatch";
+import { MediaRef, adapterCompactSignal, adapterContextOccupancy, agentTimestampMsFromMeta, autoCompactStartedNote, childStreamFromRoute, commandOutputForToolCall, commandOutputFromLiveTerminal, contextUsedFromCompactNotification, enforceCompleteSessionCost, errorDetail, gateZeroTokenMeta, isCredentialError, isIncompatibleAgentError, isResumeNotFound, isSubagentLifecycleUpdate, occupancyFromAdapterTurn, parseSessionInfoContext, permissionOutcomeFor, promptErrorText, rateLimitNoticeText, replayedTurnDuration, sessionInfoCacheFresh, sumUsage, summarizeBackgroundCommand, turnStatusFromPromptResult, usageIsRealMeasurement, type TurnEndStatus, type UpdateRoute } from "./acp-dispatch";
 import { createMcpPrepareState, prepareMcpToolCall } from "./mcp-tool";
 import { configWriteTarget, modeToRemember, rememberedEffort, startsInYolo, withRememberedEffort, type EffortPrefs } from "./mode-prefs";
-import { beginAuthRecovery, oauthShadowsXaiApiKey } from "./auth-recovery";
+import { oauthShadowsXaiApiKey } from "./auth-recovery";
 import {
   classifyLimitError,
   CONTEXT_OVERFLOW_TEXT,
@@ -155,8 +156,7 @@ import {
   limitOfferTargets,
   freePercentFromWindows,
   limitOfferTitle,
-  recommendedLimitAction,
-  switchTranscriptLine
+  recommendedLimitAction
 } from "./limit-errors";
 import {
   WELCOME_TIPS_KEY,
@@ -283,13 +283,10 @@ import {
 import { buildPromptWithImages, buildQueuedPromptWithImages, type PromptImageInput, type QueuedPromptContribution } from "./prompt-builder";
 import {
   chipsForQueueSend,
-  cloneChipForQueue,
   dequeueQueuedSends,
   enqueueQueuedSend,
   explicitVisibleChips,
   queuedFlushText,
-  queuedSendsContainChipIds,
-  queuedSendsHaveContent,
   queuedSendsMessage,
   queuedSendsText,
   restoreQueuedChips,
@@ -442,7 +439,6 @@ import {
   discoverRepos,
   fallbackName,
   findSessionCatalogCwd,
-  forkDisplayName,
   indexSessions,
   isEmptySession,
   isRepoColor,
@@ -467,7 +463,6 @@ import {
   defaultSessionTypeFromSetting,
   effectiveSessionType,
   isSessionTypeLocked,
-  forkedSessionTypeMeta,
   lockSessionType,
   type HiddenReason,
   type SessionType,
@@ -535,26 +530,13 @@ import {
   sessionBoundToClosedFolder
 } from "./workspace-auth";
 import {
-  formatRewindPointDetail,
-  formatRewindPointLabel,
   historyEventCount,
-  anyFilesAfter,
-  bubbleMapIsConsistent,
   checkWorkspaceGitStatus,
-  editRewindConfirmMessage,
-  resolveEditRewindTarget,
-  resolveUserBubbleRewind,
-  survivingUserMessagesAfterRewind,
   truncateReplayBuffer,
-  rewindConfirmMessage,
-  selectableRewindPoints,
-  userFacingRewindPoints
 } from "./rewind";
 import {
   commandsAdvertiseFeedback,
   decideFeedbackAvailability,
-  feedbackClientType,
-  isThumbsRating,
   parseFeedbackEnabledMeta
 } from "./feedback";
 import {
@@ -1225,6 +1207,7 @@ export class GrokSidebar {
   private _worktreeHost?: WorktreeHost;
   private _providerSetup?: ProviderSetup;
   private _workflowStageRunner?: WorkflowStageRunner;
+  private _turnEdit?: TurnEdit;
 
   /** Real instances set these in the constructor. Prototype stubs used by tests
    *  never run it, so the first delegating call builds the collaborator. */
@@ -1252,6 +1235,76 @@ export class GrokSidebar {
     return this._workflowStageRunner ??= this.createWorkflowStageRunner();
   }
   set workflowStageRunner(value: WorkflowStageRunner) { this._workflowStageRunner = value; }
+  get turnEdit(): TurnEdit {
+    return this._turnEdit ??= this.createTurnEdit();
+  }
+  set turnEdit(value: TurnEdit) { this._turnEdit = value; }
+
+  private createTurnEdit(): TurnEdit {
+    const self = this;
+    return createTurnEdit({
+      get host() { return self.host; },
+      get state() { return self.state; },
+      get context() { return self.context; },
+      get checkpointStore() { return self.checkpointStore; },
+      getOverride: (name: string) => self.sidebarTestOverride(name),
+      getFocused: () => self.focused,
+      setFocused: (session) => { self.focused = session; },
+      getSessionCache: () => self.sessionCache,
+      steerOps: {
+        emit: (...args) => self.emit(...args),
+        emitQueuedSends: (...args) => self.emitQueuedSends(...args),
+        refreshImplicitChip: (...args) => self.refreshImplicitChip(...args),
+        postChips: (...args) => self.postChips(...args),
+        notifyUser: (...args) => self.notifyUser(...args),
+        contextChipPayloads: (...args) => self.contextChipPayloads(...args),
+        readImageChip: (...args) => self.readImageChip(...args),
+        retainUploadedFilesForSession: (...args) => self.retainUploadedFilesForSession(...args),
+        maybeFlushQueuedSends: (...args) => self.maybeFlushQueuedSends(...args),
+      },
+      rewindOps: {
+        notifyUser: (...args) => self.notifyUser(...args),
+        rewindFromClientCheckpoints: (...args) => self.rewindFromClientCheckpoints(...args),
+        restoreComposerFor: (...args) => self.restoreComposerFor(...args),
+        checkWorkspaceGitStatus,
+        workspaceRoot: () => self.workspaceRoot(),
+        confirmInChat: (...args) => self.confirmInChat(...args),
+        truncateSessionCardsAfterRewind: (...args) => self.truncateSessionCardsAfterRewind(...args),
+        applyRewindToView: (...args) => self.applyRewindToView(...args),
+        sessionDisplayName: (...args) => self.sessionDisplayName(...args),
+        sessionCwd: (...args) => self.sessionCwd(...args),
+        openSession: (...args) => self.openSession(...args),
+        rememberQueuedDraft: (...args) => self.rememberQueuedDraft(...args),
+      },
+      authLimitOps: {
+        usableProviders: () => self.usableProviders(),
+        emit: (...args) => self.emit(...args),
+        post: (...args) => self.post(...args),
+        rememberProjectProvider: (...args) => self.rememberProjectProvider(...args),
+        sessionCwd: (...args) => self.sessionCwd(...args),
+        startSession: (...args) => self.startSession(...args),
+        handleSend: (...args) => self.handleSend(...args),
+        setProviderNeedsLogin: (...args) => self.setProviderNeedsLogin(...args),
+        startTurnGitBaseline: (...args) => self.startTurnGitBaseline(...args),
+        setStatus: (...args) => self.setStatus(...args),
+        emitAbandonedSend: (...args) => self.emitAbandonedSend(...args),
+        turnEndFields: (...args) => self.turnEndFields(...args),
+        noteLiveTurnEnded: (...args) => self.noteLiveTurnEnded(...args),
+        maybeGenerateTitle: (...args) => self.maybeGenerateTitle(...args),
+        postSessionName: (...args) => self.postSessionName(...args),
+        surfaceLimitError: (...args) => self.surfaceLimitError(...args),
+        onboardingForSession: (...args) => self.onboardingForSession(...args),
+      },
+      feedbackOps: {
+        ackTurnFeedback: (...args) => self.ackTurnFeedback(...args),
+        latchFeedbackUnavailable: (...args) => self.latchFeedbackUnavailable(...args),
+        thumbsFeedbackEnabled: () => self.thumbsFeedbackEnabled(),
+        notifyUser: (...args) => self.notifyUser(...args),
+        contextExtensionVersion: () => self.context.extensionVersion,
+        canSwitchWorkspaceFolder: () => self.host.canSwitchWorkspaceFolder,
+      },
+    });
+  }
 
   private createReviewHost(): ReviewHost {
     const self = this;
@@ -1339,6 +1392,19 @@ export class GrokSidebar {
     });
   }
 
+  private sidebarTestOverride(name: string): any {
+    const descriptor = Object.getOwnPropertyDescriptor(this, name);
+    if (!descriptor || !("value" in descriptor)) return undefined;
+    const override = descriptor.value;
+    // Some host tests explicitly assign the prototype method to a stubbed
+    // sidebar in order to request its production implementation. Once the
+    // method is a thin collaborator wrapper, treating that same function as
+    // an override would route back into the collaborator recursively.
+    const prototypeDescriptor = Object.getOwnPropertyDescriptor(GrokSidebar.prototype, name);
+    if (prototypeDescriptor && "value" in prototypeDescriptor && override === prototypeDescriptor.value) return undefined;
+    return typeof override === "function" ? override.bind(this) : override;
+  }
+
   private createProviderSetup(): ProviderSetup {
     const self = this;
     return new ProviderSetup({
@@ -1363,12 +1429,7 @@ export class GrokSidebar {
       refreshGithubState: () => self.refreshGithubState(),
       buildEnv: (...args) => self.buildEnv(...args),
       removeSessionFromDisk: (...args) => self.removeSessionFromDisk(...args),
-      getOverride: (name: string) => {
-        if (Object.prototype.hasOwnProperty.call(self, name)) {
-          return (self as any)[name];
-        }
-        return undefined;
-      }
+      getOverride: (name: string) => self.sidebarTestOverride(name)
     });
   }
 
@@ -1403,12 +1464,7 @@ export class GrokSidebar {
       emitReviewCenter: (session: Session) => self.emitReviewCenter(session),
       persistSessionType: (session: Session) => self.persistSessionType(session),
       childWaitsForYou: (child: Session | undefined) => self.childWaitsForYou(child),
-      getOverride: (name: string) => {
-        if (Object.prototype.hasOwnProperty.call(self, name)) {
-          return (self as any)[name];
-        }
-        return undefined;
-      }
+      getOverride: (name: string) => self.sidebarTestOverride(name)
     });
   }
 
@@ -5583,209 +5639,7 @@ Only continue if you trust this code.`,
     requestedChips?: ContextChip[],
     fromQueue = false,
   ): Promise<void> {
-    const authored = text ?? "";
-    const takeQueue = (fromQueue && queuedSendsHaveContent(session.queuedSends))
-      || queuedSendsContainChipIds(session.queuedSends, requestedChips);
-
-    if (!session.client || !session.activeSessionId) {
-      // No live turn to steer — fall back to the queue rather than drop it.
-      // Deliberately NOT flagged for a relay round-trip: the relay meters
-      // steerSend on ingress exactly like send, so this text is already paid
-      // for — re-submitting the queued fallback through the relay would
-      // charge it twice. Same for the two fallbacks below.
-      if (takeQueue) return;
-      const chips = chipsForQueueSend(session.chips, requestedChips);
-      if (!authored.trim() && !chips.length) return;
-      session.queuedSends = enqueueQueuedSend(session.queuedSends, authored, chips);
-      if (chips.length) {
-        session.chips = consumeChips(session.chips, chips);
-        if (session === this.focused) this.refreshImplicitChip(true);
-        else this.postChips(session);
-      }
-      this.emitQueuedSends(session);
-      return;
-    }
-
-    let contributions: QueuedSendEntry[];
-    let fromComposer = false;
-    if (takeQueue) {
-      contributions = session.queuedSends.map((item) => ({
-        text: item.text,
-        chips: item.chips.map(cloneChipForQueue)
-      }));
-      session.queuedSends = [];
-      session.queuedSendCommit = undefined;
-      this.emitQueuedSends(session);
-    } else {
-      const chips = chipsForQueueSend(session.chips, requestedChips);
-      if (!authored.trim() && !chips.length) return;
-      contributions = [{ text: authored, chips }];
-      if (chips.length) {
-        fromComposer = true;
-        session.chips = consumeChips(session.chips, chips);
-        if (session === this.focused) this.refreshImplicitChip(true);
-        else this.postChips(session);
-      }
-    }
-
-    const putBackOnQueue = (): void => {
-      if (takeQueue) {
-        session.queuedSends = [...contributions, ...session.queuedSends];
-      } else {
-        for (const item of contributions) {
-          session.queuedSends = enqueueQueuedSend(session.queuedSends, item.text, item.chips);
-        }
-      }
-      this.emitQueuedSends(session);
-    };
-    const putBackOnComposer = (): void => {
-      if (takeQueue) {
-        session.queuedSends = [...contributions, ...session.queuedSends];
-        this.emitQueuedSends(session);
-        return;
-      }
-      if (fromComposer) {
-        session.chips = restoreQueuedChips(session.chips, contributions);
-        if (session === this.focused) this.refreshImplicitChip(true);
-        else this.postChips(session);
-      }
-    };
-
-    const client = session.client;
-    const gen = session.gen;
-    const promptDeps = {
-      readFile: (p: string) => fs.readFileSync(p, "utf8"),
-      extName: (p: string) => path.extname(p),
-      // Collected here, in the same tick the interjection is built.
-      contextChipPayload: this.contextChipPayloads(
-        contributions.flatMap((item) => item.chips),
-      )
-    };
-
-    const builtContributions: QueuedPromptContribution[] = [];
-    for (const item of contributions) {
-      const itemImages: PromptImageInput[] = [];
-      for (const chip of item.chips) {
-        if (chip.hidden || !isFileChip(chip) || !isImageChip(chip)) continue;
-        const read = await this.readImageChip(chip, session, gen);
-        if (read === "gone") {
-          putBackOnComposer();
-          return;
-        }
-        if (read === "failed") {
-          putBackOnComposer();
-          return;
-        }
-        itemImages.push(read);
-      }
-      builtContributions.push({ text: item.text, chips: item.chips, images: itemImages });
-    }
-    if (gen !== session.gen || session.client !== client) {
-      putBackOnComposer();
-      return;
-    }
-
-    const images = builtContributions.flatMap((item) => item.images);
-    if (images.length && !client.honorsInterjectContent()) {
-      // 0.2.x / unverified: interject still works, but `content` is ignored
-      // and the pixels would vanish. Queue the whole item instead.
-      putBackOnQueue();
-      this.notifyUser("warning",
-        "This agent cannot steer attachments mid-turn — your message was queued instead. It will send when the turn finishes.",
-      );
-      return;
-    }
-
-    // Steer interjections mid-turn should NOT append ambient/implicit editor context (active file/selection)
-    // to avoid token ballooning and cache thrashing during tool execution. Only explicit attachments are sent.
-    const implicitChips: ContextChip[] = [];
-    const slashCommand = matchSlashCommand(
-      queuedSendsText(contributions) || authored,
-      client.availableCommands.map((c) => c.name),
-    );
-    const built = builtContributions.length === 1
-      ? buildPromptWithImages(
-        builtContributions[0].text,
-        builtContributions[0].chips,
-        builtContributions[0].images,
-        promptDeps,
-        slashCommand != null,
-      )
-      : buildQueuedPromptWithImages(builtContributions, implicitChips, promptDeps, slashCommand != null);
-
-    await this.retainUploadedFilesForSession(
-      session,
-      contributions.flatMap((item) => item.chips),
-    );
-    if (gen !== session.gen || session.client !== client) {
-      putBackOnComposer();
-      return;
-    }
-
-    // The turn ended before the steer landed (while attachments were read).
-    // grok buffers an idle steer, but codex-acp's `performSteeringRequest`
-    // "otherwise starts a new turn" — one the host never began, with no Stop
-    // and no busy state. The queue is what Steer offered to skip, so it is the
-    // honest home; flushing it sends the ordinary tracked turn (upstream
-    // 19876a0). `turnInFlight`, not `status`: only the token can tell
-    // "working" from "was working and never settled". The text is already
-    // paid for, so the relay flag is cleared before the flush (upstream 4d74e90).
-    if (!turnIsInFlight(session)) {
-      putBackOnQueue();
-      void this.maybeFlushQueuedSends(session);
-      return;
-    }
-
-    const displayText = queuedSendsText(contributions);
-    const displayChips = contributions.flatMap((item) => item.chips);
-    this.emit(session, {
-      type: "userMessage",
-      text: displayText,
-      chips: displayChips,
-      steer: true
-    });
-
-    const rpcText = images.length ? displayText : built.text;
-    try {
-      const r = await client.interject(rpcText, () => {
-        if (gen === session.gen && session.client === client) session.interjectionCount += 1;
-      }, images.length ? built.blocks : undefined);
-      if (r === "unsupported") {
-        // Unsupported backend: latch the button off and hand the item to the
-        // queue, which is exactly the behavior Steer was offering to skip.
-        this.emit(session, { type: "steerUnavailable" });
-        this.emit(session, { type: "agentReset" });
-        putBackOnQueue();
-        this.notifyUser("warning",
-          // Grok's method is unadvertised, so "unsupported" there means an old
-          // CLI that an update fixes. Every other backend advertises.
-          session.provider === "grok"
-            ? "Steering needs a newer Grok Build CLI — your message was queued instead. Update via Settings → About."
-            : "This agent cannot steer mid-turn — your message was queued instead. It will send when the turn finishes.",
-        );
-        return;
-      }
-      if (r === "failed") {
-        // The adapter answered and said it could not apply the correction.
-        // The turn is STILL RUNNING: no `agentReset` (that would delete the
-        // reply being read) and no `steerUnavailable` (one refusal is not a
-        // missing capability). The queue takes the text (upstream bb76a5a).
-        putBackOnQueue();
-        this.notifyUser("warning",
-          "The agent could not take that correction mid-turn — your message was queued instead. It will send when the turn finishes.",
-        );
-        return;
-      }
-      this.host.appendLine(
-        images.length
-          ? `[steer] interjected ${rpcText.length} chars + ${images.length} image(s) into the running turn`
-          : `[steer] interjected ${rpcText.length} chars into the running turn`,
-      );
-    } catch (e: any) {
-      this.emit(session, { type: "agentReset" });
-      putBackOnQueue();
-      this.emit(session, { type: "error", text: `Steer failed: ${e?.message ?? e}. Your message was queued instead.` });
-    }
+    return this.turnEdit.steerSend(text, session, requestedChips, fromQueue);
   }
 
   private refreshFeedbackAvailability(session: Session): void {
@@ -5879,56 +5733,7 @@ Only continue if you trust this code.`,
     rating: unknown,
     session: Session,
   ): Promise<void> {
-    const previous = session.turnRating;
-    const revert = () => this.ackTurnFeedback(session, previous);
-    if (!isThumbsRating(rating)) {
-      revert();
-      return;
-    }
-    // Setting off is not a capability gap — do not latch unsupported, or
-    // turning the opt-in on later could never restore thumbs.
-    if (!this.thumbsFeedbackEnabled()) {
-      revert();
-      return;
-    }
-    if (session.provider !== "grok" || !session.feedbackAvailable) {
-      this.latchFeedbackUnavailable(session);
-      revert();
-      return;
-    }
-    if (!session.liveFeedbackEligible) {
-      revert();
-      this.notifyUser("warning", "Only the latest reply in this session can be rated.");
-      return;
-    }
-    const client = session.client;
-    if (!client?.sessionId) {
-      revert();
-      this.notifyUser("warning", "Start a Grok session before rating a turn.");
-      return;
-    }
-    try {
-      const result = await client.submitFeedback({
-        ratingValue: rating,
-        clientType: feedbackClientType(!!this.host.canSwitchWorkspaceFolder),
-        clientVersion: this.context.extensionVersion
-      });
-      if (result === "unsupported") {
-        this.latchFeedbackUnavailable(session);
-        revert();
-        this.notifyUser("warning",
-          "Turn ratings need a Grok Build CLI that accepts feedback.",
-        );
-        return;
-      }
-      // A later send already took the affordance. The RPC rated the turn that
-      // was current at click time; do not paint the next footer.
-      if (!session.liveFeedbackEligible) return;
-      this.ackTurnFeedback(session, rating);
-    } catch (e: any) {
-      revert();
-      this.notifyUser("error", `Couldn't send that rating: ${e?.message ?? e}`);
-    }
+    return this.turnEdit.handleTurnFeedback(rating, session);
   }
 
   /**
@@ -5941,78 +5746,7 @@ Only continue if you trust this code.`,
    * model has forgotten (see research/grok-build-oss-findings.md § 3a).
    */
   private async forkFocusedSession(session: Session = this.focused): Promise<void> {
-    if (!session.client || !session.activeSessionId) {
-      this.notifyUser("warning", "Start a session before forking it.");
-      return;
-    }
-    if (!session.hasHistory) {
-      this.notifyUser("info", "Nothing to fork yet — this session has no conversation.");
-      return;
-    }
-    // Resolve the parent's name BEFORE the fork — it names the fork, so it must
-    // be the name the user was looking at when they clicked. Reading it after the
-    // await risks a turn landing mid-fork and rewriting summary.json (and with it
-    // grok's generated title), naming the fork after something never on screen.
-    // forkDisplayName is idempotent, so forking a fork stays "Foo (Fork)".
-    const parentName = this.sessionDisplayName(session);
-    const forkName = forkDisplayName(parentName);
-    try {
-      // Fork keeps the same cwd as the source, worktree-isolated ones included.
-      const cwd = this.sessionCwd(session);
-      const r = await session.client.forkSession(cwd);
-      if (r === "unsupported") {
-        this.notifyUser("warning",
-          "Forking needs a newer Grok Build CLI. Update via Settings → About.",
-        );
-        return;
-      }
-      this.host.appendLine(`[fork] ${session.activeSessionId} → ${r.newSessionId} ("${forkName}")`);
-      // Stamp the name before focusing, so neither the history list nor the
-      // toolbar ever flashes grok's own generated title for the fork.
-      const overrides = this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
-      const prev = overrides[r.newSessionId] ?? {};
-      const parentUploads = overrides[session.activeSessionId]?.uploadedFiles ?? [];
-      const parentMeta = overrides[session.activeSessionId] ?? {};
-      // AP-15 §5.4. A fork inherits the session type and is born locked: it is
-      // a branch of a conversation that has already started, so its type is as
-      // settled as its parent's. `forkedSessionTypeMeta` deliberately carries
-      // ONLY the type and the stamp — a fork must not inherit the parent's
-      // `crewRunId` or its list of subagents, which belong to the original run.
-      const forkedType = forkedSessionTypeMeta(parentMeta, Date.now());
-      const carried: SessionMetaOverrides[string] = {
-        ...prev,
-        ...forkedType,
-        customName: forkName,
-        uploadedFiles: [...new Set([...(prev.uploadedFiles ?? []), ...parentUploads])],
-        contextUsed: parentMeta.contextUsed,
-        contextWindow: parentMeta.contextWindow,
-        contextPendingCompact: parentMeta.contextPendingCompact
-      };
-      // A fork of a worktree session stays in that worktree — carry the binding.
-      // It's a second conversation branch sharing the checkout (like the Agent
-      // Dashboard's parallel sessions); Remove worktree disposes both.
-      if (session.worktree) {
-        carried.worktreePath = session.worktree.path;
-        carried.worktreeLabel = session.worktree.label;
-        carried.sourceGitRoot = session.worktree.sourceGitRoot;
-      }
-      await this.state.update(SESSION_META_KEY, {
-        ...overrides,
-        [r.newSessionId]: carried
-      });
-      this.sessionCache.delete(r.newSessionId); // customName changes displayName without touching mtime
-
-      // The fork is on disk but has no live process; openSession loads it into a
-      // fresh pool member and focuses it, exactly like clicking a history row.
-      await this.openSession(r.newSessionId, cwd);
-      this.notifyUser("info",
-        `Forked into "${forkName}". The original conversation is unchanged and is in your session history` +
-          (parentName ? ` as "${parentName}"` : "") +
-          ". Files on disk were not touched.",
-      );
-    } catch (e: any) {
-      this.notifyUser("error", `Fork failed: ${e?.message ?? e}`);
-    }
+    return this.turnEdit.forkFocusedSession(session);
   }
 
   /**
@@ -6047,119 +5781,7 @@ Only continue if you trust this code.`,
     totalUserBubbles?: number,
     session: Session = this.focused,
   ): Promise<void> {
-    if (!session.client || !session.activeSessionId) {
-      return void this.notifyUser("warning", "Start a session before editing a message.");
-    }
-    if (session.status === "working" || session.status === "needs-you") {
-      // Name the state. "Wait for the current turn" is useless when the turn
-      // already finished and the status is merely stale — the user can't tell
-      // those apart, and neither could I without this line.
-      this.host.appendLine(
-        `[edit] refused: session.status=${session.status} bubble=${userBubbleIndex}`,
-      );
-      return void this.notifyUser("warning",
-        session.status === "needs-you"
-          ? "Answer the pending permission or plan card first, then edit your last message."
-          : "Wait for the current turn to finish (or Stop it) before editing your last message.",
-      );
-    }
-    const { client, gen, activeSessionId, userMessageCount } = session;
-    if (session.provider !== "grok") {
-      await this.rewindFromClientCheckpoints(session, {
-        userBubbleIndex, bubbleText: text, totalUserBubbles, edit: true
-      });
-      return;
-    }
-    try {
-      const points = await client.listRewindPoints();
-      if (points === "unsupported") {
-        await this.rewindFromClientCheckpoints(session, {
-          userBubbleIndex, bubbleText: text, totalUserBubbles, edit: true
-        });
-        return;
-      }
-      // If the wire's user-facing list no longer matches what the user sees, the
-      // bubble->point map can't be trusted — refuse instead of reverting a turn
-      // we may have mis-identified. See bubbleMapIsConsistent.
-      if (!bubbleMapIsConsistent(points, totalUserBubbles)) {
-        this.host.appendLine(
-          `[rewind] map mismatch: ${userFacingRewindPoints(points).length} wire points vs ${totalUserBubbles} visible messages`,
-        );
-        return void this.notifyUser("warning",
-          "Grok's restore points no longer line up with this conversation, so rewinding could remove the wrong turn. Reload the window and try again.",
-        );
-      }
-      const target = resolveEditRewindTarget(points, userBubbleIndex);
-      if (!target) {
-        // Was a modal offering "Copy text to composer" and awaiting the click.
-        // Nobody can click it on a cloud machine, so the handler hung there —
-        // and the button was the only sensible answer anyway. Do it, and say so.
-        this.restoreComposerFor(session, text);
-        return void this.notifyUser("info",
-          "Grok has no restore point for that message, so it can't be rolled back. Its text is back in the composer.",
-        );
-      }
-
-      // Confirm ONLY when the turn actually changed files on disk. Editing a
-      // chat-only turn is reversible in practice (the text comes straight back
-      // to the composer), so a modal there is pure friction. Reverting code is
-      // not reversible, so that one still asks.
-      if (anyFilesAfter(points, target)) {
-        const gitStatus = await checkWorkspaceGitStatus(session.cwd || this.workspaceRoot());
-        const ok = await this.confirmInChat(session, {
-          title: "Edit this message?",
-          body: editRewindConfirmMessage(target, true, gitStatus),
-          confirmLabel: "Edit",
-          danger: true
-        });
-        if (!ok) return;
-      }
-
-      // Another view can start a turn or replace the client while we await
-      // the points or confirmation. The count catches even a finished turn;
-      // the old target must not reach that work.
-      if (
-        session.client !== client || session.gen !== gen || session.activeSessionId !== activeSessionId ||
-        session.userMessageCount !== userMessageCount ||
-        ["working", "needs-you"].includes(session.status)
-      ) {
-        return void this.notifyUser("warning",
-          "Edit cancelled because the conversation changed or another turn started. Nothing was rewound. Try Edit again when the conversation is idle.",
-        );
-      }
-      const result = await client.executeRewind({
-        targetPromptIndex: target.promptIndex,
-        mode: "all"
-      });
-      if (result === "unsupported") {
-        await this.rewindFromClientCheckpoints(session, {
-          userBubbleIndex, bubbleText: text, totalUserBubbles, edit: true
-        });
-        return;
-      }
-      if (!result.success) {
-        // Surface the CLI's own words — e.g. rewinding past a compaction point.
-        return void this.notifyUser("error", result.error || "Couldn't roll back that message.");
-      }
-
-      const reportedFiles = result.revertedFiles.length;
-      this.host.appendLine(
-        `[edit] rewound to prompt #${result.targetPromptIndex} (reported_files=${reportedFiles}, bubble=${userBubbleIndex})`,
-      );
-      const resumeId = session.activeSessionId;
-      const surviving = survivingUserMessagesAfterRewind(points, target);
-      await this.truncateSessionCardsAfterRewind(resumeId, surviving);
-      this.applyRewindToView(session, surviving);
-      if (resumeId) this.checkpointStore?.pruneAfter(resumeId, surviving);
-      this.restoreComposerFor(session, text);
-      if (reportedFiles > 0) {
-        this.notifyUser("info",
-          "Message moved back to the composer. Files were rolled back — anything created after that point may still be on disk.",
-        );
-      }
-    } catch (e: any) {
-      this.notifyUser("error", `Couldn't edit that message: ${e?.message ?? e}`);
-    }
+    return this.turnEdit.editLastMessage(userBubbleIndex, text, totalUserBubbles, session);
   }
 
   /**
@@ -6224,163 +5846,7 @@ Only continue if you trust this code.`,
     totalUserBubbles?: number,
     session: Session = this.focused,
   ): Promise<void> {
-    if (!session.client || !session.activeSessionId) {
-      return void this.notifyUser("warning", "Start a session before rewinding it.");
-    }
-    if (session.status === "working" || session.status === "needs-you") {
-      return void this.notifyUser("warning",
-        "Wait for the current turn to finish (or Stop it) before rewinding.",
-      );
-    }
-    if (!session.hasHistory) {
-      return void this.notifyUser("info", "Nothing to rewind yet — this session has no conversation.");
-    }
-    const { client, gen, activeSessionId, userMessageCount } = session;
-    if (session.provider !== "grok") {
-      await this.rewindFromClientCheckpoints(session, {
-        userBubbleIndex, bubbleText, totalUserBubbles, edit: false
-      });
-      return;
-    }
-    try {
-      const points = await client.listRewindPoints();
-      if (points === "unsupported") {
-        await this.rewindFromClientCheckpoints(session, {
-          userBubbleIndex, bubbleText, totalUserBubbles, edit: false
-        });
-        return;
-      }
-
-      // If the wire's user-facing list no longer matches what the user sees, the
-      // bubble->point map can't be trusted — refuse instead of reverting a turn
-      // we may have mis-identified. See bubbleMapIsConsistent.
-      if (!bubbleMapIsConsistent(points, totalUserBubbles)) {
-        this.host.appendLine(
-          `[rewind] map mismatch: ${userFacingRewindPoints(points).length} wire points vs ${totalUserBubbles} visible messages`,
-        );
-        return void this.notifyUser("warning",
-          "Grok's restore points no longer line up with this conversation, so rewinding could remove the wrong turn. Reload the window and try again.",
-        );
-      }
-      let target: ReturnType<typeof resolveUserBubbleRewind> = null;
-      if (typeof userBubbleIndex === "number") {
-        // Bubble button: map visible user bubble → wire prompt_index (skips legacy hidden turns).
-        target = resolveUserBubbleRewind(points, userBubbleIndex);
-        if (!target) {
-          return void this.notifyUser("info",
-            "Can't rewind to this message — it's the latest turn, or the checkpoint is unavailable.",
-          );
-        }
-      } else {
-        // Gear / command palette: pick among user-facing points that aren't the tip.
-        const facing = userFacingRewindPoints(points);
-        const selectable = selectableRewindPoints(facing.length ? facing : points);
-        if (selectable.length === 0) {
-          return void this.host.showInformationMessage(
-            facing.length <= 1
-              ? "Only one message so far — hover an earlier user message and click Rewind."
-              : "No rewind points available.",
-          );
-        }
-        // Number each entry by its place among the user's VISIBLE messages, not
-        // by the wire prompt_index — old sessions include hidden primer and
-        // marker-only verdict points, so it can render as "#1 #2 … #6 #8": a
-        // sequence the user can't match to anything on screen.
-        const visiblePosition = new Map(facing.map((p, i) => [p.promptIndex, i + 1]));
-        const items = [...selectable]
-          .sort((a, b) => b.promptIndex - a.promptIndex)
-          .map((p) => ({
-            label: formatRewindPointLabel(p, visiblePosition.get(p.promptIndex)),
-            description: p.hasFileChanges ? "files" : undefined,
-            detail: formatRewindPointDetail(p),
-            point: p
-          }));
-        const pick = await this.host.showQuickPick(items, {
-          // Execute discards the chosen message too, not just what follows it.
-          placeHolder: "Rewind past which message? (it and everything after it are discarded)",
-          ignoreFocusOut: true,
-          matchOnDescription: true,
-          matchOnDetail: true
-        });
-        if (!pick) return;
-        target = pick.point;
-      }
-
-      // Same rule as Edit: ask only when code on disk will be reverted. A
-      // conversation-only rewind hands the message back to the composer, so
-      // there is nothing unrecoverable to warn about.
-      const revertsFiles = anyFilesAfter(points, target);
-      if (revertsFiles) {
-        const gitStatus = await checkWorkspaceGitStatus(session.cwd || this.workspaceRoot());
-        const ok = await this.confirmInChat(session, {
-          title: "Rewind past this message?",
-          body: rewindConfirmMessage(target, "all", gitStatus),
-          confirmLabel: "Rewind",
-          danger: true
-        });
-        if (!ok) return;
-      }
-
-      if (
-        session.client !== client || session.gen !== gen || session.activeSessionId !== activeSessionId ||
-        session.userMessageCount !== userMessageCount ||
-        ["working", "needs-you"].includes(session.status)
-      ) {
-        return void this.notifyUser("warning",
-          "Rewind cancelled because the conversation changed or another turn started. Nothing was rewound. Try Rewind again when the conversation is idle.",
-        );
-      }
-      const result = await client.executeRewind({
-        targetPromptIndex: target.promptIndex,
-        mode: "all"
-      });
-      if (result === "unsupported") {
-        await this.rewindFromClientCheckpoints(session, {
-          userBubbleIndex, bubbleText, totalUserBubbles, edit: false
-        });
-        return;
-      }
-      if (!result.success) {
-        const err = result.error || "Rewind did not apply (no changes).";
-        return void this.notifyUser("error", err);
-      }
-
-      const reportedFiles = result.revertedFiles.length;
-      this.host.appendLine(
-        `[rewind] → prompt #${result.targetPromptIndex} (mode=${result.mode}, reported_files=${reportedFiles}` +
-          (typeof userBubbleIndex === "number" ? `, bubble=${userBubbleIndex}` : "") +
-          `)`,
-      );
-      const resumeId = session.activeSessionId;
-      // Same as Edit: our plan/permission cards are not grok's, so the rewind
-      // doesn't touch them and a replay would resurrect them at the bottom.
-      const surviving = survivingUserMessagesAfterRewind(points, target);
-      await this.truncateSessionCardsAfterRewind(resumeId, surviving);
-      this.applyRewindToView(session, surviving);
-      if (resumeId) this.checkpointStore?.pruneAfter(resumeId, surviving);
-      // Rewind DISCARDS the message it targets, so hand its text back exactly
-      // as Edit does — otherwise the button silently destroys what the user
-      // wrote. After startSession, or the replay would clear it.
-      //
-      // Deliberately NOT `result.promptText`: the CLI returns the raw prompt,
-      // still carrying our <vscode-context> envelope, fenced selection blocks
-      // and [Image #N] tags. Only the webview's bubble text has those peeled
-      // off. So the QuickPick path (no bubble) restores nothing rather than
-      // pasting plumbing into the composer.
-      const restored = (bubbleText ?? "").trim();
-      if (restored) this.restoreComposerFor(session, restored);
-      // Only speak up when something happened the chat itself doesn't show.
-      // The messages vanishing and the text landing in the composer are their
-      // own feedback; a toast restating them is noise. Reverted files are NOT
-      // visible in the chat, so those still get reported.
-      if (reportedFiles > 0) {
-        this.notifyUser("info",
-          "Rewound. Files were rolled back — anything created after that point may still be on disk.",
-        );
-      }
-    } catch (e: any) {
-      this.notifyUser("error", `Rewind failed: ${e?.message ?? e}`);
-    }
+    return this.turnEdit.rewindFocusedSession(userBubbleIndex, bubbleText, totalUserBubbles, session);
   }
 
   /**
@@ -7126,7 +6592,7 @@ Only continue if you trust this code.`,
         postSessionsList: () => self.postSessionsList(),
         sessionCacheDelete: (id) => self.sessionCache.delete(id)
       },
-      getOverride: (name) => ((self as any).getOverride ? (self as any).getOverride(name) : (self as any)[name])
+      getOverride: (name) => self.sidebarTestOverride(name)
     };
   }
 
@@ -7137,6 +6603,13 @@ Only continue if you trust this code.`,
   }
   public set subagentState(val: SubagentState | undefined) {
     this.subagentHost.state = val;
+  }
+
+  public get subagentDeadlines(): Map<string, PausableDeadline> | undefined {
+    return this.subagentHost.subagentDeadlines;
+  }
+  public set subagentDeadlines(val: Map<string, PausableDeadline> | undefined) {
+    this.subagentHost.subagentDeadlines = val;
   }
 
   public get subagents(): SubagentRegistry { return this.subagentHost.subagents; }
@@ -16182,44 +15655,7 @@ ${directives.block}`;
     session: Session,
     msg: { id: string; action: "continue" | "retry" | "dismiss"; target?: AcpProvider },
   ): Promise<void> {
-    const offer = session.pendingLimitOffer;
-    if (!offer || offer.id !== msg.id) return;
-    session.pendingLimitOffer = undefined;
-
-    if (msg.action === "continue") {
-      const allowed = limitOfferTargets(offer.source, this.usableProviders());
-      const chosen = allowed.find((t) => t.id === msg.target);
-      if (!chosen) {
-        session.pendingLimitOffer = offer;
-        return;
-      }
-      this.emit(session, {
-        type: "limitOfferResolved",
-        id: offer.id,
-        action: "continue",
-        target: chosen.id,
-        targetName: chosen.name
-      });
-      this.host.appendLine(`[limit] switching ${offer.source} → ${chosen.id} (${offer.kind})`);
-      this.emit(session, {
-        type: "hostNotice",
-        level: "info",
-        text: switchTranscriptLine(offer.source, chosen.id)
-      });
-      session.provider = chosen.id;
-      session.keepTranscriptOnStart = true;
-      await this.rememberProjectProvider(this.sessionCwd(session), chosen.id);
-      const client = await this.startSession(undefined, session);
-      if (!client) return;
-      session.chips = [...offer.chips, ...session.chips];
-      await this.handleSend(offer.text, false, session);
-      return;
-    }
-
-    this.emit(session, { type: "limitOfferResolved", id: offer.id, action: msg.action });
-    if (msg.action !== "retry") return;
-    session.chips = [...offer.chips, ...session.chips];
-    await this.handleSend(offer.text, false, session);
+    return this.turnEdit.answerLimitOffer(session, msg);
   }
 
   /**
@@ -16247,122 +15683,7 @@ ${directives.block}`;
     chips: ContextChip[],
     promptBlocks: Parameters<AcpClient["prompt"]>[0],
   ): Promise<boolean> {
-    const errorText = errorDetail(err);
-    const credential = session.client?.isCredentialError(err) === true || isCredentialError(err);
-    if (!credential && !isAuthErrorText(errorText)) return false;
-    const resumeId = beginAuthRecovery(session);
-    if (!resumeId) {
-      // One recovery per failure streak, so every send after the first
-      // declines here — the sends a person makes while wondering why nothing
-      // works. Strict classification only: entitlement wording must never
-      // label an account signed-out, because a sign-in cannot fix it
-      // (upstream 7166822).
-      if (credential) this.setProviderNeedsLogin(session.provider, true);
-      return false;
-    }
-
-    // Only a CREDENTIAL failure earns a resend. The billing/entitlement family
-    // reaches this gate because a wedged token can wear that wording — but the
-    // CLI maps a real 403 to a plain error precisely because the credential was
-    // accepted, so resending there spends a whole second turn on a wall a fresh
-    // token cannot clear. Rebuild the process either way (the next message gets
-    // the current disk token); only the credential case replays the prompt.
-    if (!credential) {
-      this.host.appendLine(`[auth] rebuilding the session without resending: ${errorText}`);
-      await this.startSession(resumeId, session);
-      return false; // the caller shows the error, which is the actionable part
-    }
-    this.host.appendLine(`[auth] recoverable token error — reloading session + resending: ${errorText}`);
-
-    // Fresh process, current disk token. Rebuild this same pool member and replay
-    // its history from disk. Its generation + authRecoveryTried guards are both
-    // session-scoped, so unrelated local/remote turns remain independent.
-    const client = await this.startSession(resumeId, session);
-    if (!client || session.client !== client) return true; // startSession surfaced its own failure/onboarding
-    const gen = session.gen;
-    if (gen !== session.gen) return true;
-
-    // The restart above replayed the transcript from the agent's own record,
-    // and Claude persists the user turn BEFORE the call it refuses — so the
-    // bubble may already be back. Re-emitting unconditionally doubled the
-    // prompt. An inexact match re-emits: the failure direction is a duplicate,
-    // never a prompt the person cannot see (upstream f3fce37).
-    const replayRestoredIt = session.inUserMessage
-      && session.replayUserRaw.trim() === displayText.trim();
-    if (!replayRestoredIt) {
-      session.userMessageCount += 1;
-      this.emit(session, { type: "userMessage", text: displayText, chips });
-    }
-    this.emit(session, { type: "agentStart" });
-    // The resend is a turn in its own right — it gets its own token, and the
-    // outer turn's `finally` can no longer end it (the tokens differ).
-    const turn = beginTurn(session);
-    this.startTurnGitBaseline(session, turn);
-    this.setStatus(session, "working");
-    session.adapterTurnCallUsed = [];
-    try {
-      const meta = await client.prompt(promptBlocks);
-      if (gen !== session.gen) {
-        this.emitAbandonedSend(session);
-        return true;
-      }
-      if (!endTurn(session, turn)) return true;
-      this.emit(session, { type: "agentEnd", meta, ...this.turnEndFields(session, turnStatusFromPromptResult(meta)) });
-      this.noteLiveTurnEnded(session);
-      this.setStatus(session, "done");
-      session.authRecoveryTried = false; // recovered — re-arm for a future expiry
-      this.setProviderNeedsLogin(session.provider, false); // and the token really is good
-      this.maybeGenerateTitle(session);
-      this.postSessionName(session);
-    } catch (err2) {
-      if (gen !== session.gen) {
-        this.emitAbandonedSend(session);
-        return true;
-      }
-      if (!endTurn(session, turn)) return true;
-      const e2 = err2 as any;
-      // The resend ran into a usage limit — that's the real story, not auth
-      // (#57): a fresh process with a fresh token hit the same wall. Offer the
-      // failover card; do not send a second prompt at the exhausted provider.
-      if (this.surfaceLimitError(session, e2, displayText, chips)) return true;
-      if (client.isCredentialError(e2) || isCredentialError(e2)) {
-        // A fresh process still can't authenticate → auth.json genuinely dead →
-        // the honest ask is a re-login. The agentError FIRST: its webview
-        // handler is what clears the busy/"Grokking" indicator and leaves a
-        // truthful transcript (the overlay alone froze both — #58). The overlay
-        // itself is post()ed, not emit()ed: live-only, so it can't resurrect
-        // from the replay buffer on a later focus switch after the user has
-        // already re-authed.
-        this.emit(session, { type: "agentError", text: errorDetail(e2), ...this.turnEndFields(session, "failed") });
-        this.noteLiveTurnEnded(session);
-        this.setStatus(session, "error");
-        // The account flag, not only the overlay: the overlay is the
-        // empty-state card, which deliberately does not paint over a live
-        // conversation — exactly where a mid-turn expiry happens. The flag is
-        // what the composer's sign-in card and every other view read.
-        this.setProviderNeedsLogin(session.provider, true);
-        this.post({ type: "onboarding", state: this.onboardingForSession(session) });
-      } else {
-        // Entitlement/billing wording (or anything else) on a fresh process is
-        // not a sign-in problem — promptErrorText shows the entitlement notice
-        // with the CLI's own actionable advice in chat (#58), never the login
-        // overlay, which can't fix it.
-        // Same as the first prompt path: say it out loud. This is the RESEND,
-        // so a failure here means a fresh process hit the same wall.
-        this.host.appendLine(
-          `[${session.provider}] resend failed for session ${session.client?.sessionId ?? session.activeSessionId ?? "none"}`
-          + `: ${errorDetail(e2)}`,
-        );
-        this.emit(session, { type: "agentError", text: promptErrorText(e2), ...this.turnEndFields(session, "failed") });
-        this.noteLiveTurnEnded(session);
-        this.setStatus(session, "error");
-      }
-    } finally {
-      // Same belt as the ordinary send path: a resend that leaves any other way
-      // must not leave the session pinned mid-turn.
-      endTurn(session, turn);
-    }
-    return true;
+    return this.turnEdit.recoverAuthAndResend(session, err, displayText, chips, promptBlocks);
   }
 
   /** Give a session a readable name from its opening prompt, as `autoName` — never
