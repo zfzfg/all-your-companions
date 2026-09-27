@@ -22,9 +22,8 @@ describe("grok CLI process invocation", () => {
     expect(combined).not.toMatch(/execGrokCli\([^\n]*\["mcp"/);
     expect(combined).toContain('client.listMcpServers()');
     // Pinned so a NEW one-shot invocation has to be noticed rather than slipped
-    // in — which is what this count is for.
-    // The tenth is `muse --version` (the Muse provider port).
-    expect(combined.match(/execGrokCli\s*\(/g)).toHaveLength(10);
+    // in. Calls now span the provider-session, CLI-update, and sidebar hosts.
+    expect(combined.match(/execGrokCli\s*\(/g)).toHaveLength(17);
     expect(combined).toMatch(/execGrokCli\(cliPath, \["--version"\],[\s\S]*parseCodexVersionOutput/);
     expect(combined).toMatch(/execGrokCli\(cliPath, \["--version"\],[\s\S]*parseClaudeVersionOutput/);
     expect(combined).toMatch(/execGrokCli\(cliPath, \["--version"\],[\s\S]*parseGeminiVersionOutput/);
