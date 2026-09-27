@@ -2,6 +2,12 @@ import { WorktreeHost, SESSION_META_KEY } from "./worktree-host";
 import { ProviderSetup } from "./provider-setup";
 import { TurnEdit, createTurnEdit } from "./turn-edit";
 import { AgentAuthoring, createAgentAuthoring } from "./agent-authoring";
+import {
+  ProviderSession,
+  createProviderSession,
+  type CliCompatibilityResult,
+  ACT_MODE_ID,
+} from "./provider-session";
 import { WebviewHtml } from "./webview-html";
 import { QuestionHost } from "./question-host";
 import { ReviewHost } from "./review-host";
@@ -54,17 +60,12 @@ import {
   activeRulesFrom,
   adoptionKeyFor,
   createRule,
-  decidePermission,
-  extractPermissionFacts,
   globalRulesToMap,
   loadWorkspaceRulesFile,
   parseAdoptionMap,
   parseGlobalRulesMap,
   pendingWorkspaceAdoption,
-  permissionRulesNotice,
-  pickAllowOnceOption,
   sanitizeWebviewAllowMatch,
-  suggestRules,
   toRuleView,
   writeWorkspaceRulesFile,
   type AdoptionRecord,
@@ -88,7 +89,6 @@ import {
   projectProviderKey,
   providerDisplayName,
   providerLoginState,
-  PROVIDER_ORDER,
   type ProviderConnections,
   type ProviderModelCache,
   type ProviderModelInfo,
@@ -116,7 +116,6 @@ import {
   INTERRUPTED_SEND_TEXT,
   beginQueuedSendCommit,
   beginTurn,
-  createPendingPermission,
   decideSessionStart,
   endTurn,
   finishQueuedSendCommit,
@@ -147,7 +146,7 @@ import { subagentTurnSummary } from "./companion-subagents";
 import { bothDelegationsHint, grokSubagentEnv } from "./grok-subagent-env";
 import { MediaRef, adapterCompactSignal, adapterContextOccupancy, agentTimestampMsFromMeta, autoCompactStartedNote, childStreamFromRoute, commandOutputForToolCall, commandOutputFromLiveTerminal, contextUsedFromCompactNotification, enforceCompleteSessionCost, errorDetail, gateZeroTokenMeta, isCredentialError, isIncompatibleAgentError, isResumeNotFound, isSubagentLifecycleUpdate, occupancyFromAdapterTurn, parseSessionInfoContext, permissionOutcomeFor, promptErrorText, rateLimitNoticeText, replayedTurnDuration, sessionInfoCacheFresh, sumUsage, summarizeBackgroundCommand, turnStatusFromPromptResult, usageIsRealMeasurement, type TurnEndStatus, type UpdateRoute } from "./acp-dispatch";
 import { createMcpPrepareState, prepareMcpToolCall } from "./mcp-tool";
-import { configWriteTarget, modeToRemember, rememberedEffort, startsInYolo, withRememberedEffort, type EffortPrefs } from "./mode-prefs";
+import { configWriteTarget, rememberedEffort, startsInYolo, withRememberedEffort, type EffortPrefs } from "./mode-prefs";
 import { oauthShadowsXaiApiKey } from "./auth-recovery";
 import {
   classifyLimitError,
@@ -185,7 +184,7 @@ import { providerConfigFiles, type ProviderConfigFile } from "./provider-config"
 import { CLI_NPM_PACKAGE, cliUpdatePlan, selfUpdateArgs } from "./cli-update-plan";
 import { readWorkflowCompletion } from "./workflow-state";
 import { parseMuseVersionOutput } from "./muse-cli-locator";
-import { supportsClientMcpServers, supportsModeSwitching } from "./acp-backend";
+import { supportsClientMcpServers } from "./acp-backend";
 import { GitRunGate, type GitTurnBaseline } from "./git-run";
 import {
   GITHUB_CLI_DOWNLOAD,
@@ -228,18 +227,12 @@ import { randomUUID } from "node:crypto";
 import { execGrokCli } from "./cli-process";
 import type { LocalGitWorktrees } from "./worktree-local";
 import {
-  extensionWasUpgraded,
   isStdioBrokenGrokVersion,
   parseGrokVersion,
   grokUpdatePolicy,
   shouldReactivelyDowngrade,
   isLockedBinaryError,
-  readCliBinaryIdentity,
-  resolvePlanModeAvailability,
-  CLI_VERSION_CACHE_KEY,
-  GROK_REQUIRED_VERSION,
-  GROK_STDIO_DOWNGRADE_TARGET,
-  type CliVersionCache
+  GROK_STDIO_DOWNGRADE_TARGET
 } from "./cli-locator";
 import { OpenClock } from "./open-timing";
 import {
@@ -289,7 +282,6 @@ import {
   explicitVisibleChips,
   queuedFlushText,
   queuedSendsMessage,
-  queuedSendsText,
   restoreQueuedChips,
   type QueuedSendEntry
 } from "./queued-send";
@@ -350,7 +342,7 @@ import {
   stagedUploadDirectory,
   unreferencedUploadsForRemovedSessions
 } from "./file-upload";
-import { applyAgentModeToHostPlan, effectivePlanActive, isPlanReviewPermission, permissionAnswerAllowed, permissionOptionsForPlan, pickRejectOption, planReviewVerdictForOption, planTextFromPermissionToolCall, shouldRejectPermission } from "./plan-gate";
+import { applyAgentModeToHostPlan, isPlanReviewPermission, permissionAnswerAllowed, planReviewVerdictForOption } from "./plan-gate";
 import { appendPlanEntry, planRestoreSource, truncateResolvedAfter, countsAsUserBubble, decideRestoreState, isInterjectionText } from "./plan-restore";
 import {
   planReviewFileName,
@@ -616,21 +608,6 @@ interface SessionLoadReservation {
  *  is gone and the attachment must be dropped — never redirected. */
 type AttachmentOwner = () => Session | undefined;
 
-interface CliCompatibilityResult {
-  planModeAvailable: boolean;
-  planModeUnavailableReason?: string;
-  /** True only after a live parseable `--version`. A cache stand-in stays false. */
-  planModeVersionVerified: boolean;
-  /** True when Plan availability came from `grok.cliVersionCache`, not a live `--version`. */
-  usedCache?: boolean;
-  /**
-   * Parseable `X.Y.Z` from this probe (live or cache). Absent when unknown.
-   * Display / Plan only — initialize must not see this unless
-   * `planModeVersionVerified` is true.
-   */
-  cliVersion?: string;
-}
-
 interface SessionsListOptions {
   offset?: number;
   limit?: number;
@@ -652,16 +629,6 @@ const REPO_PREVIEW_SIZE = 3;
  *  itself. Generous: an honoured cancel comes back well inside a second, so this
  *  only ever fires when the turn was going to wedge anyway. */
 const CANCEL_SETTLE_GRACE_MS = 10_000;
-
-// Records the extension version at the last silent CLI-update check. A fresh
-// install establishes the baseline; a later extension upgrade updates once.
-const CLI_UPDATE_VERSION_KEY = "grok.cliUpdateExtVersion";
-
-// grok's non-plan ("act") mode id on the wire. The CLI reports this via
-// current_mode_update after leaving plan mode (verified against grok 0.2.3 —
-// see research/plan-mode.md). The UI labels it "Agent"; the wire calls it
-// "default".
-const ACT_MODE_ID = "default";
 
 // Scheme for the permission-card diff preview's virtual documents. Backing the
 // before/after sides with a read-only content provider (rather than untitled
@@ -1055,7 +1022,8 @@ export class GrokSidebar {
   private readonly localWorkspaceSwitchQueue = new AsyncSerialQueue();
   // The original update trigger: at most once per activation, and only after an
   // extension-version change (never on the fresh-install baseline).
-  private cliUpdateChecked = false;
+  get cliUpdateChecked(): boolean { return this.providerSession.cliUpdateChecked; }
+  set cliUpdateChecked(v: boolean) { this.providerSession.cliUpdateChecked = v; }
 
   // Known-broken Windows builds are checked and pinned at most once per
   // activation after the normal extension-upgrade update has run.
@@ -1135,6 +1103,7 @@ export class GrokSidebar {
   private _workflowStageRunner?: WorkflowStageRunner;
   private _turnEdit?: TurnEdit;
   private _agentAuthoring?: AgentAuthoring;
+  private _providerSession?: ProviderSession;
 
   /** Real instances set these in the constructor. Prototype stubs used by tests
    *  never run it, so the first delegating call builds the collaborator. */
@@ -1170,6 +1139,70 @@ export class GrokSidebar {
     return this._agentAuthoring ??= this.createAgentAuthoring();
   }
   set agentAuthoring(value: AgentAuthoring) { this._agentAuthoring = value; }
+  get providerSession(): ProviderSession {
+    return this._providerSession ??= this.createProviderSession();
+  }
+  set providerSession(value: ProviderSession) { this._providerSession = value; }
+
+  private createProviderSession(): ProviderSession {
+    const self = this;
+    return createProviderSession({
+      get host() { return self.host; },
+      get state() { return self.state; },
+      get context() { return { extensionVersion: self.context?.extensionVersion ?? "0.2.0" }; },
+      getOverride: (name: string) => self.sidebarTestOverride(name),
+      getFocused: () => self.focused,
+      setFocused: (session) => { self.focused = session; },
+      getPool: () => self.pool,
+      sessionOps: {
+        sessionCwd: (...args) => self.sessionCwd(...args),
+        setSessionCwd: (session, cwd, root) => self.setSessionCwd(session, cwd, root ?? self.workspaceRoot()),
+        workspaceRoot: () => self.workspaceRoot(),
+        newLocalSession: () => self.newLocalSession(),
+        startSession: (...args) => self.startSession(...args),
+        restartSession: (...args) => self.restartSession(...args),
+        disposeSession: (session) => { void self.disposeSession(session); },
+        removeSessionFromDisk: (...args) => self.removeSessionFromDisk(...args),
+        discardRestartedEmptySession: (...args) => self.discardRestartedEmptySession(...args),
+        discardAdapterEmptySession: (provider, id, cwd, client) => self.discardAdapterEmptySession(provider, id, cwd ?? "", client),
+        restoreStrandedDraft: (...args) => self.restoreStrandedDraft(...args),
+        rememberQueuedDraft: (...args) => self.rememberQueuedDraft(...args),
+        rememberProjectProvider: (...args) => self.rememberProjectProvider(...args),
+        rememberGrokConfig: (...args) => self.rememberGrokConfig(...args),
+        sessionDisplayName: (...args) => self.sessionDisplayName(...args),
+        authorizedSessionCwds: () => self.authorizedSessionCwds(),
+      },
+      uiOps: {
+        notifyUser: (...args) => self.notifyUser(...args),
+        emit: (...args) => self.emit(...args),
+        emitLocalTransient: (...args) => self.emitLocalTransient(...args),
+        post: (...args) => self.post(...args),
+        postSessionsList: () => self.postSessionsList(),
+        setStatus: (...args) => self.setStatus(...args),
+        setPlanActive: (...args) => self.setPlanActive(...args),
+        syncHumanWait: (...args) => self.syncHumanWait(...args),
+        persistPlanVerdict: (session, verdict, text) => self.persistPlanVerdict(session, verdict, text ?? ""),
+        noteAnswered: (...args) => self.noteAnswered(...args),
+        autoApprovePendingPermissions: (...args) => self.autoApprovePendingPermissions(...args),
+        divertRacingSend: (...args) => self.divertRacingSend(...args),
+        pickRestartMode: (...args) => self.pickRestartMode(...args),
+        childWriteClaimWarning: (...args) => self.childWriteClaimWarning(...args),
+        snapshotToolCallWrites: (...args) => self.snapshotToolCallWrites(...args),
+        loadPermissionRuleState: (...args) => self.loadPermissionRuleState(...args),
+        maybePromptWorkspaceRulesAdoption: (...args) => self.maybePromptWorkspaceRulesAdoption(...args),
+        turnInFlight: (...args) => self.turnInFlight(...args),
+        armCancelRecovery: (...args) => self.armCancelRecovery(...args),
+      },
+      providerOps: {
+        modelsForSession: (...args) => self.modelsForSession(...args),
+        connectedProviders: () => self.connectedProviders(),
+        defaultProviderForProject: (...args) => self.defaultProviderForProject(...args),
+        locateProvider: (...args) => self.locateProvider(...args),
+        readGrokVersion: (...args) => self.readGrokVersion(...args),
+        getProviderCliVersions: () => self.providerCliVersions,
+      },
+    });
+  }
 
   private createAgentAuthoring(): AgentAuthoring {
     const self = this;
@@ -1475,6 +1508,7 @@ export class GrokSidebar {
       fs,
       (line) => this.host.appendLine(line),
     );
+    this._providerSession = this.createProviderSession();
     this.providerConnectionState = this.migrateProviderConnections();
     this.focused.provider = this.defaultProviderForProject(this.workspaceRoot());
     context.subscriptions.push(
@@ -2909,11 +2943,7 @@ export class GrokSidebar {
   }
 
   private providerForRequestedModel(modelId: string, fallback: AcpProvider): AcpProvider {
-    if (!modelId) return fallback;
-    const cache = this.state.get<ProviderModelCache>(PROVIDER_MODEL_CACHE_KEY, {});
-    const matches = PROVIDER_ORDER.filter((provider) =>
-      cache[provider]?.models.some((model) => model.modelId === modelId));
-    return matches.length === 1 ? matches[0] : fallback;
+    return this.providerSession.providerForRequestedModel(modelId, fallback);
   }
 
   resolveWebviewView(view: HostWebviewView): void {
@@ -3222,126 +3252,15 @@ export class GrokSidebar {
   }
 
   async pickModel(): Promise<void> {
-    if (!this.focused.client || !this.focused.client.availableModels.length) {
-      this.host.showInformationMessage("Start a session first.");
-      return;
-    }
-    const models = this.modelsForSession(
-      this.focused,
-      this.focused.client.availableModels,
-      this.focused.client.currentModelId,
-      !this.focused.hasHistory,
-    );
-    const items = models.map((m) => ({
-      label: `${providerDisplayName(m.provider)} · ${m.name ?? m.modelId}`,
-      description: m.provider === this.focused.provider && m.modelId === this.focused.client!.currentModelId ? "$(check) current" : "",
-      detail: m.description,
-      modelId: m.modelId,
-      provider: m.provider
-    }));
-    if (this.focused.provider === "gemini") {
-      items.push({
-        label: "$(edit) Custom Gemini model ID...",
-        description: "",
-        detail: "Enter a custom Antigravity/Gemini model name (e.g. gemini-3.9-pro)",
-        modelId: "__custom__",
-        provider: "gemini"
-      });
-    }
-    const picked = await this.host.showQuickPick(items, {
-      placeHolder: this.focused.hasHistory ? "Pick a model" : "Pick an agent and model"
-    });
-    if (picked) {
-      let targetModelId = picked.modelId;
-      if (targetModelId === "__custom__") {
-        const input = await this.host.showInputBox({
-          prompt: "Enter custom model ID (e.g. gemini-3.9-pro)",
-          placeHolder: "gemini-3.9-pro"
-        });
-        if (!input || !input.trim()) return;
-        targetModelId = input.trim();
-      }
-      await this.switchModel(targetModelId, this.focused, picked.provider);
-    }
+    return this.providerSession.pickModel();
   }
 
-  /**
-   * Switch the active model. Models belong to "agent types" (e.g. grok-build vs
-   * cursor for the composer models); the CLI binds the agent at spawn and locks
-   * it after the first turn, so a live `set_model` only works within the same
-   * agent. When it's rejected for a cross-agent model we persist the choice and
-   * restart — `newSession` reapplies it before the first agent turn, while the
-   * agent is still rebindable. Same-agent switches stay live (history intact).
-   */
   async switchModel(
     modelId: string,
     session: Session = this.focused,
     provider: AcpProvider = session.provider,
   ): Promise<void> {
-    const client = session.client;
-    // Ignore switches fired during session startup. The webview disables the
-    // control while busy; this is the backstop for a click already in flight.
-    if (!client || session.priming) return;
-    if (provider !== session.provider) {
-      if (session.hasHistory) {
-        const current = providerDisplayName(session.provider);
-        const requested = providerDisplayName(provider);
-        this.notifyUser("warning",
-          `This ${current} conversation can only use ${current} models. Start a new conversation to switch to ${requested}.`,
-        );
-        return;
-      }
-      if (!this.connectedProviders().includes(provider)) {
-        this.notifyUser("warning", `${providerDisplayName(provider)} is not connected.`);
-        return;
-      }
-      const oldProvider = session.provider;
-      const discardId = session.activeSessionId;
-      if (isAdapterProvider(oldProvider) && discardId) {
-        try { await client.deleteSession(discardId); }
-        catch (error) { this.host.appendLine(`[${oldProvider}] could not discard empty session ${discardId}: ${(error as Error).message}`); }
-      }
-      session.provider = provider;
-      await this.rememberProjectProvider(this.sessionCwd(session), provider, modelId || undefined);
-      await this.startSession(undefined, session);
-      if (oldProvider === "grok") this.discardRestartedEmptySession(discardId, session);
-      return;
-    }
-    if (modelId === client.currentModelId) return;
-    if (!modelId) {
-      if (session.hasHistory) return;
-      const discardId = session.activeSessionId;
-      await this.rememberProjectProvider(this.sessionCwd(session), provider, undefined);
-      if (provider === "grok") await this.rememberGrokConfig("defaultModel", "");
-      else if (isAdapterProvider(provider)) await this.discardAdapterEmptySession(provider, discardId, this.sessionCwd(session), client);
-      await this.startSession(undefined, session);
-      if (provider === "grok") this.discardRestartedEmptySession(discardId, session);
-      return;
-    }
-    try {
-      await client.setModel(modelId);
-      await this.rememberProjectProvider(this.sessionCwd(session), provider, modelId);
-      if (provider === "grok") await this.rememberGrokConfig("defaultModel", modelId);
-    } catch (e) {
-      if (!isIncompatibleAgentError(e)) {
-        this.notifyUser("error", `Failed to set model: ${(e as Error).message}`);
-        return;
-      }
-      if (!session.hasHistory) {
-        // Empty session (no real conversation): a cross-agent switch restarts it
-        // with a fresh grok id. There is nothing to summarize or preserve.
-        // Drop it after the restart, carrying over any rename the user made.
-        const discardId = session.activeSessionId;
-        await this.rememberGrokConfig("defaultModel", modelId);
-        await this.startSession(undefined, session);
-        this.discardRestartedEmptySession(discardId, session);
-        return;
-      }
-      const mode = await this.pickRestartMode("Switching to this model requires a new session.");
-      if (!mode) return; // dismissed — keep the current model
-      await this.rememberGrokConfig("defaultModel", modelId);
-      await this.restartSession(mode, session);
-    }
+    return this.providerSession.switchModel(modelId, session, provider);
   }
 
   openModePopover(): void {
@@ -3560,333 +3479,29 @@ Only continue if you trust this code.`,
     modeId: "agent" | "plan" | "yolo",
     session: Session = this.focused,
   ): Promise<void> {
-    // Agent/plan/yolo are mutually exclusive. Plan = client write/exec gate;
-    // YOLO = auto-approve. Both ride on top of the CLI's agent mode, except
-    // Plan which also tells the CLI to plan instead of act. The mode button only
-    // ever drives the focused session.
-    // Ignore mode changes until the session exists: before session/new the CLI
-    // setMode throws "no session" (and for Plan that error is surfaced to the user).
-    // The mode button is disabled while busy; this backstops the toggle-mode command.
-    if (!session.client || !session.client.sessionId || session.priming) return;
-    if (modeId === "plan" && !session.planModeAvailable) {
-      // Unverified probe: re-check now rather than forcing a session restart.
-      // A verified-old CLI is latched and stays refused.
-      if (!session.planModeVersionVerified) {
-        const rechecked = await this.recheckPlanModeAvailability(session);
-        if (!rechecked || !session.planModeAvailable) {
-          this.notifyUser("warning",
-            session.planModeUnavailableReason ?? "Plan mode is unavailable for this Grok CLI version.",
-          );
-          return;
-        }
-        // Probe succeeded — fall through and enter Plan on this same click.
-      } else {
-        this.notifyUser("warning",
-          session.planModeUnavailableReason ?? "Plan mode is unavailable for this Grok CLI version.",
-        );
-        return;
-      }
-    }
-    if (!session.planModeAvailable && session.planActive) {
-      // An agent-initiated unavailable Plan transition is still being forced
-      // back to Agent. Agent/YOLO clicks must not lower the safety gate ahead
-      // of that confirmation; once recovered, the user can choose YOLO again.
-      this.recoverUnavailablePlanMode(session, session.client, session.gen);
-      return;
-    }
-    // Remember the user's last non-plan mode so new sessions start in it (#25).
-    // setMode is only ever called from the webview (user action), so this
-    // captures intent, not restore/replay bookkeeping (those use client.setMode
-    // directly). `modeToRemember` drops Plan (a transient per-task choice).
-    const remember = modeToRemember(modeId);
-    if (remember) {
-      void this.rememberGrokConfig("defaultMode", remember);
-    }
-    if (modeId === "yolo") {
-      session.autoApprove = true;
-      this.setPlanActive(session, false); // posts displayMode → "yolo"
-      // Flipping to Auto-accept mid-turn (#64) should unblock the CURRENT prompt,
-      // not just future requests: clear routine tool cards already on screen.
-      // Plan-review stays — that card is not a routine grant.
-      this.autoApprovePendingPermissions(session);
-      // Muse has no set_mode: auto-accept is the host's own gate there.
-      if (session.client && supportsModeSwitching(session.provider)) {
-        try {
-          if (session.provider === "codex") {
-            await session.client.setMode("default");
-            await session.client.setMode("agent-full-access");
-          } else if (session.provider === "claude" || session.provider === "gemini") {
-            await session.client.setMode("yolo");
-          } else {
-            await session.client.setMode(ACT_MODE_ID);
-          }
-        } catch { /* CLI stays put; gate is what matters */ }
-      }
-      return;
-    }
-    if (modeId === "plan") {
-      // Raise only after the agent accepts Plan. Doing it first left the badge
-      // claiming Plan when set_mode failed — Claude/Codex have no client gate,
-      // and grok's native writes can skip the partial delegated-command one.
-      // The client commits its own gate in the set_mode response hook so a
-      // same-chunk terminal/create cannot observe the window this await leaves.
-      if (session.client) {
-        try {
-          await session.client.setMode("plan");
-          session.autoApprove = false;
-          this.setPlanActive(session, true);
-        } catch (e) {
-          this.notifyUser("error", `Couldn't switch mode: ${(e as Error).message}`);
-        }
-      }
-      return;
-    }
-    session.autoApprove = false;
-    // agent
-    this.setPlanActive(session, false); // posts displayMode → "agent"
-    if (session.client && supportsModeSwitching(session.provider)) {
-      try {
-        if (session.provider === "codex") {
-          await session.client.setMode("default");
-          await session.client.setMode("agent");
-        } else if (session.provider === "claude" || session.provider === "gemini") {
-          await session.client.setMode("agent");
-        } else {
-          await session.client.setMode(ACT_MODE_ID);
-        }
-      }
-      catch (e) { this.notifyUser("error", `Couldn't switch mode: ${(e as Error).message}`); }
-    }
+    return this.providerSession.setMode(modeId, session);
   }
 
-  /** Resolve a plan-review card inside the ORIGINAL planning turn.
-   *
-   * Native outcomes drive grok's continuation: approved resumes into
-   * implementation, rejected stays in Plan so grok can revise, and abandoned
-   * ends the planning turn in Agent mode. Gate + permission state must be
-   * settled before the response releases the blocked tool call because
-   * implementation can begin immediately. Approve/reject comments are
-   * interjected first; abandon comments join the ordinary send queue because
-   * the abandoned turn ends without another model step to drain an interjection. */
   private handleExitPlan(
     requestId: number | string,
     verdict: "approved" | "abandoned" | "rejected",
     comment?: string,
     session: Session = this.focused,
   ): void {
-    const client = session.client;
-    const pending = session.pendingExitPlans.get(requestId);
-    if (!client || !pending) return;
-    const feedback = comment?.trim();
-    const planText = pending.planText;
-    const gen = session.gen;
-    const sidebar = this;
-    const resolveCard = () => this.emit(session, { type: "planResolved", requestId, verdict });
-    if (verdict === "approved") {
-      // Restore the mode chosen before Plan (#64) before native implementation
-      // can raise a permission request in this same turn.
-      session.autoApprove = this.host.getConfiguration("grok").get<string>("defaultMode", "") === "yolo";
-      this.setPlanActive(session, false);
-    } else if (verdict === "rejected") {
-      session.autoApprove = false;
-      this.setPlanActive(session, true);
-    } else {
-      // Preserve the existing safety choice: explicit Cancel lands in Agent,
-      // never back in remembered YOLO/Auto-accept.
-      session.autoApprove = false;
-      this.setPlanActive(session, false);
-    }
-
-    if (verdict === "abandoned") {
-      // Native abandon ends this turn without another model step, so an
-      // interjection would remain undrained. Respond first, then queue any
-      // comment while status is still working; handleSend's finally flushes it
-      // as a real prompt after the abandoned turn settles.
-      if (!client.respondExitPlan(requestId, verdict)) {
-        session.autoApprove = false;
-        this.setPlanActive(session, true);
-        this.setStatus(session, "needs-you");
-        return;
-      }
-      commitVerdict();
-      if (feedback) this.divertRacingSend(session, feedback, false);
-      resolveCard();
-      return;
-    }
-
-    // Calling the async method writes before its first await. Keep this call
-    // before respondExitPlan so the comment is queued while grok is still
-    // blocked on exit_plan_mode; capability handling continues asynchronously.
-    const inFlightComment = feedback ? { text: feedback, client, gen } : undefined;
-    if (inFlightComment) session.inFlightPlanComments.set(requestId, inFlightComment);
-    const commentDelivery = feedback
-      ? client.interject(feedback, () => {
-          // The response dispatcher invokes this synchronously before resolving
-          // the Promise. Acceptance therefore retires exit recovery before a
-          // subsequent process-close event can reclaim the same text.
-          if (session.inFlightPlanComments.get(requestId) === inFlightComment) {
-            session.inFlightPlanComments.delete(requestId);
-          }
-          if (gen === session.gen && session.client === client) session.interjectionCount += 1;
-        })
-      : undefined;
-    const verdictWritten = client.respondExitPlan(requestId, verdict);
-    if (!verdictWritten) {
-      void commentDelivery?.catch(() => {});
-      session.autoApprove = false;
-      this.setPlanActive(session, true);
-      this.setStatus(session, "needs-you");
-      return;
-    }
-    commitVerdict();
-    resolveCard();
-
-    if (!feedback || !commentDelivery) return;
-
-    void commentDelivery.then((result) => {
-      if (!verdictWritten) return;
-      // Stale completions never emit into replacement session state. The old
-      // process's close handler already reclaimed any still-owned text before
-      // bumping gen; accepted text retired that ownership in onResolve above.
-      if (gen !== session.gen || session.client !== client) return;
-      if (result === "ok") {
-        this.emit(session, { type: "userMessage", text: feedback, chips: [], steer: true });
-        this.host.appendLine(`[plan-verdict] interjected ${feedback.length} comment chars`);
-      } else {
-        if (session.inFlightPlanComments.get(requestId) === inFlightComment) {
-          session.inFlightPlanComments.delete(requestId);
-        }
-        this.emit(session, { type: "steerUnavailable" });
-        this.divertRacingSend(session, feedback, false);
-      }
-    }).catch((e: any) => {
-      if (!verdictWritten) return;
-      if (gen !== session.gen || session.client !== client) return;
-      if (session.inFlightPlanComments.get(requestId) === inFlightComment) {
-        session.inFlightPlanComments.delete(requestId);
-      }
-      this.emit(session, {
-        type: "error",
-        text: `Plan comment steering failed: ${e?.message ?? e}. Your comment was queued instead.`
-      });
-      this.divertRacingSend(session, feedback, false);
-    });
-
-    function commitVerdict(): void {
-      session.pendingExitPlans.delete(requestId);
-      sidebar.syncHumanWait(session);
-      sidebar.persistPlanVerdict(session, verdict, planText);
-      // Same rule as answering a permission or a question: a plan verdict is
-      // activity, but it only resumes the turn if nothing else is outstanding.
-      sidebar.noteAnswered(session);
-      if (verdict === "approved" && session.autoApprove) {
-        sidebar.autoApprovePendingPermissions(session);
-      }
-      if (verdict === "rejected" && !feedback) {
-        sidebar.emit(session, { type: "planNotice", text: "Plan rejected — staying in Plan mode." });
-      } else if (verdict === "abandoned" && !feedback) {
-        sidebar.emit(session, { type: "planNotice", text: "Plan abandoned — switched to Agent mode." });
-      }
-    }
+    return this.providerSession.handleExitPlan(requestId, verdict, comment, session);
   }
 
-  /** Move comments still awaiting acceptance into the ordinary queue before a
-   * controlled restart replaces their owning process. */
   private queueInFlightPlanCommentsOnExit(session: Session, client: AcpClient, gen: number): void {
-    const recovered: string[] = [];
-    for (const [requestId, pending] of session.inFlightPlanComments) {
-      if (pending.client !== client || pending.gen !== gen) continue;
-      session.inFlightPlanComments.delete(requestId);
-      recovered.push(pending.text);
-    }
-    if (!recovered.length) return;
-    session.queuedSends = enqueueQueuedSend(session.queuedSends, recovered.join("\n\n"), []);
+    return this.providerSession.queueInFlightPlanCommentsOnExit(session, client, gen);
   }
 
-  /**
-   * An old/unverified CLI may still enter Plan on its own. Keep the client-side
-   * write/terminal gate raised until the CLI confirms it returned to Agent.
-   * Only the latest attempt may lower the gate, so overlapping mode updates or
-   * a defensive exit-plan request cannot let an earlier RPC win a race.
-   */
   private recoverUnavailablePlanMode(
     session: Session,
     client: AcpClient,
     gen: number,
     exitPlanRequestId?: number | string,
   ): void {
-    const attempt = ++session.planModeRecoveryAttempt;
-    if (session.planModeRecovery?.warningTimer) {
-      clearTimeout(session.planModeRecovery.warningTimer);
-    }
-    const recovery = {
-      attempt,
-      modeConfirmed: false,
-      turnSettled: !this.turnInFlight(session),
-      warningTimer: undefined as ReturnType<typeof setTimeout> | undefined
-    };
-    session.planModeRecovery = recovery;
-    session.autoApprove = false;
-    this.setPlanActive(session, true);
-    if (exitPlanRequestId !== undefined) {
-      client.respondExitPlanUnavailable(exitPlanRequestId);
-    }
-    if (!recovery.turnSettled) {
-      // This CLI's verdict behavior is not trusted, so there is no safe native
-      // continuation to preserve. Cancel it and wait for client.prompt() to
-      // settle; a set_mode acknowledgement alone cannot authorize writes.
-      const cancelled = session.turnToken;
-      void client.cancel("unavailable Plan recovery");
-      // "Wait for client.prompt() to settle" is the assumption that wedged
-      // sessions in the first place — a cancel is a request, not an outcome.
-      // This path cancels a CLI already known to be misbehaving, so it is the
-      // LAST one that should be trusted to answer. Same recovery as a user Stop.
-      if (cancelled) this.armCancelRecovery(session, cancelled);
-    }
-    this.emit(session, {
-      type: "planNotice",
-      text:
-        `${session.planModeUnavailableReason ?? "Plan mode is unavailable for this Grok CLI version."} ` +
-        "Returning to Agent mode; write and terminal actions remain blocked until the planning turn stops and Agent mode is confirmed."
-    });
-
-    recovery.warningTimer = setTimeout(() => {
-      if (
-        gen !== session.gen ||
-        session.client !== client ||
-        session.planModeRecovery !== recovery
-      ) return;
-      this.emit(session, {
-        type: "error",
-        text:
-          "Could not finish leaving unavailable Plan mode promptly. " +
-          "Write and terminal actions remain blocked for safety; start a new session if recovery does not complete."
-      });
-    }, 10_000);
-
-    void client.setMode(ACT_MODE_ID).then(() => {
-      if (
-        gen !== session.gen ||
-        session.client !== client ||
-        session.planModeRecovery !== recovery
-      ) return;
-      recovery.modeConfirmed = true;
-      this.finishUnavailablePlanRecovery(session, client, gen, recovery);
-    }).catch((e: any) => {
-      if (
-        gen !== session.gen ||
-        session.client !== client ||
-        session.planModeRecovery !== recovery
-      ) return;
-      if (recovery.warningTimer) clearTimeout(recovery.warningTimer);
-      session.planModeRecovery = undefined;
-      this.emit(session, {
-        type: "error",
-        text:
-          `Could not leave unavailable Plan mode: ${e?.message ?? e}. ` +
-          "Write and terminal actions remain blocked for safety. Update Grok Build or start a new session."
-      });
-    });
+    return this.providerSession.recoverUnavailablePlanMode(session, client, gen, exitPlanRequestId);
   }
 
   private finishUnavailablePlanRecovery(
@@ -3895,24 +3510,11 @@ Only continue if you trust this code.`,
     gen: number,
     recovery: NonNullable<Session["planModeRecovery"]>,
   ): void {
-    if (
-      gen !== session.gen ||
-      session.client !== client ||
-      session.planModeRecovery !== recovery ||
-      !recovery.modeConfirmed ||
-      !recovery.turnSettled
-    ) return;
-    if (recovery.warningTimer) clearTimeout(recovery.warningTimer);
-    session.planModeRecovery = undefined;
-    this.setPlanActive(session, false);
-    this.emit(session, { type: "planNotice", text: "Returned to Agent mode." });
+    return this.providerSession.finishUnavailablePlanRecovery(session, client, gen, recovery);
   }
 
   private settleUnavailablePlanTurn(session: Session, client: AcpClient, gen: number): void {
-    const recovery = session.planModeRecovery;
-    if (!recovery || gen !== session.gen || session.client !== client) return;
-    recovery.turnSettled = true;
-    this.finishUnavailablePlanRecovery(session, client, gen, recovery);
+    return this.providerSession.settleUnavailablePlanTurn(session, client, gen);
   }
 
   /** Persist this plan (text + verdict) so the resume view can replay every plan
@@ -4092,147 +3694,16 @@ Only continue if you trust this code.`,
     req: PermissionRequest,
     cwd: string,
   ): void {
-    const planActive = effectivePlanActive(
-      client.usesClientPlanGate,
-      client.planActive,
-      session.planActive,
-    );
-    // While planning, decline permissions for operations the same fs/terminal
-    // policy would block. A read-only execute request falls through to the
-    // ordinary permission prompt; Plan mode never grants permission itself.
-    if (client.usesClientPlanGate && planActive && shouldRejectPermission(req.toolCall, {
-      active: true,
-      workspaceRoot: cwd,
-      grokHome: resolveGrokHome(process.env),
-      shellDialect: resolvedTerminalShellDialect()
-    })) {
-      const rejectId = pickRejectOption(req.options);
-      if (rejectId) {
-        client.respondPermission(req.id, rejectId);
-      } else {
-        client.respondPermissionCancelled(req.id);
-      }
-      const kind = String(req.toolCall?.kind || "tool").toLowerCase();
-      this.emit(session, {
-        type: "planNotice",
-        text: kind === "execute"
-          ? "Plan mode declined this command because it was not verified as safe to run while planning. Question-card answers are unaffected."
-          : `Plan mode declined this ${kind} request because workspace changes are blocked while planning. Question-card answers are unaffected.`
-      });
-      return;
-    }
-    // S-01: a subagent writing a file another writer holds always gets a card.
-    const claimWarning = this.childWriteClaimWarning(session, req);
-    // AP-07: after the plan gate, before the card. Pure decision; we only apply.
-    // Plan-review cards are a verdict, not a tool grant — rules never auto-decide them.
-    if (!claimWarning && !isPlanReviewPermission(req.toolCall?.kind) &&
-        this.applyPermissionRules(session, client, req, cwd)) {
-      return;
-    }
-    // Auto accept is not a verdict on a plan-review card. Same rule as
-    // autoApprovePendingPermissions, including after a failed mode RPC
-    // that already cleared the Plan bit.
-    if (!claimWarning && session.autoApprove && !planActive && !isPlanReviewPermission(req.toolCall?.kind)) {
-      const opt = req.options.find((o) => o.kind === "allow_always") ??
-                  req.options.find((o) => o.kind === "allow_once");
-      if (opt) {
-        this.snapshotToolCallWrites(session, req.toolCall, cwd);
-        client.respondPermission(req.id, opt.optionId);
-        return;
-      }
-    }
-    // Remember it so the answer can be persisted for replay on resume.
-    const visibleOptions = permissionOptionsForPlan(
-      req.options ?? [],
-      planActive,
-      req.toolCall?.kind,
-    );
-    if (
-      planActive &&
-      String(req.toolCall?.kind ?? "").toLowerCase() === "execute" &&
-      visibleOptions.length === 0
-    ) {
-      client.respondPermissionCancelled(req.id);
-      this.emit(session, {
-        type: "planNotice",
-        text: "Plan mode declined this command because it offered no safe one-time or reject option."
-      });
-      return;
-    }
-    const plan = isPlanReviewPermission(req.toolCall?.kind)
-      ? planTextFromPermissionToolCall(req.toolCall)
-      : undefined;
-    session.pendingPermissions.set(req.id, createPendingPermission({
-      title: req.toolCall?.title || `permission: ${req.toolCall?.kind || "tool"}`,
-      toolCallId: req.toolCall?.toolCallId,
-      toolKind: req.toolCall?.kind,
-      paths: extractPermissionFacts(req.toolCall).paths.slice(),
-      plan,
-      options: (req.options ?? []).map((o) => ({
-        optionId: o.optionId,
-        kind: o.kind,
-        name: o.name
-      }))
-    }));
-    this.syncHumanWait(session);
-    const ruleSuggestions = isPlanReviewPermission(req.toolCall?.kind)
-      ? undefined
-      : suggestRules(extractPermissionFacts(req.toolCall), cwd);
-    this.emit(session, {
-      type: "permissionRequest",
-      req: {
-        ...req,
-        options: visibleOptions,
-        ...(plan !== undefined ? { plan } : {})
-      },
-      ...(ruleSuggestions && ruleSuggestions.length ? { ruleSuggestions } : {}),
-      ...(claimWarning ? { warning: claimWarning } : {})
-    });
-    this.setStatus(session, "needs-you");
+    return this.providerSession.handlePermissionRequest(session, client, req, cwd);
   }
 
-  /**
-   * Apply the AP-07 engine to a live permission request. Returns true when
-   * the request was answered (allow/deny) and must not emit a card.
-   *
-   * Empty user rules and no floor hit → false, which is today's fall-through.
-   */
   private applyPermissionRules(
     session: Session,
     client: AcpClient,
     req: PermissionRequest,
     cwd: string,
   ): boolean {
-    const facts = { ...extractPermissionFacts(req.toolCall), shellDialect: resolvedTerminalShellDialect() };
-    const loaded = this.loadPermissionRuleState(cwd);
-    this.maybePromptWorkspaceRulesAdoption(session, cwd, loaded);
-    const decision = decidePermission(
-      [...loaded.active, ...(session.rolePermissionRules ?? []), ...(session.sessionPermissionRules ?? [])],
-      facts,
-      cwd,
-    );
-    if (decision.action === "ask") return false;
-    if (decision.action === "deny") {
-      const rejectId = pickRejectOption(req.options ?? []);
-      if (rejectId) client.respondPermission(req.id, rejectId);
-      else client.respondPermissionCancelled(req.id);
-      this.emit(session, {
-        type: "hostNotice",
-        level: "warning",
-        text: permissionRulesNotice(decision)
-      });
-      return true;
-    }
-    const allowId = pickAllowOnceOption(req.options ?? []);
-    if (!allowId) return false;
-    this.snapshotToolCallWrites(session, req.toolCall, cwd);
-    client.respondPermission(req.id, allowId);
-    this.emit(session, {
-      type: "hostNotice",
-      level: "info",
-      text: permissionRulesNotice(decision)
-    });
-    return true;
+    return this.providerSession.applyPermissionRules(session, client, req, cwd);
   }
 
   private permissionRulesFs(): PermissionRulesFs {
@@ -7348,113 +6819,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
   }
 
   private async resetProviderSessionsAfterLogout(provider: AcpProvider): Promise<void> {
-    const connected = this.connectedProviders();
-    // Never the opposite provider just because this one signed out: with nothing
-    // connected that mints a session bound to an account the user does not have,
-    // and `defaultProviderForProject` already declines to name a disconnected
-    // one. Replacements made with nothing connected carry `needsProvider`
-    // instead, and reconnecting any provider adopts them.
-    const needsProvider = connected.length === 0;
-    const replacementProvider = (cwd: string) => this.defaultProviderForProject(cwd);
-    const providerName = providerDisplayName(provider);
-    const affectedSessions = new Set<Session>(
-      [...this.pool].filter((session) => session.provider === provider),
-    );
-    if (this.focused.provider === provider) affectedSessions.add(this.focused);
-    const replacingFocused = this.focused.provider === provider;
-    const focusedQueuedText = replacingFocused ? queuedSendsText(this.focused.queuedSends) : "";
-    const focusedDraftId = replacingFocused ? this.focused.activeSessionId : undefined;
-    const focusedCwd = replacingFocused ? this.sessionCwd(this.focused) : "";
-    const backgroundQueued = [...affectedSessions]
-      .filter((session) => session !== this.focused && session.queuedSends.length > 0)
-      .map((session) => ({
-        id: session.activeSessionId,
-        name: this.sessionDisplayName(session) || "a background conversation",
-        text: queuedSendsText(session.queuedSends)
-      }));
-
-    for (const affected of affectedSessions) {
-      const text = queuedSendsText(affected.queuedSends);
-      if (text && affected.activeSessionId) {
-        await this.rememberQueuedDraft(affected.activeSessionId, text);
-      }
-    }
-
-    // A signed-out session with nothing in it is a shell, and a sign-out is
-    // the moment it stops having any owner at all. Left on disk each one is an
-    // "Untitled" row in the rail that nobody can account for — the owner
-    // counted three after a few connect/disconnect cycles (2026-08-31) — and
-    // the periodic sweep is age-gated at thirty minutes, so it collects them
-    // long after they have been read as a bug. Drafts were persisted to meta
-    // above, so "empty" here is genuinely empty. Read BEFORE dispose, which
-    // clears the ids this needs.
-    const shells = [...affectedSessions]
-      .filter((s) => !s.hasHistory && !s.worktree && s.chips.length === 0 && !s.priming
-        && !s.strandedDraft && s.queuedSends.length === 0 && !!s.activeSessionId)
-      .map((s) => ({ id: s.activeSessionId, cwd: this.sessionCwd(s), provider: s.provider }));
-    // Atomic boundary: detach every signed-out-provider client before any
-    // replacement startup can await. Membership is provider identity only;
-    // another provider's crashed/clientless session remains resumable.
-    for (const session of affectedSessions) void this.disposeSession(session);
-    for (const shell of shells) {
-      if (isAdapterProvider(shell.provider)) {
-        void this.discardAdapterEmptySession(shell.provider, shell.id, shell.cwd);
-      } else {
-        this.removeSessionFromDisk(shell.id, shell.cwd);
-      }
-    }
-
-    let localReplacement: Session | undefined;
-    if (replacingFocused) {
-      const cwd = authorizedListCwd(focusedCwd, this.authorizedSessionCwds(), pathsEqual)
-        ?? this.workspaceRoot();
-      const replacement = this.newLocalSession();
-      replacement.provider = replacementProvider(cwd);
-      replacement.needsProvider = needsProvider;
-      this.setSessionCwd(replacement, cwd, this.workspaceRoot());
-      replacement.priming = connected.length > 0;
-      replacement.lastActiveAt = Date.now();
-      this.focused = replacement;
-      this.pool.add(replacement);
-      localReplacement = replacement;
-      this.post({ type: "clearMessages" });
-      // With an account left, the draft goes straight back into the composer it
-      // was typed in. With none, that composer is behind the onboarding overlay,
-      // so hold it until reconnect gives it somewhere visible to land.
-      if (focusedQueuedText) {
-        replacement.strandedDraft = focusedQueuedText;
-        replacement.strandedDraftSessionId = focusedDraftId;
-      }
-      if (connected.length) this.emit(replacement, { type: "setBusy", value: true, locked: true });
-      else this.post({ type: "onboarding", state: "connect-agent", platform: process.platform });
-    }
-
-    // A background conversation's draft belongs to that conversation, not to
-    // whoever happens to be focused. The draft is persisted to its own meta
-    // (restored by `restorePersistedDraft` when that conversation next starts)
-    // and the view gets a transient, content-light pointer to it.
-    const draftNoticeTarget = localReplacement ?? this.focused;
-    for (const queued of backgroundQueued) {
-      if (!queued.id) {
-        this.emitLocalTransient(draftNoticeTarget, {
-          type: "error",
-          text: `${providerName} was signed out while ${queued.name} had an unsaved draft:\n\n${queued.text}`
-        });
-        continue;
-      }
-      this.emitLocalTransient(draftNoticeTarget, {
-        type: "error",
-        text: `${providerName} was signed out while “${queued.name}” had a draft. It is saved — open that conversation to get it back.`
-      });
-    }
-
-    // Startup begins only after the atomic disposal phase above. Sends during
-    // any stall now target an inert replacement and stay composer/queue owned;
-    // no signed-out client remains reachable.
-    if (localReplacement && connected.length) {
-      const started = await this.startSession(undefined, localReplacement);
-      if (started && !localReplacement.needsProvider) this.restoreStrandedDraft(localReplacement);
-    }
+    return this.providerSession.resetProviderSessionsAfterLogout(provider);
   }
 
   /**
@@ -7811,165 +7176,22 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
    * that cannot reach x.ai would otherwise re-charge that wait on every
    * window. */
   private async maybeUpdateCliOnUpgrade(cliPath: string): Promise<void> {
-    if (this.cliUpdateChecked) return;
-    this.cliUpdateChecked = true;
-    const current = this.context.extensionVersion;
-    const lastSeen = this.state.get<string>(CLI_UPDATE_VERSION_KEY);
-    try {
-      if (!extensionWasUpgraded(lastSeen, current)) return;
-      const policy = grokUpdatePolicy(await this.readGrokVersion(cliPath), process.platform);
-      if (!policy.allow) {
-        this.host.appendLine(
-          `Extension upgraded ${lastSeen} → ${current}; skipping silent CLI update (${policy.note}).`,
-        );
-        return;
-      }
-      const args = policy.target ? ["update", "--version", policy.target] : ["update"];
-      this.host.appendLine(
-        `Extension upgraded ${lastSeen} → ${current}; updating grok CLI (silent: ${args.join(" ")}).`,
-      );
-      this.post({ type: "cliUpdating" });
-      try {
-        // 20s, not the 180s the manual update gets. This one is awaited BEFORE
-        // the CLI spawns, with the composer already locked, so every second of
-        // it is a second the user cannot type — and it is optional work: the
-        // installed binary is fine. A no-op `grok update` is ~0.8s where x.ai
-        // is reachable and 68s where it is not (measured by funkpopo behind a
-        // blocked x.ai, PR #129), so a short budget separates the two without
-        // needing to detect which network we are on.
-        const { stdout, stderr } = await execGrokCli(cliPath, args, { timeout: 20_000 });
-        if (stdout?.trim()) this.host.appendLine(stdout.trim());
-        if (stderr?.trim()) this.host.appendLine(stderr.trim());
-      } catch (e) {
-        this.host.appendLine(`grok update failed (continuing with current binary): ${(e as Error).message}`);
-      }
-    } finally {
-      // ONE attempt per extension version, whatever the outcome.
-      //
-      // This used to leave the marker unwritten on failure so the next window
-      // would retry, reasoning that the likely cause was transient — on Windows
-      // another grok.exe holding the binary's lock, which a worktree create
-      // leaves for a moment. That is true of a lock, which fails instantly and
-      // costs nothing to retry. It is false of an unreachable x.ai: that
-      // failure is persistent, and retrying it charged the full timeout to
-      // session startup on EVERY new window, indefinitely. A user behind a
-      // blocked x.ai paid it forever (funkpopo, PR #129).
-      //
-      // So a failed attempt now counts as the attempt. The cost of being wrong
-      // is small and self-correcting: the update is optional, the version floor
-      // and Plan-mode checks still run against whatever is installed, and the
-      // CLI's own autoUpdate catches it up. The next extension version tries
-      // again.
-      void this.state.update(CLI_UPDATE_VERSION_KEY, current);
-    }
+    return this.providerSession.maybeUpdateCliOnUpgrade(cliPath);
   }
 
-  /**
-   * Probe the installed CLI and decide Plan availability. Fail-closed when the
-   * version cannot be read, but that outcome is *not* latched — only a live
-   * parseable below-floor banner sticks for the session. Retries once on
-   * empty/unparseable output, then falls back to the last verified banner for
-   * this binary when the file identity still matches. A cache hit keeps that
-   * availability and is never treated as verified — initialize must not use
-   * `cliVersion` unless `planModeVersionVerified` is true. Performs no update
-   * or pool orchestration.
-   */
   private async planModeCompatibility(
     cliPath: string,
     opts: { notify?: boolean } = {},
   ): Promise<CliCompatibilityResult> {
-    const notify = opts.notify !== false;
-    const cache = this.state.get<CliVersionCache>(CLI_VERSION_CACHE_KEY, {});
-    const { decision, nextCache, usedCache, versionOutput } = await resolvePlanModeAvailability({
-      readOnce: () => this.readGrokVersion(cliPath),
-      sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-      identity: readCliBinaryIdentity(cliPath),
-      cache
-    });
-    if (nextCache) void this.state.update(CLI_VERSION_CACHE_KEY, nextCache);
-    const parsed = parseGrokVersion(versionOutput);
-    const cliVersion = parsed ? parsed.join(".") : undefined;
-    if (cliVersion) this.providerCliVersions.grok = cliVersion;
-    if (decision.available) {
-      if (usedCache) {
-        this.host.appendLine("grok --version failed; using last verified version for Plan mode.");
-      }
-      return { planModeAvailable: true, planModeVersionVerified: decision.verified, usedCache, cliVersion };
-    }
-    if (decision.verified) {
-      const message =
-        `grok CLI ${decision.installed} is below required version ${GROK_REQUIRED_VERSION}; ` +
-        "Plan mode is unavailable.";
-      this.host.appendLine(message);
-      if (notify) void this.host.showWarningMessage(message);
-      return {
-        planModeAvailable: false,
-        planModeVersionVerified: true,
-        planModeUnavailableReason: decision.reason,
-        usedCache,
-        cliVersion
-      };
-    }
-    // Unverified: log + optional toast once at session start; a later Plan pick
-    // re-probes without forcing a restart (#105).
-    const message =
-      `Could not verify the Grok CLI version (the check failed or timed out — a first run after install can be slow). ` +
-      `Plan mode is unavailable until it can be checked. Pick Plan again or reload the window to retry. ` +
-      `Continuing best-effort with the current binary.`;
-    this.host.appendLine(message);
-    if (notify) {
-      void this.host.showWarningMessage(
-        `Could not verify the Grok CLI version (the check failed or timed out — a first run after install can be slow). ` +
-          `Pick Plan again or reload the window to retry.`,
-      );
-    }
-    return {
-      planModeAvailable: false,
-      planModeVersionVerified: false,
-      planModeUnavailableReason: decision.reason,
-      usedCache,
-      cliVersion
-    };
+    return this.providerSession.planModeCompatibility(cliPath, opts);
   }
 
-  /** Push a Plan-availability decision onto the session and its views. */
   private applyPlanModeCompatibility(session: Session, compatibility: CliCompatibilityResult): void {
-    session.planModeAvailable = compatibility.planModeAvailable;
-    session.planModeUnavailableReason = compatibility.planModeUnavailableReason;
-    session.planModeVersionVerified = compatibility.planModeVersionVerified;
-    this.emit(session, {
-      type: "planModeAvailability",
-      available: compatibility.planModeAvailable,
-      reason: compatibility.planModeUnavailableReason,
-      recheckable: !compatibility.planModeAvailable && !compatibility.planModeVersionVerified
-    });
-    this.emit(session, {
-      type: "providerCapabilities",
-      provider: session.provider,
-      capabilities: allProviderCapabilities(session.provider, {
-        planModeAvailable: compatibility.planModeAvailable,
-        cliVerified: compatibility.planModeVersionVerified,
-        planModeUnavailableReason: compatibility.planModeUnavailableReason,
-        steeringSupported: session.client?.supportsInterject?.()
-      })
-    });
+    return this.providerSession.applyPlanModeCompatibility(session, compatibility);
   }
 
-  /**
-   * Re-run the version probe for an unverified session when the user picks Plan.
-   * Returns false if the CLI path is missing or the session was torn down mid-probe.
-   */
   private async recheckPlanModeAvailability(session: Session): Promise<boolean> {
-    const gen = session.gen;
-    const cliPath = this.locateProvider("grok");
-    if (!cliPath) return false;
-    this.host.appendLine("Re-checking Grok CLI version for Plan mode…");
-    // Silent: the initial session-start probe already notified; a second toast
-    // on every pick would turn a transient into noise.
-    const compatibility = await this.planModeCompatibility(cliPath, { notify: false });
-    if (gen !== session.gen) return false;
-    this.applyPlanModeCompatibility(session, compatibility);
-    return true;
+    return this.providerSession.recheckPlanModeAvailability(session);
   }
 
   /** Pin the bounded Windows stdio-hang range before spawning ACP. */
