@@ -75,10 +75,7 @@ import {
   type PermissionRulesFs,
   type PermissionRuleView
 } from "./permission-rules";
-import { CODEX_MANAGED_VERSION } from "./codex-managed-installer";
 import { resolveCodexHome } from "./codex-cli-locator";
-import { parseClaudeVersionOutput } from "./claude-cli-locator";
-import { parseGeminiVersionOutput } from "./gemini-cli-locator";
 import {
   adapterEntriesEligibleForClear,
   adapterListEntry,
@@ -87,7 +84,6 @@ import {
   mergeProviderSessionEntries,
   missingProviderState,
   modelsForConnectedProviders,
-  parseCodexVersionOutput,
   projectProviderKey,
   providerDisplayName,
   providerLoginState,
@@ -178,9 +174,8 @@ import type { GithubAuthState } from "./github-auth";
 import { SubscriptionUsageBinding, SubscriptionUsageCache, subscriptionCredentialContext, type SubscriptionWindow } from "./subscription-usage";
 import { readCodexSubscriptionWindows } from "./codex-usage";
 import { providerConfigFiles, type ProviderConfigFile } from "./provider-config";
-import { CLI_NPM_PACKAGE, cliUpdatePlan, selfUpdateArgs } from "./cli-update-plan";
 import { readWorkflowCompletion } from "./workflow-state";
-import { parseMuseVersionOutput } from "./muse-cli-locator";
+import { CliUpdateHost, createCliUpdateHost } from "./cli-update-host";
 import { supportsClientMcpServers } from "./acp-backend";
 import { GitRunGate, type GitTurnBaseline } from "./git-run";
 import {
@@ -206,9 +201,7 @@ import type { LocalGitWorktrees } from "./worktree-local";
 import {
   isStdioBrokenGrokVersion,
   parseGrokVersion,
-  grokUpdatePolicy,
   shouldReactivelyDowngrade,
-  isLockedBinaryError,
   GROK_STDIO_DOWNGRADE_TARGET
 } from "./cli-locator";
 import { OpenClock } from "./open-timing";
@@ -914,6 +907,13 @@ export class GrokSidebar {
 
   get githubConnection(): GithubAuthState | undefined { return this.projectFolders.githubConnection; }
   set githubConnection(v: GithubAuthState | undefined) { this.projectFolders.githubConnection = v; }
+
+  /** CLI update subsystem */
+  private _cliUpdateHost?: CliUpdateHost;
+  get cliUpdateHost(): CliUpdateHost {
+    return this._cliUpdateHost ??= this.createCliUpdateHost();
+  }
+  set cliUpdateHost(value: CliUpdateHost) { this._cliUpdateHost = value; }
   get mcpServers(): McpServerView[] { return this.voiceAndMcp.mcpServers; }
   set mcpServers(v: McpServerView[]) { this.voiceAndMcp.mcpServers = v; }
   get mcpServersCwd(): string | undefined { return this.voiceAndMcp.mcpServersCwd; }
@@ -934,10 +934,14 @@ export class GrokSidebar {
   set grokSessionForMcpListInFlight(v: Promise<Session | undefined> | undefined) { this.voiceAndMcp.grokSessionForMcpListInFlight = v; }
   private readonly mcpConnectorKeysReady: Promise<void>;
   private grokVersionProbe?: Promise<string>;
-  private codexVersionProbe?: Promise<string>;
-  private claudeVersionProbe?: Promise<string>;
-  private geminiVersionProbe?: Promise<string>;
-  private museVersionProbe?: Promise<string>;
+  get codexVersionProbe(): Promise<string> | undefined { return this.cliUpdateHost.codexVersionProbe; }
+  set codexVersionProbe(v: Promise<string> | undefined) { this.cliUpdateHost.codexVersionProbe = v; }
+  get claudeVersionProbe(): Promise<string> | undefined { return this.cliUpdateHost.claudeVersionProbe; }
+  set claudeVersionProbe(v: Promise<string> | undefined) { this.cliUpdateHost.claudeVersionProbe = v; }
+  get geminiVersionProbe(): Promise<string> | undefined { return this.cliUpdateHost.geminiVersionProbe; }
+  set geminiVersionProbe(v: Promise<string> | undefined) { this.cliUpdateHost.geminiVersionProbe = v; }
+  get museVersionProbe(): Promise<string> | undefined { return this.cliUpdateHost.museVersionProbe; }
+  set museVersionProbe(v: Promise<string> | undefined) { this.cliUpdateHost.museVersionProbe = v; }
   /** History browsing scope. Deliberately independent of the live session cwd. */
   private selectedRepoCwd?: string;
   /**
@@ -1146,6 +1150,34 @@ export class GrokSidebar {
       postRoutines: () => self.postRoutines(),
       handleSend: (prompt: string, isSteer: boolean, session: Session) => self.handleSend(prompt, isSteer, session),
       getOverride: (name: string) => self.sidebarTestOverride(name),
+    });
+  }
+
+  private createCliUpdateHost(): CliUpdateHost {
+    const self = this;
+    return createCliUpdateHost({
+      get host() { return self.host; },
+      get state() { return self.state; },
+      get context() { return self.context; },
+      post: (msg) => self.post(msg),
+      postGrokUpdateStatus: (msg) => self.postGrokUpdateStatus(msg),
+      postProviderState: () => self.postProviderState(),
+      get providerCliVersions() {
+        return (self.providerCliVersions ?? ((self as any).providerCliVersions = {})) as Record<string, string>;
+      },
+      hasProviderConsent: (provider) => self.hasProviderConsent(provider),
+      locateProvider: (provider) => self.locateProvider(provider),
+      readGrokVersion: (cliPath) => self.readGrokVersion(cliPath),
+      connectedProviders: () => self.connectedProviders(),
+      installManagedCodexCli: () => self.installManagedCodexCli(),
+      reprobeProviderCredentials: (provider) => self.reprobeProviderCredentials(provider),
+      getFocused: () => self.focused,
+      setFocused: (session) => { self.focused = session; },
+      getPool: () => (self.pool ? self.pool.values() : []),
+      newLocalSession: () => self.newLocalSession(),
+      disposePool: () => self.disposePool(),
+      startSession: (resumeId) => self.startSession(resumeId),
+      getOverride: (name: string) => self.sidebarTestOverride(name)
     });
   }
 
@@ -1583,6 +1615,7 @@ export class GrokSidebar {
     this._providerSession = this.createProviderSession();
     this._voiceAndMcp = this.createVoiceAndMcp();
     this._projectFolders = this.createProjectFolders();
+    this._cliUpdateHost = this.createCliUpdateHost();
     this.providerConnectionState = this.migrateProviderConnections();
     this.focused.provider = this.defaultProviderForProject(this.workspaceRoot());
     context.subscriptions.push(
@@ -6143,155 +6176,27 @@ Only continue if you trust this code.`,
    * global installs, so nothing happens silently. Refresh re-reads the version.
    */
   private async updateProviderCli(provider: unknown): Promise<void> {
-    if (provider !== "codex" && provider !== "claude") return;
-    if (!this.hasProviderConsent(provider)) return;
-    const cliPath = this.locateProvider(provider);
-    if (!cliPath) return;
-    let realPath = cliPath;
-    try { realPath = fs.realpathSync(cliPath); } catch { /* keep the located path */ }
-    const managedRoot = this.context.globalStorageUri.fsPath;
-    const managed = provider === "codex" && pathsEqual(realPath.slice(0, managedRoot.length), managedRoot);
-    if (managed) {
-      await this.installManagedCodexCli();
-      return;
-    }
-    const plan = cliUpdatePlan({
-      managed: false,
-      realPath,
-      packageName: CLI_NPM_PACKAGE[provider],
-      targetVersion: provider === "codex" ? CODEX_MANAGED_VERSION : undefined
-    });
-    const quote = (value: string) => `"${value.replace(/"/g, '\\"')}"`;
-    const command = plan.kind === "npm"
-      ? `npm install -g --prefix ${quote(plan.prefix)} ${plan.packageSpec}`
-      : [quote(cliPath), ...selfUpdateArgs(provider, plan.kind === "self" ? plan.target : undefined)].join(" ");
-    const term = this.host.createTerminal({ name: `Update ${providerDisplayName(provider)} CLI` });
-    term.show();
-    term.sendText(command);
-    this.host.appendLine(`[${provider}] CLI update started in a terminal: ${command}`);
-    // The next version read must not be the memoized one from before.
-    if (provider === "codex") this.codexVersionProbe = undefined;
-    else this.claudeVersionProbe = undefined;
+    return this.cliUpdateHost.updateProviderCli(provider);
   }
 
-  /**
-   * Re-read a provider's model catalog when its CLI changed under us
-   * (upstream 8a72f31). The catalog is persisted, so an updated CLI's new
-   * models never appeared until a reconnect. Keyed on the OBSERVED version —
-   * the CLIs update themselves — and one attempt per version: the stamp is
-   * written before the probe.
-   */
   private async refreshModelsIfCliChanged(provider: AcpProvider, version: string): Promise<void> {
-    if (!version || !this.hasProviderConsent(provider)) return;
-    const cache = this.state.get<ProviderModelCache>(PROVIDER_MODEL_CACHE_KEY, {});
-    const cached = cache[provider];
-    if (!cached || cached.cliVersion === version) return;
-    await this.state.update(PROVIDER_MODEL_CACHE_KEY, {
-      ...cache,
-      [provider]: { ...cached, cliVersion: version }
-    } satisfies ProviderModelCache);
-    this.host.appendLine(`[${provider}] CLI ${cached.cliVersion ?? "unknown"} -> ${version}; re-reading the model catalog`);
-    await this.reprobeProviderCredentials(provider);
+    return this.cliUpdateHost.refreshModelsIfCliChanged(provider, version);
   }
 
   private probeCodexVersion(): Promise<string> {
-    if (this.codexVersionProbe) return this.codexVersionProbe;
-    this.codexVersionProbe = (async () => {
-      const cliPath = this.locateProvider("codex");
-      if (!cliPath) return "";
-      try {
-        const { stdout } = await execGrokCli(cliPath, ["--version"], {
-          timeout: 30_000,
-          windowsHide: true
-        });
-        const version = parseCodexVersionOutput(stdout ?? "");
-        if (!version) throw new Error("unrecognized version output");
-        this.providerCliVersions.codex = version;
-        this.postProviderState();
-        await this.refreshModelsIfCliChanged("codex", version);
-        return version;
-      } catch (error) {
-        this.host.appendLine(`codex --version failed: ${(error as Error).message}`);
-        this.postProviderState();
-        return "";
-      }
-    })();
-    return this.codexVersionProbe;
+    return this.cliUpdateHost.probeCodexVersion();
   }
 
-  /** Read `claude --version` once per activation. The adapter handshake version
-   * is a stale package constant (0.49.0 on 0.69.0) and must not be displayed. */
   private probeClaudeVersion(): Promise<string> {
-    if (this.claudeVersionProbe) return this.claudeVersionProbe;
-    this.claudeVersionProbe = (async () => {
-      const cliPath = this.locateProvider("claude");
-      if (!cliPath) return "";
-      try {
-        const { stdout } = await execGrokCli(cliPath, ["--version"], {
-          timeout: 30_000,
-          windowsHide: true
-        });
-        const version = parseClaudeVersionOutput(stdout ?? "");
-        if (!version) throw new Error("unrecognized version output");
-        this.providerCliVersions.claude = version;
-        this.postProviderState();
-        await this.refreshModelsIfCliChanged("claude", version);
-        return version;
-      } catch (error) {
-        this.host.appendLine(`claude --version failed: ${(error as Error).message}`);
-        this.postProviderState();
-        return "";
-      }
-    })();
-    return this.claudeVersionProbe;
+    return this.cliUpdateHost.probeClaudeVersion();
   }
 
-  /** Read `gemini --version` once per activation. */
-  /** Probe the installed Muse CLI, not the SDK/adapter package version. */
   private probeMuseVersion(): Promise<string> {
-    if (!this.hasProviderConsent("muse")) return Promise.resolve("");
-    if (this.museVersionProbe) return this.museVersionProbe;
-    this.museVersionProbe = (async () => {
-      const cliPath = this.locateProvider("muse");
-      if (!cliPath) return "";
-      try {
-        const { stdout } = await execGrokCli(cliPath, ["--version"], { timeout: 30_000, windowsHide: true });
-        const version = parseMuseVersionOutput(stdout ?? "");
-        if (!version) throw new Error("unrecognized version output");
-        this.providerCliVersions.muse = version;
-        this.postProviderState();
-        return version;
-      } catch (error) {
-        this.host.appendLine(`muse --version failed: ${(error as Error).message}`);
-        this.postProviderState();
-        return "";
-      }
-    })();
-    return this.museVersionProbe;
+    return this.cliUpdateHost.probeMuseVersion();
   }
 
   private probeGeminiVersion(): Promise<string> {
-    if (this.geminiVersionProbe) return this.geminiVersionProbe;
-    this.geminiVersionProbe = (async () => {
-      const cliPath = this.locateProvider("gemini");
-      if (!cliPath) return "";
-      try {
-        const { stdout } = await execGrokCli(cliPath, ["--version"], {
-          timeout: 30_000,
-          windowsHide: true
-        });
-        const version = parseGeminiVersionOutput(stdout ?? "");
-        if (!version) throw new Error("unrecognized version output");
-        this.providerCliVersions.gemini = version;
-        this.postProviderState();
-        return version;
-      } catch (error) {
-        this.host.appendLine(`gemini --version failed: ${(error as Error).message}`);
-        this.postProviderState();
-        return "";
-      }
-    })();
-    return this.geminiVersionProbe;
+    return this.cliUpdateHost.probeGeminiVersion();
   }
 
   /** Once per extension upgrade, from session start, with a fresh install only
@@ -6372,129 +6277,19 @@ Only continue if you trust this code.`,
    * safe while a session is live. Posts a grokUpdateStatus back to the webview.
    */
   private async checkGrokUpdate(): Promise<void> {
-    const connected = this.connectedProviders();
-    if (connected.includes("codex")) void this.probeCodexVersion();
-    if (!connected.includes("grok")) return;
-    const cliPath = this.locateProvider("grok");
-    if (!cliPath) {
-      this.postGrokUpdateStatus({ type: "grokUpdateStatus", error: "grok CLI not found" });
-      return;
-    }
-    // Compute the update policy from the installed version (issue #22) so the menu
-    // can disable the action — with a note — when an update would land on an
-    // unsupported Windows build. Independent of the --check result below.
-    const policy = grokUpdatePolicy(await this.readGrokVersion(cliPath), process.platform);
-    try {
-      const { stdout } = await execGrokCli(cliPath, ["update", "--check", "--json"], { timeout: 30_000 });
-      const info = JSON.parse(stdout) as {
-        currentVersion?: string;
-        latestVersion?: string;
-        updateAvailable?: boolean;
-      };
-      this.postGrokUpdateStatus({
-        type: "grokUpdateStatus",
-        current: info.currentVersion ?? null,
-        latest: info.latestVersion ?? null,
-        updateAvailable: !!info.updateAvailable,
-        policy
-      });
-    } catch (e) {
-      this.host.appendLine(`grok update --check failed: ${(e as Error).message}`);
-      this.postGrokUpdateStatus({ type: "grokUpdateStatus", error: (e as Error).message, policy });
-    }
+    return this.cliUpdateHost.checkGrokUpdate();
   }
 
-  /**
-   * On-demand "Update Grok Build" from the About panel. grok holds its binary
-   * open while running (a hard lock on Windows), so we tear the session down,
-   * run `grok update`, then resume the *same* session on the fresh binary —
-   * preserving the conversation. The welcome lifecycle (Updating… → Starting… →
-   * Connected · v<new>) shows progress.
-   */
   private async updateGrokCliOnDemand(): Promise<void> {
-    const cliPath = this.locateProvider("grok");
-    if (!cliPath) {
-      this.post({ type: "onboarding", state: "missing-cli", platform: process.platform, provider: "grok" });
-      return;
-    }
-    // Enforce the update policy (issue #22) server-side too — the menu already
-    // disables the action when blocked, but never move the CLI onto an
-    // unsupported Windows build even if the message arrives some other way.
-    const policy = grokUpdatePolicy(await this.readGrokVersion(cliPath), process.platform);
-    if (!policy.allow) {
-      void this.host.showInformationMessage(
-        policy.note ?? "Grok CLI updates are paused for compatibility.",
-      );
-      return;
-    }
-    const updateArgs = policy.target ? ["update", "--version", policy.target] : ["update"];
-    // The update tears down the whole pool (the binary is locked while any session
-    // holds it open), so a session that's mid-turn or waiting on you would be
-    // interrupted. Warn first if any are — now that several can run at once, this
-    // is no longer a non-event. (The silent startup auto-update skips this: it runs
-    // before anything is in flight.)
-    const busy = [...this.pool].filter(
-      (s) => s.status === "working" || s.status === "needs-you",
-    ).length;
-    if (busy > 0) {
-      const choice = await this.host.showWarningMessage(
-        `Updating the Grok Build CLI will stop ${busy} session${busy === 1 ? "" : "s"} currently in progress. Continue?`,
-        { modal: true },
-        "Update Anyway",
-      );
-      if (choice !== "Update Anyway") return;
-    }
-    const resumeId = this.focused.activeSessionId;
-    const resumeCwd = this.focused.cwd;
-    const resumeWorktree = this.focused.worktree;
-    // Free the binary: every pooled session's process holds it open (a hard lock
-    // on Windows), so tear the whole pool down before the update replaces the
-    // executable, then resume the focused session on the fresh binary. Other
-    // backgrounded sessions go cold — re-focusing one reloads it from disk.
-    // AWAIT the teardown: kill() only *signals*, and on Windows the OS releases
-    // the grok.exe lock a beat after the process actually exits — running the
-    // update before that loses the rename with "cannot rename locked executable".
-    this.focused = this.newLocalSession();
-    this.focused.cwd = resumeCwd;
-    this.focused.worktree = resumeWorktree;
-    this.post({ type: "clearMessages" });
-    this.post({ type: "cliUpdating" });
-    await this.disposePool();
-    await this.runGrokUpdate(cliPath, updateArgs);
-    // Respawn on the (possibly) updated binary, resuming the same session.
-    await this.startSession(resumeId);
+    return this.cliUpdateHost.updateGrokCliOnDemand();
   }
 
-  /** Run `grok update`, retrying once on the Windows "locked executable" error.
-   *  Even after awaiting the pool teardown a lingering file lock can outlive the
-   *  killed processes by a beat (antivirus / handle cleanup); a short pause-and-
-   *  retry clears it. Any non-lock failure is real and surfaces immediately. */
   private async runGrokUpdate(
     cliPath: string,
     updateArgs: string[],
     notifyFailure = true,
   ): Promise<boolean> {
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        const { stdout, stderr } = await execGrokCli(cliPath, updateArgs, { timeout: 180_000 });
-        if (stdout?.trim()) this.host.appendLine(stdout.trim());
-        if (stderr?.trim()) this.host.appendLine(stderr.trim());
-        return true;
-      } catch (e) {
-        const msg = (e as Error).message;
-        if (attempt === 0 && isLockedBinaryError(msg)) {
-          this.host.appendLine("grok update hit a locked binary; pausing then retrying once…");
-          await new Promise((r) => setTimeout(r, 2000));
-          continue;
-        }
-        this.host.appendLine(`grok update failed: ${msg}`);
-        if (notifyFailure) {
-          void this.host.showWarningMessage(`Grok Build update failed: ${msg}`);
-        }
-        return false;
-      }
-    }
-    return false;
+    return this.cliUpdateHost.runGrokUpdate(cliPath, updateArgs, notifyFailure);
   }
 
   /** Persist a picker choice where the next read will actually find it: every
