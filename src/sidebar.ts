@@ -13,6 +13,7 @@ import { WebviewHtml } from "./webview-html";
 import { QuestionHost } from "./question-host";
 import { ReviewHost } from "./review-host";
 import { WorkflowStageRunner } from "./workflow-stage-runner";
+import { RoutineScheduler } from "./routine-scheduler";
 import {
   SubagentHost,
   createSubagentHost,
@@ -95,16 +96,12 @@ import {
   type ProviderHistoryCursor
 } from "./provider-ui";
 import {
-  ROUTINES_KEY,
-  routineWindow,
   toRoutineView,
   validateRoutine,
   manualWindowKey,
-  routineSessionName,
   type Routine,
   type RoutineModelOption,
-  type RoutineProjectOption,
-  type RoutineRun
+  type RoutineProjectOption
 } from "./routines";
 import { RoutineRunStore } from "./routine-store";
 import { CheckpointStore, nodeCheckpointFs } from "./checkpoint-store";
@@ -903,6 +900,17 @@ export class GrokSidebar {
   }
   set projectFolders(value: ProjectFolders) { this._projectFolders = value; }
 
+  /** Routine scheduler subsystem */
+  private _routineScheduler?: RoutineScheduler;
+  get routineScheduler(): RoutineScheduler {
+    return this._routineScheduler ??= this.createRoutineScheduler();
+  }
+  set routineScheduler(value: RoutineScheduler) { this._routineScheduler = value; }
+
+  get routineTimer(): NodeJS.Timeout | undefined { return this.routineScheduler.routineTimer; }
+  set routineTimer(v: NodeJS.Timeout | undefined) { this.routineScheduler.routineTimer = v; }
+  get routinesInFlight(): Set<string> { return this.routineScheduler.routinesInFlight; }
+
   get githubConnection(): GithubAuthState | undefined { return this.projectFolders.githubConnection; }
   set githubConnection(v: GithubAuthState | undefined) { this.projectFolders.githubConnection = v; }
   get mcpServers(): McpServerView[] { return this.voiceAndMcp.mcpServers; }
@@ -1004,10 +1012,6 @@ export class GrokSidebar {
   /** `/agent` briefs, results and run logs (AP-10). Decision 18.1: runs are
    *  execution noise and live in globalStorage, not in the project. */
   private readonly agentRuns: AgentRunStore;
-  private routineTimer?: ReturnType<typeof setInterval>;
-  /** Routines whose session is live right now, so a slow turn cannot be
-   *  overlapped by the next tick even though its window is still current. */
-  private readonly routinesInFlight = new Set<string>();
   private routineError?: { id?: string; message: string };
 
   private hostPipeMux?: HostPipeMux;
@@ -1114,6 +1118,33 @@ export class GrokSidebar {
         importImageFromDisk: (path, owner) => self.importImageFromDisk(path, owner),
         postChips: (session) => self.postChips(session),
       },
+    });
+  }
+
+  private createRoutineScheduler(): RoutineScheduler {
+    const self = this;
+    return new RoutineScheduler({
+      state: {
+        get: <T>(key: string, defaultValue?: T) =>
+          defaultValue !== undefined ? self.state.get<T>(key, defaultValue) : (self.state.get<T>(key) as T),
+        update: (key: string, value: any) => self.state.update(key, value),
+      },
+      getRoutineRuns: () => self.routineRuns,
+      usableProviders: () => self.usableProviders(),
+      resolveLocalRepoTarget: (cwd: string) => self.resolveLocalRepoTarget(cwd),
+      newLocalSession: () => self.newLocalSession(),
+      addSessionToPool: (session: Session) => { self.pool.add(session); },
+      setSessionCwd: (session: Session, cwd: string, root: string) => self.setSessionCwd(session, cwd, root),
+      workspaceRoot: () => self.workspaceRoot(),
+      startSession: (id?: string, session?: Session) => self.startSession(id, session),
+      switchModel: (model: string, session: Session, provider?: AcpProvider) => self.switchModel(model, session, provider),
+      deleteSessionCache: (id: string) => { self.sessionCache.delete(id); },
+      postSessionName: (session: Session) => self.postSessionName(session),
+      postRepoCatalog: () => self.postRepoCatalog(),
+      postSessionsList: () => self.postSessionsList(),
+      postRoutines: () => self.postRoutines(),
+      handleSend: (prompt: string, isSteer: boolean, session: Session) => self.handleSend(prompt, isSteer, session),
+      getOverride: (name: string) => self.sidebarTestOverride(name),
     });
   }
 
@@ -1567,6 +1598,7 @@ export class GrokSidebar {
       fs,
       log: (line) => this.host.appendLine(line)
     });
+    this._routineScheduler = this.createRoutineScheduler();
     this.checkpointStore = new CheckpointStore({
       root: path.join(this.context.globalStorageUri.fsPath, "checkpoints"),
       fs: nodeCheckpointFs(fs),
@@ -1602,182 +1634,23 @@ export class GrokSidebar {
    * broken that too, silently, and only for people running two editors.
    */
   private loadRoutines(): Routine[] {
-    const raw = this.state.get<Record<string, Routine>>(ROUTINES_KEY, {});
-    return Object.values(raw || {})
-      .filter((r) => r && typeof r.id === "string" && typeof r.cwd === "string")
-      .sort((a, b) => a.createdAt - b.createdAt);
+    return this.routineScheduler.loadRoutines();
   }
 
   private async saveRoutines(routines: readonly Routine[]): Promise<void> {
-    const map: Record<string, Routine> = {};
-    for (const routine of routines) map[routine.id] = routine;
-    await this.state.update(ROUTINES_KEY, map);
+    return this.routineScheduler.saveRoutines(routines);
   }
 
-  /**
-   * One tick for every routine.
-   *
-   * Deliberately NOT aligned to any particular boundary: the schedule lives in
-   * the window key, so the tick only has to be finer than the smallest cadence
-   * (15 minutes). A minute is comfortably that, and costs one `routineWindow`
-   * call plus at most one `EEXIST` per routine.
-   */
   private startRoutineScheduler(): void {
-    // Sweep first: a record left `running` belonged to a host that died
-    // mid-run, and must not sit in the strip pretending to be live.
-    const now = Date.now();
-    for (const routine of this.loadRoutines()) this.routineRuns.sweepInterrupted(routine.id, now);
-
-    this.routineTimer = setInterval(() => void this.tickRoutines(), 60_000);
-    // `unref` so a pending tick never holds the process open — the desktop app
-    // quitting with all its windows is the normal end of a session, not
-    // something to delay by up to a minute.
-    this.routineTimer.unref?.();
+    this.routineScheduler.startRoutineScheduler();
   }
 
   private async tickRoutines(): Promise<void> {
-    const now = Date.now();
-    for (const routine of this.loadRoutines()) {
-      if (routine.paused) continue;
-      if (this.routinesInFlight.has(routine.id)) continue;
-      const { key } = routineWindow(routine, now);
-      if (!key) continue;
-      // The claim IS the mutual exclusion. Losing it is the normal outcome for
-      // every host that did not win, and for this host on every later tick
-      // inside the same window.
-      const claimed = this.routineRuns.claim(routine.id, key, {
-        routineId: routine.id,
-        windowKey: key,
-        startedAt: now,
-        outcome: "running"
-      });
-      if (!claimed) continue;
-      await this.runRoutine(routine, key, now);
-    }
+    return this.routineScheduler.tickRoutines();
   }
 
-  /**
-   * Fire one routine: open a background session in its project and send its
-   * prompt. Never focuses — a routine that steals the desk while you are typing
-   * is worse than one that does not run.
-   */
   private async runRoutine(routine: Routine, windowKey: string, startedAt: number): Promise<void> {
-    this.routinesInFlight.add(routine.id);
-    const finish = (outcome: RoutineRun["outcome"], extra: Partial<RoutineRun> = {}): void => {
-      this.routineRuns.finish({
-        routineId: routine.id,
-        windowKey,
-        startedAt,
-        endedAt: Date.now(),
-        outcome,
-        cwd: routine.cwd,
-        ...extra
-      });
-      this.routineRuns.prune(routine.id);
-      this.routinesInFlight.delete(routine.id);
-      this.postRoutines();
-    };
-
-    // The model gate, and the reason a skip is a first-class outcome rather
-    // than a failure: "Claude was not connected at 06:00" is a fact about the
-    // machine, and the strip should say so plainly.
-    // Gate on the PROVIDER, never on an exact model.
-    //
-    // The model list is a picker concern and its contents move: a provider with
-    // an empty cache contributes one "<Provider> default" row carrying an empty
-    // modelId, and once discovery populates the cache it contributes concrete
-    // models instead. Matching a saved routine against that list meant a
-    // routine created on a fresh host ran ONCE — populating the cache as it went
-    // — and then skipped every later firing, reporting "was not connected" about
-    // a provider that was connected the whole time.
-    //
-    // What actually decides whether a run can happen is whether the provider is
-    // usable. The model is a preference, applied below and harmless if it no
-    // longer exists.
-    //
-    // A review asked for the exact gate back for CONCRETE models, so that a
-    // routine pinned to a retired model skips rather than running on the
-    // agent's default. Declined, deliberately, and this note exists so it is
-    // not re-litigated every round. The two failure modes are not symmetric:
-    // the exact gate skips FOREVER and blames a provider that is connected,
-    // triggered by an ordinary cache refresh; the provider gate produces one
-    // run on a slightly different model, triggered only when a vendor retires
-    // a model the user pinned. Interactive sessions fall back the same way when
-    // that happens, so this is the product behaving consistently rather than an
-    // exception. A routine that quietly stops for months is the failure a user
-    // actually notices, and only after it has cost them something.
-    if (!this.usableProviders().includes(routine.provider)) {
-      finish("skipped", { detail: `Skipped — ${providerDisplayName(routine.provider)} was not connected` });
-      return;
-    }
-    if (!this.resolveLocalRepoTarget(routine.cwd)) {
-      finish("skipped", { detail: "Skipped — the project is no longer available" });
-      return;
-    }
-
-    try {
-      const session = this.newLocalSession();
-      this.pool.add(session);
-      this.setSessionCwd(session, routine.cwd, this.workspaceRoot());
-      session.provider = routine.provider;
-      const client = await this.startSession(undefined, session);
-      if (!client) {
-        finish("failed", { detail: "Failed — the agent could not start" });
-        return;
-      }
-      // Empty means "this agent's default" — the session already has it, and
-      // asking to switch TO nothing is not a request the picker can serve.
-      if (routine.model) await this.switchModel(routine.model, session, routine.provider);
-      // Recorded BEFORE the turn: the session exists and is the run's result
-      // even if the prompt errors, and a link to a half-finished conversation
-      // beats a run with nothing to open.
-      const sessionId = session.client?.sessionId;
-      this.routineRuns.finish({
-        routineId: routine.id,
-        windowKey,
-        startedAt,
-        outcome: "running",
-        cwd: routine.cwd,
-        ...(sessionId ? { sessionId } : {})
-      });
-      // Name it before the turn, not after. A run that errors or is interrupted
-      // still leaves a session in the rail, and an untitled one is the hardest
-      // to account for — "why is this here" is exactly the question the tag
-      // answers.
-      if (sessionId) {
-        const overrides = this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
-        await this.state.update(SESSION_META_KEY, {
-          ...overrides,
-          [sessionId]: {
-            ...(overrides[sessionId] ?? {}),
-            customName: routineSessionName(routine.title)
-          }
-        });
-        this.sessionCache.delete(sessionId);
-        this.postSessionName(session);
-      }
-      this.postRepoCatalog();
-      this.postSessionsList();
-      this.postRoutines();
-
-      await this.handleSend(routine.prompt, false, session);
-      // `handleSend` CATCHES a failed turn — it renders the error and resolves
-      // normally — so awaiting it says nothing about whether the turn worked.
-      // Reporting every one of those as a success would put a green tick on the
-      // strip for a rate-limited run, which is precisely the lie this page
-      // exists to prevent.
-      const failed = session.status === "error";
-      // Re-read rather than reusing the id captured above: a session that had
-      // to restart mid-start carries a different id by now, and the run must
-      // link to the conversation that actually holds the answer.
-      finish(failed ? "failed" : "ran", {
-        cwd: routine.cwd,
-        ...(session.client?.sessionId ? { sessionId: session.client.sessionId } : {}),
-        ...(failed ? { detail: "Failed — the turn ended in an error" } : {})
-      });
-    } catch (e) {
-      finish("failed", { detail: `Failed — ${(e as Error).message}` });
-    }
+    return this.routineScheduler.runRoutine(routine, windowKey, startedAt);
   }
 
   /* --------------------------------------------------------------- /agent */
@@ -6177,7 +6050,7 @@ Only continue if you trust this code.`,
   dispose(): void {
     void this.host.setContext("grok.composerFocus", false);
     if (this.reaper) { clearInterval(this.reaper); this.reaper = undefined; }
-    if (this.routineTimer) { clearInterval(this.routineTimer); this.routineTimer = undefined; }
+    this._routineScheduler?.dispose();
     if (this.workflowTimer) { clearInterval(this.workflowTimer); this.workflowTimer = undefined; }
     this._providerSetup?.dispose();
     for (const timer of this.turnOrderTimers) clearTimeout(timer);

@@ -41,8 +41,8 @@ export interface RoutineSchedulerDeps {
 }
 
 export class RoutineScheduler {
-  private routineTimer?: NodeJS.Timeout;
-  private readonly routinesInFlight = new Set<string>();
+  public routineTimer?: NodeJS.Timeout;
+  public readonly routinesInFlight = new Set<string>();
 
   constructor(private readonly deps: RoutineSchedulerDeps) {}
 
