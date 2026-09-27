@@ -116,7 +116,6 @@ import {
   runExclusiveHistoryLoad,
   pendingPermissionOptions,
   preferredPermissionAllowOption,
-  rehydrateBusyChrome,
   sessionReadyForPrompt,
   sessionUiSnapshot,
   turnElapsedMs,
@@ -172,6 +171,7 @@ import { ProjectFolders } from "./project-folders";
 import type { GithubAuthState } from "./github-auth";
 import type { SubscriptionUsageCache, SubscriptionWindow } from "./subscription-usage";
 import { UsageHost, createUsageHost } from "./usage-host";
+import { SidebarStateHost, createSidebarStateHost } from "./sidebar-state-host";
 import { providerConfigFiles, type ProviderConfigFile } from "./provider-config";
 import { readWorkflowCompletion } from "./workflow-state";
 import { CliUpdateHost, createCliUpdateHost } from "./cli-update-host";
@@ -179,10 +179,8 @@ import { supportsClientMcpServers } from "./acp-backend";
 import { GitRunGate, type GitTurnBaseline } from "./git-run";
 import {
   GROK_VIEW_ID,
-  MOVE_VIEW_HINT_USED_KEY,
   moveViewContainerFor,
-  panelPositionFor,
-  shouldShowMoveViewHint
+  panelPositionFor
 } from "./view-move";
 import {
   APTABASE_APP_KEY_PROD,
@@ -206,10 +204,8 @@ import {
 import { OpenClock } from "./open-timing";
 import {
   TerminalManager,
-  commandLanguageForDialect,
   grokShellEnvValue,
   resolvedTerminalShell,
-  resolvedTerminalShellDialect,
   setTerminalShellPreference,
   type ShellPreference
 } from "./terminal-manager";
@@ -318,7 +314,7 @@ import {
 } from "./plan-review";
 import { isPrimerText } from "./grok-primer";
 import { AsyncSerialQueue } from "./async-serial";
-import { HOST_CAPABILITIES, HostMsg, INTERRUPTED_SEND_CODE, WebviewMsg, type GithubState, type WorkflowLineupView } from "./protocol";
+import { HostMsg, INTERRUPTED_SEND_CODE, WebviewMsg, type GithubState, type WorkflowLineupView } from "./protocol";
 import { withoutArchiveFields } from "./project-discovery";
 import { SessionRequestState } from "./session-request-state";
 import { historyImagePreviews } from "./image-history";
@@ -421,7 +417,6 @@ import {
 } from "./run-progress";
 import {
   APP_PURPOSE_KEY,
-  DEFAULT_APP_PURPOSE,
   parseAppPurpose,
   type AppPurpose
 } from "./app-purpose";
@@ -919,6 +914,13 @@ export class GrokSidebar {
   }
   set usageHost(value: UsageHost) { this._usageHost = value; }
 
+  /** Sidebar state subsystem */
+  private _sidebarStateHost?: SidebarStateHost;
+  get sidebarStateHost(): SidebarStateHost {
+    return this._sidebarStateHost ??= this.createSidebarStateHost();
+  }
+  set sidebarStateHost(value: SidebarStateHost) { this._sidebarStateHost = value; }
+
   get subscriptionUsageCaches(): Map<string, SubscriptionUsageCache> | undefined { return this.usageHost.subscriptionUsageCaches; }
   set subscriptionUsageCaches(v: Map<string, SubscriptionUsageCache> | undefined) { this.usageHost.subscriptionUsageCaches = v; }
   get mcpServers(): McpServerView[] { return this.voiceAndMcp.mcpServers; }
@@ -1157,6 +1159,33 @@ export class GrokSidebar {
       postRoutines: () => self.postRoutines(),
       handleSend: (prompt: string, isSteer: boolean, session: Session) => self.handleSend(prompt, isSteer, session),
       getOverride: (name: string) => self.sidebarTestOverride(name),
+    });
+  }
+
+  private createSidebarStateHost(): SidebarStateHost {
+    const self = this;
+    return createSidebarStateHost({
+      get host() { return self.host; },
+      get state() { return self.state; },
+      get context() { return self.context; },
+      getFocused: () => self.focused,
+      getView: () => self.view,
+      post: (msg) => self.post(msg),
+      emit: (session, msg) => self.emit(session, msg),
+      workspaceRoot: () => self.workspaceRoot(),
+      canAddProjectFolder: () => self.canAddProjectFolder(),
+      touch: (session) => self.touch(session),
+      markRead: (session) => self.markRead(session),
+      refreshWorkflowCompletions: (session) => self.refreshWorkflowCompletions(session),
+      displayMode: (session) => self.displayMode(session),
+      postWorkflowList: (session) => self.postWorkflowList(session),
+      postMode: () => self.postMode(),
+      postRepoCatalog: () => self.postRepoCatalog(),
+      postSessionsList: () => self.postSessionsList(),
+      postSessionName: (session) => self.postSessionName(session),
+      registerFullImage: (path) => self.registerFullImage(path),
+      appPurpose: () => self.appPurpose(),
+      getOverride: (name: string) => self.sidebarTestOverride(name)
     });
   }
 
@@ -1638,6 +1667,7 @@ export class GrokSidebar {
     this._projectFolders = this.createProjectFolders();
     this._cliUpdateHost = this.createCliUpdateHost();
     this._usageHost = this.createUsageHost();
+    this._sidebarStateHost = this.createSidebarStateHost();
     this.providerConnectionState = this.migrateProviderConnections();
     this.focused.provider = this.defaultProviderForProject(this.workspaceRoot());
     context.subscriptions.push(
@@ -11944,91 +11974,16 @@ ${directives.block}`;
    * where the view goes — that decision takes no account of it.
    */
   async retireMoveViewHint(): Promise<void> {
-    await this.state.update(MOVE_VIEW_HINT_USED_KEY, true);
-    this.post({ type: "moveViewHint", value: false });
+    return this.sidebarStateHost.retireMoveViewHint();
   }
 
   /** Global "Use this app for" from ~/.grok/client-state (absent → Knowledge work). */
   private appPurpose(): AppPurpose {
-    return parseAppPurpose(this.state.get<string>(APP_PURPOSE_KEY));
+    return this.sidebarStateHost.appPurpose();
   }
 
   private buildInitialStateMsg(session: Session = this.focused): Extract<HostMsg, { type: "initialState" }> {
-    const cfg = this.host.getConfiguration("grok");
-    const cwd = this.workspaceRoot();
-    // Additive: older webviews ignore an unknown field; older hosts omit it
-    // and command View all then leaves language unset.
-    const commandLanguage = commandLanguageForDialect(resolvedTerminalShellDialect());
-    return {
-      type: "initialState",
-      // The level this session is actually running at, not the last one chosen
-      // anywhere: a remote picking up a Claude conversation must not be shown
-      // grok's effort.
-      effort: session.client?.currentReasoningEffort || rememberedEffort(
-        cfg.get<EffortPrefs>("defaultEffortByProvider", {}),
-        session.provider,
-        cfg.get<string>("defaultEffort", ""),
-      ),
-      cwd,
-      useCtrlEnter: cfg.get("useCtrlEnterToSend", false),
-      extVersion: this.context.extensionVersion,
-      showThinking: cfg.get("showThinking", false),
-      expandCommandOutputs: cfg.get("expandCommandOutputs", false),
-      steerByDefault: cfg.get("steerByDefault", false),
-      promptNav: cfg.get<boolean>("promptNav", true) !== false,
-      soundNotifications: cfg.get("soundNotifications", false),
-      processingSound: cfg.get("processingSound", false),
-      readRepliesAloud: cfg.get("readRepliesAloud", false),
-      telemetryEnabled: cfg.get("telemetry.enabled", true),
-      thumbsFeedback: cfg.get("thumbsFeedback", false),
-      appPurpose: this.appPurpose() || DEFAULT_APP_PURPOSE,
-      ...(commandLanguage ? { commandLanguage } : {}),
-      // `canSwitchWorkspaceFolder` is the desktop app's defining capability and
-      // is how every other host-kind decision here is made.
-      hostKind: this.host.canSwitchWorkspaceFolder ? "desktop" : "extension",
-      // Wire baseline + host-kind UI affordances (gear Move view / Show logs).
-      capabilities: {
-        ...HOST_CAPABILITIES,
-        relocateView: this.host.canRelocateView,
-        // Cursor refuses extension containers in the secondary side bar, so the
-        // menu offers the panel by edge there rather than a destination that
-        // would silently do nothing.
-        secondarySideBar: this.host.canUseSecondarySideBar,
-        moveViewHint: shouldShowMoveViewHint({
-          hostAcceptedSecondarySideBar: this.host.canUseSecondarySideBar,
-          canRelocateView: this.host.canRelocateView,
-          pickerAlreadyUsed: this.state.get<boolean>(MOVE_VIEW_HINT_USED_KEY) === true
-        }),
-        showOutput: this.host.canShowOutput,
-        // OPT-IN: unpackaged desktop only. Gear → Advanced offers the control so
-        // DevTools is discoverable without the auto-hidden application menu.
-        toggleDevTools: this.host.canToggleDevTools,
-        // OPT-IN: absent/false hides Settings → Connectors.
-        ...(this.host.canShowMcpSettings ? { mcpSettings: true } : {}),
-        // Absent/true = host opens files in an editor tab; false = no editor
-        // (desktop → in-app lightbox for generated images). See Host.canOpenInEditor.
-        openInEditor: this.host.canOpenInEditor,
-        // Only a host that owns the media handler may opt generated videos into
-        // metadata preload; every other host keeps the lazy default.
-        servesMediaRanges: this.host.canServeMediaRanges,
-        showInFolder: this.host.canShowInFolder,
-        // OPT-IN: desktop only. View all / proposed diffs open the in-app
-        // overlay instead of a host editor or bare window.
-        previewInApp: this.host.canPreviewInApp,
-        // OPT-IN: VS Code editor tab. Desktop/remotes keep the in-page overlay.
-        settingsEditor: this.host.canOpenSettingsEditor,
-        // Only a host that owns its own folder set can add one. VS Code's
-        // workspace is VS Code's to manage, so the extension never advertises
-        // this and the rail never draws the control — capability, not a flag.
-        addProjectFolder: this.canAddProjectFolder(),
-        // Add project can MAKE one as well as find one. Both are opt-in field
-        // presence, never a version check: a client older than this ignores the
-        // flags and keeps offering only the picker.
-        createProject: this.canAddProjectFolder(),
-        cloneProject: this.canAddProjectFolder(),
-        removeProjectFolder: this.canAddProjectFolder()
-      }
-    };
+    return this.sidebarStateHost.buildInitialStateMsg(session);
   }
 
   private postInitialState(): void {
@@ -12101,35 +12056,8 @@ ${directives.block}`;
    * controller still holds a live pool member.
    */
   private rehydrateWebviewFromFocused(): void {
-    const session = this.focused;
-    const wv = this.view?.webview;
-    if (!wv) return;
-    this.touch(session);
-    this.markRead(session);
-    this.refreshWorkflowCompletions(session);
-    void wv.postMessage({ type: "clearMessages" });
-    void wv.postMessage({ type: "historyReplay", active: true });
-    for (const m of session.buffer) {
-      void wv.postMessage(this.localizeHistoryMessage(m, wv));
-    }
-    void wv.postMessage({ type: "historyReplay", active: false });
-    for (const m of sessionUiSnapshot(
-      session,
-      this.displayMode(session),
-      this.localPreviewChips(session, wv),
-    )) {
-      void wv.postMessage(m);
-    }
-    if (session.sessionType === "crew") this.postWorkflowList(session);
-    // Restore turn chrome the buffer does not carry (busy is event-sourced live).
-    // During priming the client exists but has no session id yet — keep the
-    // startup lock so a reload cannot unlock the composer into a lost prompt.
-    const chrome = rehydrateBusyChrome(session);
-    void wv.postMessage({ type: "setBusy", value: chrome.value, locked: chrome.locked });
-    this.postMode();
-    this.postRepoCatalog();
-    this.postSessionsList();
-    this.postSessionName(session);
+    // Rehydrates busy chrome via rehydrateBusyChrome
+    return this.sidebarStateHost.rehydrateWebviewFromFocused();
   }
 
   private async readImageChip(
@@ -12137,71 +12065,19 @@ ${directives.block}`;
     session: Session,
     gen: number,
   ): Promise<PromptImageInput | "failed" | "gone"> {
-    try {
-      const bytes = await fs.promises.readFile(chip.path);
-      if (bytes.length === 0) throw new Error("file is empty");
-      return {
-        index: chip.imageIndex!,
-        mimeType: chip.mimeType ?? "image/png",
-        data: bytes.toString("base64"),
-        path: chip.path,
-        relPath: chip.originRelPath
-      };
-    } catch (e) {
-      if (gen !== session.gen) return "gone";
-      this.emit(session, {
-        type: "agentError",
-        text: `Could not read ${chip.relPath} (${(e as Error).message}). Remove the attachment and try again.`
-      });
-      return "failed";
-    }
+    return this.sidebarStateHost.readImageChip(chip, session, gen);
   }
 
   private postChips(session: Session = this.focused): void {
-    if (session === this.focused && this.view) {
-      const webview = this.view.webview;
-      const localMessage: HostMsg = { type: "chips", chips: this.localPreviewChips(session, webview) };
-      void webview.postMessage(localMessage);
-    }
+    return this.sidebarStateHost.postChips(session);
   }
 
   private localPreviewChips(session: Session, webview: HostWebview): ContextChip[] {
-    return session.chips.map((chip) => isFileChip(chip) && isImageChip(chip)
-      // Staging paths are genuine local disk (Uri.file roots).
-      ? { ...chip, previewSrc: webview.asWebviewUri(Uri.file(chip.path)), fullId: this.registerFullImage(chip.path) }
-      : chip);
+    return this.sidebarStateHost.localPreviewChips(session, webview);
   }
 
   private localizeHistoryMessage(message: HostMsg, webview: HostWebview): HostMsg {
-    if (message.type === "userMessage" && message.chips) {
-      return { ...message, chips: message.chips.map((chip) => isFileChip(chip) && isImageChip(chip)
-        ? { ...chip, ...(fs.existsSync(chip.path)
-          ? { previewSrc: webview.asWebviewUri(Uri.file(chip.path)), fullId: this.registerFullImage(chip.path) }
-          : {}) }
-        : chip) };
-    }
-    if (message.type === "queuedSends" && message.queued) {
-      return {
-        ...message,
-        queued: message.queued.map((item) => ({
-          ...item,
-          ...(item.chips ? { chips: item.chips.map((chip) => isFileChip(chip) && isImageChip(chip)
-            ? { ...chip, ...(fs.existsSync(chip.path)
-              ? { previewSrc: webview.asWebviewUri(Uri.file(chip.path)), fullId: this.registerFullImage(chip.path) }
-              : {}) }
-            : chip) } : {})
-        }))
-      };
-    }
-    if (message.type === "userMessageChunk" && message.images) {
-      return {
-        ...message,
-        images: message.images.map((image) => image.path && fs.existsSync(image.path)
-          ? { ...image, previewSrc: webview.asWebviewUri(Uri.file(image.path)), fullId: this.registerFullImage(image.path) }
-          : image)
-      };
-    }
-    return message;
+    return this.sidebarStateHost.localizeHistoryMessage(message, webview);
   }
 
   // grok's output for hidden summary/context-injection turns, dropped from both

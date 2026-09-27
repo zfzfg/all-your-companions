@@ -175,7 +175,11 @@ describe("both routes to the host picker retire the hint BEFORE moving", () => {
     // for this one. A webview holding a stale flag rebuilds the hint on the next
     // session swap, and cancelling the picker causes no rebuild that would
     // refresh it.
-    const src = readFileSync(path.join(root, "src", "sidebar.ts"), "utf8");
+    const file = [
+      path.join(root, "src", "sidebar-state-host.ts"),
+      path.join(root, "src", "sidebar.ts")
+    ].find((f) => readFileSync(f, "utf8").includes("MOVE_VIEW_HINT_USED_KEY, true"))!;
+    const src = readFileSync(file, "utf8");
     expect(before(src, "MOVE_VIEW_HINT_USED_KEY, true", '{ type: "moveViewHint", value: false }')).toBe(
       true,
     );
