@@ -26,7 +26,6 @@ import type {
   Host,
   HostContext,
   HostDisposable,
-  HostTerminalCapture,
   HostWebview,
   HostWebviewView,
   HostEditorWebview
@@ -56,6 +55,10 @@ import {
   type PermissionRule,
   type PermissionRulesFs,
 } from "./permission-host";
+import {
+  ImplicitContext,
+  createImplicitContext,
+} from "./implicit-context";
 import { resolveCodexHome } from "./codex-cli-locator";
 import {
   adapterEntriesEligibleForClear,
@@ -192,29 +195,19 @@ import {
 import {
   FileChip,
   MAX_VISION_IMAGE_BYTES,
-  clearImplicitChips,
   consumeChips,
   extFromMime,
   isImageChip,
   isImplicitChip,
   isVisionMime,
-  makeExplicitChip,
   makeImageChip,
-  implicitChipStartsHidden,
-  makeImplicitChip,
   mimeFromPath,
   removeChip,
-  selectionLineRange,
   toggleChip,
   allocateImageIndex
 } from "./chips";
 import {
-  contextChipLabel,
-  isDiagnosticsChip,
   isFileChip,
-  isTerminalChip,
-  makeDiagnosticsChip,
-  makeTerminalChip,
   type ContextChip,
   type ContextChipPayload
 } from "./context-chips";
@@ -257,16 +250,10 @@ import { type AgentResult, type BriefingInput, type FileReconciliation } from ".
 import { type HandoffKind, type ThreadContext } from "./handoff";
 import { AgentRunStore, type AgentRunTrigger } from "./agent-run";
 import {
-  MENTION_INDEX_LIMIT,
-  MENTION_INDEX_TTL_MS,
-  buildExcludeGlob,
-  clampMentionIndexLimit,
   filterMentionFiles,
   filterMentionSources,
   isMentionPathInsideWorkspace,
-  mergeMentionEntries,
   normalizeRelPath,
-  orderMentionIndex,
   resolveMentionAttachmentPath,
   type ContextSourceId
 } from "./mention";
@@ -316,7 +303,6 @@ import {
   orderedResumeCwdCandidates,
   persistSessionContext,
   contextUsageFromLog,
-  relativePathWithin,
   readSessionEntries,
   expiredArchiveChoiceKeys,
   newestTranscriptMtime,
@@ -681,18 +667,31 @@ export class GrokSidebar {
   private set chips(value: ContextChip[]) { this.focused.chips = value; }
   /** Attachment-staging ops still in flight — see trackAttach. */
   private readonly pendingAttach = new Set<Promise<void>>();
-  /** Cached findFiles snapshot for the `@` popover (no open-editor merge).
-   *  One snapshot serves {@link MENTION_INDEX_TTL_MS}; concurrent queries share
-   *  one in-flight build. Open tabs are layered on at read time. */
-  private mentionIndex: { at: number; rels: string[]; absByRel: Map<string, string> } | null = null;
-  private mentionIndexPromise: Promise<{ rels: string[]; absByRel: Map<string, string> }> | null = null;
-  /** Same snapshot, for a session whose cwd is not the open workspace folder. */
-  private readonly otherCwdMentionIndexes = new Map<string, {
+  get mentionIndex(): { at: number; rels: string[]; absByRel: Map<string, string> } | null {
+    return this.implicitContext.mentionIndex;
+  }
+  set mentionIndex(val: { at: number; rels: string[]; absByRel: Map<string, string> } | null) {
+    this.implicitContext.mentionIndex = val;
+  }
+  get mentionIndexPromise(): Promise<{ rels: string[]; absByRel: Map<string, string> }> | null {
+    return this.implicitContext.mentionIndexPromise;
+  }
+  set mentionIndexPromise(val: Promise<{ rels: string[]; absByRel: Map<string, string> }> | null) {
+    this.implicitContext.mentionIndexPromise = val;
+  }
+  get otherCwdMentionIndexes(): Map<string, {
     at: number;
     rels: string[];
     absByRel: Map<string, string>;
-  }>();
-  private editorWatcher?: HostDisposable;
+  }> {
+    return this.implicitContext.otherCwdMentionIndexes;
+  }
+  get editorWatcher(): HostDisposable | undefined {
+    return this.implicitContext.editorWatcher;
+  }
+  set editorWatcher(val: HostDisposable | undefined) {
+    this.implicitContext.editorWatcher = val;
+  }
   private terminalManager = new TerminalManager();
   get voiceRecorder(): VoiceRecorder { return this.voiceAndMcp.voiceRecorder; }
   set voiceRecorder(v: VoiceRecorder) { this.voiceAndMcp.voiceRecorder = v; }
@@ -1050,6 +1049,54 @@ export class GrokSidebar {
     return this._permissionHost ??= this.createPermissionHost();
   }
   set permissionHost(value: PermissionHost) { this._permissionHost = value; }
+  private _implicitContext?: ImplicitContext;
+  get implicitContext(): ImplicitContext {
+    return this._implicitContext ??= this.createImplicitContext();
+  }
+  set implicitContext(value: ImplicitContext) { this._implicitContext = value; }
+
+  private createImplicitContext(): ImplicitContext {
+    const self = this;
+    return createImplicitContext({
+      get host() {
+        return self.host ?? ({
+          getConfiguration: () => ({ get: (_key: string, def: any) => def }),
+          getActiveTextEditor: () => undefined,
+          onDidChangeActiveTextEditor: () => ({ dispose: () => {} }),
+          onDidChangeActiveTextEditorSelection: () => ({ dispose: () => {} }),
+          appendLine: () => {},
+          showInformationMessage: async () => undefined,
+          showWarningMessage: async () => undefined,
+          findFiles: async () => [],
+          openWorkspaceTextFiles: () => [],
+          getDiagnostics: () => [],
+          getTerminalCapture: () => undefined,
+          asRelativePath: (u: any) => u?.fsPath ?? String(u),
+        } as any);
+      },
+      get state() {
+        return self.state ?? ({
+          get: (_k: string, def?: any) => def,
+          update: async () => {},
+        } as any);
+      },
+      sessionCwd: (session: Session) => (self.sessionCwd ? self.sessionCwd(session) : (session?.cwd ?? "")),
+      workspaceRoot: () => (self.workspaceRoot ? self.workspaceRoot() : ""),
+      getFocused: () => self.focused,
+      getChips: () => (self.chips ?? self.focused?.chips ?? []),
+      setChips: (chips) => {
+        if (self.focused) self.focused.chips = chips;
+        else self.chips = chips;
+      },
+      postChips: (session?: Session) => self.postChips?.(session),
+      post: (msg: any) => self.post?.(msg),
+      notifyUser: (level: "info" | "warning" | "error", text: string) => self.notifyUser?.(level, text),
+      revealAndFocusComposer: () => self.revealAndFocusComposer?.(),
+      trackAttach: (p: Promise<void>) => { void self.trackAttach?.(p); },
+      pickFileFromComputer: () => (self.pickFileFromComputer ? self.pickFileFromComputer() : Promise.resolve()),
+      getOverride: (name: string) => self.sidebarTestOverride(name),
+    });
+  }
 
   private createPermissionHost(): PermissionHost {
     const self = this;
@@ -1674,6 +1721,7 @@ export class GrokSidebar {
     this._usageHost = this.createUsageHost();
     this._sidebarStateHost = this.createSidebarStateHost();
     this._permissionHost = this.createPermissionHost();
+    this._implicitContext = this.createImplicitContext();
     this.providerConnectionState = this.migrateProviderConnections();
     this.focused.provider = this.defaultProviderForProject(this.workspaceRoot());
     context.subscriptions.push(
@@ -3201,57 +3249,9 @@ export class GrokSidebar {
   }
 
   insertActiveMention(opts?: { selection?: boolean; uri?: Uri; pickIfMissing?: boolean }): void {
-    const editor = this.host.getActiveTextEditor();
-    // Prefer a full Uri end-to-end (scheme + authority) so asRelativePath matches
-    // remote workspace folders. Explorer Send File passes the explorer Uri via
-    // the adapter; never flatten to fsPath and rebuild with Uri.file.
-    const pathUri = opts?.uri ?? editor?.document.uri;
-    const absPath = pathUri?.fsPath;
-    if (!absPath || !pathUri) {
-      // Invoked from the Command Palette with no file editor active — no target
-      // to attach. Degrade gracefully instead of a silent no-op that also drops
-      // focus (#43): Send File opens the file picker; the selection/@-mention
-      // commands (which have nothing to reference without an editor) surface a
-      // hint so the command visibly did *something*.
-      if (opts?.pickIfMissing) {
-        void this.trackAttach(this.pickFileFromComputer());
-      } else {
-        void this.host.showInformationMessage(
-          "Grok: open a file in the editor first, then run this command.",
-        );
-      }
-      return;
-    }
-    // Same fence as the implicit chip, and for the same reason: the attachment
-    // has to belong to the CONVERSATION, not to the window. Once the rail could
-    // put a project-B conversation on screen inside a window opened on A, "Add
-    // Selection to Grok" on an A file handed A's source to B — and with a
-    // selection the prompt builder reads that absolute path and embeds the text
-    // under an innocuous A-relative name like `src/foo.ts`.
-    //
-    // Also where the relative path comes from. `asRelativePath` resolves against
-    // VS Code's workspace folders, and a project reached through the rail is
-    // deliberately not one of them, so it would have labelled an ordinary file
-    // with its full absolute path.
-    const sessionRoot = this.sessionCwd(this.focused);
-    const relPath = this.conversationRelPath(absPath);
-    if (relPath === undefined) {
-      void this.host.showWarningMessage(
-        `That file is outside ${path.basename(sessionRoot) || "this project"}, which is where ` +
-          "this conversation is running. Open a conversation in its project first.",
-      );
-      return;
-    }
-    let selStart: number | undefined;
-    let selEnd: number | undefined;
-    if (opts?.selection && editor && !editor.selection.isEmpty) {
-      const range = selectionLineRange(editor.selection.start, editor.selection.end);
-      selStart = range.startLine;
-      selEnd = range.endLine;
-    }
-    this.chips.push(makeExplicitChip(absPath, relPath, selStart, selEnd));
-    this.postChips();
-    this.revealAndFocusComposer();
+    const override = this.sidebarTestOverride("insertActiveMention");
+    if (override) return override(opts);
+    return this.implicitContext.insertActiveMention(opts);
   }
 
   newSession(): void {
@@ -5927,6 +5927,7 @@ ${detail}`,
   dispose(): void {
     void this.host.setContext("grok.composerFocus", false);
     if (this.reaper) { clearInterval(this.reaper); this.reaper = undefined; }
+    this._implicitContext?.dispose();
     this._routineScheduler?.dispose();
     if (this.workflowTimer) { clearInterval(this.workflowTimer); this.workflowTimer = undefined; }
     this._providerSetup?.dispose();
@@ -10098,66 +10099,22 @@ ${detail}`,
     this.revealAndFocusComposer();
   }
 
-  /** The `@` popover's file index, rebuilt at most once per
-   *  {@link MENTION_INDEX_TTL_MS}. Keystrokes during a cold build all await the
-   *  same findFiles pass instead of stacking one per key. Open editors that the
-   *  findFiles cap missed are merged in on every read (not cached) so a newly
-   *  opened tab is mentionable immediately, and closing it drops it again (#69). */
   private async mentionFileIndex(): Promise<{ rels: string[]; absByRel: Map<string, string> }> {
-    const base = await this.mentionFindFilesIndex();
-    const merged = mergeMentionEntries(base.absByRel, this.openWorkspaceFileEntries());
-    if (merged === base.absByRel) return base;
-    return { rels: orderMentionIndex([...merged.keys()]), absByRel: merged };
+    const override = this.sidebarTestOverride("mentionFileIndex");
+    if (override) return override();
+    return this.implicitContext.mentionFileIndex();
   }
 
-  /** TTL-cached `findFiles` snapshot only — no open-editor injection. */
   private async mentionFindFilesIndex(): Promise<{ rels: string[]; absByRel: Map<string, string> }> {
-    const cached = this.mentionIndex;
-    if (cached && Date.now() - cached.at < MENTION_INDEX_TTL_MS) return cached;
-    if (!this.mentionIndexPromise) {
-      this.mentionIndexPromise = this.buildMentionIndex()
-        .then((idx) => {
-          this.mentionIndex = { at: Date.now(), ...idx };
-          return idx;
-        })
-        .finally(() => { this.mentionIndexPromise = null; });
-    }
-    return this.mentionIndexPromise;
+    const override = this.sidebarTestOverride("mentionFindFilesIndex");
+    if (override) return override();
+    return this.implicitContext.mentionFindFilesIndex();
   }
 
-  private async buildMentionIndex(): Promise<{ rels: string[]; absByRel: Map<string, string> }> {
-    const cfg = this.host.getConfiguration();
-    // findFiles' default excludes are files.exclude ONLY — node_modules lives in
-    // search.exclude, so both must be merged in or the index is dependency soup.
-    const exclude = buildExcludeGlob([
-      cfg.get<Record<string, unknown>>("files.exclude"),
-      cfg.get<Record<string, unknown>>("search.exclude"),
-    ]);
-    // Cap is user-tunable (`grok.mentionIndexLimit`) — large monorepos that hit
-    // the default 5000 can miss files from `@` autocomplete (#69).
-    const limit = clampMentionIndexLimit(
-      this.host.getConfiguration("grok").get<number>("mentionIndexLimit", MENTION_INDEX_LIMIT),
-    );
-    const uris = await this.host.findFiles("**/*", exclude, limit);
-    const absByRel = new Map<string, string>();
-    for (const uri of uris) {
-      // Default asRelativePath prefixes the folder name only in a multi-root
-      // workspace — exactly when the prefix is needed to disambiguate. Pass the
-      // full Uri so remote schemes match workspace folders (path-only fails).
-      const rel = normalizeRelPath(this.host.asRelativePath(uri));
-      const abs = uri.fsPath;
-      if (!absByRel.has(rel)) absByRel.set(rel, abs);
-    }
-    return { rels: orderMentionIndex([...absByRel.keys()]), absByRel };
-  }
-
-  /** Currently open workspace text tabs as `{rel, abs}` for mention merge.
-   *  Non-file schemes and paths outside the workspace are skipped. */
   private openWorkspaceFileEntries(): Array<{ rel: string; abs: string }> {
-    return this.host.openWorkspaceTextFiles().map((e) => ({
-      rel: normalizeRelPath(e.rel),
-      abs: e.abs
-    }));
+    const override = this.sidebarTestOverride("openWorkspaceFileEntries");
+    if (override) return override();
+    return this.implicitContext.openWorkspaceFileEntries();
   }
 
   /** Resolve the xAI key for Speech-to-Text: the `grok.voiceApiKey` setting,
@@ -10383,28 +10340,9 @@ ${detail}`,
   }
 
   private async mentionFileIndexForCwd(cwd: string): Promise<{ rels: string[]; absByRel: Map<string, string> }> {
-    if (pathsEqual(cwd, this.workspaceRoot())) return this.mentionFileIndex();
-    const key = normalizeRepoPath(cwd);
-    const cached = this.otherCwdMentionIndexes.get(key);
-    if (cached && Date.now() - cached.at < MENTION_INDEX_TTL_MS) return cached;
-    const cfg = this.host.getConfiguration();
-    const exclude = buildExcludeGlob([
-      cfg.get<Record<string, unknown>>("files.exclude"),
-      cfg.get<Record<string, unknown>>("search.exclude"),
-    ]);
-    const limit = clampMentionIndexLimit(
-      this.host.getConfiguration("grok").get<number>("mentionIndexLimit", MENTION_INDEX_LIMIT),
-    );
-    const uris = await this.host.findFiles({ base: cwd, pattern: "**/*" }, exclude, limit);
-    const absByRel = new Map<string, string>();
-    for (const uri of uris) {
-      const abs = uri.fsPath;
-      const rel = normalizeRelPath(path.relative(cwd, abs));
-      if (rel && !absByRel.has(rel)) absByRel.set(rel, abs);
-    }
-    const value = { at: Date.now(), rels: orderMentionIndex([...absByRel.keys()]), absByRel };
-    this.otherCwdMentionIndexes.set(key, value);
-    return value;
+    const override = this.sidebarTestOverride("mentionFileIndexForCwd");
+    if (override) return override(cwd);
+    return this.implicitContext.mentionFileIndexForCwd(cwd);
   }
 
   private async promptVoiceKeySetup(): Promise<void> {
@@ -10921,89 +10859,21 @@ ${detail}`,
   // Nothing carries content between the two. A chip attached before a build ran
   // must send the problems the build produced, not the empty list from before.
 
-  /**
-   * Stage `@problems` / `@terminal`.
-   *
-   * The probe is also the emptiness check: no problems and no captured output
-   * mean there is nothing to attach, and saying so beats a chip that silently
-   * contributes an empty block at send. A facade that throws lands in the same
-   * branch — the user is told, the composer is untouched.
-   */
   private addContextSourceChip(
     source: ContextSourceId,
     owner: AttachmentOwner,
   ): void {
-    const session = owner();
-    if (!session) return; // asking tab gone — drop, never redirect
-    let chip: ContextChip;
-    if (source === "problems") {
-      let count: number;
-      try {
-        count = this.host.getDiagnostics({ scope: "workspace" }).length;
-      } catch (e) {
-        this.host.appendLine(`[context-chip] diagnostics probe failed: ${(e as Error).message}`);
-        this.notifyUser("warning", "Could not read the editor's problems.");
-        return;
-      }
-      if (!count) {
-        this.notifyUser("info", "No problems reported — nothing to attach.");
-        return;
-      }
-      chip = makeDiagnosticsChip({ scope: "workspace", count });
-    } else {
-      let capture: HostTerminalCapture | undefined;
-      try {
-        capture = this.host.getTerminalCapture();
-      } catch (e) {
-        this.host.appendLine(`[context-chip] terminal probe failed: ${(e as Error).message}`);
-        this.notifyUser("warning", "Could not read the terminal.");
-        return;
-      }
-      if (!capture?.text.trim()) {
-        this.notifyUser("info",
-          "No terminal output captured yet. Run a command in the integrated terminal first — capture needs shell integration.",
-        );
-        return;
-      }
-      chip = makeTerminalChip({
-        label: capture.label,
-        bytes: Buffer.byteLength(capture.text, "utf8")
-      });
-    }
-    session.chips.push(chip);
-    this.postChips(session);
+    const override = this.sidebarTestOverride("addContextSourceChip");
+    if (override) return override(source, owner);
+    return this.implicitContext.addContextSourceChip(source, owner);
   }
 
-  /**
-   * Collect, at SEND, what every visible non-file chip contributes.
-   *
-   * Returns a resolver for `PromptBuilderDeps.contextChipPayload`. A source that
-   * throws or emptied resolves to `undefined`, which the builder renders as
-   * nothing at all — the send goes through with one fewer block rather than
-   * failing, the same degradation an unreadable selection already gets.
-   */
   private contextChipPayloads(
     chips: readonly ContextChip[],
   ): (chip: ContextChip) => ContextChipPayload | undefined {
-    const payloads = new Map<string, ContextChipPayload>();
-    for (const chip of chips) {
-      if (chip.hidden || isFileChip(chip)) continue;
-      try {
-        if (isDiagnosticsChip(chip)) {
-          const items = this.host.getDiagnostics({ scope: chip.scope, path: chip.path });
-          payloads.set(chip.id, { kind: "diagnostics", items });
-        } else if (isTerminalChip(chip)) {
-          const capture = this.host.getTerminalCapture();
-          if (capture) payloads.set(chip.id, { kind: "terminal", label: capture.label, text: capture.text });
-        }
-      } catch (e) {
-        // Logged, never fatal: the turn the user asked for still goes.
-        this.host.appendLine(
-          `[context-chip] ${contextChipLabel(chip)} could not be collected: ${(e as Error).message}`,
-        );
-      }
-    }
-    return (chip) => payloads.get(chip.id);
+    const override = this.sidebarTestOverride("contextChipPayloads");
+    if (override) return override(chips);
+    return this.implicitContext.contextChipPayloads(chips);
   }
 
   /** A prompt is running or pending user action — a new prompt now would
@@ -13227,119 +13097,27 @@ ${directives.block}`;
   }
 
   private watchActiveEditor(): void {
-    this.editorWatcher?.dispose();
-    this.editorWatcher = disposeAll(
-      this.host.onDidChangeActiveTextEditor(() => this.refreshImplicitChip()),
-      // Host already filters to the active editor (split editors that are not
-      // active must not drive the context chip).
-      this.host.onDidChangeActiveTextEditorSelection(() => this.refreshImplicitChip()),
-    );
+    const override = this.sidebarTestOverride("watchActiveEditor");
+    if (override) return override();
+    return this.implicitContext.watchActiveEditor();
   }
 
-  /** The remembered eye-off choice for the active-editor context chip (#67).
-   *  Defaults to visible — this only ever reflects an explicit click. */
   private implicitChipHidden(): boolean {
-    return this.state.get<boolean>(IMPLICIT_CHIP_HIDDEN_KEY, false);
+    const override = this.sidebarTestOverride("implicitChipHidden");
+    if (override) return override();
+    return this.implicitContext.implicitChipHidden();
   }
 
-  /** Mirror the active editor (file + live selection line range) onto the
-   *  implicit context chip. No-op diffing keeps this silent for plain cursor
-   *  movement — selection events fire on every caret change, but an empty
-   *  selection compares equal to the previous empty one, so nothing is posted.
-   *  `forcePost` is for a fresh webview, which needs the current state even
-   *  when it hasn't changed. */
-  /**
-   * The focused conversation's relative path for a file, or undefined when the
-   * file does not really belong to it.
-   *
-   * Lexical containment first ({@link relativePathWithin}), then CANONICAL.
-   * A symlink — or a Windows junction — inside project B pointing at project A
-   * passes the lexical test as `linked/secret.ts`, because it genuinely is at
-   * that path inside B. But `buildPrompt` opens the absolute path and reads
-   * whatever is on the other end, so A's source would be embedded in B's
-   * conversation under a name that looks like B's own. The remote file browser
-   * has always resolved canonically for exactly this reason
-   * (`resolveTreePath` in `file-tree.ts`); this fence has to as well.
-   *
-   * Unprovable means refused: if either side cannot be resolved (deleted,
-   * permissions), there is no containment to demonstrate, and a chip is not
-   * worth guessing about.
-   */
   private conversationRelPath(absPath: string): string | undefined {
-    const root = this.sessionCwd(this.focused);
-    const lexical = relativePathWithin(root, absPath);
-    if (lexical === undefined) return undefined;
-    try {
-      if (relativePathWithin(fs.realpathSync(root), fs.realpathSync(absPath)) === undefined) {
-        return undefined;
-      }
-    } catch {
-      return undefined;
-    }
-    // The LEXICAL path is the label: it is where the user sees the file, and
-    // rewriting it to the link target would name a project they did not open.
-    return lexical;
+    const override = this.sidebarTestOverride("conversationRelPath");
+    if (override) return override(absPath);
+    return this.implicitContext.conversationRelPath(absPath);
   }
 
   private refreshImplicitChip(forcePost = false): void {
-    const includeActive = this.host.getConfiguration("grok")
-      .get<boolean>("includeActiveFileByDefault", true);
-    const prev = this.chips.filter(isFileChip).find(isImplicitChip);
-    const editor = this.host.getActiveTextEditor();
-
-    if (!includeActive || !editor || editor.document.uri.scheme !== "file") {
-      // No chip to show — and if one is lingering, the webview must hear about
-      // its removal (the old code cleared host-side but never posted).
-      this.chips = clearImplicitChips(this.chips);
-      if (prev || forcePost) this.postChips();
-      return;
-    }
-
-    const absPath = editor.document.uri.fsPath;
-    // The chip must belong to the CONVERSATION, not to the window.
-    //
-    // While VS Code history was pinned to the open folder these were the same
-    // thing, so taking the active editor unconditionally was safe. It is not any
-    // more: the rail can put a project-B conversation on screen while VS Code
-    // still shows a project-A file. Sending then attached A's file — and for a
-    // SELECTION, `buildPrompt` reads that absolute path and embeds A's source
-    // text under an A-relative name — into B's prompt. Content crossing projects
-    // is exactly the class this scope work exists to close.
-    //
-    // Also the source of the relative path now. `asRelativePath` resolves
-    // against VS Code's workspace folders, and a project reached through the
-    // rail is deliberately not one of them, so it would have handed back an
-    // absolute path for a file that is perfectly ordinary inside its own repo.
-    const relPath = this.conversationRelPath(absPath);
-    if (relPath === undefined) {
-      this.chips = clearImplicitChips(this.chips);
-      if (prev || forcePost) this.postChips();
-      return;
-    }
-    let selStart: number | undefined;
-    let selEnd: number | undefined;
-    if (!editor.selection.isEmpty) {
-      const range = selectionLineRange(editor.selection.start, editor.selection.end);
-      selStart = range.startLine;
-      selEnd = range.endLine;
-    }
-
-    if (
-      prev &&
-      prev.path === absPath &&
-      prev.relPath === relPath &&
-      prev.selectionStart === selStart &&
-      prev.selectionEnd === selEnd
-    ) {
-      if (forcePost) this.postChips();
-      return;
-    }
-
-    const next = makeImplicitChip(absPath, relPath, selStart, selEnd);
-    next.hidden = implicitChipStartsHidden(prev, this.implicitChipHidden());
-    this.chips = clearImplicitChips(this.chips);
-    this.chips.push(next);
-    this.postChips();
+    const override = this.sidebarTestOverride("refreshImplicitChip");
+    if (override) return override(forcePost);
+    return this.implicitContext.refreshImplicitChip(forcePost);
   }
 
   /** Parse the workspace `.env` into a plain map (no process.env merge). Used by
