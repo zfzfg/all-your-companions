@@ -83,6 +83,8 @@ export class FileUploadHost {
   constructor(private readonly deps: FileUploadHostDeps) {}
 
   public trackAttach(op: Promise<unknown>): Promise<void> {
+    const override = this.deps.getOverride?.<typeof this.trackAttach>("trackAttach");
+    if (override) return override(op);
     const tracked = op.then(() => undefined);
     this.pendingAttach.add(tracked);
     const done = () => { this.pendingAttach.delete(tracked); };
@@ -91,10 +93,14 @@ export class FileUploadHost {
   }
 
   public imageStagingDir(): string {
+    const override = this.deps.getOverride?.<typeof this.imageStagingDir>("imageStagingDir");
+    if (override) return override();
     return path.join(this.deps.context.globalStorageUri.fsPath, "image-staging");
   }
 
   public fileStagingDir(): string {
+    const override = this.deps.getOverride?.<typeof this.fileStagingDir>("fileStagingDir");
+    if (override) return override();
     return path.join(this.deps.context.globalStorageUri.fsPath, "file-staging");
   }
 
@@ -133,6 +139,8 @@ export class FileUploadHost {
   }
 
   public async retainUploadedFilesForSession(session: Session, chips: ContextChip[]): Promise<void> {
+    const override = this.deps.getOverride?.<typeof this.retainUploadedFilesForSession>("retainUploadedFilesForSession");
+    if (override) return override(session, chips);
     const sid = session.activeSessionId ?? session.client?.sessionId;
     if (!sid) return;
     const uploaded = chips
@@ -153,6 +161,8 @@ export class FileUploadHost {
     ids: Iterable<string>,
     overrides: SessionMetaOverrides,
   ): Promise<void> {
+    const override = this.deps.getOverride?.<typeof this.removeUploadsForSessions>("removeUploadsForSessions");
+    if (override) return override(ids, overrides);
     const files = unreferencedUploadsForRemovedSessions(overrides, ids);
     const dirs = new Set(
       files
@@ -175,6 +185,8 @@ export class FileUploadHost {
     owner: AttachmentOwner = () => this.deps.getFocused(),
     previewId?: string,
   ): Promise<Session | undefined> {
+    const override = this.deps.getOverride?.<typeof this.stageImageAttachment>("stageImageAttachment");
+    if (override) return override(bytes, mimeType, originPath, owner, previewId);
     const dir = this.imageStagingDir();
     await fs.promises.mkdir(dir, { recursive: true });
     const absPath = path.join(dir, `image-${randomUUID()}${extFromMime(mimeType)}`);
@@ -203,6 +215,8 @@ export class FileUploadHost {
     owner: AttachmentOwner = () => this.deps.getFocused(),
     previewId?: string,
   ): Promise<void> {
+    const override = this.deps.getOverride?.<typeof this.addPastedImage>("addPastedImage");
+    if (override) return override(base64, mimeType, owner, previewId);
     try {
       if (!isVisionMime(mimeType)) {
         this.deps.notifyUser("error", `Grok: unsupported image type ${mimeType} — use PNG, JPEG, GIF, or WebP.`);
@@ -226,6 +240,8 @@ export class FileUploadHost {
     srcPath: string,
     owner: AttachmentOwner = () => this.deps.getFocused(),
   ): Promise<Session | false | undefined> {
+    const override = this.deps.getOverride?.<typeof this.importImageFromDisk>("importImageFromDisk");
+    if (override) return override(srcPath, owner);
     const stat = await fs.promises.stat(srcPath);
     if (!stat.isFile() || stat.size === 0 || stat.size > MAX_VISION_IMAGE_BYTES) return false;
     const bytes = await fs.promises.readFile(srcPath);
@@ -233,6 +249,8 @@ export class FileUploadHost {
   }
 
   public registerFullImage(imagePath: string): string {
+    const override = this.deps.getOverride?.<typeof this.registerFullImage>("registerFullImage");
+    if (override) return override(imagePath);
     const existing = this.fullImageHandles.get(imagePath);
     if (existing) return existing;
     const handle = randomUUID().replace(/-/g, "");
@@ -251,6 +269,8 @@ export class FileUploadHost {
   }
 
   public isImagePathAuthorizedNow(imagePath: string, session?: Session): boolean {
+    const override = this.deps.getOverride?.<typeof this.isImagePathAuthorizedNow>("isImagePathAuthorizedNow");
+    if (override) return override(imagePath, session);
     if (this.isImagePathInOpenSet(imagePath)) return true;
     if (!session || !this.deps.isAuthorizedCwd(this.deps.sessionCwd(session))) return false;
     try {
@@ -265,6 +285,8 @@ export class FileUploadHost {
   }
 
   public async readOriginalImage(imagePath: string): Promise<string | undefined> {
+    const override = this.deps.getOverride?.<typeof this.readOriginalImage>("readOriginalImage");
+    if (override) return override(imagePath);
     try {
       const mime = guessMediaMime(imagePath);
       if (!/^image\/(png|jpeg|gif|webp|bmp)$/.test(mime)) return undefined;
