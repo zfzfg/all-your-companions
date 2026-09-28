@@ -24,6 +24,8 @@ const sidebarSrc = () =>
   fs.readFileSync(path.join(__dirname, "..", "src", "sidebar.ts"), "utf8");
 const sessionStartSrc = () =>
   fs.readFileSync(path.join(__dirname, "..", "src", "session-start.ts"), "utf8");
+const permissionHostSrc = () =>
+  fs.readFileSync(path.join(__dirname, "..", "src", "permission-host.ts"), "utf8");
 
 const ALWAYS = '[ui]\npermission_mode = "always-approve"\n';
 const ASK = '[ui]\npermission_mode = "ask"\n';
@@ -96,9 +98,9 @@ describe("consent gate wiring", () => {
   });
 
   it("only prompts for a project-supplied config", () => {
-    const src = sidebarSrc();
-    const start = src.indexOf("private async confirmRepoForcedAutoApprove(");
-    const body = src.slice(start, src.indexOf("private configForcesAutoApprove", start));
+    const src = permissionHostSrc();
+    const start = src.indexOf("public async confirmRepoForcedAutoApprove(");
+    const body = src.slice(start, src.indexOf("public configForcesAutoApprove", start));
     expect(body).toContain('!== "project"');
     // Asked once per root, not once per session start — a project with several
     // conversations would otherwise prompt on every one of them.
@@ -111,13 +113,13 @@ describe("global always-approve notice", () => {
     // Desktop turns showInformationMessage into a blocking dialog, so "once
     // per activation" was every app launch. The flag has to live in the
     // host memento or the same person is trained to click Cancel.
-    const src = sidebarSrc();
-    const start = src.indexOf("private noticeAlwaysApproveOnce(");
+    const src = permissionHostSrc();
+    const start = src.indexOf("public noticeAlwaysApproveOnce(");
     expect(start).toBeGreaterThan(0);
-    const body = src.slice(start, src.indexOf("private setPlanActive", start));
+    const body = src.slice(start, src.indexOf("public ruleFileFs", start));
     expect(body).toContain("ALWAYS_APPROVE_NOTICE_KEY");
-    expect(body).toContain("this.state.get");
-    expect(body).toContain("this.state.update");
+    expect(body).toContain("this.deps.state.get");
+    expect(body).toContain("this.deps.state.update");
     expect(body).toContain("shouldShowAlwaysApproveNotice");
     expect(ALWAYS_APPROVE_NOTICE_KEY).toBe("grok.alwaysApproveNoticeShown");
   });
