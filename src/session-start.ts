@@ -213,6 +213,27 @@ export interface SessionStartTurnAndSendOps {
 }
 
 export interface SessionStartLifecycleOps {
+  detachClient(session: Session): void;
+  replayLoadedHistory(session: Session, action: () => Promise<void>): Promise<void>;
+  restoreSessionType(session: Session): void;
+  persistSessionType(session: Session): void;
+  postSessionType(session: Session): void;
+  flushHiddenChildMeta(session: Session): void;
+  restorePersistedDraft(session: Session): void;
+}
+export interface SessionStartUsageOps {
+  emitContextUsage(session: Session): void;
+  refreshContextFromSessionInfo(session: Session, gen: number, opts?: { force?: boolean }): Promise<boolean>;
+  restoreUsage(session: Session): void;
+  bindSubscriptionUsage(session: Session, env: NodeJS.ProcessEnv): void;
+  refreshSubscriptionUsage(session: Session): Promise<void>;
+  publishSubscriptionUsage(session: Session): void;
+  noteAdapterCompactSignal(session: Session, signal: any): void;
+  adapterTurnOccupancy(session: Session, meta?: any): number | undefined;
+  rememberAdapterContext(session: Session, patch: any): any;
+  accumulateUsage(session: Session, meta?: any): PromiseLike<void> | undefined;
+}
+export interface SessionStartEventOps {
   confirmRepoForcedAutoApprove(cwd: string): Promise<boolean>;
   configForcesAutoApprove(cwd: string): boolean;
   noticeAlwaysApproveOnce(cwd: string): void;
@@ -221,30 +242,13 @@ export interface SessionStartLifecycleOps {
   drainPendingConfirms(session: Session): void;
   dropPendingQuestions(session: Session): void;
   revokeAskUserToken(session: Session): void;
-  detachClient(session: Session): void;
-  replayLoadedHistory(session: Session, action: () => Promise<void>): Promise<void>;
-  restoreSessionType(session: Session): void;
-  persistSessionType(session: Session): void;
-  postSessionType(session: Session): void;
-  emitContextUsage(session: Session): void;
-  refreshContextFromSessionInfo(session: Session, gen: number, opts?: { force?: boolean }): Promise<boolean>;
-  restoreUsage(session: Session): void;
-  flushHiddenChildMeta(session: Session): void;
-  restorePersistedDraft(session: Session): void;
-  bindSubscriptionUsage(session: Session, env: NodeJS.ProcessEnv): void;
-  refreshSubscriptionUsage(session: Session): Promise<void>;
   warnOAuthShadowOnce(authMethodId: string | undefined, env: NodeJS.ProcessEnv): void;
   syncHumanWait(session: Session): void;
   showQuestion(session: Session, req: QuestionRequest, responder: QuestionResponder): void;
   closeQuestionsForToolCall(session: Session, call: any): void;
   handlePermissionRequest(session: Session, client: AcpClient, req: PermissionRequest, cwd: string): void;
-  publishSubscriptionUsage(session: Session): void;
   applyMcpNotification(session: Session, method: string, params: unknown): void;
   noteNativeChild(session: Session, u: any): void;
-  noteAdapterCompactSignal(session: Session, signal: any): void;
-  adapterTurnOccupancy(session: Session, meta?: any): number | undefined;
-  rememberAdapterContext(session: Session, patch: any): any;
-  accumulateUsage(session: Session, meta?: any): PromiseLike<void> | undefined;
   postGeneratedMedia(m: MediaRef, session: Session, gen: number): Promise<void>;
   hostMcpServersFor(session: Session): Promise<any[]>;
   imageStagingDir(): string;
@@ -296,6 +300,9 @@ export interface SessionStartDeps {
   readonly workflowCommandsOps: SessionStartWorkflowCommandsOps;
   readonly flags: SessionStartFlags;
   getOverride?<T extends (...args: any[]) => any>(name: string): T | undefined;
+
+  readonly usageOps: SessionStartUsageOps;
+  readonly eventOps: SessionStartEventOps;
 }
 
 export class SessionStart {
@@ -412,7 +419,7 @@ export class SessionStart {
     }
 
     const consentAt = clock.now();
-    if (target.provider === "grok" && !(await this.deps.sessionLifecycleOps.confirmRepoForcedAutoApprove(this.deps.sessionCwd(target)))) {
+    if (target.provider === "grok" && !(await this.deps.eventOps.confirmRepoForcedAutoApprove(this.deps.sessionCwd(target)))) {
       return undefined;
     }
     approveGateMs = clock.elapsed(consentAt);
@@ -437,7 +444,7 @@ export class SessionStart {
     const openedAt = clock.now();
     const replacedClient = session.client;
     if (replacedClient) {
-      this.deps.sessionLifecycleOps.queueInFlightPlanCommentsOnExit(session, replacedClient, session.gen);
+      this.deps.eventOps.queueInFlightPlanCommentsOnExit(session, replacedClient, session.gen);
     }
     const gen = ++session.gen;
     const testDelay = this.deps.flags.getTestSessionStartDelay();
@@ -455,8 +462,8 @@ export class SessionStart {
     session.status = "idle";
     session.turnToken = undefined;
 
-    this.deps.sessionLifecycleOps.stopVoiceInput(session);
-    this.deps.sessionLifecycleOps.drainPendingConfirms(session);
+    this.deps.eventOps.stopVoiceInput(session);
+    this.deps.eventOps.drainPendingConfirms(session);
     session.client = undefined;
 
     const disposeAt = clock.now();
@@ -475,7 +482,7 @@ export class SessionStart {
       this.deps.host.getConfiguration("grok").get<string>("defaultMode", ""),
       !!resumeId,
     );
-    const configAutoApprove = session.provider === "grok" && this.deps.sessionLifecycleOps.configForcesAutoApprove(this.deps.sessionCwd(session));
+    const configAutoApprove = session.provider === "grok" && this.deps.eventOps.configForcesAutoApprove(this.deps.sessionCwd(session));
     session.autoApprove = rememberedYolo || configAutoApprove;
     session.planActive = false;
     session.sessionPermissionRules = [];
@@ -491,8 +498,8 @@ export class SessionStart {
     session.planEntries = [];
     session.reviewBlocks = [];
     session.pendingExitPlans.clear();
-    this.deps.sessionLifecycleOps.dropPendingQuestions(session);
-    this.deps.sessionLifecycleOps.revokeAskUserToken(session);
+    this.deps.eventOps.dropPendingQuestions(session);
+    this.deps.eventOps.revokeAskUserToken(session);
     session.inFlightPlanComments.clear();
     if (session.planModeRecovery?.warningTimer) clearTimeout(session.planModeRecovery.warningTimer);
     session.planModeRecovery = undefined;
@@ -518,7 +525,7 @@ export class SessionStart {
     session.adapterTurnCallUsed = [];
 
     this.deps.emit(session, { type: "modeChanged", modeId: session.autoApprove ? "yolo" : "agent" });
-    if (configAutoApprove) this.deps.sessionLifecycleOps.noticeAlwaysApproveOnce(this.deps.sessionCwd(session));
+    if (configAutoApprove) this.deps.eventOps.noticeAlwaysApproveOnce(this.deps.sessionCwd(session));
     if (resumeId) this.deps.emit(session, { type: "clearMessages" });
 
     this.deps.emit(session, { type: "setBusy", value: true, locked: true });
@@ -646,8 +653,8 @@ export class SessionStart {
         }
 
         if (session.client !== client) throw new Error("the provider exited during startup");
-        this.deps.sessionLifecycleOps.bindSubscriptionUsage(session, envConfig.env);
-        void this.deps.sessionLifecycleOps.refreshSubscriptionUsage(session);
+        this.deps.usageOps.bindSubscriptionUsage(session, envConfig.env);
+        void this.deps.usageOps.refreshSubscriptionUsage(session);
 
         session.priming = false;
         session.needsProvider = false;
@@ -672,7 +679,7 @@ export class SessionStart {
           /timed out: (initialize|session\/(new|load))|exited \(code null\)/i.test(msg);
         const userFacing = credentialFailure || stdioRegression || replayBegan || attempt >= startSpawnAttempts;
         client.removeAllListeners("exit");
-        this.deps.sessionLifecycleOps.drainPendingConfirms(session);
+        this.deps.eventOps.drainPendingConfirms(session);
         void client.dispose();
         session.client = undefined;
         if (!userFacing) {
@@ -835,14 +842,14 @@ export class SessionStart {
       effort,
       log: (msg) => this.deps.host.appendLine(msg),
       timeouts: this.deps.providerOps.acpClientTimeouts(),
-      mcpServers: async () => supportsClientMcpServers(session.provider) ? this.deps.sessionLifecycleOps.hostMcpServersFor(session) : [],
+      mcpServers: async () => supportsClientMcpServers(session.provider) ? this.deps.eventOps.hostMcpServersFor(session) : [],
       ...(session.provider === "grok"
         ? { grokVersion: handshake.grokHandshakeVersion, grokVersionVerified: handshake.grokVersionVerified }
         : { backend: this.deps.providerOps.createProviderBackend(session.provider, effort) }),
     });
 
     session.client = client;
-    this.deps.sessionLifecycleOps.syncHumanWait(session);
+    this.deps.eventOps.syncHumanWait(session);
     session.lastSessionInfoAt = 0;
     session.lastSessionInfoUsed = undefined;
     session.sessionInfoStale = false;
@@ -887,7 +894,7 @@ export class SessionStart {
   ): void {
     client.on("initialized", (init) => {
       if (gen !== session.gen) return;
-      this.deps.sessionLifecycleOps.warnOAuthShadowOnce(init?._meta?.defaultAuthMethodId, env);
+      this.deps.eventOps.warnOAuthShadowOnce(init?._meta?.defaultAuthMethodId, env);
       const handshakeVersion = init?.serverInfo?.version ?? init?.version ?? null;
       if (session.provider === "grok" && typeof handshakeVersion === "string" && handshakeVersion.trim()) {
         this.deps.providerOps.providerCliVersions.grok = handshakeVersion.trim().replace(/^v/i, "");
@@ -1007,7 +1014,7 @@ export class SessionStart {
       session.inUserMessage = false;
       session.historyEventCount += 1;
       this.deps.emit(session, { type: "messageChunk", text });
-      this.deps.sessionLifecycleOps.noteAdapterCompactSignal(session, text);
+      this.deps.usageOps.noteAdapterCompactSignal(session, text);
     });
 
     client.on("userMessageChunk", (text: string, meta?: any) => {
@@ -1019,7 +1026,7 @@ export class SessionStart {
           type: "userMessageChunk",
           text,
           timestampMs: agentTimestampMsFromMeta(meta),
-          images: historyImagePreviews(text, this.deps.sessionLifecycleOps.imageStagingDir(), this.deps.sessionCwd(session)),
+          images: historyImagePreviews(text, this.deps.eventOps.imageStagingDir(), this.deps.sessionCwd(session)),
         });
         return;
       }
@@ -1047,7 +1054,7 @@ export class SessionStart {
         timestampMs: agentTimestampMsFromMeta(meta),
         images: historyImagePreviews(
           session.replayUserRaw,
-          this.deps.sessionLifecycleOps.imageStagingDir(),
+          this.deps.eventOps.imageStagingDir(),
           this.deps.sessionCwd(session),
         ),
       });
@@ -1076,7 +1083,7 @@ export class SessionStart {
 
     client.on("mediaContent", (m: MediaRef) => {
       if (gen !== session.gen) return;
-      void this.deps.sessionLifecycleOps.postGeneratedMedia(m, session, gen);
+      void this.deps.eventOps.postGeneratedMedia(m, session, gen);
     });
 
     client.on("taskBackgrounded", (u: any) => {
@@ -1124,7 +1131,7 @@ export class SessionStart {
       if (!session.replaying) this.deps.reviewAndPlanOps.snapshotPendingEditToolCall(session, prepared.call);
       this.deps.emit(session, { type, call: prepared.call });
       this.deps.reviewAndPlanOps.noteReviewToolCall(session, prepared.call);
-      this.deps.sessionLifecycleOps.noteAdapterCompactSignal(session, prepared.call);
+      this.deps.usageOps.noteAdapterCompactSignal(session, prepared.call);
       if (prepared.commandOutput) {
         this.deps.emit(session, { type: "commandOutput", ...prepared.commandOutput });
       }
@@ -1138,7 +1145,7 @@ export class SessionStart {
 
     client.on("toolCallUpdate", (u) => {
       if (gen !== session.gen) return;
-      this.deps.sessionLifecycleOps.closeQuestionsForToolCall(session, u);
+      this.deps.eventOps.closeQuestionsForToolCall(session, u);
       emitToolCallEvent("toolCallUpdate", u);
     });
 
@@ -1151,8 +1158,8 @@ export class SessionStart {
       if (gen !== session.gen) return;
       const gated = gateZeroTokenMeta(meta);
       if (isAdapterProvider(session.provider) && !session.replaying) {
-        const occupancy = this.deps.sessionLifecycleOps.adapterTurnOccupancy(session, meta);
-        const remembered = this.deps.sessionLifecycleOps.rememberAdapterContext(session, occupancy !== undefined ? { occupancy } : {});
+        const occupancy = this.deps.usageOps.adapterTurnOccupancy(session, meta);
+        const remembered = this.deps.usageOps.rememberAdapterContext(session, occupancy !== undefined ? { occupancy } : {});
         this.deps.emit(session, {
           type: "promptComplete",
           meta: { ...gated, totalTokens: remembered?.used ?? gated.totalTokens },
@@ -1167,7 +1174,7 @@ export class SessionStart {
         }
         this.deps.emit(session, { type: "promptComplete", meta: gated });
       }
-      if (session.captureAgentText === undefined) void this.deps.sessionLifecycleOps.accumulateUsage(session, meta);
+      if (session.captureAgentText === undefined) void this.deps.usageOps.accumulateUsage(session, meta);
       session.adapterTurnCallUsed = [];
       if (!session.replaying) this.deps.reviewAndPlanOps.finishCheckpointTurn(session);
     });
@@ -1175,7 +1182,7 @@ export class SessionStart {
     client.on("contextUsage", (used: number | undefined, window?: number) => {
       if (gen !== session.gen) return;
       if (isAdapterProvider(session.provider)) {
-        this.deps.sessionLifecycleOps.rememberAdapterContext(session, {
+        this.deps.usageOps.rememberAdapterContext(session, {
           ...(typeof window === "number" && Number.isFinite(window) && window > 0 ? { window } : {}),
         });
         return;
@@ -1197,20 +1204,20 @@ export class SessionStart {
     client.on("subscriptionUsage", (windows: SubscriptionWindow[]) => {
       if (gen !== session.gen || session.client !== client || session.replaying) return;
       session.subscriptionUsage?.observe(windows);
-      this.deps.sessionLifecycleOps.publishSubscriptionUsage(session);
+      this.deps.usageOps.publishSubscriptionUsage(session);
     });
 
     client.on("adapterUsageUpdate", (used: number, window?: number) => {
       if (gen !== session.gen) return;
       if (!isAdapterProvider(session.provider) || session.replaying) {
         if (typeof window === "number" && Number.isFinite(window) && window > 0) {
-          this.deps.sessionLifecycleOps.rememberAdapterContext(session, { window });
+          this.deps.usageOps.rememberAdapterContext(session, { window });
         }
         return;
       }
       if (session.compactUsageArmed) {
         session.compactUsageArmed = false;
-        this.deps.sessionLifecycleOps.rememberAdapterContext(session, {
+        this.deps.usageOps.rememberAdapterContext(session, {
           occupancy: used,
           compacted: true,
           ...(typeof window === "number" && Number.isFinite(window) && window > 0 ? { window } : {}),
@@ -1221,13 +1228,13 @@ export class SessionStart {
         session.adapterTurnCallUsed.push(used);
       }
       if (typeof window === "number" && Number.isFinite(window) && window > 0) {
-        this.deps.sessionLifecycleOps.rememberAdapterContext(session, { window });
+        this.deps.usageOps.rememberAdapterContext(session, { window });
       }
     });
 
     client.on("mcpNotification", (method: string, params: unknown) => {
       if (gen !== session.gen) return;
-      this.deps.sessionLifecycleOps.applyMcpNotification(session, method, params);
+      this.deps.eventOps.applyMcpNotification(session, method, params);
     });
 
     client.on("xaiNotification", (u) => {
@@ -1259,7 +1266,7 @@ export class SessionStart {
       }
       if (isSubagentLifecycleUpdate(u)) {
         this.deps.emit(session, { type: "subagentUpdate", update: u });
-        this.deps.sessionLifecycleOps.noteNativeChild(session, u);
+        this.deps.eventOps.noteNativeChild(session, u);
       }
       const runProg = parseRunProgressUpdate(u);
       if (runProg) this.deps.emit(session, { type: "runProgress", update: runProg });
@@ -1292,7 +1299,7 @@ export class SessionStart {
 
     client.on("permissionRequest", (req: PermissionRequest) => {
       if (gen !== session.gen) return;
-      this.deps.sessionLifecycleOps.handlePermissionRequest(session, client, req, cwd);
+      this.deps.eventOps.handlePermissionRequest(session, client, req, cwd);
     });
 
     client.on("mutationBlocked", (info: { kind: string; target: string }) => {
@@ -1316,7 +1323,7 @@ export class SessionStart {
 
     client.on("questionRequest", (req: QuestionRequest) => {
       if (gen !== session.gen) return;
-      this.deps.sessionLifecycleOps.showQuestion(session, req, {
+      this.deps.eventOps.showQuestion(session, req, {
         toolCallId: req.toolCallId,
         answer: (answers, annotations) => client.respondQuestion(req.id, answers, annotations),
         cancel: () => client.respondQuestionCancelled(req.id),
@@ -1328,7 +1335,7 @@ export class SessionStart {
       if (gen !== session.gen) return;
       if (session.priming) {
         if (session.client === client) {
-          this.deps.sessionLifecycleOps.drainPendingConfirms(session);
+          this.deps.eventOps.drainPendingConfirms(session);
           session.client = undefined;
           this.deps.getPool().delete(session);
         }
@@ -1440,11 +1447,11 @@ export class SessionStart {
     }
 
     // Seed the context donut
-    this.deps.sessionLifecycleOps.emitContextUsage(session);
+    this.deps.usageOps.emitContextUsage(session);
     if (session.provider === "grok" || session.provider === "gemini") {
-      void this.deps.sessionLifecycleOps.refreshContextFromSessionInfo(session, gen, { force: true });
+      void this.deps.usageOps.refreshContextFromSessionInfo(session, gen, { force: true });
     }
-    this.deps.sessionLifecycleOps.restoreUsage(session);
+    this.deps.usageOps.restoreUsage(session);
   }
 
   /**
@@ -1653,7 +1660,7 @@ export class SessionStart {
         session.sawCompactNotification = false;
         if (isAdapterProvider(session.provider)) {
           session.adapterCompactThisTurn = true;
-          this.deps.sessionLifecycleOps.rememberAdapterContext(session, { compacted: true });
+          this.deps.usageOps.rememberAdapterContext(session, { compacted: true });
         }
       }
 

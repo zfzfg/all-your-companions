@@ -27,9 +27,25 @@ function harness(over: Partial<SidebarInboundDeps> = {}) {
     slots: {},
     boot: {},
     composer: { handleSend, handleAgentCommand },
-    sessions: {},
+    sessions: {
+
+},
+sessionSettings: {
+
+},
+worktrees: {
+
+},
     review: {},
-    workflow: {},
+    workflow: {
+
+},
+authoring: {
+
+},
+children: {
+
+},
     routines: {},
     providers: {},
     projects: {},

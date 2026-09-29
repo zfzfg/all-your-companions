@@ -127,6 +127,12 @@ import { mergeReviewPackets, panelTargets } from "./workflow-panel";
 import { gitRootForPath } from "./worktree";
 import { type WorktreeHost } from "./worktree-host";
 
+export interface WorkflowStageUiOps {
+emit(session: Session, msg: HostMsg): void;
+agentNotice(session: Session, level: "info" | "warning" | "error", text: string): void;
+confirmInChat(session: Session, opts: { title: string; body?: string; confirmLabel: string; danger?: boolean }): Promise<boolean>;
+showQuestion(session: Session, question: any, handlers: any): void;
+}
 export interface WorkflowStageRunnerDeps {
   readonly host: Host;
   readonly context: HostContext;
@@ -138,10 +144,6 @@ export interface WorkflowStageRunnerDeps {
   readonly pool: Set<Session>;
   readonly focused: Session;
   sessionCwd(session?: Session): string;
-  emit(session: Session, msg: HostMsg): void;
-  agentNotice(session: Session, level: "info" | "warning" | "error", text: string): void;
-  confirmInChat(session: Session, opts: { title: string; body?: string; confirmLabel: string; danger?: boolean }): Promise<boolean>;
-  showQuestion(session: Session, question: any, handlers: any): void;
   newFocusedSession(): Promise<Session>;
   setStatus(session: Session, status: Session["status"]): void;
   runAgentRole(role: AgentRole, brief: BriefingInput, trigger: AgentRunTrigger, caller: Session, coords?: any): Promise<any>;
@@ -154,6 +156,8 @@ export interface WorkflowStageRunnerDeps {
   persistSessionType(session: Session): void;
   childWaitsForYou(child: Session | undefined): boolean;
   getOverride?<T extends (...args: any[]) => any>(name: string): T | undefined;
+
+  readonly ui: WorkflowStageUiOps;
 }
 
 export class WorkflowStageRunner {
@@ -184,12 +188,12 @@ export class WorkflowStageRunner {
   private get focused(): Session { return this.deps.focused; }
 
   private sessionCwd(session?: Session): string { return this.deps.sessionCwd(session); }
-  private emit(session: Session, msg: HostMsg): void { this.deps.emit(session, msg); }
-  private agentNotice(session: Session, level: "info" | "warning" | "error", text: string): void { this.deps.agentNotice(session, level, text); }
+  private emit(session: Session, msg: HostMsg): void { this.deps.ui.emit(session, msg); }
+  private agentNotice(session: Session, level: "info" | "warning" | "error", text: string): void { this.deps.ui.agentNotice(session, level, text); }
   private confirmInChat(session: Session, opts: { title: string; body?: string; confirmLabel: string; danger?: boolean }): Promise<boolean> {
-    return this.deps.confirmInChat(session, opts);
+    return this.deps.ui.confirmInChat(session, opts);
   }
-  private showQuestion(session: Session, question: any, handlers: any): void { this.deps.showQuestion(session, question, handlers); }
+  private showQuestion(session: Session, question: any, handlers: any): void { this.deps.ui.showQuestion(session, question, handlers); }
   private newFocusedSession(): Promise<Session> { return this.deps.newFocusedSession(); }
   private setStatus(session: Session, status: Session["status"]): void { this.deps.setStatus(session, status); }
   private runAgentRole(role: AgentRole, brief: BriefingInput, trigger: AgentRunTrigger, caller: Session, coords?: any): Promise<any> {

@@ -275,7 +275,7 @@ describe("the sidebar source keeps the AP-05 wiring", () => {
   });
 
   it("revokes the session token on a session start or restart", () => {
-    expect(sessionStart).toContain("this.deps.sessionLifecycleOps.revokeAskUserToken(session);");
+    expect(sessionStart).toContain("this.deps.eventOps.revokeAskUserToken(session);");
   });
 
   it("never lets a failed pipe keep a session from starting", () => {

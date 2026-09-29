@@ -148,7 +148,7 @@ describe("native plan verdict orchestration", () => {
 
   it("recovers pending feedback before a controlled restart invalidates its generation", () => {
     const recover = startSessionSetup.indexOf(
-      "this.deps.sessionLifecycleOps.queueInFlightPlanCommentsOnExit(session, replacedClient, session.gen)",
+      "this.deps.eventOps.queueInFlightPlanCommentsOnExit(session, replacedClient, session.gen)",
     );
     const bump = startSessionSetup.indexOf("const gen = ++session.gen");
     const clear = startSessionSetup.indexOf("session.inFlightPlanComments.clear()", bump);

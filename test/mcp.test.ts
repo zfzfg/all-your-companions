@@ -237,7 +237,7 @@ describe("MCP inventory catalog", () => {
       sessionStartSrc.indexOf('client.on("mcpNotification"'),
       sessionStartSrc.indexOf('client.on("xaiNotification"'),
     );
-    expect(notify).toContain("this.deps.sessionLifecycleOps.applyMcpNotification(session, method, params)");
+    expect(notify).toContain("this.deps.eventOps.applyMcpNotification(session, method, params)");
     expect(notify).not.toContain("mcpServersCwd");
     const apply = src.slice(
       src.indexOf("public applyMcpNotification("),

@@ -52,12 +52,6 @@ function makeRunner(inThread = false) {
     pool: new Set<Session>(),
     focused: new Session(),
     sessionCwd: vi.fn(() => "/workspace"),
-    emit: vi.fn((session: Session, msg: HostMsg) => { emitted.push({ session, msg }); }),
-    agentNotice: vi.fn((session: Session, level: any, text: string) => {
-      emitted.push({ session, msg: { type: "hostNotice", level, text } });
-    }),
-    confirmInChat: vi.fn(async () => true),
-    showQuestion: vi.fn(),
     newFocusedSession: vi.fn(async () => new Session()),
     setStatus: vi.fn(),
     runAgentRole: vi.fn(async () => ({ outcome: "completed", filesReported: [], filesObserved: [], summary: "done", planEntries: [] })),
@@ -82,7 +76,15 @@ function makeRunner(inThread = false) {
     emitReviewCenter: vi.fn(),
     persistSessionType: vi.fn(),
     childWaitsForYou: vi.fn(() => false),
-  };
+ui: {
+emit: vi.fn((session: Session, msg: HostMsg) => { emitted.push({ session, msg }); }),
+agentNotice: vi.fn((session: Session, level: any, text: string) => {
+      emitted.push({ session, msg: { type: "hostNotice", level, text } });
+    }),
+confirmInChat: vi.fn(async () => true),
+showQuestion: vi.fn()
+}
+};
 
   const runner = new WorkflowStageRunner(deps);
   return { runner, deps, emitted, appendLines };

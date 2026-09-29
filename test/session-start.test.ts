@@ -51,7 +51,15 @@ function makeStart() {
     providerOps: {},
     reviewAndPlanOps: {},
     turnAndSendOps: { ensureClient },
-    sessionLifecycleOps: {},
+    sessionLifecycleOps: {
+
+},
+usageOps: {
+
+},
+eventOps: {
+
+},
     workflowCommandsOps: { handleAgentCommand },
     flags: {},
   } as unknown as SessionStartDeps;

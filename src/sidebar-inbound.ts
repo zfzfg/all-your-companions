@@ -121,7 +121,6 @@ export interface InboundComposerOps {
   trackAttach(...args: any[]): any;
 }
 export interface InboundSessionOps {
-  applyFocusedWorktree(...args: any[]): any;
   armCancelRecovery(...args: any[]): any;
   cancelAgentRun(...args: any[]): any;
   clearAllSessions(...args: any[]): any;
@@ -134,30 +133,35 @@ export interface InboundSessionOps {
   handleVoiceStart(...args: any[]): any;
   handleVoiceStop(...args: any[]): any;
   newFocusedSession(...args: any[]): any;
-  newWorktreeSession(...args: any[]): any;
   noteAnswered(...args: any[]): any;
   openSession(...args: any[]): any;
-  persistEffort(...args: any[]): any;
-  pickModel(...args: any[]): any;
   pickRestartMode(...args: any[]): any;
-  refreshContextFromSessionInfo(...args: any[]): any;
-  refreshSubscriptionUsage(...args: any[]): any;
   refuseMismatchedSessionId(...args: any[]): any;
-  removeFocusedWorktree(...args: any[]): any;
   renameSession(...args: any[]): any;
   restartSession(...args: any[]): any;
   rewindFocusedSession(...args: any[]): any;
-  selectRepo(...args: any[]): any;
-  sendLocalRepoSessionsPreview(...args: any[]): any;
-  setMode(...args: any[]): any;
-  setProviderNeedsLogin(...args: any[]): any;
-  setRepoArchived(...args: any[]): any;
-  setRepoColor(...args: any[]): any;
-  setSessionType(...args: any[]): any;
   startSession(...args: any[]): any;
   stopVoiceInput(...args: any[]): any;
-  switchModel(...args: any[]): any;
   syncHumanWait(...args: any[]): any;
+}
+export interface InboundSessionSettingsOps {
+  persistEffort(...args: any[]): any;
+  pickModel(...args: any[]): any;
+  refreshContextFromSessionInfo(...args: any[]): any;
+  refreshSubscriptionUsage(...args: any[]): any;
+  setMode(...args: any[]): any;
+  setProviderNeedsLogin(...args: any[]): any;
+  setSessionType(...args: any[]): any;
+  switchModel(...args: any[]): any;
+}
+export interface InboundWorktreeOps {
+  applyFocusedWorktree(...args: any[]): any;
+  newWorktreeSession(...args: any[]): any;
+  removeFocusedWorktree(...args: any[]): any;
+  selectRepo(...args: any[]): any;
+  sendLocalRepoSessionsPreview(...args: any[]): any;
+  setRepoArchived(...args: any[]): any;
+  setRepoColor(...args: any[]): any;
   toggleRepoPin(...args: any[]): any;
   toggleSessionPin(...args: any[]): any;
 }
@@ -181,37 +185,41 @@ export interface InboundReviewOps {
 }
 export interface InboundWorkflowOps {
   agentNotice(...args: any[]): any;
-  answerSubagentApproval(...args: any[]): any;
   applyWorkflowPlanEdit(...args: any[]): any;
-  cancelSubagent(...args: any[]): any;
-  cancelWorkflowGenerate(...args: any[]): any;
-  childOverviewAction(...args: any[]): any;
   companionsSetting(...args: any[]): any;
-  continueSubagent(...args: any[]): any;
   controlWorkflow(...args: any[]): any;
   defaultWorkflowName(...args: any[]): any;
   gateActionFromMsg(...args: any[]): any;
-  handleAddWorkflowStagesBlock(...args: any[]): any;
-  handleDeleteCompanionFile(...args: any[]): any;
-  handleGenerateWorkflow(...args: any[]): any;
   handleHostGateAction(...args: any[]): any;
-  handleSaveAgentRole(...args: any[]): any;
-  handleSaveCrewFlow(...args: any[]): any;
-  handleSaveWorkflow(...args: any[]): any;
   handleWorkflowGateAction(...args: any[]): any;
   openNewCrewSession(...args: any[]): any;
   poolSessionById(...args: any[]): any;
-  postAgentRoles(...args: any[]): any;
-  postSubagentCard(...args: any[]): any;
-  postSubagentTray(...args: any[]): any;
-  postWorkflowValidation(...args: any[]): any;
-  promoteSubagentSession(...args: any[]): any;
   sendToRunningStage(...args: any[]): any;
-  setCompanionsSetting(...args: any[]): any;
-  setSessionDelegation(...args: any[]): any;
-  settleSubagentWorktree(...args: any[]): any;
   startHandoff(...args: any[]): any;
   startWorkflowRun(...args: any[]): any;
+}
+export interface InboundAuthoringOps {
+  cancelWorkflowGenerate(...args: any[]): any;
+  handleAddWorkflowStagesBlock(...args: any[]): any;
+  handleDeleteCompanionFile(...args: any[]): any;
+  handleGenerateWorkflow(...args: any[]): any;
+  handleSaveAgentRole(...args: any[]): any;
+  handleSaveCrewFlow(...args: any[]): any;
+  handleSaveWorkflow(...args: any[]): any;
+  postAgentRoles(...args: any[]): any;
+  postWorkflowValidation(...args: any[]): any;
+  setCompanionsSetting(...args: any[]): any;
+}
+export interface InboundSubagentOps {
+  answerSubagentApproval(...args: any[]): any;
+  cancelSubagent(...args: any[]): any;
+  childOverviewAction(...args: any[]): any;
+  continueSubagent(...args: any[]): any;
+  postSubagentCard(...args: any[]): any;
+  postSubagentTray(...args: any[]): any;
+  promoteSubagentSession(...args: any[]): any;
+  setSessionDelegation(...args: any[]): any;
+  settleSubagentWorktree(...args: any[]): any;
 }
 export interface InboundRoutineOps {
   loadRoutines(...args: any[]): any;
@@ -289,6 +297,12 @@ export interface SidebarInboundDeps {
   readonly providers: InboundProviderOps;
   readonly projects: InboundProjectOps;
   readonly settings: InboundSettingsOps;
+
+  readonly sessionSettings: InboundSessionSettingsOps;
+  readonly worktrees: InboundWorktreeOps;
+
+  readonly authoring: InboundAuthoringOps;
+  readonly children: InboundSubagentOps;
 }
 
 export class SessionInboundRouter {
@@ -442,17 +456,17 @@ export class SessionInboundRouter {
         await this.deps.sessions.forkFocusedSession(session);
         break;
       case "newWorktreeSession":
-        await this.deps.sessions.newWorktreeSession();
+        await this.deps.worktrees.newWorktreeSession();
         break;
       case "applyWorktree":
         // The webview's custom confirm already ran (native modals stay only on
         // the Command-Palette path).
         if (this.deps.sessions.refuseMismatchedSessionId(msg.sessionId, session)) break;
-        await this.deps.sessions.applyFocusedWorktree(session, true);
+        await this.deps.worktrees.applyFocusedWorktree(session, true);
         break;
       case "removeWorktree":
         if (this.deps.sessions.refuseMismatchedSessionId(msg.sessionId, session)) break;
-        await this.deps.sessions.removeFocusedWorktree(session, true);
+        await this.deps.worktrees.removeFocusedWorktree(session, true);
         break;
       case "rewindSession":
         await this.deps.sessions.rewindFocusedSession(
@@ -486,11 +500,11 @@ export class SessionInboundRouter {
         await this.deps.sessions.editLastMessage(msg.userBubbleIndex, msg.text, msg.totalUserBubbles, session);
         break;
       case "refreshSubscriptionUsage":
-        void this.deps.sessions.refreshSubscriptionUsage(session);
+        void this.deps.sessionSettings.refreshSubscriptionUsage(session);
         break;
       case "refreshContextDetails":
         if (session.provider === "grok" || session.provider === "gemini") {
-          void this.deps.sessions.refreshContextFromSessionInfo(session, session.gen, {
+          void this.deps.sessionSettings.refreshContextFromSessionInfo(session, session.gen, {
             force: session.sessionInfoStale,
           });
         }
@@ -515,13 +529,13 @@ export class SessionInboundRouter {
         break;
       }
       case "pickModel":
-        await this.deps.sessions.pickModel();
+        await this.deps.sessionSettings.pickModel();
         break;
       case "setMode":
-        await this.deps.sessions.setMode(msg.modeId, session);
+        await this.deps.sessionSettings.setMode(msg.modeId, session);
         break;
       case "setSessionType":
-        this.deps.sessions.setSessionType(session, msg.sessionType);
+        this.deps.sessionSettings.setSessionType(session, msg.sessionType);
         break;
       case "contextOverflowAnswer":
         await this.deps.composer.answerContextOverflow(session, msg);
@@ -533,7 +547,7 @@ export class SessionInboundRouter {
         await this.deps.composer.answerLimitOffer(session, msg);
         break;
       case "setModel":
-        await this.deps.sessions.switchModel(
+        await this.deps.sessionSettings.switchModel(
           msg.modelId,
           session,
           isAcpProvider(msg.provider)
@@ -551,7 +565,7 @@ export class SessionInboundRouter {
           // history (a dead client on a session WITH history must keep that history).
           const wasEmpty = !session.hasHistory;
           const discardId = session.activeSessionId;
-          await this.deps.sessions.persistEffort(session.provider, newLevel);
+          await this.deps.sessionSettings.persistEffort(session.provider, newLevel);
           if (wasEmpty && isAdapterProvider(session.provider)) {
             await this.deps.sessions.discardAdapterEmptySession(session.provider, discardId, this.deps.sessionCwd(session), session.client);
           }
@@ -571,14 +585,14 @@ export class SessionInboundRouter {
         if (newLevel && session.client.currentModelSupportsEffort()) {
           const applied = await session.client.setReasoningEffort(newLevel).catch(() => false);
           if (applied) {
-            await this.deps.sessions.persistEffort(session.provider, newLevel);
+            await this.deps.sessionSettings.persistEffort(session.provider, newLevel);
             break;
           }
         }
 
         const mode = await this.deps.sessions.pickRestartMode("Changing reasoning effort requires restarting the session.");
         if (!mode) break; // dismissed — leave the remembered effort untouched
-        await this.deps.sessions.persistEffort(session.provider, newLevel);
+        await this.deps.sessionSettings.persistEffort(session.provider, newLevel);
         await this.deps.sessions.restartSession(mode, session);
         break;
       }
@@ -588,26 +602,26 @@ export class SessionInboundRouter {
       case "listRepoSessions":
         // Preview rows for a repo WITHOUT selecting it (the projects rail).
         // Local: desktop multi-folder rail and the VS Code primary-side-bar rail.
-        this.deps.sessions.sendLocalRepoSessionsPreview(msg.cwd, msg.limit);
+        this.deps.worktrees.sendLocalRepoSessionsPreview(msg.cwd, msg.limit);
         break;
       case "toggleSessionPin":
         // Rail pin, when any projects rail is live (desktop multi-folder or
         // VS Code primary-side-bar view).
         if (this.deps.host.canSwitchWorkspaceFolder || this.deps.slots.projectsRail) {
-          await this.deps.sessions.toggleSessionPin(msg.id, msg.cwd, msg.pinned);
+          await this.deps.worktrees.toggleSessionPin(msg.id, msg.cwd, msg.pinned);
         }
         break;
       case "selectRepo":
-        await this.deps.sessions.selectRepo(msg.cwd);
+        await this.deps.worktrees.selectRepo(msg.cwd);
         break;
       case "setRepoArchived":
-        await this.deps.sessions.setRepoArchived(msg.cwd, msg.archived);
+        await this.deps.worktrees.setRepoArchived(msg.cwd, msg.archived);
         break;
       case "setRepoColor":
-        await this.deps.sessions.setRepoColor(msg.cwd, msg.color);
+        await this.deps.worktrees.setRepoColor(msg.cwd, msg.color);
         break;
       case "toggleRepoPin":
-        await this.deps.sessions.toggleRepoPin(msg.cwd, msg.pinned);
+        await this.deps.worktrees.toggleRepoPin(msg.cwd, msg.pinned);
         break;
       case "resumeSession":
         await this.deps.sessions.openSession(msg.id, msg.cwd);
@@ -686,20 +700,20 @@ export class WorkflowInboundRouter {
         // a reopened page does not greet the user with an error they already
         // fixed — same rule as `listRoutines`.
         this.deps.slots.agentRolesError = undefined;
-        this.deps.workflow.postAgentRoles();
+        this.deps.authoring.postAgentRoles();
         break;
       }
       case "saveAgentRole": {
-        await this.deps.workflow.handleSaveAgentRole(msg);
+        await this.deps.authoring.handleSaveAgentRole(msg);
         break;
       }
       case "companionSubagentAction": {
         const record = this.deps.slots.subagents.get(msg.subagentId);
         if (!record) break;
         if (msg.action === "cancel") {
-          this.deps.workflow.cancelSubagent(msg.subagentId, "the user cancelled it from the tray");
-          this.deps.workflow.postSubagentCard(session, msg.subagentId);
-          this.deps.workflow.postSubagentTray(session);
+          this.deps.children.cancelSubagent(msg.subagentId, "the user cancelled it from the tray");
+          this.deps.children.postSubagentCard(session, msg.subagentId);
+          this.deps.children.postSubagentTray(session);
         } else if (msg.action === "openTranscript" && record.childSessionId) {
           // The child is hidden from history but its transcript is readable —
           // that is the whole reason §6.6 keeps it rather than asking the CLI
@@ -708,28 +722,28 @@ export class WorkflowInboundRouter {
           if (live) this.deps.sessions.focusSession(live);
           else await this.deps.sessions.openSession(record.childSessionId, this.deps.sessionCwd(session));
         } else if (msg.action === "promote") {
-          await this.deps.workflow.promoteSubagentSession(session, msg.subagentId);
+          await this.deps.children.promoteSubagentSession(session, msg.subagentId);
         } else if (msg.action === "followUp") {
           const text = String(msg.message ?? "").trim();
           if (!text) break;
-          const started = await this.deps.workflow.continueSubagent(session, msg.subagentId, text);
+          const started = await this.deps.children.continueSubagent(session, msg.subagentId, text);
           if (!started.ok) this.deps.workflow.agentNotice(session, "warning", started.message);
         } else if (msg.action === "applyWorktree" || msg.action === "discardWorktree") {
-          await this.deps.workflow.settleSubagentWorktree(session, msg.subagentId, msg.action === "applyWorktree");
+          await this.deps.children.settleSubagentWorktree(session, msg.subagentId, msg.action === "applyWorktree");
         }
         break;
       }
       case "childOverviewAction":
-        await this.deps.workflow.childOverviewAction(msg);
+        await this.deps.children.childOverviewAction(msg);
         break;
       case "setCompanionsSetting":
-        await this.deps.workflow.setCompanionsSetting(String(msg.key ?? ""), msg.value);
+        await this.deps.authoring.setCompanionsSetting(String(msg.key ?? ""), msg.value);
         break;
       case "setSessionDelegation":
-        this.deps.workflow.setSessionDelegation(session, String(msg.value ?? "auto"));
+        this.deps.children.setSessionDelegation(session, String(msg.value ?? "auto"));
         break;
       case "subagentApprovalAnswer": {
-        this.deps.workflow.answerSubagentApproval(session, msg);
+        this.deps.children.answerSubagentApproval(session, msg);
         break;
       }
       case "workflowStart": {
@@ -769,20 +783,20 @@ export class WorkflowInboundRouter {
         }));
         await this.deps.host.getConfiguration("companions").update("subagents.routing", rules, "global");
         this.deps.host.appendLine(`[companions] routing: ${rules.length} rule(s)`);
-        this.deps.workflow.postAgentRoles();
+        this.deps.authoring.postAgentRoles();
         break;
       }
       case "setCrewStageSubagents":
         await this.deps.host.getConfiguration("companions")
           .update("crew.stagesMayUseSubagents", !!msg.value, "global");
-        this.deps.workflow.postAgentRoles();
+        this.deps.authoring.postAgentRoles();
         break;
       case "setSubagentsEnabled":
         // Global, like the other display and behaviour prefs. The config
         // watcher re-posts it, keeping every open settings page in step.
         await this.deps.host.getConfiguration("companions")
           .update("subagents.enabled", !!msg.value, "global");
-        this.deps.workflow.postAgentRoles();
+        this.deps.authoring.postAgentRoles();
         break;
       case "subagentRosterSave": {
         // A PATCH, merged into the stored object. Two settings pages open on
@@ -801,46 +815,46 @@ export class WorkflowInboundRouter {
         this.deps.host.appendLine(
           `[companions] roster: ${msg.provider} ${Object.keys(msg.patch ?? {}).join(", ")}`,
         );
-        this.deps.workflow.postAgentRoles();
+        this.deps.authoring.postAgentRoles();
         break;
       }
       case "deleteAgentRole": {
-        this.deps.workflow.handleDeleteCompanionFile(msg.scope, "agents", msg.name);
+        this.deps.authoring.handleDeleteCompanionFile(msg.scope, "agents", msg.name);
         break;
       }
       case "saveCrewFlow": {
-        await this.deps.workflow.handleSaveCrewFlow(msg);
+        await this.deps.authoring.handleSaveCrewFlow(msg);
         break;
       }
       case "deleteCrewFlow": {
-        this.deps.workflow.handleDeleteCompanionFile(msg.scope, "crews", msg.name);
+        this.deps.authoring.handleDeleteCompanionFile(msg.scope, "crews", msg.name);
         break;
       }
       case "saveWorkflow": {
-        await this.deps.workflow.handleSaveWorkflow(msg);
+        await this.deps.authoring.handleSaveWorkflow(msg);
         break;
       }
       case "validateWorkflow": {
-        this.deps.workflow.postWorkflowValidation(msg.draft);
+        this.deps.authoring.postWorkflowValidation(msg.draft);
         break;
       }
       case "generateWorkflow": {
-        await this.deps.workflow.handleGenerateWorkflow(msg);
+        await this.deps.authoring.handleGenerateWorkflow(msg);
         break;
       }
       case "cancelWorkflowGenerate":
-        this.deps.workflow.cancelWorkflowGenerate();
+        this.deps.authoring.cancelWorkflowGenerate();
         break;
       case "setDefaultWorkflow": {
         const name = String(msg.name ?? "").trim().toLowerCase();
         if (name) {
           await this.deps.host.getConfiguration("companions").update("crew.defaultWorkflow", name, "global");
         }
-        this.deps.workflow.postAgentRoles();
+        this.deps.authoring.postAgentRoles();
         break;
       }
       case "addWorkflowStagesBlock": {
-        await this.deps.workflow.handleAddWorkflowStagesBlock(msg.scope, msg.name);
+        await this.deps.authoring.handleAddWorkflowStagesBlock(msg.scope, msg.name);
         break;
       }
       case "runWorkflow":
@@ -1592,7 +1606,7 @@ export class ProjectInboundRouter {
           // No status RPC: the person acknowledges the CLI sign-in here, and a
           // landed credential file is the evidence (upstream). A turn still
           // reports a credential failure through the normal path.
-          this.deps.sessions.setProviderNeedsLogin("muse", !this.deps.providers.providerCredentialFilePresent("muse"));
+          this.deps.sessionSettings.setProviderNeedsLogin("muse", !this.deps.providers.providerCredentialFilePresent("muse"));
           void this.deps.providers.probeProviderVersion("muse");
         } else await this.deps.providers.reprobeProviderCredentials(provider);
         await this.deps.providers.adoptSessionsForConnectedProvider(provider, session);
