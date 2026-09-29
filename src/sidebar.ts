@@ -1,4 +1,5 @@
-import {
+import { FileUploadHost, createFileUploadHost } from "./file-upload-host";
+import  {
   SessionCatalog,
   createSessionCatalog,
   type SessionsListOptions,
@@ -6,24 +7,14 @@ import {
   REPO_PINS_KEY,
   REPO_ARCHIVES_KEY,
   REPO_COLORS_KEY
-  } from "./session-catalog";
-import {
-  SessionStart,
-  createSessionStart
-  } from "./session-start";
-import {
-  SidebarInbound,
-  createSidebarInbound
-  } from "./sidebar-inbound";
+} from "./session-catalog";
+import { SessionStart, createSessionStart } from "./session-start";
+import { SidebarInbound, createSidebarInbound } from "./sidebar-inbound";
 import { WorktreeHost, SESSION_META_KEY } from "./worktree-host";
 import { ProviderSetup } from "./provider-setup";
 import { TurnEdit, createTurnEdit } from "./turn-edit";
 import { AgentAuthoring, createAgentAuthoring } from "./agent-authoring";
-import {
-  ProviderSession,
-  createProviderSession,
-  type CliCompatibilityResult
-  } from "./provider-session";
+import { ProviderSession, createProviderSession, type CliCompatibilityResult } from "./provider-session";
 import { VoiceAndMcp, type VoiceStreamContext } from "./voice-and-mcp";
 import { WebviewHtml } from "./webview-html";
 import { QuestionHost } from "./question-host";
@@ -31,14 +22,14 @@ import { ReviewHost } from "./review-host";
 import { WorkflowStageRunner } from "./workflow-stage-runner";
 import { RoutineScheduler } from "./routine-scheduler";
 import { createSidebarTestHooks, type SidebarTestHooks } from "./sidebar-test-hooks";
-import {
+import  {
   SubagentHost,
   createSubagentHost,
   type SubagentHostDeps,
   type SubagentState,
   SUBAGENT_INDEX_KEY
 } from "./subagent-host";
-import type {
+import type  {
   Host,
   HostContext,
   HostDisposable,
@@ -50,17 +41,22 @@ import { Uri, disposeAll, shouldRehydrateOnWebviewReady } from "./host";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { AcpClient, ExitPlanRequest, PermissionRequest, QuestionRequest } from "./acp";
+import  {
+  AcpClient,
+  ExitPlanRequest,
+  PermissionRequest,
+  QuestionRequest
+} from "./acp";
 import type { AcpProvider } from "./acp-backend";
-import { isAdapterProvider, } from "./acp-backend";
+import { isAdapterProvider } from "./acp-backend";
 import { providerCapability } from "./provider-capabilities";
-import {
+import  {
   dropReviewTurnsAfter,
   filesForScope,
   reviewCenterSnapshot,
   type ReviewScope
 } from "./review-center";
-import {
+import  {
   PermissionHost,
   createPermissionHost,
   GrokDiffContentProvider,
@@ -70,21 +66,18 @@ import {
   type AdoptionRecord,
   type PermissionRule,
   type PermissionRulesFs
-  } from "./permission-host";
-import {
-  ImplicitContext,
-  createImplicitContext
-  } from "./implicit-context";
+} from "./permission-host";
+import { ImplicitContext, createImplicitContext } from "./implicit-context";
 import { resolveCodexHome } from "./codex-cli-locator";
-import {
+import  {
   modelsForConnectedProviders,
   projectProviderKey,
   providerDisplayName,
   type ProviderConnections,
   type ProviderModelCache,
   type ProviderModelInfo
-  } from "./provider-ui";
-import {
+} from "./provider-ui";
+import  {
   toRoutineView,
   type Routine,
   type RoutineModelOption,
@@ -93,7 +86,7 @@ import {
 import { RoutineRunStore } from "./routine-store";
 import { CheckpointStore, nodeCheckpointFs } from "./checkpoint-store";
 import { PersistedState } from "./persisted-state";
-import {
+import  {
   Session,
   SessionStartIntent,
   SessionStatus,
@@ -109,8 +102,13 @@ import {
   turnIsInFlight,
   type QuestionResponder
 } from "./session";
-import { buildReapCandidates, selectReapable, computeDot, Dot } from "./session-pool";
-import {
+import  {
+  buildReapCandidates,
+  selectReapable,
+  computeDot,
+  Dot
+} from "./session-pool";
+import  {
   resolveVoiceKey,
   extractGrokAuthKey,
   pickSttBackend,
@@ -122,16 +120,29 @@ import {
 import { VoiceRecorder } from "./voice-recorder";
 import { VoiceStreamer } from "./voice-streamer";
 import type { PromptResultMeta, PromptUsage, SessionInfoContext } from "./acp-dispatch";
-import { DEFAULT_COMPACT_THRESHOLD, GROK_COMPACT_ENV, grokCompactThresholdEnv, } from "./grok-compaction";
+import { DEFAULT_COMPACT_THRESHOLD, GROK_COMPACT_ENV, grokCompactThresholdEnv } from "./grok-compaction";
 
 import { ChildRelayTable, type RelayKind, type RelayOrigin } from "./child-relay";
 import { normalizeStallWarningSec, type PausableDeadline } from "./child-watch";
 import { subagentTurnSummary } from "./companion-subagents";
 import { bothDelegationsHint, grokSubagentEnv } from "./grok-subagent-env";
-import { MediaRef, enforceCompleteSessionCost, errorDetail, permissionOutcomeFor, rateLimitNoticeText, sumUsage, type TurnEndStatus, } from "./acp-dispatch";
-import { configWriteTarget, rememberedEffort, withRememberedEffort, type EffortPrefs } from "./mode-prefs";
+import  {
+  MediaRef,
+  enforceCompleteSessionCost,
+  errorDetail,
+  permissionOutcomeFor,
+  rateLimitNoticeText,
+  sumUsage,
+  type TurnEndStatus
+} from "./acp-dispatch";
+import  {
+  configWriteTarget,
+  rememberedEffort,
+  withRememberedEffort,
+  type EffortPrefs
+} from "./mode-prefs";
 import { oauthShadowsXaiApiKey } from "./auth-recovery";
-import {
+import  {
   classifyLimitError,
   CONTEXT_OVERFLOW_TEXT,
   isContextOverflowError,
@@ -140,26 +151,22 @@ import {
   limitOfferTitle,
   recommendedLimitAction
 } from "./limit-errors";
-import {
+import  {
   WELCOME_TIPS_KEY,
   WELCOME_TIPS_SHOWN_KEY,
   localDayKey,
   parseDismissedTips,
   shownOn
-  } from "./welcome-tips";
-import {
-  ProjectFolders,
-  EXTRA_PROJECT_FOLDERS_KEY,
-  REMOVED_PROJECT_FOLDERS_KEY,
-} from "./project-folders";
+} from "./welcome-tips";
+import { ProjectFolders, EXTRA_PROJECT_FOLDERS_KEY, REMOVED_PROJECT_FOLDERS_KEY } from "./project-folders";
 import type { GithubAuthState } from "./github-auth";
-import type { SubscriptionUsageCache, } from "./subscription-usage";
+import type { SubscriptionUsageCache } from "./subscription-usage";
 import { UsageHost, createUsageHost } from "./usage-host";
 import { SidebarStateHost, createSidebarStateHost } from "./sidebar-state-host";
 import { readWorkflowCompletion } from "./workflow-state";
 import { CliUpdateHost, createCliUpdateHost } from "./cli-update-host";
 import { GitRunGate, type GitTurnBaseline } from "./git-run";
-import {
+import  {
   APTABASE_APP_KEY_PROD,
   buildSessionStartEvent,
   osNameFromPlatform,
@@ -172,36 +179,19 @@ import {
 import { randomUUID } from "node:crypto";
 import { execGrokCli } from "./cli-process";
 import type { LocalGitWorktrees } from "./worktree-local";
-import {
-  isStdioBrokenGrokVersion,
-  parseGrokVersion,
-  GROK_STDIO_DOWNGRADE_TARGET
-} from "./cli-locator";
+import { isStdioBrokenGrokVersion, parseGrokVersion, GROK_STDIO_DOWNGRADE_TARGET } from "./cli-locator";
 import { OpenClock } from "./open-timing";
-import {
+import  {
   TerminalManager,
   grokShellEnvValue,
   resolvedTerminalShell,
   setTerminalShellPreference,
   type ShellPreference
 } from "./terminal-manager";
-import {
-  FileChip,
-  MAX_VISION_IMAGE_BYTES,
-  consumeChips,
-  extFromMime,
-  isVisionMime,
-  makeImageChip,
-  mimeFromPath,
-  allocateImageIndex
-} from "./chips";
-import {
-  isFileChip,
-  type ContextChip,
-  type ContextChipPayload
-} from "./context-chips";
-import { type PromptImageInput, } from "./prompt-builder";
-import {
+import { FileChip, consumeChips } from "./chips";
+import { type ContextChip, type ContextChipPayload } from "./context-chips";
+import { type PromptImageInput } from "./prompt-builder";
+import  {
   enqueueQueuedSend,
   explicitVisibleChips,
   queuedFlushText,
@@ -215,7 +205,7 @@ import { type WorkflowDefinition } from "./workflow";
 import { type ValidateWorkflowContext } from "./workflow-validate";
 import { type WorkflowDraft } from "./workflow-write";
 
-import {
+import  {
   applyGateAction,
   isTerminalRunStatus,
   WorkflowRunStore,
@@ -223,38 +213,36 @@ import {
   type RunLineupEntry,
   type WorkflowRun
 } from "./workflow-run";
-import {
-  type HandoffPacket,
-  type HandoffPlanStep
-} from "./workflow-handoff";
+import { type HandoffPacket, type HandoffPlanStep } from "./workflow-handoff";
 import { type AgentRoleDraft, type CrewFlowDraft, type RoleScope } from "./agent-role-write";
 import { FileClaimStore } from "./file-claims";
-import { AGENT_ROLES_DIR, loadAgentRoles, type AgentRole, type AgentRoleSet } from "./agent-roles";
+import  {
+  AGENT_ROLES_DIR,
+  loadAgentRoles,
+  type AgentRole,
+  type AgentRoleSet
+} from "./agent-roles";
 import { type AgentResult, type BriefingInput, type FileReconciliation } from "./briefing";
 import { type HandoffKind, type ThreadContext } from "./handoff";
 import { AgentRunStore, type AgentRunTrigger } from "./agent-run";
-import {
-  normalizeRelPath,
-  type ContextSourceId
-} from "./mention";
+import { type ContextSourceId } from "./mention";
 import { sessionScopedRoots } from "./auth-roots";
 import { parseFileRef } from "./file-ref";
-import {
-  retainedUploadDirectories,
-  stagedUploadDirectory,
-  unreferencedUploadsForRemovedSessions
-} from "./file-upload";
-import { isPlanReviewPermission, } from "./plan-gate";
-import { appendPlanEntry, truncateResolvedAfter, } from "./plan-restore";
-import {
-  planReviewFileName,
-  planReviewSessionDirectoryName
-} from "./plan-review";
+
+import { isPlanReviewPermission } from "./plan-gate";
+import { appendPlanEntry, truncateResolvedAfter } from "./plan-restore";
+import { planReviewFileName, planReviewSessionDirectoryName } from "./plan-review";
 import { AsyncSerialQueue } from "./async-serial";
-import { HostMsg, INTERRUPTED_SEND_CODE, WebviewMsg, type GithubState, type WorkflowLineupView } from "./protocol";
+import  {
+  HostMsg,
+  INTERRUPTED_SEND_CODE,
+  WebviewMsg,
+  type GithubState,
+  type WorkflowLineupView
+} from "./protocol";
 import { withoutArchiveFields } from "./project-discovery";
 import { SessionRequestState } from "./session-request-state";
-import {
+import  {
   SessionListEntry,
   SessionMetaOverrides,
   RepoArchives,
@@ -278,7 +266,7 @@ import {
   sessionCatalogDirs,
   sessionDirFor
 } from "./sessions";
-import {
+import  {
   applySessionTypeSwitch,
   defaultSessionTypeFromSetting,
   effectiveSessionType,
@@ -291,54 +279,36 @@ import {
 import { type AwaitArguments, type ListArguments, type SpawnArguments } from "./companions-protocol";
 import { CompanionsHostServer, type CompanionsCall } from "./companions-server";
 import { HostPipeMux } from "./host-pipe-mux";
-import {
-  type SubagentDirective
-} from "./subagent-directives";
-import {
-  SubagentRegistry,
-  formatSubagentDiagnosis,
-  type CompanionsSkipReason
-} from "./companion-subagents";
-import { listEligibleTargets, resolveTarget, type EligibilityInput, type EligibilityResult, type RefusalCode, type RosterEntry, type SpawnLimits } from "./target-eligibility";
-import {
-  isTrustedGeneratedMediaPath,
-  resolveChatOpenFilePath
-} from "./media-serve";
-import {
-  type FfmpegResolution
-} from "./ffmpeg-locate";
-import {
-        gitRootForPath,
+import { type SubagentDirective } from "./subagent-directives";
+import { SubagentRegistry, formatSubagentDiagnosis, type CompanionsSkipReason } from "./companion-subagents";
+import  {
+  listEligibleTargets,
+  resolveTarget,
+  type EligibilityInput,
+  type EligibilityResult,
+  type RefusalCode,
+  type RosterEntry,
+  type SpawnLimits
+} from "./target-eligibility";
+import { resolveChatOpenFilePath } from "./media-serve";
+import { type FfmpegResolution } from "./ffmpeg-locate";
+import  {
+  gitRootForPath,
   matchWorktreeForCwd,
   normalizeFsPath,
   pathsEqual,
-              type WorktreeParentRef,
+  type WorktreeParentRef,
   type WorktreeRecord,
   worktreeCwdsForRepo,
-    worktreesForRepo
+  worktreesForRepo
 } from "./worktree";
-import {
-  cwdIsAuthorized,
-  imagePathStillAuthorized,
-  pathBoundToClosedFolder
-} from "./workspace-auth";
-import {
-  historyEventCount,
-  checkWorkspaceGitStatus,
-  truncateReplayBuffer
-  } from "./rewind";
-import {
-  decideFeedbackAvailability
-  } from "./feedback";
-import {
-  type RunProgressUpdate,
-  workflowControlCommand
-} from "./run-progress";
-import {
-  type AppPurpose
-} from "./app-purpose";
+import { cwdIsAuthorized } from "./workspace-auth";
+import { historyEventCount, checkWorkspaceGitStatus, truncateReplayBuffer } from "./rewind";
+import { decideFeedbackAvailability } from "./feedback";
+import { type RunProgressUpdate, workflowControlCommand } from "./run-progress";
+import { type AppPurpose } from "./app-purpose";
 import { type McpServerView } from "./mcp";
-import type {
+import type  {
   ConnectedConnectorStore,
   ConnectorDef,
   ConnectorId,
@@ -385,29 +355,6 @@ const REPO_PREVIEW_SIZE = 3;
  *  itself. Generous: an honoured cancel comes back well inside a second, so this
  *  only ever fires when the turn was going to wedge anyway. */
 const CANCEL_SETTLE_GRACE_MS = 10_000;
-
-// Scheme for the permission-card diff preview's virtual documents. Backing the
-// before/after sides with a read-only content provider (rather than untitled
-// scratch buffers) means the diff tab never goes "dirty", so closing it doesn't
-// prompt to save (issue #21). The path keeps the real filename so VS Code infers
-// the language for syntax highlighting.
-/** Best-effort MIME from a file extension, for inlining generated media. */
-function guessMediaMime(p: string): string {
-  const ext = p.toLowerCase().split(".").pop() ?? "";
-  switch (ext) {
-    case "jpg":
-    case "jpeg": return "image/jpeg";
-    case "gif": return "image/gif";
-    case "webp": return "image/webp";
-    case "bmp": return "image/bmp";
-    case "svg": return "image/svg+xml";
-    case "mp4":
-    case "m4v": return "video/mp4";
-    case "mov": return "video/quicktime";
-    case "webm": return "video/webm";
-    default: return "image/png";
-  }
-}
 
 /** Find sensitive credential/key/env files in a workspace root */
 export function findWorkspaceSensitiveFiles(workspaceRoot?: string): string[] {
@@ -513,8 +460,7 @@ export class GrokSidebar {
    */
   private static readonly MAX_LIVE_SESSIONS = 8;
   private static readonly IDLE_TTL_MS = 60 * 60 * 1000; // 1h
-  private static readonly REAP_INTERVAL_MS = 5 * 60 * 1000; // sweep every 5 min
-  private static readonly STAGING_ORPHAN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+  private static readonly REAP_INTERVAL_MS = 5 * 60 * 1000;
   // The empty-session sweep only scans the newest N by mtime, keeping it bounded
   // on a large store.
   public static readonly SWEEP_SCAN_LIMIT = 300;
@@ -543,8 +489,6 @@ export class GrokSidebar {
   set compactMismatchNoticeShown(v: boolean) { this.usageHost.compactMismatchNoticeShown = v; }
   private get chips(): ContextChip[] { return this.focused.chips; }
   private set chips(value: ContextChip[]) { this.focused.chips = value; }
-  /** Attachment-staging ops still in flight — see trackAttach. */
-  private readonly pendingAttach = new Set<Promise<void>>();
   get mentionIndex(): { at: number; rels: string[]; absByRel: Map<string, string> } | null {
     return this.implicitContext.mentionIndex;
   }
@@ -598,12 +542,6 @@ export class GrokSidebar {
   private configWatcher?: HostDisposable;
   /** Cold session/load claims the persisted id before ACP has emitted `session`. */
   private readonly sessionLoadReservations = new Map<string, SessionLoadReservation>();
-  /**
-   * Per-Session start tail. Boot, client-ready, resume, and ensureClient all
-   * share it with handleSend so a send cannot commit an echo while a start
-   * is still replacing the process.
-   */
-  private sessionStartTails?: WeakMap<Session, Promise<void>>;
   private static readonly SESSION_LOAD_RESERVATION_TTL_MS = 10 * 60_000;
   private testSessionStartDelay?: {
     resumeId: string | undefined;
@@ -6436,10 +6374,6 @@ ${detail}`,
     this.postSessionsList();
   }
 
-  private sessionStartTailMap(): WeakMap<Session, Promise<void>> {
-    return (this.sessionStartTails ??= new WeakMap());
-  }
-
   private runExclusiveSessionStart<R>(session: Session, action: () => Promise<R>): Promise<R> {
     return this.sessionStart.runExclusiveSessionStart(session, action);
   }
@@ -7482,11 +7416,7 @@ ${detail}`,
    *  this set before snapshotting chips: the chip must make THIS send, not the
    *  next one. */
   private trackAttach(op: Promise<unknown>): Promise<void> {
-    const tracked = op.then(() => undefined);
-    this.pendingAttach.add(tracked);
-    const done = () => { this.pendingAttach.delete(tracked); };
-    void tracked.then(done, done);
-    return tracked;
+    return this.fileUploadHost.trackAttach(op);
   }
 
   /**
@@ -7498,13 +7428,11 @@ ${detail}`,
    * with no live session at all (paste during startup/onboarding just works).
    */
   private imageStagingDir(): string {
-    // Node-fs staging path — genuine local disk on the extension host (v3.1.0
-    // also used globalStorageUri.fsPath here; not a workspace.fs address).
-    return path.join(this.context.globalStorageUri.fsPath, "image-staging");
+    return this.fileUploadHost.imageStagingDir();
   }
 
   private fileStagingDir(): string {
-    return path.join(this.context.globalStorageUri.fsPath, "file-staging");
+    return this.fileUploadHost.fileStagingDir();
   }
 
   /** Delete staged images older than 7 days. A pending attachment lives for
@@ -7512,58 +7440,17 @@ ${detail}`,
    *  closed). The age gate keeps a second VS Code window's fresh staging
    *  files safe — globalStorage is shared across windows. */
   private async sweepImageStaging(): Promise<void> {
-    const dir = this.imageStagingDir();
-    try {
-      const cutoff = Date.now() - GrokSidebar.STAGING_ORPHAN_TTL_MS;
-      for (const name of await fs.promises.readdir(dir)) {
-        const p = path.join(dir, name);
-        try {
-          if ((await fs.promises.stat(p)).mtimeMs < cutoff) await fs.promises.unlink(p);
-        } catch { /* raced or locked — next sweep gets it */ }
-      }
-    } catch { /* staging dir doesn't exist yet */ }
+    return this.fileUploadHost.sweepImageStaging();
   }
 
   /** Keep sent documents for their session's lifetime; only abandoned staging
    * directories use the seven-day orphan policy shared with images. */
   private async sweepFileStaging(): Promise<void> {
-    const root = this.fileStagingDir();
-    const overrides = this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
-    const retained = retainedUploadDirectories(root, overrides);
-    try {
-      const cutoff = Date.now() - GrokSidebar.STAGING_ORPHAN_TTL_MS;
-      for (const name of await fs.promises.readdir(root)) {
-        const dir = path.join(root, name);
-        // Reuse the owned-path validator with a synthetic leaf: unknown entries
-        // in globalStorage are not ours to remove.
-        const owned = stagedUploadDirectory(root, path.join(dir, "_"));
-        if (!owned) continue;
-        const key = process.platform === "win32" ? path.resolve(owned).toLowerCase() : path.resolve(owned);
-        if (retained.has(key)) continue;
-        try {
-          if ((await fs.promises.stat(owned)).mtimeMs < cutoff) {
-            await fs.promises.rm(owned, { recursive: true, force: true });
-          }
-        } catch { /* raced or locked — next activation gets it */ }
-      }
-    } catch { /* staging dir doesn't exist yet */ }
+    return this.fileUploadHost.sweepFileStaging();
   }
 
   private async retainUploadedFilesForSession(session: Session, chips: ContextChip[]): Promise<void> {
-    const sid = session.activeSessionId ?? session.client?.sessionId;
-    if (!sid) return;
-    const uploaded = chips
-      .filter(isFileChip)
-      .filter((chip) => !chip.hidden && !!stagedUploadDirectory(this.fileStagingDir(), chip.path))
-      .map((chip) => chip.path);
-    if (!uploaded.length) return;
-    const overrides = this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
-    const cur = overrides[sid] ?? {};
-    const files = [...new Set([...(cur.uploadedFiles ?? []), ...uploaded])];
-    await this.state.update(SESSION_META_KEY, {
-      ...overrides,
-      [sid]: { ...cur, uploadedFiles: files }
-    });
+    return this.fileUploadHost.retainUploadedFilesForSession(session, chips);
   }
 
   /** Remove UUID upload directories owned only by the sessions being deleted.
@@ -7572,19 +7459,7 @@ ${detail}`,
     ids: Iterable<string>,
     overrides: SessionMetaOverrides,
   ): Promise<void> {
-    const files = unreferencedUploadsForRemovedSessions(overrides, ids);
-    const dirs = new Set(
-      files
-        .map((file) => stagedUploadDirectory(this.fileStagingDir(), file))
-        .filter((dir): dir is string => !!dir),
-    );
-    for (const dir of dirs) {
-      try {
-        await fs.promises.rm(dir, { recursive: true, force: true });
-      } catch (e) {
-        this.host.appendLine(`[upload] could not remove staged document directory: ${(e as Error).message}`);
-      }
-    }
+    return this.fileUploadHost.removeUploadsForSessions(ids, overrides);
   }
 
   /** Write image bytes into staging and attach the chip. The `[Image #N]`
@@ -7596,34 +7471,7 @@ ${detail}`,
     owner: AttachmentOwner = () => this.focused,
     previewId?: string,
   ): Promise<Session | undefined> {
-    const dir = this.imageStagingDir();
-    await fs.promises.mkdir(dir, { recursive: true });
-    const absPath = path.join(dir, `image-${randomUUID()}${extFromMime(mimeType)}`);
-    await fs.promises.writeFile(absPath, bytes);
-    const session = owner();
-    if (!session) {
-      // The asking tab left while this was writing. Delivering it anywhere else
-      // would put its image in someone else's conversation; the staged copy is
-      // left for the seven-day sweep rather than deleted, in case the write
-      // raced a reconnect that is about to come back.
-      return undefined;
-    }
-    const rel = originPath
-      ? normalizeRelPath(path.relative(this.sessionCwd(session), originPath))
-      : undefined;
-    // asRelativePath returns the input unchanged for files outside the
-    // workspace — only carry the origin when it's a real workspace-relative path.
-    const originRelPath = rel && rel !== ".." && !rel.startsWith("../") && !path.isAbsolute(rel)
-      ? rel
-      : undefined;
-    const allocated = allocateImageIndex(session.imageIndexHighWater, [
-      ...session.chips,
-      ...session.queuedSends.flatMap((item) => item.chips),
-    ]);
-    session.imageIndexHighWater = allocated.highWater;
-    session.chips.push(makeImageChip(absPath, allocated.index, mimeType, originRelPath, previewId));
-    this.postChips(session);
-    return session;
+    return this.fileUploadHost.stageImageAttachment(bytes, mimeType, originPath, owner, previewId);
   }
 
   /** Clipboard paste from the webview (base64 + mime, already prefiltered to
@@ -7635,23 +7483,7 @@ ${detail}`,
     owner: AttachmentOwner = () => this.focused,
     previewId?: string,
   ): Promise<void> {
-    try {
-      if (!isVisionMime(mimeType)) {
-        this.notifyUser("error", `Grok: unsupported image type ${mimeType} — use PNG, JPEG, GIF, or WebP.`);
-        return;
-      }
-      const bytes = Buffer.from(base64, "base64");
-      if (bytes.length === 0) return;
-      if (bytes.length > MAX_VISION_IMAGE_BYTES) {
-        this.notifyUser("error", "Grok: pasted image exceeds the 20 MiB vision limit.");
-        return;
-      }
-      const session = await this.stageImageAttachment(bytes, mimeType, undefined, owner, previewId);
-      if (session === this.focused) this.revealAndFocusComposer();
-    } catch (e) {
-      this.host.appendLine(`[image] paste failed: ${(e as Error).message}`);
-      this.notifyUser("error", `Grok: could not attach the pasted image — ${(e as Error).message}`);
-    }
+    return this.fileUploadHost.addPastedImage(base64, mimeType, owner, previewId);
   }
 
   /** Copy an on-disk raster image into staging as a vision attachment, keeping
@@ -7665,10 +7497,7 @@ ${detail}`,
     srcPath: string,
     owner: AttachmentOwner = () => this.focused,
   ): Promise<Session | false | undefined> {
-    const stat = await fs.promises.stat(srcPath);
-    if (!stat.isFile() || stat.size === 0 || stat.size > MAX_VISION_IMAGE_BYTES) return false;
-    const bytes = await fs.promises.readFile(srcPath);
-    return this.stageImageAttachment(bytes, mimeFromPath(srcPath), srcPath, owner);
+    return this.fileUploadHost.importImageFromDisk(srcPath, owner);
   }
 
   private async addDroppedFile(
@@ -9178,87 +9007,24 @@ ${detail}`,
     return env;
   }
 
-  /** How many enlargeable images a session remembers. Bounded because the map
-   *  is keyed by a handle we mint per path and never otherwise expire. */
-  private static readonly FULL_IMAGE_HANDLE_LIMIT = 300;
-
-  /** handle -> path, and its inverse so the same picture keeps one handle
-   *  across replays instead of minting a new one on every reconnect. */
-  private readonly fullImagePaths = new Map<string, string>();
-  private readonly fullImageHandles = new Map<string, string>();
-
   /** Mint (or reuse) the handle for a path we are about to show a remote. */
   private registerFullImage(imagePath: string): string {
-    const existing = this.fullImageHandles.get(imagePath);
-    if (existing) return existing;
-    const handle = randomUUID().replace(/-/g, "");
-    this.fullImageHandles.set(imagePath, handle);
-    this.fullImagePaths.set(handle, imagePath);
-    while (this.fullImagePaths.size > GrokSidebar.FULL_IMAGE_HANDLE_LIMIT) {
-      const oldest = this.fullImagePaths.keys().next().value;
-      if (oldest === undefined) break;
-      const stalePath = this.fullImagePaths.get(oldest);
-      this.fullImagePaths.delete(oldest);
-      if (stalePath && this.fullImageHandles.get(stalePath) === oldest) {
-        this.fullImageHandles.delete(stalePath);
-      }
-    }
-    return handle;
+    return this.fileUploadHost.registerFullImage(imagePath);
   }
 
   /** Fetch-time revalidation for remote image handles (open-set + session media). */
   private isImagePathAuthorizedNow(imagePath: string, session?: Session): boolean {
-    if (this.isImagePathInOpenSet(imagePath)) return true;
-    // Pasted attachments live in global storage, outside the project. Require
-    // staging containment AND a reference in the asking session, so one
-    // session cannot read another's images (upstream 330e709).
-    if (!session || !this.isAuthorizedCwd(this.sessionCwd(session))) return false;
-    try {
-      if (!pathBoundToClosedFolder(fs.realpathSync(imagePath), fs.realpathSync(this.imageStagingDir()), pathsEqual)) return false;
-    } catch { return false; }
-    const owns = (images: readonly unknown[]) => images.some((image) => (image as { path?: unknown }).path === imagePath);
-    return owns(session.chips)
-      || session.queuedSends.some((item) => owns(item.chips))
-      || session.buffer.some((m) =>
-        m.type === "userMessage" ? owns(m.chips ?? [])
-          : m.type === "userMessageChunk" ? owns((m as { images?: { path?: string }[] }).images ?? []) : false);
+    return this.fileUploadHost.isImagePathAuthorizedNow(imagePath, session);
   }
 
   /** Whole original image as a data URI, for the clipboard. Undefined when
    *  unsupported or over the budget: never resized to fit. */
   private async readOriginalImage(imagePath: string): Promise<string | undefined> {
-    try {
-      const mime = guessMediaMime(imagePath);
-      if (!/^image\/(png|jpeg|gif|webp|bmp)$/.test(mime)) return undefined;
-      const limit = 25 * 1024 * 1024;
-      if ((await fs.promises.stat(imagePath)).size > limit) return undefined;
-      const bytes = await fs.promises.readFile(imagePath);
-      if (!bytes.length || bytes.length > limit) return undefined;
-      return `data:${mime};base64,${bytes.toString("base64")}`;
-    } catch {
-      return undefined;
-    }
+    return this.fileUploadHost.readOriginalImage(imagePath);
   }
 
   private isImagePathInOpenSet(imagePath: string): boolean {
-    const authorized = this.authorizedSessionCwds();
-    let home: string | undefined;
-    try {
-      home = resolveGrokHome(process.env);
-    } catch {
-      home = undefined;
-    }
-    return imagePathStillAuthorized(imagePath, authorized, {
-      grokHome: home,
-      sameCwd: pathsEqual,
-      isTrustedGeneratedMedia: (p) => {
-        try {
-          return !!home && isTrustedGeneratedMediaPath(p, home, (c) => fs.realpathSync(c));
-        } catch {
-          return false;
-        }
-      }
-    });
+    return this.fileUploadHost.isImagePathInOpenSet(imagePath);
   }
 
   /**
@@ -9322,6 +9088,33 @@ ${detail}`,
 
   private getHtml(webview: HostWebview): string {
     return this.webviewHtml.getHtml(webview);
+  }
+
+
+  private _fileUploadHost?: FileUploadHost;
+  get fileUploadHost(): FileUploadHost { return this._fileUploadHost ??= this.createFileUploadHost(); }
+  set fileUploadHost(value: FileUploadHost) { this._fileUploadHost = value; }
+  get pendingAttach(): Set<Promise<void>> { return this.fileUploadHost.pendingAttach; }
+  set pendingAttach(value: Set<Promise<void>>) { this.fileUploadHost.pendingAttach = value; }
+  get fullImagePaths(): Map<string, string> { return this.fileUploadHost.fullImagePaths; }
+  set fullImagePaths(value: Map<string, string>) { this.fileUploadHost.fullImagePaths = value; }
+  get fullImageHandles(): Map<string, string> { return this.fileUploadHost.fullImageHandles; }
+  set fullImageHandles(value: Map<string, string>) { this.fileUploadHost.fullImageHandles = value; }
+  private createFileUploadHost(): FileUploadHost {
+    const self = this;
+    return createFileUploadHost({
+      get host() { return self.host; },
+      get context() { return self.context; },
+      get state() { return self.state; },
+      getFocused: () => self.focused,
+      sessionCwd: (session) => self.sessionCwd(session),
+      isAuthorizedCwd: (cwd) => self.isAuthorizedCwd(cwd),
+      authorizedSessionCwds: () => self.authorizedSessionCwds(),
+      postChips: (session) => self.postChips(session),
+      notifyUser: (level, text) => self.notifyUser(level, text),
+      revealAndFocusComposer: () => self.revealAndFocusComposer(),
+      getOverride: (name) => self.sidebarTestOverride(name),
+    });
   }
 }
 
