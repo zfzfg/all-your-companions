@@ -1,28 +1,51 @@
+import { HostMsg } from "./protocol";
+import { OpenClock } from "./open-timing";
+import { configWriteTarget, withRememberedEffort, type EffortPrefs } from "./mode-prefs";
+import { errorDetail } from "./acp-dispatch";
+import { SessionStartIntent } from "./session";
+
+import { modelsForConnectedProviders, type ProviderModelInfo } from "./provider-ui";
+import { type SessionsListOptions } from "./session-catalog";
+export interface ProviderSessionSidebarOps {
+  readonly state: MementoLike;
+  readonly providerCliVersions: Partial<Record<"grok" | "codex" | "claude" | "gemini" | "muse", string>>;
+  readonly focused: Session;
+  readonly pool: Set<Session>;
+  emit: (session: Session, message: HostMsg) => void;
+  usableProviders: () => AcpProvider[];
+  readonly host: Host;
+  locateProvider: (provider: AcpProvider) => string | undefined;
+  postProviderState: () => void;
+  post: (message: HostMsg) => void;
+  setProviderConnectedInMemory: (provider: AcpProvider, connected: boolean) => void;
+  resetProviderSessionsAfterLogout: (provider: AcpProvider) => Promise<void>;
+  persistProviderConnections: () => Promise<void>;
+  postSessionsList: (opts?: SessionsListOptions) => void;
+  openWorkspaceFolders: () => string[];
+  rememberProjectProvider: (cwd: string, provider: AcpProvider, modelId?: string) => Promise<void>;
+  sessionCwd: (session?: Session) => string;
+  startSession: (resumeId?: string, target?: Session, intent?: SessionStartIntent, clock?: OpenClock) => Promise<AcpClient | undefined>;
+  scheduleAdapterHistoryRefresh: (provider: AcpProvider, cwd: string) => void;
+  restoreStrandedDraft: (session: Session) => void;
+  rememberGrokConfig: (key: "defaultEffort" | "defaultModel" | "defaultMode", value: string) => Promise<void>;
+}
 import { Session, createPendingPermission } from "./session";
 import type { Host } from "./host";
 import type { MementoLike } from "./persisted-state";
-import {
-  type AcpProvider,
-  isAdapterProvider,
-  supportsModeSwitching,
-} from "./acp-backend";
-import {
-  providerDisplayName,
-  type ProviderModelCache,
-  PROVIDER_ORDER,
-} from "./provider-ui";
+import { type AcpProvider, isAdapterProvider, supportsModeSwitching } from "./acp-backend";
+import { providerDisplayName, type ProviderModelCache, PROVIDER_ORDER } from "./provider-ui";
 import { PROVIDER_MODEL_CACHE_KEY } from "./subagent-host";
 import { isIncompatibleAgentError } from "./acp-dispatch";
 import type { AcpClient, PermissionRequest } from "./acp";
-import {
+import  {
   effectivePlanActive,
   isPlanReviewPermission,
   permissionOptionsForPlan,
   pickRejectOption,
   planTextFromPermissionToolCall,
-  shouldRejectPermission,
+  shouldRejectPermission
 } from "./plan-gate";
-import {
+import  {
   CLI_VERSION_CACHE_KEY,
   GROK_REQUIRED_VERSION,
   extensionWasUpgraded,
@@ -30,19 +53,19 @@ import {
   parseGrokVersion,
   readCliBinaryIdentity,
   resolvePlanModeAvailability,
-  type CliVersionCache,
+  type CliVersionCache
 } from "./cli-locator";
 import { execGrokCli } from "./cli-process";
 import { modeToRemember } from "./mode-prefs";
 import { enqueueQueuedSend, queuedSendsText } from "./queued-send";
 import { resolveGrokHome } from "./sessions";
 import { resolvedTerminalShellDialect } from "./terminal-manager";
-import {
+import  {
   decidePermission,
   extractPermissionFacts,
   permissionRulesNotice,
   suggestRules,
-  pickAllowOnceOption,
+  pickAllowOnceOption
 } from "./permission-rules";
 import { allProviderCapabilities } from "./provider-capabilities";
 import { authorizedListCwd } from "./workspace-auth";
@@ -120,6 +143,8 @@ export interface ProviderSessionDeps {
   sessionOps: ProviderSessionSessionOps;
   uiOps: ProviderSessionUiOps;
   providerOps: ProviderSessionProviderOps;
+
+  readonly sidebarOps: ProviderSessionSidebarOps;
 }
 
 export class ProviderSession {
@@ -911,6 +936,329 @@ export class ProviderSession {
     if (gen !== session.gen) return false;
     this.applyPlanModeCompatibility(session, compatibility);
     return true;
+  }
+
+
+public cacheProviderModels(
+    provider: AcpProvider,
+    models: readonly ProviderModelInfo[] | readonly any[],
+    currentModelId?: string,
+  ): PromiseLike<void> {
+    const override = this.deps.getOverride?.<typeof this.cacheProviderModels>("cacheProviderModels");
+    if (override) return override(provider, models, currentModelId);
+
+    const current = this.deps.sidebarOps.state.get<ProviderModelCache>(PROVIDER_MODEL_CACHE_KEY, {});
+    const clean = models.map(({ provider: _provider, defaultImplied: _default, ...model }: any) => model);
+    const stored = this.deps.sidebarOps.state.update(PROVIDER_MODEL_CACHE_KEY, {
+      ...current,
+      [provider]: {
+        models: clean,
+        currentModelId,
+        seenAt: Date.now(),
+        // Stamp the CLI this catalog came from, so a later update can be seen.
+        cliVersion: this.deps.sidebarOps.providerCliVersions[provider]
+      }
+    } satisfies ProviderModelCache);
+    // The picker reads this cache, and an adapter's models arrive
+    // ASYNCHRONOUSLY — the warm-up runs after the connect returns. Re-posting
+    // only at connect time therefore published an empty list, and the newly
+    // connected agent appeared in the picker only after a New session, which is
+    // exactly what the owner saw with Codex. Push the catalog again once the
+    // models actually exist.
+    // A provider the cache had NOTHING for is a newly connected agent, and it
+    // must appear in the picker of the conversation the person is looking at —
+    // not only in an empty one. The owner connected Codex from a session with
+    // history and it stayed missing until he reloaded (2026-08-31). Adding
+    // options cannot disturb a live thread: the current model is re-sent
+    // unchanged, so nothing about the running conversation moves.
+    const providerIsNew = !current[provider] || (current[provider].models ?? []).length === 0;
+    void Promise.resolve(stored).then(() => {
+      const sessions = providerIsNew
+        ? this.sessionsForModelRefresh()
+        : this.emptySessionsForModelRefresh();
+      for (const session of sessions) this.postSessionModels(session);
+    });
+    return stored;
+  }
+
+/** Sessions whose picker may be refreshed in place: no history, so there is
+   *  nothing a changed model list could disturb. */
+  /** Every session with a live client. Used only when a provider appears for
+   *  the first time, where the change is purely additive. */
+  public sessionsForModelRefresh(): Session[] {
+    const override = this.deps.getOverride?.<typeof this.sessionsForModelRefresh>("sessionsForModelRefresh");
+    if (override) return override();
+
+    const seen = new Set<Session>();
+    for (const session of [this.deps.sidebarOps.focused, ...this.deps.sidebarOps.pool]) {
+      if (!session || seen.has(session)) continue;
+      seen.add(session);
+    }
+    return [...seen].filter((session) => session.client?.sessionId);
+  }
+
+public emptySessionsForModelRefresh(): Session[] {
+    const override = this.deps.getOverride?.<typeof this.emptySessionsForModelRefresh>("emptySessionsForModelRefresh");
+    if (override) return override();
+
+    const seen = new Set<Session>();
+    for (const session of [this.deps.sidebarOps.focused, ...this.deps.sidebarOps.pool]) {
+      if (!session || seen.has(session)) continue;
+      seen.add(session);
+    }
+    return [...seen].filter((session) => !session.hasHistory && session.client?.sessionId);
+  }
+
+public postSessionModels(session: Session): void {
+    const override = this.deps.getOverride?.<typeof this.postSessionModels>("postSessionModels");
+    if (override) return override(session);
+
+    const client = session.client;
+    // `hasHistory` no longer disqualifies a session: a NEW provider's models
+    // are additive and the selection is re-sent unchanged (see
+    // cacheProviderModels). Callers decide which sessions to refresh.
+    if (!client?.sessionId) return;
+    this.deps.sidebarOps.emit(session, {
+      type: "session",
+      sessionId: client.sessionId,
+      models: this.modelsForSession(session, client.availableModels, client.currentModelId, true),
+      currentModelId: client.currentModelId,
+      worktree: !!session.worktree,
+      provider: session.provider
+    });
+  }
+
+public modelsForSession(session: Session, ownModels: readonly any[], currentModelId?: string, newSession = false): ProviderModelInfo[] {
+    const override = this.deps.getOverride?.<typeof this.modelsForSession>("modelsForSession");
+    if (override) return override(session, ownModels, currentModelId, newSession);
+
+    if (!newSession) return ownModels.map((model) => ({ ...model, provider: session.provider }));
+    return modelsForConnectedProviders(
+      // Usable, not connected: a provider that cannot answer contributes no
+      // rows to the picker, so its heading and its stale cached models go with
+      // it (owner, 2026-08-17: "Not connected => Not visible").
+      this.deps.sidebarOps.usableProviders(),
+      this.deps.sidebarOps.state.get<ProviderModelCache>(PROVIDER_MODEL_CACHE_KEY, {}),
+      { provider: session.provider, models: ownModels, currentModelId },
+    );
+  }
+
+/**
+   * Sign out of the Grok CLI (`grok logout` — clears `~/.grok/auth.json`). The
+   * CLI owns auth, so we shell out to it, tear down the live session, and drop
+   * the webview back to the auth-required onboarding state. Resolves issue #13.
+   */
+  async logout(
+    provider: AcpProvider = "grok",
+    opts: { report?: (text: string) => void } = {},
+  ): Promise<void> {
+    const override = this.deps.getOverride?.<typeof this.logout>("logout");
+    if (override) return override(provider, opts);
+
+    // Every failure below goes through here.
+    const fail = (text: string) => {
+      this.deps.sidebarOps.host.appendLine(`[providers] ${text}`);
+      if (opts.report) opts.report(text);
+      else void this.deps.sidebarOps.host.showErrorMessage(text);
+    };
+    if (isAdapterProvider(provider)) {
+      const cliPath = this.deps.sidebarOps.locateProvider(provider);
+      const name = providerDisplayName(provider);
+      if (!cliPath) {
+        fail(`${name} sign-out could not run because the ${name} CLI was not found. The account remains connected.`);
+        return;
+      }
+      const choice = await this.deps.sidebarOps.host.showWarningMessage(
+        `Sign out of ${name}? This clears the ${name} CLI's cached credentials.`,
+        { modal: true },
+        "Sign Out",
+      );
+      if (choice !== "Sign Out") return;
+      const logoutArgs = (provider === "claude" || provider === "gemini") ? ["auth", "logout"] : ["logout"];
+      try {
+        await execGrokCli(cliPath, logoutArgs, { timeout: 30_000, windowsHide: true });
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === "ENOENT" || code === "EACCES" || code === "EPERM") {
+          this.deps.sidebarOps.host.createTerminal({ name: `${name} Logout`, shellPath: cliPath, shellArgs: logoutArgs }).show();
+          // The cause, in the log, next to the sentence that hides it. This
+          // branch fires when the resolved CLI cannot be executed at all —
+          // on Windows that is almost always an extensionless npm shim run
+          // without a shell — and the user-facing text cannot say that.
+          this.deps.sidebarOps.host.appendLine(`[providers] ${provider} logout spawn failed: ${cliPath} (${code}) ${errorDetail(error)}`);
+          fail(`${name} sign-out could not be observed, so it was opened in a terminal. The account remains connected until sign-out is confirmed.`);
+        } else {
+          fail(`${name} sign-out failed: ${errorDetail(error)}. The account remains connected.`);
+        }
+        this.deps.sidebarOps.postProviderState();
+        return;
+      }
+      await this.finishProviderLogout(provider, opts.report);
+      return;
+    }
+    const cliPath = this.deps.sidebarOps.locateProvider("grok");
+    if (!cliPath) {
+      this.deps.sidebarOps.post({ type: "onboarding", state: "missing-cli", platform: process.platform, provider: "grok" });
+      return;
+    }
+    const choice = await this.deps.sidebarOps.host.showWarningMessage(
+      "Sign out of Grok? This clears the CLI's cached credentials.",
+      { modal: true },
+      "Sign Out",
+    );
+    if (choice !== "Sign Out") return;
+    // shellPath/shellArgs, not sendText — a quoted path typed into PowerShell
+    // is parsed as a string literal rather than an invocation.
+    this.deps.sidebarOps.host.createTerminal({ name: "Grok Logout", shellPath: cliPath, shellArgs: ["logout"] });
+    await this.finishProviderLogout("grok", opts.report);
+  }
+
+public async finishProviderLogout(
+    provider: AcpProvider,
+    report?: (text: string) => void,
+  ): Promise<void> {
+    const override = this.deps.getOverride?.<typeof this.finishProviderLogout>("finishProviderLogout");
+    if (override) return override(provider, report);
+
+    this.deps.sidebarOps.setProviderConnectedInMemory(provider, false);
+    const reset = this.deps.sidebarOps.resetProviderSessionsAfterLogout(provider);
+    try {
+      await this.deps.sidebarOps.persistProviderConnections();
+    } catch (error) {
+      const providerName = providerDisplayName(provider);
+      const detail = errorDetail(error);
+      this.deps.sidebarOps.host.appendLine(`[providers] ${providerName} signed out, but saving connection state failed: ${detail}`);
+      const text = `${providerName} signed out and its conversations were reset, but the disconnected state could not be saved: ${detail}`;
+      if (report) report(text);
+      else await this.deps.sidebarOps.host.showErrorMessage(text);
+    }
+    await reset;
+    this.deps.sidebarOps.postSessionsList();
+  }
+
+/**
+   * A provider just became usable (Settings' "Check again",
+   * `recheckConnection`) — put every session that was waiting for one to work.
+   */
+  public async adoptSessionsForConnectedProvider(
+    provider: AcpProvider,
+    session: Session,
+  ): Promise<void> {
+    const override = this.deps.getOverride?.<typeof this.adoptSessionsForConnectedProvider>("adoptSessionsForConnectedProvider");
+    if (override) return override(provider, session);
+
+      // Every view stranded by a last-provider sign-out, not just this one.
+      const adopted = await this.retargetNeedsProviderSessions(provider);
+      // An empty conversation bound to a provider that cannot answer has
+      // nothing worth preserving, so hand it to the one just connected. This
+      // used to require `firstConnection`, computed from CONNECTED providers,
+      // so a lapsed Codex made connecting Grok look like a second account and
+      // the empty session stayed on Codex — asking for a codex login while
+      // the picker read Grok 4.6. What matters is whether the session's own
+      // provider can answer, not how many others are linked.
+      // Both halves matter: the session is stranded on something that cannot
+      // answer, AND the provider just re-checked can. A FAILED re-check leaves
+      // it unusable, and handing the empty session to it there would start a
+      // session against an agent that just refused to authenticate.
+      const nowUsable = this.deps.sidebarOps.usableProviders();
+      const strandedOnUnusable = !session.hasHistory
+        && !nowUsable.includes(session.provider)
+        && nowUsable.includes(provider);
+      // Say it worked. An empty session looks exactly like a re-check that did
+      // nothing, and this is the moment someone most wants confirmation. Only
+      // on a conversation with no history — a real transcript is its own
+      // evidence, and the panel would cover it.
+      // Announced once, after whichever branch ran, and only when the re-check
+      // actually succeeded. It was previously wired into two of the four
+      // outcomes and missed the most ordinary one — the session is already on
+      // this provider and simply starts — so the confirmation the owner asked
+      // for did not appear in the case he was testing.
+      const confirmConnected = () => {
+        if (session.hasHistory || !this.deps.sidebarOps.usableProviders().includes(provider)) return;
+        // No folder to start in — "You can start grokking!" would be a lie.
+        // startSession already painted no-project.
+        if (this.deps.sidebarOps.host.canSwitchWorkspaceFolder && !this.deps.sidebarOps.openWorkspaceFolders().length) return;
+        this.deps.sidebarOps.emit(session, {
+          type: "onboarding",
+          state: "provider-connected",
+          platform: process.platform,
+          provider
+        });
+      };
+      if (adopted.has(session)) {
+        this.deps.sidebarOps.postSessionsList();
+      } else if (strandedOnUnusable) {
+        session.provider = provider;
+        await this.deps.sidebarOps.rememberProjectProvider(this.deps.sidebarOps.sessionCwd(session), provider);
+        await this.deps.sidebarOps.startSession(undefined, session);
+      } else if (session.provider === provider && !session.client) {
+        // Retry a provider whose first real session exposed a credential error.
+        await this.deps.sidebarOps.startSession(session.hasHistory ? session.activeSessionId : undefined, session);
+      } else {
+        // Adding a second account must not restart or change a conversation
+        // with history on screen. But an EMPTY one has nothing to protect,
+        // and leaving its picker stale meant the newly connected agent's
+        // models only appeared after clicking New session — for a session
+        // that already was new. Re-post the catalog so the picker picks it up
+        // in place.
+        if (isAdapterProvider(provider)) this.deps.sidebarOps.scheduleAdapterHistoryRefresh(provider, this.deps.sidebarOps.sessionCwd(session));
+        if (!session.hasHistory) this.postSessionModels(session);
+        this.deps.sidebarOps.postSessionsList();
+      }
+      // Re-post after the branches, not just after setProviderConnected: the
+      // credential re-probe and any retarget above change what a provider row
+      // should say, and Settings → Providers reads this. Without it a freshly
+      // connected agent still showed its old state there until something else
+      // happened to refresh the panel.
+      this.deps.sidebarOps.postProviderState();
+      confirmConnected();
+  }
+
+public async retargetNeedsProviderSessions(provider: AcpProvider): Promise<Set<Session>> {
+    const override = this.deps.getOverride?.<typeof this.retargetNeedsProviderSessions>("retargetNeedsProviderSessions");
+    if (override) return override(provider);
+
+    const targets = new Set<Session>();
+    const consider = (session: Session | undefined) => {
+      if (session?.needsProvider) targets.add(session);
+    };
+    consider(this.deps.sidebarOps.focused);
+    for (const session of this.deps.sidebarOps.pool) consider(session);
+    if (!targets.size) return targets;
+    // Bind and lock all of them before the first start can await, for the same
+    // reason the sign-out path detaches before it starts: a send arriving
+    // mid-adoption must queue against a priming session, not fall back through
+    // the refusal path it is being rescued from.
+    for (const session of targets) {
+      session.provider = provider;
+      session.priming = true;
+      this.deps.sidebarOps.emit(session, { type: "setBusy", value: true, locked: true });
+    }
+    // `needsProvider` is cleared by a start that actually succeeds, so a refused
+    // one (closed folder, missing CLI) stays adoptable by the next re-check
+    // rather than becoming permanently unreachable.
+    for (const session of targets) {
+      const started = await this.deps.sidebarOps.startSession(undefined, session);
+      if (started && !session.needsProvider) this.deps.sidebarOps.restoreStrandedDraft(session);
+    }
+    return targets;
+  }
+
+/** Remember a reasoning-effort choice for the agent it was made in. The
+   *  legacy single `grok.defaultEffort` is kept in step for grok so an existing
+   *  setting keeps working and older hosts still read something sensible. */
+  public async persistEffort(provider: AcpProvider, level: string): Promise<void> {
+    const override = this.deps.getOverride?.<typeof this.persistEffort>("persistEffort");
+    if (override) return override(provider, level);
+
+    const cfg = this.deps.sidebarOps.host.getConfiguration("grok");
+    const next = withRememberedEffort(cfg.get<EffortPrefs>("defaultEffortByProvider", {}), provider, level);
+    try {
+      await cfg.update("defaultEffortByProvider", next, configWriteTarget(cfg.inspect<EffortPrefs>("defaultEffortByProvider")));
+      if (provider === "grok") await this.deps.sidebarOps.rememberGrokConfig("defaultEffort", level);
+    } catch {
+      // Best-effort persistence: a host settings write failure should not break the session effort switch
+    }
   }
 }
 

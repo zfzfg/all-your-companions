@@ -1,3 +1,4 @@
+import { unwiredOps } from "./unwired-ops";
 import { describe, expect, it, vi } from "vitest";
 import { createCliUpdateHost, type CliUpdateHostDeps } from "../src/cli-update-host";
 import { Session } from "../src/session";
@@ -10,6 +11,8 @@ describe("CliUpdateHost", () => {
     const appended: string[] = [];
     let focused = new Session();
     const deps: CliUpdateHostDeps = {
+    sidebarOps: unwiredOps<CliUpdateHostDeps["sidebarOps"]>(),
+
       host: {
         appendLine: (l: string) => appended.push(l),
         showInformationMessage: vi.fn(),

@@ -65,6 +65,11 @@ export function wireExtractedHosts(sidebar: any): void {
     detachClient: (...args) => sidebar.detachClient?.(...args),
   });
   sidebar.providerSetup = new ProviderSetup({
+    sidebarOps: {
+      get host() { return sidebar.host; },
+      grokCompactThresholdSetting: () => sidebar.grokCompactThresholdSetting?.() ?? 80,
+      companionsSetting: (_key, fallback) => fallback,
+    },
     get host() { return sidebar.host; },
     get context() { return sidebar.context; },
     get state() { return sidebar.state; },

@@ -120,12 +120,12 @@ import  {
 import { VoiceRecorder } from "./voice-recorder";
 import { VoiceStreamer } from "./voice-streamer";
 import type { PromptResultMeta, PromptUsage, SessionInfoContext } from "./acp-dispatch";
-import { DEFAULT_COMPACT_THRESHOLD, GROK_COMPACT_ENV, grokCompactThresholdEnv } from "./grok-compaction";
+import { DEFAULT_COMPACT_THRESHOLD } from "./grok-compaction";
 
 import { ChildRelayTable, type RelayKind, type RelayOrigin } from "./child-relay";
 import { normalizeStallWarningSec, type PausableDeadline } from "./child-watch";
 import { subagentTurnSummary } from "./companion-subagents";
-import { bothDelegationsHint, grokSubagentEnv } from "./grok-subagent-env";
+import { bothDelegationsHint } from "./grok-subagent-env";
 import  {
   MediaRef,
   enforceCompleteSessionCost,
@@ -135,12 +135,7 @@ import  {
   sumUsage,
   type TurnEndStatus
 } from "./acp-dispatch";
-import  {
-  configWriteTarget,
-  rememberedEffort,
-  withRememberedEffort,
-  type EffortPrefs
-} from "./mode-prefs";
+import { configWriteTarget, rememberedEffort, type EffortPrefs } from "./mode-prefs";
 import { oauthShadowsXaiApiKey } from "./auth-recovery";
 import  {
   classifyLimitError,
@@ -181,13 +176,7 @@ import { execGrokCli } from "./cli-process";
 import type { LocalGitWorktrees } from "./worktree-local";
 import { isStdioBrokenGrokVersion, parseGrokVersion, GROK_STDIO_DOWNGRADE_TARGET } from "./cli-locator";
 import { OpenClock } from "./open-timing";
-import  {
-  TerminalManager,
-  grokShellEnvValue,
-  resolvedTerminalShell,
-  setTerminalShellPreference,
-  type ShellPreference
-} from "./terminal-manager";
+import { TerminalManager, setTerminalShellPreference, type ShellPreference } from "./terminal-manager";
 import { FileChip, consumeChips } from "./chips";
 import { type ContextChip, type ContextChipPayload } from "./context-chips";
 import { type PromptImageInput } from "./prompt-builder";
@@ -718,7 +707,6 @@ export class GrokSidebar {
   get grokSessionForMcpListInFlight(): Promise<Session | undefined> | undefined { return this.voiceAndMcp.grokSessionForMcpListInFlight; }
   set grokSessionForMcpListInFlight(v: Promise<Session | undefined> | undefined) { this.voiceAndMcp.grokSessionForMcpListInFlight = v; }
   private readonly mcpConnectorKeysReady: Promise<void>;
-  private grokVersionProbe?: Promise<string>;
   get codexVersionProbe(): Promise<string> | undefined { return this.cliUpdateHost.codexVersionProbe; }
   set codexVersionProbe(v: Promise<string> | undefined) { this.cliUpdateHost.codexVersionProbe = v; }
   get claudeVersionProbe(): Promise<string> | undefined { return this.cliUpdateHost.claudeVersionProbe; }
@@ -1624,7 +1612,17 @@ settleSubagentWorktree: (...args: any[]) => (self as any).settleSubagentWorktree
       disposePool: () => self.disposePool(),
       startSession: (resumeId) => self.startSession(resumeId),
       getOverride: (name: string) => self.sidebarTestOverride(name)
-    });
+    ,
+sidebarOps: {hasProviderConsent: (...args) => self.hasProviderConsent(...args),
+probeCodexVersion: (...args) => self.probeCodexVersion(...args),
+probeClaudeVersion: (...args) => self.probeClaudeVersion(...args),
+probeGeminiVersion: (...args) => self.probeGeminiVersion(...args),
+probeMuseVersion: (...args) => self.probeMuseVersion(...args),
+locateProvider: (...args) => self.locateProvider(...args),
+readGrokVersion: (...args) => self.readGrokVersion(...args),
+postProviderState: (...args) => self.postProviderState(...args),
+get providerCliVersions() { return self.providerCliVersions; }}
+});
   }
 
   private createProjectFolders(): ProjectFolders {
@@ -1751,7 +1749,29 @@ settleSubagentWorktree: (...args: any[]) => (self as any).settleSubagentWorktree
         readGrokVersion: (...args) => self.readGrokVersion(...args),
         getProviderCliVersions: () => self.providerCliVersions
   }
-  });
+  ,
+sidebarOps: {get state() { return self.state; },
+get providerCliVersions() { return self.providerCliVersions; },
+get focused() { return self.focused; },
+get pool() { return self.pool; },
+emit: (...args) => self.emit(...args),
+usableProviders: (...args) => self.usableProviders(...args),
+get host() { return self.host; },
+locateProvider: (...args) => self.locateProvider(...args),
+postProviderState: (...args) => self.postProviderState(...args),
+post: (...args) => self.post(...args),
+setProviderConnectedInMemory: (...args) => self.setProviderConnectedInMemory(...args),
+resetProviderSessionsAfterLogout: (...args) => self.resetProviderSessionsAfterLogout(...args),
+persistProviderConnections: (...args) => self.persistProviderConnections(...args),
+postSessionsList: (...args) => self.postSessionsList(...args),
+openWorkspaceFolders: (...args) => self.openWorkspaceFolders(...args),
+rememberProjectProvider: (...args) => self.rememberProjectProvider(...args),
+sessionCwd: (...args) => self.sessionCwd(...args),
+startSession: (...args) => self.startSession(...args),
+scheduleAdapterHistoryRefresh: (...args) => self.scheduleAdapterHistoryRefresh(...args),
+restoreStrandedDraft: (...args) => self.restoreStrandedDraft(...args),
+rememberGrokConfig: (...args) => self.rememberGrokConfig(...args)}
+});
   }
 
   private createAgentAuthoring(): AgentAuthoring {
@@ -2001,7 +2021,11 @@ settleSubagentWorktree: (...args: any[]) => (self as any).settleSubagentWorktree
       buildEnv: (...args) => self.buildEnv(...args),
       removeSessionFromDisk: (...args) => self.removeSessionFromDisk(...args),
       getOverride: (name: string) => self.sidebarTestOverride(name)
-    });
+    ,
+sidebarOps: {grokCompactThresholdSetting: (...args) => self.grokCompactThresholdSetting(...args),
+companionsSetting: (...args) => self.companionsSetting(...args),
+get host() { return self.host; }}
+});
   }
 
   private createWorkflowStageRunner(): WorkflowStageRunner {
@@ -3213,38 +3237,7 @@ showQuestion: (session: Session, question: any, handlers: any) => self.showQuest
     models: readonly ProviderModelInfo[] | readonly any[],
     currentModelId?: string,
   ): PromiseLike<void> {
-    const current = this.state.get<ProviderModelCache>(PROVIDER_MODEL_CACHE_KEY, {});
-    const clean = models.map(({ provider: _provider, defaultImplied: _default, ...model }: any) => model);
-    const stored = this.state.update(PROVIDER_MODEL_CACHE_KEY, {
-      ...current,
-      [provider]: {
-        models: clean,
-        currentModelId,
-        seenAt: Date.now(),
-        // Stamp the CLI this catalog came from, so a later update can be seen.
-        cliVersion: this.providerCliVersions[provider]
-      }
-    } satisfies ProviderModelCache);
-    // The picker reads this cache, and an adapter's models arrive
-    // ASYNCHRONOUSLY — the warm-up runs after the connect returns. Re-posting
-    // only at connect time therefore published an empty list, and the newly
-    // connected agent appeared in the picker only after a New session, which is
-    // exactly what the owner saw with Codex. Push the catalog again once the
-    // models actually exist.
-    // A provider the cache had NOTHING for is a newly connected agent, and it
-    // must appear in the picker of the conversation the person is looking at —
-    // not only in an empty one. The owner connected Codex from a session with
-    // history and it stayed missing until he reloaded (2026-08-31). Adding
-    // options cannot disturb a live thread: the current model is re-sent
-    // unchanged, so nothing about the running conversation moves.
-    const providerIsNew = !current[provider] || (current[provider].models ?? []).length === 0;
-    void Promise.resolve(stored).then(() => {
-      const sessions = providerIsNew
-        ? this.sessionsForModelRefresh()
-        : this.emptySessionsForModelRefresh();
-      for (const session of sessions) this.postSessionModels(session);
-    });
-    return stored;
+    return this.providerSession.cacheProviderModels(provider, models, currentModelId);
   }
 
   /** Sessions whose picker may be refreshed in place: no history, so there is
@@ -3252,21 +3245,11 @@ showQuestion: (session: Session, question: any, handlers: any) => self.showQuest
   /** Every session with a live client. Used only when a provider appears for
    *  the first time, where the change is purely additive. */
   private sessionsForModelRefresh(): Session[] {
-    const seen = new Set<Session>();
-    for (const session of [this.focused, ...this.pool]) {
-      if (!session || seen.has(session)) continue;
-      seen.add(session);
-    }
-    return [...seen].filter((session) => session.client?.sessionId);
+    return this.providerSession.sessionsForModelRefresh();
   }
 
   private emptySessionsForModelRefresh(): Session[] {
-    const seen = new Set<Session>();
-    for (const session of [this.focused, ...this.pool]) {
-      if (!session || seen.has(session)) continue;
-      seen.add(session);
-    }
-    return [...seen].filter((session) => !session.hasHistory && session.client?.sessionId);
+    return this.providerSession.emptySessionsForModelRefresh();
   }
 
   /**
@@ -3320,31 +3303,11 @@ showQuestion: (session: Session, question: any, handlers: any) => self.showQuest
   }
 
   private postSessionModels(session: Session): void {
-    const client = session.client;
-    // `hasHistory` no longer disqualifies a session: a NEW provider's models
-    // are additive and the selection is re-sent unchanged (see
-    // cacheProviderModels). Callers decide which sessions to refresh.
-    if (!client?.sessionId) return;
-    this.emit(session, {
-      type: "session",
-      sessionId: client.sessionId,
-      models: this.modelsForSession(session, client.availableModels, client.currentModelId, true),
-      currentModelId: client.currentModelId,
-      worktree: !!session.worktree,
-      provider: session.provider
-    });
+    return this.providerSession.postSessionModels(session);
   }
 
   private modelsForSession(session: Session, ownModels: readonly any[], currentModelId?: string, newSession = false): ProviderModelInfo[] {
-    if (!newSession) return ownModels.map((model) => ({ ...model, provider: session.provider }));
-    return modelsForConnectedProviders(
-      // Usable, not connected: a provider that cannot answer contributes no
-      // rows to the picker, so its heading and its stale cached models go with
-      // it (owner, 2026-08-17: "Not connected => Not visible").
-      this.usableProviders(),
-      this.state.get<ProviderModelCache>(PROVIDER_MODEL_CACHE_KEY, {}),
-      { provider: session.provider, models: ownModels, currentModelId },
-    );
+    return this.providerSession.modelsForSession(session, ownModels, currentModelId, newSession);
   }
 
   private providerForRequestedModel(modelId: string, fallback: AcpProvider): AcpProvider {
@@ -5864,82 +5827,14 @@ ${detail}`,
     provider: AcpProvider = "grok",
     opts: { report?: (text: string) => void } = {},
   ): Promise<void> {
-    // Every failure below goes through here.
-    const fail = (text: string) => {
-      this.host.appendLine(`[providers] ${text}`);
-      if (opts.report) opts.report(text);
-      else void this.host.showErrorMessage(text);
-    };
-    if (isAdapterProvider(provider)) {
-      const cliPath = this.locateProvider(provider);
-      const name = providerDisplayName(provider);
-      if (!cliPath) {
-        fail(`${name} sign-out could not run because the ${name} CLI was not found. The account remains connected.`);
-        return;
-      }
-      const choice = await this.host.showWarningMessage(
-        `Sign out of ${name}? This clears the ${name} CLI's cached credentials.`,
-        { modal: true },
-        "Sign Out",
-      );
-      if (choice !== "Sign Out") return;
-      const logoutArgs = (provider === "claude" || provider === "gemini") ? ["auth", "logout"] : ["logout"];
-      try {
-        await execGrokCli(cliPath, logoutArgs, { timeout: 30_000, windowsHide: true });
-      } catch (error) {
-        const code = (error as NodeJS.ErrnoException).code;
-        if (code === "ENOENT" || code === "EACCES" || code === "EPERM") {
-          this.host.createTerminal({ name: `${name} Logout`, shellPath: cliPath, shellArgs: logoutArgs }).show();
-          // The cause, in the log, next to the sentence that hides it. This
-          // branch fires when the resolved CLI cannot be executed at all —
-          // on Windows that is almost always an extensionless npm shim run
-          // without a shell — and the user-facing text cannot say that.
-          this.host.appendLine(`[providers] ${provider} logout spawn failed: ${cliPath} (${code}) ${errorDetail(error)}`);
-          fail(`${name} sign-out could not be observed, so it was opened in a terminal. The account remains connected until sign-out is confirmed.`);
-        } else {
-          fail(`${name} sign-out failed: ${errorDetail(error)}. The account remains connected.`);
-        }
-        this.postProviderState();
-        return;
-      }
-      await this.finishProviderLogout(provider, opts.report);
-      return;
-    }
-    const cliPath = this.locateProvider("grok");
-    if (!cliPath) {
-      this.post({ type: "onboarding", state: "missing-cli", platform: process.platform, provider: "grok" });
-      return;
-    }
-    const choice = await this.host.showWarningMessage(
-      "Sign out of Grok? This clears the CLI's cached credentials.",
-      { modal: true },
-      "Sign Out",
-    );
-    if (choice !== "Sign Out") return;
-    // shellPath/shellArgs, not sendText — a quoted path typed into PowerShell
-    // is parsed as a string literal rather than an invocation.
-    this.host.createTerminal({ name: "Grok Logout", shellPath: cliPath, shellArgs: ["logout"] });
-    await this.finishProviderLogout("grok", opts.report);
+    return this.providerSession.logout(provider, opts);
   }
 
   private async finishProviderLogout(
     provider: AcpProvider,
     report?: (text: string) => void,
   ): Promise<void> {
-    this.setProviderConnectedInMemory(provider, false);
-    const reset = this.resetProviderSessionsAfterLogout(provider);
-    try {
-      await this.persistProviderConnections();
-    } catch (error) {
-      const providerName = providerDisplayName(provider);
-      const detail = errorDetail(error);
-      this.host.appendLine(`[providers] ${providerName} signed out, but saving connection state failed: ${detail}`);
-      const text = `${providerName} signed out and its conversations were reset, but the disconnected state could not be saved: ${detail}`;
-      if (report) report(text);
-      else await this.host.showErrorMessage(text);
-    }
-    await reset;
-    this.postSessionsList();
+    return this.providerSession.finishProviderLogout(provider, report);
   }
 
   private async resetProviderSessionsAfterLogout(provider: AcpProvider): Promise<void> {
@@ -5954,98 +5849,11 @@ ${detail}`,
     provider: AcpProvider,
     session: Session,
   ): Promise<void> {
-      // Every view stranded by a last-provider sign-out, not just this one.
-      const adopted = await this.retargetNeedsProviderSessions(provider);
-      // An empty conversation bound to a provider that cannot answer has
-      // nothing worth preserving, so hand it to the one just connected. This
-      // used to require `firstConnection`, computed from CONNECTED providers,
-      // so a lapsed Codex made connecting Grok look like a second account and
-      // the empty session stayed on Codex — asking for a codex login while
-      // the picker read Grok 4.6. What matters is whether the session's own
-      // provider can answer, not how many others are linked.
-      // Both halves matter: the session is stranded on something that cannot
-      // answer, AND the provider just re-checked can. A FAILED re-check leaves
-      // it unusable, and handing the empty session to it there would start a
-      // session against an agent that just refused to authenticate.
-      const nowUsable = this.usableProviders();
-      const strandedOnUnusable = !session.hasHistory
-        && !nowUsable.includes(session.provider)
-        && nowUsable.includes(provider);
-      // Say it worked. An empty session looks exactly like a re-check that did
-      // nothing, and this is the moment someone most wants confirmation. Only
-      // on a conversation with no history — a real transcript is its own
-      // evidence, and the panel would cover it.
-      // Announced once, after whichever branch ran, and only when the re-check
-      // actually succeeded. It was previously wired into two of the four
-      // outcomes and missed the most ordinary one — the session is already on
-      // this provider and simply starts — so the confirmation the owner asked
-      // for did not appear in the case he was testing.
-      const confirmConnected = () => {
-        if (session.hasHistory || !this.usableProviders().includes(provider)) return;
-        // No folder to start in — "You can start grokking!" would be a lie.
-        // startSession already painted no-project.
-        if (this.host.canSwitchWorkspaceFolder && !this.openWorkspaceFolders().length) return;
-        this.emit(session, {
-          type: "onboarding",
-          state: "provider-connected",
-          platform: process.platform,
-          provider
-        });
-      };
-      if (adopted.has(session)) {
-        this.postSessionsList();
-      } else if (strandedOnUnusable) {
-        session.provider = provider;
-        await this.rememberProjectProvider(this.sessionCwd(session), provider);
-        await this.startSession(undefined, session);
-      } else if (session.provider === provider && !session.client) {
-        // Retry a provider whose first real session exposed a credential error.
-        await this.startSession(session.hasHistory ? session.activeSessionId : undefined, session);
-      } else {
-        // Adding a second account must not restart or change a conversation
-        // with history on screen. But an EMPTY one has nothing to protect,
-        // and leaving its picker stale meant the newly connected agent's
-        // models only appeared after clicking New session — for a session
-        // that already was new. Re-post the catalog so the picker picks it up
-        // in place.
-        if (isAdapterProvider(provider)) this.scheduleAdapterHistoryRefresh(provider, this.sessionCwd(session));
-        if (!session.hasHistory) this.postSessionModels(session);
-        this.postSessionsList();
-      }
-      // Re-post after the branches, not just after setProviderConnected: the
-      // credential re-probe and any retarget above change what a provider row
-      // should say, and Settings → Providers reads this. Without it a freshly
-      // connected agent still showed its old state there until something else
-      // happened to refresh the panel.
-      this.postProviderState();
-      confirmConnected();
+    return this.providerSession.adoptSessionsForConnectedProvider(provider, session);
   }
 
   private async retargetNeedsProviderSessions(provider: AcpProvider): Promise<Set<Session>> {
-    const targets = new Set<Session>();
-    const consider = (session: Session | undefined) => {
-      if (session?.needsProvider) targets.add(session);
-    };
-    consider(this.focused);
-    for (const session of this.pool) consider(session);
-    if (!targets.size) return targets;
-    // Bind and lock all of them before the first start can await, for the same
-    // reason the sign-out path detaches before it starts: a send arriving
-    // mid-adoption must queue against a priming session, not fall back through
-    // the refusal path it is being rescued from.
-    for (const session of targets) {
-      session.provider = provider;
-      session.priming = true;
-      this.emit(session, { type: "setBusy", value: true, locked: true });
-    }
-    // `needsProvider` is cleared by a start that actually succeeds, so a refused
-    // one (closed folder, missing CLI) stays adoptable by the next re-check
-    // rather than becoming permanently unreachable.
-    for (const session of targets) {
-      const started = await this.startSession(undefined, session);
-      if (started && !session.needsProvider) this.restoreStrandedDraft(session);
-    }
-    return targets;
+    return this.providerSession.retargetNeedsProviderSessions(provider);
   }
 
   dispose(): void {
@@ -6117,20 +5925,7 @@ ${detail}`,
   }
 
   private probeProviderVersion(provider: AcpProvider): Promise<string> {
-    if (!this.hasProviderConsent(provider)) return Promise.resolve("");
-    if (provider === "codex") return this.probeCodexVersion();
-    if (provider === "claude") return this.probeClaudeVersion();
-    if (provider === "gemini") return this.probeGeminiVersion();
-    if (provider === "muse") return this.probeMuseVersion();
-    if (this.grokVersionProbe) return this.grokVersionProbe;
-    this.grokVersionProbe = (async () => {
-      const cliPath = this.locateProvider("grok");
-      if (!cliPath) return "";
-      const output = await this.readGrokVersion(cliPath);
-      this.postProviderState();
-      return this.providerCliVersions.grok ?? output;
-    })();
-    return this.grokVersionProbe;
+    return this.cliUpdateHost.probeProviderVersion(provider);
   }
 
   /** Read `codex --version` once per activation. The adapter handshake reports
@@ -6272,14 +6067,7 @@ ${detail}`,
    *  legacy single `grok.defaultEffort` is kept in step for grok so an existing
    *  setting keeps working and older hosts still read something sensible. */
   private async persistEffort(provider: AcpProvider, level: string): Promise<void> {
-    const cfg = this.host.getConfiguration("grok");
-    const next = withRememberedEffort(cfg.get<EffortPrefs>("defaultEffortByProvider", {}), provider, level);
-    try {
-      await cfg.update("defaultEffortByProvider", next, configWriteTarget(cfg.inspect<EffortPrefs>("defaultEffortByProvider")));
-      if (provider === "grok") await this.rememberGrokConfig("defaultEffort", level);
-    } catch {
-      // Best-effort persistence: a host settings write failure should not break the session effort switch
-    }
+    return this.providerSession.persistEffort(provider, level);
   }
 
   /** Confirm a restart for a setting that only applies on a fresh session
@@ -8911,20 +8699,7 @@ ${detail}`,
   /** Parse the workspace `.env` into a plain map (no process.env merge). Used by
    *  both the CLI env builder and the voice key resolver. */
   private readDotEnv(cwd: string): Record<string, string> {
-    const dotEnv: Record<string, string> = {};
-    try {
-      const content = fs.readFileSync(path.join(cwd, ".env"), "utf8");
-      for (const line of content.split("\n")) {
-        const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith("#")) continue;
-        const eq = trimmed.indexOf("=");
-        if (eq < 1) continue;
-        const key = trimmed.slice(0, eq).trim();
-        const val = trimmed.slice(eq + 1).trim().replace(/^["']|["']$/g, "");
-        if (key) dotEnv[key] = val;
-      }
-    } catch { /* no .env — fine */ }
-    return dotEnv;
+    return this.providerSetup.readDotEnv(cwd);
   }
 
   private warnOAuthShadowOnce(defaultAuthMethodId: unknown, env: NodeJS.ProcessEnv): void {
@@ -8969,42 +8744,7 @@ ${detail}`,
   }
 
   private buildEnv(cwd: string): NodeJS.ProcessEnv {
-    const dotEnv = this.readDotEnv(cwd);
-    const env: NodeJS.ProcessEnv = { ...process.env, ...dotEnv };
-
-    // XAI_API_KEY is the generic xAI key name; grok CLI needs GROK_CODE_XAI_API_KEY.
-    // Map from either source (workspace .env or the user's shell environment).
-    if (env["XAI_API_KEY"] && !env["GROK_CODE_XAI_API_KEY"]) {
-      env["GROK_CODE_XAI_API_KEY"] = env["XAI_API_KEY"];
-    }
-
-    // Tell the agent which shell dialect to write for — match the shell we
-    // actually run its commands under (#46, §2.9). Presence check (not truthiness)
-    // so an explicitly-empty user GROK_SHELL ("let grok detect") is honored, not
-    // overridden. Frozen at spawn: a mid-session `grok.terminalShell` toggle
-    // updates the shell we RUN commands under (cache cleared) but not this env,
-    // so the dialect hint realigns on the next session — acceptable for a rare
-    // escape-hatch toggle.
-    if (!("GROK_SHELL" in env)) {
-      const grokShell = grokShellEnvValue(resolvedTerminalShell(), process.platform);
-      if (grokShell) env["GROK_SHELL"] = grokShell;
-    }
-
-    // Compact only when the context is really full (K-01). The catalog pins
-    // 80%; the env outranks it. A user-set variable (shell or .env) wins.
-    const compactThreshold = grokCompactThresholdEnv(this.grokCompactThresholdSetting(), env);
-    if (compactThreshold !== undefined) env[GROK_COMPACT_ENV] = compactThreshold;
-    // S-07: Grok's own subagents — on/off and parallelism, by env, like K-01.
-    const grokSub = this.companionsSetting<string>("grok.subagents.enabled", "default");
-    Object.assign(env, grokSubagentEnv({
-      ...(grokSub === "on" ? { enabled: true } : grokSub === "off" ? { enabled: false } : {}),
-      maxConcurrent: Number(this.companionsSetting<number>("grok.subagents.maxConcurrent", 0)) || 0
-    }, env));
-
-    if (Object.keys(dotEnv).length > 0) {
-      this.host.appendLine(`[env] loaded ${Object.keys(dotEnv).length} var(s) from .env`);
-    }
-    return env;
+    return this.providerSetup.buildEnv(cwd);
   }
 
   /** Mint (or reuse) the handle for a path we are about to show a remote. */
@@ -9116,6 +8856,9 @@ ${detail}`,
       getOverride: (name) => self.sidebarTestOverride(name),
     });
   }
+
+  get grokVersionProbe(): Promise<string> | undefined { return this.cliUpdateHost.grokVersionProbe; }
+  set grokVersionProbe(value: Promise<string> | undefined) { this.cliUpdateHost.grokVersionProbe = value; }
 }
 
 /**

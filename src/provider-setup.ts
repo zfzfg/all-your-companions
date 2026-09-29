@@ -1,3 +1,11 @@
+import { grokShellEnvValue, resolvedTerminalShell } from "./terminal-manager";
+import { grokSubagentEnv } from "./grok-subagent-env";
+import { GROK_COMPACT_ENV, grokCompactThresholdEnv } from "./grok-compaction";
+export interface ProviderSetupSidebarOps {
+  grokCompactThresholdSetting: () => number;
+  companionsSetting: <T>(key: string, fallback: T) => T;
+  readonly host: Host;
+}
 /** ProviderSetup: GrokSidebar collaborator for provider discovery, setup, auth and warmup. */
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -20,7 +28,7 @@ import type { Host, HostContext } from "./host";
 import { MuseBackend } from "./muse-backend";
 import { locateMuseCli } from "./muse-cli-locator";
 import type { PersistedState } from "./persisted-state";
-import {
+import  {
   connectedProviderIds,
   projectProviderKey,
   type ProjectProviderDefaults,
@@ -28,7 +36,7 @@ import {
   providerLoginState,
   type ProviderModelInfo,
   usableProviderIds,
-  versionIsOlder,
+  versionIsOlder
 } from "./provider-ui";
 import { Session } from "./session";
 import { resolveGrokHome, type SessionListEntry } from "./sessions";
@@ -58,6 +66,8 @@ export interface ProviderSetupDeps {
   buildEnv(cwd: string): NodeJS.ProcessEnv;
   removeSessionFromDisk(id: string | undefined, sessionCwd?: string): boolean;
   getOverride?<T extends (...args: any[]) => any>(name: string): T | undefined;
+
+  readonly sidebarOps: ProviderSetupSidebarOps;
 }
 
 export class ProviderSetup {
@@ -103,7 +113,6 @@ export class ProviderSetup {
   private probeProviderVersion(provider: AcpProvider): Promise<string> {
     return this.deps.probeProviderVersion(provider);
   }
-  private buildEnv(cwd: string): NodeJS.ProcessEnv { return this.deps.buildEnv(cwd); }
   private removeSessionFromDisk(id: string | undefined, sessionCwd?: string): boolean {
     return this.deps.removeSessionFromDisk(id, sessionCwd);
   }
@@ -779,5 +788,70 @@ export class ProviderSetup {
     this.loginReprobeTimers.clear();
     this.codexInstallAbort?.abort(new Error("Installation cancelled."));
     this.codexInstallAbort = undefined;
+  }
+
+
+/** Parse the workspace `.env` into a plain map (no process.env merge). Used by
+   *  both the CLI env builder and the voice key resolver. */
+  public readDotEnv(cwd: string): Record<string, string> {
+    const override = this.deps.getOverride?.<typeof this.readDotEnv>("readDotEnv");
+    if (override) return override(cwd);
+
+    const dotEnv: Record<string, string> = {};
+    try {
+      const content = fs.readFileSync(path.join(cwd, ".env"), "utf8");
+      for (const line of content.split("\n")) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith("#")) continue;
+        const eq = trimmed.indexOf("=");
+        if (eq < 1) continue;
+        const key = trimmed.slice(0, eq).trim();
+        const val = trimmed.slice(eq + 1).trim().replace(/^["']|["']$/g, "");
+        if (key) dotEnv[key] = val;
+      }
+    } catch { /* no .env — fine */ }
+    return dotEnv;
+  }
+
+public buildEnv(cwd: string): NodeJS.ProcessEnv {
+    const override = this.deps.getOverride?.<typeof this.buildEnv>("buildEnv");
+    if (override) return override(cwd);
+
+    const dotEnv = this.readDotEnv(cwd);
+    const env: NodeJS.ProcessEnv = { ...process.env, ...dotEnv };
+
+    // XAI_API_KEY is the generic xAI key name; grok CLI needs GROK_CODE_XAI_API_KEY.
+    // Map from either source (workspace .env or the user's shell environment).
+    if (env["XAI_API_KEY"] && !env["GROK_CODE_XAI_API_KEY"]) {
+      env["GROK_CODE_XAI_API_KEY"] = env["XAI_API_KEY"];
+    }
+
+    // Tell the agent which shell dialect to write for — match the shell we
+    // actually run its commands under (#46, §2.9). Presence check (not truthiness)
+    // so an explicitly-empty user GROK_SHELL ("let grok detect") is honored, not
+    // overridden. Frozen at spawn: a mid-session `grok.terminalShell` toggle
+    // updates the shell we RUN commands under (cache cleared) but not this env,
+    // so the dialect hint realigns on the next session — acceptable for a rare
+    // escape-hatch toggle.
+    if (!("GROK_SHELL" in env)) {
+      const grokShell = grokShellEnvValue(resolvedTerminalShell(), process.platform);
+      if (grokShell) env["GROK_SHELL"] = grokShell;
+    }
+
+    // Compact only when the context is really full (K-01). The catalog pins
+    // 80%; the env outranks it. A user-set variable (shell or .env) wins.
+    const compactThreshold = grokCompactThresholdEnv(this.deps.sidebarOps.grokCompactThresholdSetting(), env);
+    if (compactThreshold !== undefined) env[GROK_COMPACT_ENV] = compactThreshold;
+    // S-07: Grok's own subagents — on/off and parallelism, by env, like K-01.
+    const grokSub = this.deps.sidebarOps.companionsSetting<string>("grok.subagents.enabled", "default");
+    Object.assign(env, grokSubagentEnv({
+      ...(grokSub === "on" ? { enabled: true } : grokSub === "off" ? { enabled: false } : {}),
+      maxConcurrent: Number(this.deps.sidebarOps.companionsSetting<number>("grok.subagents.maxConcurrent", 0)) || 0
+    }, env));
+
+    if (Object.keys(dotEnv).length > 0) {
+      this.deps.sidebarOps.host.appendLine(`[env] loaded ${Object.keys(dotEnv).length} var(s) from .env`);
+    }
+    return env;
   }
 }

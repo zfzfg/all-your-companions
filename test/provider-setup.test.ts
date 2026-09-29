@@ -47,6 +47,7 @@ function createFakeDeps(overrides: Partial<ProviderSetupDeps> = {}): {
   };
 
   const deps: ProviderSetupDeps = {
+    sidebarOps: { host, grokCompactThresholdSetting: () => 80, companionsSetting: (_key, fallback) => fallback },
     host,
     context,
     state,

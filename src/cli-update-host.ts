@@ -1,3 +1,15 @@
+
+export interface CliUpdateHostSidebarOps {
+  hasProviderConsent: (provider: AcpProvider) => boolean;
+  probeCodexVersion: () => Promise<string>;
+  probeClaudeVersion: () => Promise<string>;
+  probeGeminiVersion: () => Promise<string>;
+  probeMuseVersion: () => Promise<string>;
+  locateProvider: (provider: AcpProvider) => string | undefined;
+  readGrokVersion: (cliPath: string, timeout?: number) => Promise<string>;
+  postProviderState: () => void;
+  readonly providerCliVersions: Partial<Record<"grok" | "codex" | "claude" | "gemini" | "muse", string>>;
+}
 /**
  * CliUpdateHost: CLI update execution, provider version probing,
  * and on-demand grok/codex/claude updater workflows.
@@ -42,6 +54,8 @@ export interface CliUpdateHostDeps {
   disposePool(): Promise<void>;
   startSession(resumeId?: string): Promise<any>;
   getOverride?<T extends (...args: any[]) => any>(name: string): T | undefined;
+
+  readonly sidebarOps: CliUpdateHostSidebarOps;
 }
 
 export class CliUpdateHost {
@@ -290,6 +304,29 @@ export class CliUpdateHost {
     }
     return false;
   }
+
+
+public probeProviderVersion(provider: AcpProvider): Promise<string> {
+    const override = this.deps.getOverride?.<typeof this.probeProviderVersion>("probeProviderVersion");
+    if (override) return override(provider);
+
+    if (!this.deps.sidebarOps.hasProviderConsent(provider)) return Promise.resolve("");
+    if (provider === "codex") return this.deps.sidebarOps.probeCodexVersion();
+    if (provider === "claude") return this.deps.sidebarOps.probeClaudeVersion();
+    if (provider === "gemini") return this.deps.sidebarOps.probeGeminiVersion();
+    if (provider === "muse") return this.deps.sidebarOps.probeMuseVersion();
+    if (this.grokVersionProbe) return this.grokVersionProbe;
+    this.grokVersionProbe = (async () => {
+      const cliPath = this.deps.sidebarOps.locateProvider("grok");
+      if (!cliPath) return "";
+      const output = await this.deps.sidebarOps.readGrokVersion(cliPath);
+      this.deps.sidebarOps.postProviderState();
+      return this.deps.sidebarOps.providerCliVersions.grok ?? output;
+    })();
+    return this.grokVersionProbe;
+  }
+
+  grokVersionProbe?: Promise<string>;
 }
 
 export function createCliUpdateHost(deps: CliUpdateHostDeps): CliUpdateHost {

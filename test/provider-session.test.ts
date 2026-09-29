@@ -1,3 +1,4 @@
+import { unwiredOps } from "./unwired-ops";
 import { describe, expect, it, vi } from "vitest";
 import {
   ProviderSession,
@@ -15,6 +16,8 @@ function makeMockDeps(): ProviderSessionDeps {
   session.planModeAvailable = true;
 
   return {
+    
+    sidebarOps: unwiredOps<ProviderSessionDeps["sidebarOps"]>(),
     host: {
       appendLine: vi.fn(),
       showInformationMessage: vi.fn(async () => undefined),
