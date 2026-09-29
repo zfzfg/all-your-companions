@@ -105,9 +105,10 @@ describe("turn end refreshes the project preview", () => {
   it("re-reads a beat later, and again, because the agent owns the write", () => {
     // Reading immediately races the agent's own transcript write. A single
     // delay is a guess about someone else's disk; two cheap scans cover it.
-    const start = src.indexOf("private refreshSessionOrderAfterTurn(");
+    const catalog = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "session-catalog.ts"), "utf8");
+    const start = catalog.indexOf("public refreshSessionOrderAfterTurn(");
     expect(start).toBeGreaterThan(-1);
-    const body = src.slice(start, src.indexOf("\n  /**", start));
+    const body = catalog.slice(start, catalog.indexOf("\n  /**", start));
     expect(body).toContain("sendLocalRepoSessionsPreview");
     const delays = body.match(/for \(const delay of \[([^\]]+)\]/);
     expect(delays, "delays are declared as a list, not hidden in a chain").toBeTruthy();
@@ -119,7 +120,10 @@ describe("turn end refreshes the project preview", () => {
   it("clears its pending timers on dispose", () => {
     const start = src.indexOf("dispose(): void {");
     const body = src.slice(start, src.indexOf("\n  }", start));
-    expect(body).toContain("turnOrderTimers");
-    expect(body).toContain("clearTimeout");
+    expect(body).toContain("_sessionCatalog?.dispose()");
+    const catalog = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "session-catalog.ts"), "utf8");
+    const cleanup = catalog.slice(catalog.indexOf("dispose(): void {"));
+    expect(cleanup).toContain("turnOrderTimers");
+    expect(cleanup).toContain("clearTimeout");
   });
 });

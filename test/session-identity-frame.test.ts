@@ -39,10 +39,10 @@ const sessionCatalogSrc = readFileSync(
 );
 
 function methodBody(signature: string): string {
-  const inCatalog = signature.includes("focusSession");
+  const inCatalog = signature.includes("focusSession") || signature.includes("sessionIdentityFrame");
   const bareSig = signature.replace(/private\s+/, "");
   const source = inCatalog ? sessionCatalogSrc : src;
-  const target = inCatalog ? bareSig : signature;
+  const target = signature.includes("sessionIdentityFrame") ? "public " + bareSig : inCatalog ? bareSig : signature;
   const start = source.indexOf(target);
   expect(start, `${signature} not found`).toBeGreaterThan(-1);
   if (inCatalog) {

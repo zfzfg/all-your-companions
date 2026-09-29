@@ -32,6 +32,27 @@ function makeCatalog() {
       get: vi.fn((key: string, def?: any) => stateData[key] ?? def),
       update: vi.fn(async (key: string, val: any) => { stateData[key] = val; }),
     } as any,
+    sidebarOps: {
+      modelsForSession: () => [],
+      get state() { return deps.state; },
+      sessionCwd: () => "/repo",
+      resolveLocalRepoTarget: () => undefined,
+      focused: session,
+      postLocal: (msg) => posted.push(msg),
+      sessionCache: new Map(),
+      workspaceRoot: () => "/repo",
+      worktreeCache: [],
+      get host() { return deps.host; },
+      allAdapterCatalogs: () => [],
+      isAuthorizedCwd: () => true,
+      postSessionsList: vi.fn(),
+      pool: new Set([session]),
+      pushDot: vi.fn(),
+      adapterHistory: () => undefined,
+      hasProviderConsent: () => true,
+      locateProvider: () => undefined,
+      createProviderBackend: () => undefined,
+    },
     getOverride: undefined,
     getFocused: () => session,
     setFocused: vi.fn(),
@@ -40,79 +61,59 @@ function makeCatalog() {
     getWorktreeCache: () => [],
 
     repoOps: {
-      openWorkspaceFolders: () => ["/repo"],
-      extraProjectFolders: () => [],
-      removedProjectFolderKeys: () => new Set(),
-      sessionCwdsForRepo: () => ["/repo"],
-      defaultProviderForProject: () => "grok",
-      selectedHistoryCwd: () => "/repo",
-      getSelectedRepoCwd: () => "/repo",
-      setSelectedRepoCwd: vi.fn(),
-      workspaceRoot: () => "/repo",
-      canAddProjectFolder: () => true,
-      normalizeArchiveChoices: vi.fn(),
-      refreshWorktreeCache: vi.fn(async () => {}),
-    },
+openWorkspaceFolders: () => ["/repo"],
+extraProjectFolders: () => [],
+removedProjectFolderKeys: () => new Set(),
+defaultProviderForProject: () => "grok",
+selectedHistoryCwd: () => "/repo",
+getSelectedRepoCwd: () => "/repo",
+setSelectedRepoCwd: vi.fn(),
+workspaceRoot: () => "/repo",
+canAddProjectFolder: () => true,
+refreshWorktreeCache: vi.fn(async () => {})
+},
 
     adapterOps: {
-      connectedProviders: () => ["grok"],
-      locateProvider: () => undefined,
-      createProviderBackend: () => undefined,
-      hasProviderConsent: () => true,
-      setProviderNeedsLogin: vi.fn(),
-      adapterHistory: () => undefined,
-      allAdapterCatalogs: () => [],
-      getCodexSessionCache: () => new Map(),
-      getClaudeSessionCache: () => new Map(),
-      getGeminiSessionCache: () => new Map(),
-      getMuseSessionCache: () => new Map(),
-      isProviderCredentialError: () => false,
-      discardAdapterEmptySession: vi.fn(async () => true),
-    },
+connectedProviders: () => ["grok"],
+locateProvider: () => undefined,
+createProviderBackend: () => undefined,
+hasProviderConsent: () => true,
+setProviderNeedsLogin: vi.fn(),
+adapterHistory: () => undefined,
+allAdapterCatalogs: () => [],
+getCodexSessionCache: () => new Map(),
+getClaudeSessionCache: () => new Map(),
+getGeminiSessionCache: () => new Map(),
+getMuseSessionCache: () => new Map(),
+isProviderCredentialError: () => false
+},
 
     sessionOps: {
-      authorizedSessionCwds: () => ["/repo"],
-      historyCwdFor: () => "/repo",
-      sessionCwd: () => "/repo",
-      setSessionCwd: vi.fn(),
-      readEntriesCachedMulti: () => [],
-      liveSessionEntry: vi.fn((_s, id, cwd) => ({
-        id,
-        cwd,
-        displayName: id,
-        rawSummary: id,
-        updatedAt: Date.now(),
-        createdAt: Date.now(),
-        numMessages: 1,
-      })),
-      dotForId: () => "none",
-      annotateWorktreeLabels: vi.fn(),
-      workflowStore: () => ({ defs: new Map() }),
-      workflowRuns: () => ({ readRun: () => undefined }),
-      resolveWorkflow: () => undefined,
-      updateSessionMeta: vi.fn(async () => {}),
-      touch: vi.fn(),
-      markRead: vi.fn(),
-      refreshWorkflowCompletions: vi.fn(),
-    },
+authorizedSessionCwds: () => ["/repo"],
+historyCwdFor: () => "/repo",
+sessionCwd: () => "/repo",
+setSessionCwd: vi.fn(),
+workflowStore: () => ({ defs: new Map() }),
+workflowRuns: () => ({ readRun: () => undefined }),
+resolveWorkflow: () => undefined,
+touch: vi.fn(),
+refreshWorkflowCompletions: vi.fn()
+},
 
     uiOps: {
-      postLocal: vi.fn((msg) => { posted.push(msg); }),
-      postSessionName: vi.fn(),
-      postSessionsList: vi.fn(),
-      sendLocalRepoSessionsPreview: vi.fn(),
-      postMode: vi.fn(),
-      postChildContext: vi.fn(),
-      postSessionRemoved: vi.fn(),
-      sessionIdentityFrame: vi.fn(() => ({ type: "session", sessionId: "session-1", provider: "grok" })),
-      localizeHistoryMessage: vi.fn((m) => m),
-      localPreviewChips: vi.fn(() => []),
-      displayMode: vi.fn(() => "agent"),
-      getWebview: () => ({
+postLocal: vi.fn((msg) => { posted.push(msg); }),
+postSessionsList: vi.fn(),
+postMode: vi.fn(),
+postChildContext: vi.fn(),
+postSessionRemoved: vi.fn(),
+localizeHistoryMessage: vi.fn((m) => m),
+localPreviewChips: vi.fn(() => []),
+displayMode: vi.fn(() => "agent"),
+getWebview: () => ({
         postMessage: (m: any) => { webviewMsgs.push(m); },
       }),
-      hasProjectsRail: () => true,
-    },
+hasProjectsRail: () => true
+},
 
     lifecycleOps: {
       startSession: vi.fn(async () => undefined),
@@ -158,16 +159,19 @@ describe("SessionCatalog", () => {
     other.activeSessionId = "session-2";
     other.provider = "grok";
 
+    const markRead = vi.spyOn(catalog, "markRead");
+    const identity = vi.spyOn(catalog, "sessionIdentityFrame");
+    const postName = vi.spyOn(catalog, "postSessionName");
     catalog.focusSession(other);
 
     expect(deps.setFocused).toHaveBeenCalledWith(other);
     expect(deps.sessionOps.touch).toHaveBeenCalledWith(other);
-    expect(deps.sessionOps.markRead).toHaveBeenCalledWith(other);
-    expect(deps.uiOps.sessionIdentityFrame).toHaveBeenCalledWith(other);
+    expect(markRead).toHaveBeenCalledWith(other);
+    expect(identity).toHaveBeenCalledWith(other);
     expect(webviewMsgs.some((m) => m.type === "clearMessages")).toBe(true);
     expect(webviewMsgs.some((m) => m.type === "historyReplay" && m.active === true)).toBe(true);
     expect(deps.uiOps.postMode).toHaveBeenCalled();
-    expect(deps.uiOps.postSessionName).toHaveBeenCalledWith(other);
+    expect(postName).toHaveBeenCalledWith(other);
   });
 
   it("parkFocused tears down untouched idle session", () => {

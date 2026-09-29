@@ -1,3 +1,38 @@
+const REPO_PREVIEW_SIZE = 3;
+import { gitRootForPath, type WorktreeParentRef, worktreeCwdsForRepo } from "./worktree";
+import  {
+  capSessionMetaAutoNames,
+  cliSessionTitle,
+  fallbackName,
+  readSessionEntries,
+  expiredArchiveChoiceKeys,
+  newestTranscriptMtime
+} from "./sessions";
+import { computeDot } from "./session-pool";
+
+import { type ProviderModelInfo } from "./provider-ui";
+import * as fs from "node:fs";
+export interface SessionCatalogSidebarOps {
+  modelsForSession: (session: Session, ownModels: readonly any[], currentModelId?: string, newSession?: boolean) => ProviderModelInfo[];
+  readonly state: HostContext["globalState"];
+  sessionCwd: (session?: Session) => string;
+  resolveLocalRepoTarget: (cwd: string) => RepoListEntry | undefined;
+  readonly focused: Session;
+  postLocal: (message: HostMsg) => void;
+  readonly sessionCache: Map<string, { mtimeMs: number; entry: SessionListEntry; }>;
+  workspaceRoot: () => string;
+  readonly worktreeCache: WorktreeRecord[];
+  readonly host: Host;
+  allAdapterCatalogs: () => Iterable<readonly SessionListEntry[]>;
+  isAuthorizedCwd: (cwd: string | undefined) => boolean;
+  postSessionsList: (opts?: SessionsListOptions) => void;
+  readonly pool: Set<Session>;
+  pushDot: (session: Session) => void;
+  adapterHistory: (provider: AcpProvider) => { cache: Map<string, SessionListEntry[]>; at: Map<string, number>; refresh: Map<string, Promise<void>>; } | undefined;
+  hasProviderConsent: (provider: AcpProvider) => boolean;
+  locateProvider: (provider: AcpProvider) => string | undefined;
+  createProviderBackend: (provider: AcpProvider, effort?: string) => import("./acp-backend").AcpBackend | undefined;
+}
 /**
  * Session catalog and history navigation: repo discovery, session listing,
  * pin tracking, deletion, clear-all, sweep, rename, focus, and open.
@@ -11,18 +46,12 @@ import type { AcpProvider } from "./acp-backend";
 import { isAdapterProvider } from "./acp-backend";
 import { providerDisplayName } from "./provider-ui";
 import type { Host, HostContext } from "./host";
-import {
-  Session,
-  SessionStartIntent,
-  sessionUiSnapshot,
-} from "./session";
+import { Session, SessionStartIntent, sessionUiSnapshot } from "./session";
 import { type Dot } from "./session-pool";
 import type { HostMsg } from "./protocol";
 import { OpenClock } from "./open-timing";
-import {
-  SESSION_META_KEY,
-} from "./worktree-host";
-import {
+import { SESSION_META_KEY } from "./worktree-host";
+import  {
   SessionListEntry,
   SessionMetaOverrides,
   RepoArchives,
@@ -43,32 +72,27 @@ import {
   orderedResumeCwdCandidates,
   resolveGrokHome,
   sessionCwdBelongsToRepo,
-  sessionDirFor,
+  sessionDirFor
 } from "./sessions";
 import { withoutArchiveFields } from "./project-discovery";
-import {
+import  {
   adapterEntriesEligibleForClear,
   adapterListEntry,
   findCachedAdapterSession,
   mergeProviderHistoryPage,
   mergeProviderSessionEntries,
   projectProviderKey,
-  type ProviderHistoryCursor,
+  type ProviderHistoryCursor
 } from "./provider-ui";
-import {
-  effectiveSessionType,
-} from "./session-type";
-import {
-  authorizedListCwd,
-  filterEntriesByAuthorizedCwd,
-} from "./workspace-auth";
-import {
+import { effectiveSessionType } from "./session-type";
+import { authorizedListCwd, filterEntriesByAuthorizedCwd } from "./workspace-auth";
+import  {
   matchWorktreeForCwd,
   mergeSessionIndexes,
   normalizeFsPath,
   pathsEqual,
   type WorktreeRecord,
-  worktreesForRepo,
+  worktreesForRepo
 } from "./worktree";
 import { historySubtitle } from "./workflow-run";
 import { GrokSidebar } from "./sidebar";
@@ -91,14 +115,12 @@ export interface SessionCatalogRepoOps {
   openWorkspaceFolders(): readonly string[];
   extraProjectFolders(): readonly string[];
   removedProjectFolderKeys(): Set<string>;
-  sessionCwdsForRepo(repoCwd: string, overrides: SessionMetaOverrides): string[];
   defaultProviderForProject(cwd: string): AcpProvider;
   selectedHistoryCwd(): string;
   getSelectedRepoCwd(): string | undefined;
   setSelectedRepoCwd(cwd: string | undefined): void;
   workspaceRoot(): string;
   canAddProjectFolder(): boolean;
-  normalizeArchiveChoices(): void;
   refreshWorktreeCache(): Promise<void>;
 }
 
@@ -119,12 +141,6 @@ export interface SessionCatalogAdapterOps {
   getGeminiSessionCache(): Map<string, SessionListEntry[]>;
   getMuseSessionCache(): Map<string, SessionListEntry[]>;
   isProviderCredentialError(provider: AcpProvider, error: unknown): boolean;
-  discardAdapterEmptySession(
-    provider: AcpProvider,
-    id: string | undefined,
-    cwd: string,
-    client?: AcpClient,
-  ): Promise<boolean>;
 }
 
 export interface SessionCatalogSessionOps {
@@ -132,46 +148,19 @@ export interface SessionCatalogSessionOps {
   historyCwdFor(): string;
   sessionCwd(session: Session): string;
   setSessionCwd(session: Session, cwd: string, workspaceRoot?: string): void;
-  readEntriesCachedMulti(
-    ids: string[],
-    mtimeById: Map<string, number>,
-    cwdById: Map<string, string>,
-    overrides: SessionMetaOverrides,
-    grokHome: string,
-    log: (m: string) => void,
-  ): SessionListEntry[];
-  liveSessionEntry(
-    session: Session,
-    id: string,
-    cwd: string,
-    overrides: SessionMetaOverrides,
-  ): SessionListEntry;
-  dotForId(id: string): Dot;
-  annotateWorktreeLabels(
-    entries: SessionListEntry[],
-    overrides: SessionMetaOverrides,
-    workspaceCwd: string,
-  ): void;
   workflowStore(): { defs: Map<string, any> };
   workflowRuns(): { readRun(id: string): any };
   resolveWorkflow(session: Session, name: string): any;
-  updateSessionMeta(
-    updater: (current: SessionMetaOverrides) => SessionMetaOverrides | null,
-  ): Promise<void>;
   touch(session: Session): void;
-  markRead(session: Session): void;
   refreshWorkflowCompletions(session: Session): void;
 }
 
 export interface SessionCatalogUiOps {
   postLocal(msg: HostMsg | any): void;
-  postSessionName(session: Session): void;
   postSessionsList(): void;
-  sendLocalRepoSessionsPreview(cwd: string): void;
   postMode(): void;
   postChildContext(session: Session): void;
   postSessionRemoved(id: string | undefined, cwd: string): void;
-  sessionIdentityFrame(session: Session): any;
   localizeHistoryMessage(msg: any, webview: any): any;
   localPreviewChips(session: Session, webview: any): any;
   displayMode(session: Session): any;
@@ -228,6 +217,8 @@ export interface SessionCatalogDeps {
   readonly sessionOps: SessionCatalogSessionOps;
   readonly uiOps: SessionCatalogUiOps;
   readonly lifecycleOps: SessionCatalogLifecycleOps;
+
+  readonly sidebarOps: SessionCatalogSidebarOps;
 }
 
 export class SessionCatalog {
@@ -241,17 +232,9 @@ export class SessionCatalog {
     return this.deps.lifecycleOps.disposeSession(session);
   }
 
-  private sendLocalRepoSessionsPreview(cwd: string): void {
-    this.deps.uiOps.sendLocalRepoSessionsPreview(cwd);
-  }
-
-  private sessionIdentityFrame(session: Session): any {
-    return this.deps.uiOps.sessionIdentityFrame(session);
-  }
-
   repoCatalog(): RepoListEntry[] {
-    const override = this.deps.getOverride?.<typeof this.repoCatalog>("repoCatalog");
-    if (override) return override();
+    const testOverride = this.deps.getOverride?.<typeof this.repoCatalog>("repoCatalog");
+    if (testOverride) return testOverride();
 
     const pins = this.deps.state.get<RepoPins>(REPO_PINS_KEY, {});
     const worktreeLabels = new Map<string, string>();
@@ -291,10 +274,10 @@ export class SessionCatalog {
   }
 
   localRepoCatalogEntries(): RepoListEntry[] {
-    const override = this.deps.getOverride?.<typeof this.localRepoCatalogEntries>(
+    const testOverride = this.deps.getOverride?.<typeof this.localRepoCatalogEntries>(
       "localRepoCatalogEntries",
     );
-    if (override) return override();
+    if (testOverride) return testOverride();
 
     const full = this.repoCatalog();
     let entries: RepoListEntry[];
@@ -346,10 +329,10 @@ export class SessionCatalog {
   }
 
   resolveLocalRepoTarget(cwd: string): RepoListEntry | undefined {
-    const override = this.deps.getOverride?.<typeof this.resolveLocalRepoTarget>(
+    const testOverride = this.deps.getOverride?.<typeof this.resolveLocalRepoTarget>(
       "resolveLocalRepoTarget",
     );
-    if (override) return override(cwd);
+    if (testOverride) return testOverride(cwd);
 
     const entries = this.localRepoCatalogEntries();
     let hit = entries.find((r) => pathsEqual(r.cwd, cwd));
@@ -358,8 +341,7 @@ export class SessionCatalog {
       const owners = entries.filter(
         (r) =>
           r.available &&
-          this.deps.repoOps
-            .sessionCwdsForRepo(r.cwd, overrides)
+          this.sessionCwdsForRepo(r.cwd, overrides)
             .some((c) => pathsEqual(c, cwd)),
       );
       hit = owners.length === 1 ? owners[0] : undefined;
@@ -369,10 +351,10 @@ export class SessionCatalog {
   }
 
   postRepoCatalog(): void {
-    const override = this.deps.getOverride?.<typeof this.postRepoCatalog>("postRepoCatalog");
-    if (override) return override();
+    const testOverride = this.deps.getOverride?.<typeof this.postRepoCatalog>("postRepoCatalog");
+    if (testOverride) return testOverride();
 
-    this.deps.repoOps.normalizeArchiveChoices();
+    this.normalizeArchiveChoices();
     const localEntries = this.localRepoCatalogEntries().map((entry) => ({
       ...entry,
       defaultProvider: this.deps.repoOps.defaultProviderForProject(entry.cwd),
@@ -407,10 +389,10 @@ export class SessionCatalog {
   }
 
   buildPinnedSessions(): { entries: SessionListEntry[]; dots: Record<string, Dot> } {
-    const override = this.deps.getOverride?.<typeof this.buildPinnedSessions>(
+    const testOverride = this.deps.getOverride?.<typeof this.buildPinnedSessions>(
       "buildPinnedSessions",
     );
-    if (override) return override();
+    if (testOverride) return testOverride();
 
     const overrides = this.deps.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
     const authorized = this.deps.sessionOps.authorizedSessionCwds();
@@ -471,7 +453,7 @@ export class SessionCatalog {
         present.map((e: { id: string }) => [e.id, cwd]),
       );
       entries.push(
-        ...this.deps.sessionOps.readEntriesCachedMulti(
+        ...this.readEntriesCachedMulti(
           present.map((e: { id: string }) => e.id),
           mtimeById,
           cwdById,
@@ -484,13 +466,13 @@ export class SessionCatalog {
     const filtered = filterEntriesByAuthorizedCwd(entries, authorized, pathsEqual);
     filtered.sort((a, b) => (b.pinnedAt ?? 0) - (a.pinnedAt ?? 0));
     const dots: Record<string, Dot> = {};
-    for (const e of filtered) dots[e.id] = this.deps.sessionOps.dotForId(e.id);
+    for (const e of filtered) dots[e.id] = this.dotForId(e.id);
     return { entries: filtered, dots };
   }
 
   postPinnedSessions(): void {
-    const override = this.deps.getOverride?.<typeof this.postPinnedSessions>("postPinnedSessions");
-    if (override) return override();
+    const testOverride = this.deps.getOverride?.<typeof this.postPinnedSessions>("postPinnedSessions");
+    if (testOverride) return testOverride();
 
     const hasLocalRail =
       this.deps.host.canSwitchWorkspaceFolder || this.deps.uiOps.hasProjectsRail();
@@ -503,8 +485,8 @@ export class SessionCatalog {
     opts?: SessionsListOptions,
     activeId: string | null | undefined = this.deps.getFocused()?.activeSessionId,
   ): Extract<HostMsg, { type: "sessions" }> {
-    const override = this.deps.getOverride?.<typeof this.buildSessionsList>("buildSessionsList");
-    if (override) return override(cwd, opts, activeId);
+    const testOverride = this.deps.getOverride?.<typeof this.buildSessionsList>("buildSessionsList");
+    if (testOverride) return testOverride(cwd, opts, activeId);
 
     const offset = Math.max(0, opts?.offset ?? 0);
     const authorized = this.deps.sessionOps.authorizedSessionCwds();
@@ -566,7 +548,7 @@ export class SessionCatalog {
       }
       if (adapter.some((entry) => entry.id === session.activeSessionId)) continue;
       adapter.push(
-        this.deps.sessionOps.liveSessionEntry(
+        this.liveSessionEntry(
           session,
           session.activeSessionId,
           this.deps.sessionOps.sessionCwd(session),
@@ -588,7 +570,7 @@ export class SessionCatalog {
       ? (merged ?? []).slice(offset, offset + limit)
       : combinedPage?.entries ?? [];
     const dots: Record<string, Dot> = {};
-    for (const entry of entries) dots[entry.id] = this.deps.sessionOps.dotForId(entry.id);
+    for (const entry of entries) dots[entry.id] = this.dotForId(entry.id);
     const nextOffset = query
       ? offset + entries.length
       : Math.max(offset + entries.length, combinedPage?.providerCursor.grokOffset ?? 0);
@@ -608,10 +590,10 @@ export class SessionCatalog {
   }
 
   scheduleAdapterHistoryRefresh(provider: AcpProvider, cwd: string): void {
-    const override = this.deps.getOverride?.<typeof this.scheduleAdapterHistoryRefresh>(
+    const testOverride = this.deps.getOverride?.<typeof this.scheduleAdapterHistoryRefresh>(
       "scheduleAdapterHistoryRefresh",
     );
-    if (override) return override(provider, cwd);
+    if (testOverride) return testOverride(provider, cwd);
 
     if (!isAdapterProvider(provider) || !this.deps.adapterOps.connectedProviders().includes(provider)) {
       return;
@@ -638,8 +620,8 @@ export class SessionCatalog {
   }
 
   async refreshCodexHistory(cwd: string, key = projectProviderKey(cwd)): Promise<void> {
-    const override = this.deps.getOverride?.<typeof this.refreshCodexHistory>("refreshCodexHistory");
-    if (override) return override(cwd, key);
+    const testOverride = this.deps.getOverride?.<typeof this.refreshCodexHistory>("refreshCodexHistory");
+    if (testOverride) return testOverride(cwd, key);
     return this.refreshAdapterHistory("codex", cwd, key);
   }
 
@@ -648,10 +630,10 @@ export class SessionCatalog {
     cwd: string,
     key = projectProviderKey(cwd),
   ): Promise<void> {
-    const override = this.deps.getOverride?.<typeof this.refreshAdapterHistory>(
+    const testOverride = this.deps.getOverride?.<typeof this.refreshAdapterHistory>(
       "refreshAdapterHistory",
     );
-    if (override) return override(provider, cwd, key);
+    if (testOverride) return testOverride(provider, cwd, key);
 
     if (!isAdapterProvider(provider) || !this.deps.adapterOps.hasProviderConsent(provider)) return;
     const history = this.deps.adapterOps.adapterHistory(provider);
@@ -690,7 +672,7 @@ export class SessionCatalog {
       );
       history.cache.set(key, entries);
       history.at.set(key, Date.now());
-      await this.deps.sessionOps.updateSessionMeta((current) => {
+      await this.updateSessionMeta((current) => {
         let changed = false;
         const next = { ...current };
         for (const entry of result.sessions) {
@@ -726,10 +708,10 @@ export class SessionCatalog {
     opts?: GrokSessionsListOptions,
     activeId: string | null | undefined = this.deps.getFocused()?.activeSessionId,
   ): GrokSessionsListMessage {
-    const override = this.deps.getOverride?.<typeof this.buildGrokSessionsList>(
+    const testOverride = this.deps.getOverride?.<typeof this.buildGrokSessionsList>(
       "buildGrokSessionsList",
     );
-    if (override) return override(cwd, opts, activeId);
+    if (testOverride) return testOverride(cwd, opts, activeId);
 
     const offset = Math.max(0, opts?.offset ?? 0);
     const limit = opts?.limit ?? SESSION_PAGE_SIZE;
@@ -756,7 +738,7 @@ export class SessionCatalog {
 
     void this.deps.repoOps.refreshWorktreeCache();
 
-    const repoCwds = this.deps.repoOps.sessionCwdsForRepo(cwd, overrides);
+    const repoCwds = this.sessionCwdsForRepo(cwd, overrides);
     const repoCwdKeys = new Set(repoCwds.map(normalizeFsPath));
     const index = mergeSessionIndexes(
       repoCwds.map((c) => ({
@@ -775,8 +757,7 @@ export class SessionCatalog {
     let total: number;
     let nextOffset: number;
     if (query) {
-      const all = this.deps.sessionOps
-        .readEntriesCachedMulti(
+      const all = this.readEntriesCachedMulti(
           index.map((e: { id: string }) => e.id),
           mtimeById,
           cwdById,
@@ -798,13 +779,12 @@ export class SessionCatalog {
       total = index.length;
       const pageIndex = index.slice(offset, offset + limit);
       const pageIds = pageIndex.map((e: { id: string }) => e.id);
-      pageEntries = this.deps.sessionOps
-        .readEntriesCachedMulti(pageIds, mtimeById, cwdById, overrides, grokHome, log)
+      pageEntries = this.readEntriesCachedMulti(pageIds, mtimeById, cwdById, overrides, grokHome, log)
         .filter((e) => e.kind !== "subagent");
       pageEntries.sort((a: SessionListEntry, b: SessionListEntry) => b.updatedAt - a.updatedAt);
       nextOffset = offset + pageIds.length;
     }
-    this.deps.sessionOps.annotateWorktreeLabels(pageEntries, overrides, cwd);
+    this.annotateWorktreeLabels(pageEntries, overrides, cwd);
     for (const entry of pageEntries) {
       if (effectiveSessionType(overrides[entry.id]) === "crew") {
         entry.sessionType = "crew";
@@ -841,7 +821,7 @@ export class SessionCatalog {
         if (!id || onDisk.has(id) || seen.has(id)) continue;
         const sCwd = this.deps.sessionOps.sessionCwd(s);
         if (!repoCwdKeys.has(normalizeFsPath(sCwd))) continue;
-        const entry = this.deps.sessionOps.liveSessionEntry(s, id, sCwd, overrides);
+        const entry = this.liveSessionEntry(s, id, sCwd, overrides);
         if (s.worktree) entry.worktreeLabel = s.worktree.label;
         synthetic.push(entry);
         seen.add(id);
@@ -866,10 +846,10 @@ export class SessionCatalog {
     }
 
     const dots: Record<string, Dot> = {};
-    for (const e of pageEntries) dots[e.id] = this.deps.sessionOps.dotForId(e.id);
+    for (const e of pageEntries) dots[e.id] = this.dotForId(e.id);
     for (const s of this.deps.getPool()) {
       if (s.activeSessionId && !(s.activeSessionId in dots)) {
-        dots[s.activeSessionId] = this.deps.sessionOps.dotForId(s.activeSessionId);
+        dots[s.activeSessionId] = this.dotForId(s.activeSessionId);
       }
     }
     return {
@@ -886,8 +866,8 @@ export class SessionCatalog {
   }
 
   renameSession(id: string, name: string, requestedCwd?: string): void {
-    const override = this.deps.getOverride?.<typeof this.renameSession>("renameSession");
-    if (override) return override(id, name, requestedCwd);
+    const testOverride = this.deps.getOverride?.<typeof this.renameSession>("renameSession");
+    if (testOverride) return testOverride(id, name, requestedCwd);
 
     const overrides = this.deps.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
     const trimmed = (name || "").trim();
@@ -928,19 +908,19 @@ export class SessionCatalog {
     }
     const live = [...this.deps.getPool()].find((session) => session.activeSessionId === id);
     this.deps.uiOps.postSessionsList();
-    if (live) this.deps.uiOps.postSessionName(live);
+    if (live) this.postSessionName(live);
     if (requestedCwd) this.sendLocalRepoSessionsPreview(requestedCwd);
   }
 
   sessionHasLiveOwner(session: Session): boolean {
-    const override = this.deps.getOverride?.<typeof this.sessionHasLiveOwner>("sessionHasLiveOwner");
-    if (override) return override(session);
+    const testOverride = this.deps.getOverride?.<typeof this.sessionHasLiveOwner>("sessionHasLiveOwner");
+    if (testOverride) return testOverride(session);
     return session === this.deps.getFocused();
   }
 
   reportProtectedSession(action: "delete" | "clear"): void {
-    const override = this.deps.getOverride?.<typeof this.reportProtectedSession>("reportProtectedSession");
-    if (override) return override(action);
+    const testOverride = this.deps.getOverride?.<typeof this.reportProtectedSession>("reportProtectedSession");
+    if (testOverride) return testOverride(action);
     const text =
       action === "delete"
         ? "This conversation is open. Close it before deleting it."
@@ -949,8 +929,8 @@ export class SessionCatalog {
   }
 
   notifyUser(level: "info" | "warning" | "error", text: string): void {
-    const override = this.deps.getOverride?.<typeof this.notifyUser>("notifyUser");
-    if (override) return override(level, text);
+    const testOverride = this.deps.getOverride?.<typeof this.notifyUser>("notifyUser");
+    if (testOverride) return testOverride(level, text);
     if (level === "error") void this.deps.host.showErrorMessage(text);
     else if (level === "warning") void this.deps.host.showWarningMessage(text);
     else void this.deps.host.showInformationMessage(text);
@@ -961,8 +941,8 @@ export class SessionCatalog {
     _name: string | undefined,
     requestedCwd?: string,
   ): Promise<void> {
-    const override = this.deps.getOverride?.<typeof this.deleteSession>("deleteSession");
-    if (override) return override(id, _name, requestedCwd);
+    const testOverride = this.deps.getOverride?.<typeof this.deleteSession>("deleteSession");
+    if (testOverride) return testOverride(id, _name, requestedCwd);
 
     const overridesNow = this.deps.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
     if (this.deps.lifecycleOps.isSessionLoadReserved(id)) {
@@ -1079,15 +1059,15 @@ export class SessionCatalog {
   }
 
   async clearAllSessions(requestedCwd: string): Promise<void> {
-    const override = this.deps.getOverride?.<typeof this.clearAllSessions>("clearAllSessions");
-    if (override) return override(requestedCwd);
+    const testOverride = this.deps.getOverride?.<typeof this.clearAllSessions>("clearAllSessions");
+    if (testOverride) return testOverride(requestedCwd);
 
     const repo = this.localRepoCatalogEntries().find((r) => pathsEqual(r.cwd, requestedCwd));
     if (!repo) return;
     const cwd = repo.cwd;
     const grokHome = resolveGrokHome(process.env);
     const overrides = this.deps.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
-    const repoCwds = this.deps.repoOps.sessionCwdsForRepo(cwd, overrides);
+    const repoCwds = this.sessionCwdsForRepo(cwd, overrides);
     const repoCwdKeys = new Set(repoCwds.map(normalizeFsPath));
     const exiting: Promise<void>[] = [];
     for (const s of [...this.deps.getPool()]) {
@@ -1148,7 +1128,7 @@ export class SessionCatalog {
       if (keptForAnotherOwner) this.reportProtectedSession("clear");
       else this.notifyUser("info", "No history to clear.");
       this.deps.uiOps.postSessionsList();
-      this.deps.uiOps.sendLocalRepoSessionsPreview(cwd);
+      this.sendLocalRepoSessionsPreview(cwd);
       return;
     }
 
@@ -1259,13 +1239,13 @@ export class SessionCatalog {
   }
 
   focusSession(session: Session): void {
-    const override = this.deps.getOverride?.<typeof this.focusSession>("focusSession");
-    if (override) return override(session);
+    const testOverride = this.deps.getOverride?.<typeof this.focusSession>("focusSession");
+    if (testOverride) return testOverride(session);
 
     if (session === this.deps.getFocused()) return;
     this.deps.setFocused(session);
     this.deps.sessionOps.touch(session);
-    this.deps.sessionOps.markRead(session);
+    this.markRead(session);
     this.deps.sessionOps.refreshWorkflowCompletions(session);
     const wv = this.deps.uiOps.getWebview();
     const identity = this.sessionIdentityFrame(session);
@@ -1287,13 +1267,13 @@ export class SessionCatalog {
     }
     this.deps.uiOps.postMode();
     this.postRepoCatalog();
-    this.deps.uiOps.postSessionName(session);
+    this.postSessionName(session);
     this.deps.uiOps.postChildContext(session);
   }
 
   parkFocused(): void {
-    const override = this.deps.getOverride?.<typeof this.parkFocused>("parkFocused");
-    if (override) return override();
+    const testOverride = this.deps.getOverride?.<typeof this.parkFocused>("parkFocused");
+    if (testOverride) return testOverride();
 
     const cur = this.deps.getFocused();
     if (cur.deleted) return;
@@ -1308,10 +1288,10 @@ export class SessionCatalog {
   }
 
   teardownEmptySession(session: Session): void {
-    const override = this.deps.getOverride?.<typeof this.teardownEmptySession>(
+    const testOverride = this.deps.getOverride?.<typeof this.teardownEmptySession>(
       "teardownEmptySession",
     );
-    if (override) return override(session);
+    if (testOverride) return testOverride(session);
 
     const id = session.activeSessionId;
     const cwd = this.deps.sessionOps.sessionCwd(session);
@@ -1321,8 +1301,7 @@ export class SessionCatalog {
       : undefined;
     void this.deps.lifecycleOps.disposeSession(session);
     if (isAdapterProvider(provider)) {
-      void this.deps.adapterOps
-        .discardAdapterEmptySession(provider, id, cwd, client)
+      void this.discardAdapterEmptySession(provider, id, cwd, client)
         .finally(() => client?.dispose())
         .then((removed) => {
           if (removed) this.deps.uiOps.postSessionRemoved(id, cwd);
@@ -1338,10 +1317,10 @@ export class SessionCatalog {
   }
 
   removeSessionFromDisk(id: string | undefined, sessionCwd?: string): boolean {
-    const override = this.deps.getOverride?.<typeof this.removeSessionFromDisk>(
+    const testOverride = this.deps.getOverride?.<typeof this.removeSessionFromDisk>(
       "removeSessionFromDisk",
     );
-    if (override) return override(id, sessionCwd);
+    if (testOverride) return testOverride(id, sessionCwd);
 
     if (!id) return false;
     const overrides = this.deps.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
@@ -1374,8 +1353,8 @@ export class SessionCatalog {
     cwd: string = this.deps.repoOps.workspaceRoot(),
     opts: { force?: boolean } = {},
   ): void {
-    const override = this.deps.getOverride?.<typeof this.sweepEmptySessions>("sweepEmptySessions");
-    if (override) return override(cwd, opts);
+    const testOverride = this.deps.getOverride?.<typeof this.sweepEmptySessions>("sweepEmptySessions");
+    if (testOverride) return testOverride(cwd, opts);
 
     if (!cwd) return;
     const repoKey = normalizeRepoPath(cwd);
@@ -1467,8 +1446,8 @@ export class SessionCatalog {
   }
 
   async newFocusedSession(requestedCwd?: string): Promise<void> {
-    const override = this.deps.getOverride?.<typeof this.newFocusedSession>("newFocusedSession");
-    if (override) return override(requestedCwd);
+    const testOverride = this.deps.getOverride?.<typeof this.newFocusedSession>("newFocusedSession");
+    if (testOverride) return testOverride(requestedCwd);
 
     const named = requestedCwd ? this.resolveLocalRepoTarget(requestedCwd) : undefined;
     if (requestedCwd && !named) {
@@ -1510,8 +1489,8 @@ export class SessionCatalog {
   }
 
   async openSession(id: string, sessionCwd?: string): Promise<void> {
-    const override = this.deps.getOverride?.<typeof this.openSession>("openSession");
-    if (override) return override(id, sessionCwd);
+    const testOverride = this.deps.getOverride?.<typeof this.openSession>("openSession");
+    if (testOverride) return testOverride(id, sessionCwd);
 
     const clock = new OpenClock();
     const claim = this.deps.lifecycleOps.reserveSessionLoad(id);
@@ -1552,10 +1531,10 @@ export class SessionCatalog {
   }
 
   localTrustedSessionCwds(overrides: SessionMetaOverrides): string[] {
-    const override = this.deps.getOverride?.<typeof this.localTrustedSessionCwds>(
+    const testOverride = this.deps.getOverride?.<typeof this.localTrustedSessionCwds>(
       "localTrustedSessionCwds",
     );
-    if (override) return override(overrides);
+    if (testOverride) return testOverride(overrides);
 
     const out: string[] = [];
     const seen = new Set<string>();
@@ -1568,7 +1547,7 @@ export class SessionCatalog {
     };
     if (this.deps.host.canSwitchWorkspaceFolder) {
       for (const repoCwd of this.deps.repoOps.openWorkspaceFolders()) {
-        for (const c of this.deps.repoOps.sessionCwdsForRepo(repoCwd, overrides)) add(c);
+        for (const c of this.sessionCwdsForRepo(repoCwd, overrides)) add(c);
       }
       add(this.deps.repoOps.workspaceRoot());
       return out;
@@ -1576,16 +1555,16 @@ export class SessionCatalog {
     add(this.deps.repoOps.workspaceRoot());
     if (this.deps.repoOps.getSelectedRepoCwd()) add(this.deps.repoOps.getSelectedRepoCwd());
     for (const repo of this.repoCatalog()) {
-      for (const c of this.deps.repoOps.sessionCwdsForRepo(repo.cwd, overrides)) add(c);
+      for (const c of this.sessionCwdsForRepo(repo.cwd, overrides)) add(c);
     }
     return out;
   }
 
   async followSessionWorkspace(session: Session): Promise<void> {
-    const override = this.deps.getOverride?.<typeof this.followSessionWorkspace>(
+    const testOverride = this.deps.getOverride?.<typeof this.followSessionWorkspace>(
       "followSessionWorkspace",
     );
-    if (override) return override(session);
+    if (testOverride) return testOverride(session);
 
     if (!this.deps.host.canSwitchWorkspaceFolder) return;
     const intendedTarget = session.worktree?.sourceGitRoot ?? session.cwd;
@@ -1612,10 +1591,10 @@ export class SessionCatalog {
     sessionCwd?: string,
     clock?: OpenClock,
   ): Promise<void> {
-    const override = this.deps.getOverride?.<typeof this.openSessionReserved>(
+    const testOverride = this.deps.getOverride?.<typeof this.openSessionReserved>(
       "openSessionReserved",
     );
-    if (override) return override(id, sessionCwd, clock);
+    if (testOverride) return testOverride(id, sessionCwd, clock);
 
     for (const s of this.deps.getPool()) {
       if (s.activeSessionId === id && s.client) {
@@ -1684,8 +1663,585 @@ export class SessionCatalog {
     await this.followSessionWorkspace(fresh);
     fresh.hasHistory = true;
     await this.deps.lifecycleOps.startSession(id, fresh, "ensure", clock);
-    this.deps.sessionOps.markRead(fresh);
+    this.markRead(fresh);
     this.postRepoCatalog();
+  }
+
+
+/**
+   * Re-post the model catalog for a session already on screen.
+   *
+   * Connecting a second agent used to leave the picker stale until the user
+   * clicked New session — on a session that was already new. An empty
+   * conversation has nothing to protect, so its catalog is refreshed in place;
+   * one with history is left alone, because changing the model list under a
+   * live thread is a different thing entirely.
+   */
+  /**
+   * The identity frame for a conversation that is already live.
+   *
+   * Re-focusing one replays its transcript and its UI snapshot and, until
+   * 2026-09-01, stopped there. `sessionUiSnapshot` carries `modelChanged`, so
+   * the model PICKER updated — but `session` is the only frame that sets the
+   * provider, and it was never sent on this path. Switching from a Grok
+   * conversation to a live Codex one therefore left the client believing it was
+   * still on Grok: the composer said "Ask Grok", the working indicator said
+   * "grokking", the model list stayed the old session's, and steering was
+   * attempted against a CLI that has no such method (owner, from a phone,
+   * 2026-09-01 — the model picker showing the right model while everything
+   * around it showed the wrong agent is exactly this frame's absence).
+   *
+   * The same omission the `sessionName` note in focusSession records, one field
+   * over: send the small identity frame the client needs, rather than rebuild a
+   * catalog to carry it.
+   *
+   * `newSession: false` — a re-focus is not a new conversation, matching what
+   * startSession passes for a resume.
+   */
+  public sessionIdentityFrame(session: Session): HostMsg | undefined {
+    const testOverride = this.deps.getOverride?.<typeof this.sessionIdentityFrame>("sessionIdentityFrame");
+    if (testOverride) return testOverride(session);
+
+    const client = session.client;
+    if (!client?.sessionId) return undefined;
+    return {
+      type: "session",
+      sessionId: client.sessionId,
+      // `?? []` is load-bearing. A session can have a sessionId before its
+      // model list arrives — a phone JOINING a conversation the desk already
+      // holds is the ordinary case — and `modelsForSession` maps over this
+      // array unconditionally. Without the fallback it threw here, after
+      // `clearMessages` had already gone out, so the client was left cleared
+      // with an error instead of a transcript. Ten integration tests said so
+      // and I had not run them.
+      models: this.deps.sidebarOps.modelsForSession(session, client.availableModels ?? [], client.currentModelId, false),
+      currentModelId: client.currentModelId,
+      worktree: !!session.worktree,
+      provider: session.provider
+    };
+  }
+
+/** Synthesize a list entry for a live session grok hasn't written a `summary.json` for yet (a
+   *  brand-new one). The disk-scan index can't see it, so without this the active row would vanish
+   *  from history when the popover is opened the instant a session goes live. Uses the best name we
+   *  have in memory: a generated/renamed `customName`, else the first user message, else a
+   *  placeholder — all of which the next refresh replaces with grok's own summary once it lands. */
+  /** The name this session shows in the history list — what the user actually
+   *  reads, which is what a fork should be named after (#48).
+   *
+   *  Precedence mirrors the list itself: the user's `customName` first (that IS
+   *  the row's label for any session that has one), then grok's own title, then
+   *  the first user message.
+   *
+   *  The one deliberate departure: a **legacy primer-derived** title is skipped.
+   *  Older builds sent the primer as message #1, so inheriting that invisible
+   *  internal title into a fork would propagate it forever. `cliSessionTitle`
+   *  rejects it and we fall through to something real. */
+  public sessionDisplayName(session: Session): string {
+    const testOverride = this.deps.getOverride?.<typeof this.sessionDisplayName>("sessionDisplayName");
+    if (testOverride) return testOverride(session);
+
+    const id = session.activeSessionId;
+    if (!id) return "";
+    const override = this.deps.sidebarOps.state.get<SessionMetaOverrides>(SESSION_META_KEY, {})[id];
+    const custom = override?.customName?.trim();
+    if (custom) return custom;
+    // A live empty session is deliberately shown as "New session" in the
+    // history list, even if grok has already left a summary file behind.
+    if (!session.hasHistory) return "New session";
+    try {
+      const cwd = this.deps.sidebarOps.sessionCwd(session);
+      const grokHome = resolveGrokHome(process.env);
+      const sessDir = sessionDirFor(grokHome, cwd, id, { fs: defaultFs });
+      if (!sessDir) throw new Error("no session dir");
+      const raw = JSON.parse(fs.readFileSync(path.join(sessDir, "summary.json"), "utf8"));
+      const title = cliSessionTitle(raw?.session_summary, raw?.generated_title);
+      if (title) return fallbackName(title, Date.now());
+    } catch {
+      // No summary yet (grok flushes it at turn end) — fall through.
+    }
+    // Same last resort the history list uses ("Untitled (<date>)"), so a fork of
+    // a nameless session reads like a row rather than a bare "(Fork)".
+    const generated = (override?.autoName || "").trim();
+    const opening = (session.firstUserMessageForTitle || "").trim();
+    const first = session.client && isAdapterProvider(session.client.provider) ? generated || opening : opening || generated;
+    return fallbackName(first, Date.now());
+  }
+
+/** Push the focused conversation's title independently of history pagination.
+   *  The VS Code webview must not depend on the history popover having been
+   *  opened. */
+  public postSessionName(session: Session, name = this.sessionDisplayName(session)): void {
+    const testOverride = this.deps.getOverride?.<typeof this.postSessionName>("postSessionName");
+    if (testOverride) return testOverride(session, name);
+
+    const id = session.activeSessionId;
+    if (!id) return;
+    const cwd = this.deps.sidebarOps.sessionCwd(session);
+    // The owning PROJECT, resolved the same way the rail groups worktrees under
+    // their parent. Only when it differs from the cwd — an ordinary session is
+    // its own project and the field would be noise.
+    const owner = this.deps.sidebarOps.resolveLocalRepoTarget(cwd)?.cwd;
+    const message: HostMsg = {
+      type: "sessionName",
+      sessionId: id,
+      name,
+      cwd,
+      ...(owner && !pathsEqual(owner, cwd) ? { repoCwd: owner } : {})
+    };
+    if (session === this.deps.sidebarOps.focused) this.deps.sidebarOps.postLocal(message);
+  }
+
+public liveSessionEntry(
+    session: Session,
+    id: string,
+    cwd: string,
+    overrides: SessionMetaOverrides,
+  ): SessionListEntry {
+    const testOverride = this.deps.getOverride?.<typeof this.liveSessionEntry>("liveSessionEntry");
+    if (testOverride) return testOverride(session, id, cwd, overrides);
+
+    const now = Date.now();
+    const customName = overrides[id]?.customName?.trim() || undefined;
+    // No summary.json to read yet, so grok has no title for this one — the best
+    // we have is the opening message, live or as the stored `autoName`.
+    const firstMsg = (session.firstUserMessageForTitle || "").trim()
+      || (overrides[id]?.autoName || "").trim();
+    const displayName = customName || (firstMsg ? fallbackName(firstMsg, now) : "New session");
+    const ts = session.lastActiveAt || now;
+    return {
+      id,
+      cwd,
+      displayName,
+      rawSummary: firstMsg,
+      customName,
+      updatedAt: ts,
+      createdAt: ts,
+      numMessages: session.userMessageCount,
+      modelId: undefined,
+      provider: session.provider
+    };
+  }
+
+/**
+   * Like {@link readEntriesCached} but each id may live under a different cwd
+   * (workspace vs worktree). Groups stale ids by cwd so we still batch the
+   * disk reads per catalog.
+   */
+  public readEntriesCachedMulti(
+    ids: string[],
+    mtimeById: Map<string, number>,
+    cwdById: Map<string, string>,
+    overrides: SessionMetaOverrides,
+    grokHome: string,
+    log: (m: string) => void,
+  ): SessionListEntry[] {
+    const testOverride = this.deps.getOverride?.<typeof this.readEntriesCachedMulti>("readEntriesCachedMulti");
+    if (testOverride) return testOverride(ids, mtimeById, cwdById, overrides, grokHome, log);
+
+    const staleByCwd = new Map<string, string[]>();
+    for (const id of ids) {
+      const cached = this.deps.sidebarOps.sessionCache.get(id);
+      if (cached && cached.mtimeMs === (mtimeById.get(id) ?? -1)) continue;
+      const c = cwdById.get(id) || this.deps.sidebarOps.workspaceRoot();
+      const list = staleByCwd.get(c) ?? [];
+      list.push(id);
+      staleByCwd.set(c, list);
+    }
+    for (const [c, stale] of staleByCwd) {
+      const fresh = readSessionEntries({ fs: defaultFs, grokHome, cwd: c, ids: stale, overrides, log });
+      for (const e of fresh) {
+        this.deps.sidebarOps.sessionCache.set(e.id, { mtimeMs: mtimeById.get(e.id) ?? 0, entry: e });
+      }
+    }
+    return ids.map((id) => this.deps.sidebarOps.sessionCache.get(id)?.entry).filter((e): e is SessionListEntry => !!e);
+  }
+
+public annotateWorktreeLabels(
+    entries: SessionListEntry[],
+    overrides: SessionMetaOverrides,
+    workspaceCwd: string,
+  ): void {
+    const testOverride = this.deps.getOverride?.<typeof this.annotateWorktreeLabels>("annotateWorktreeLabels");
+    if (testOverride) return testOverride(entries, overrides, workspaceCwd);
+
+    const repoWts = worktreesForRepo(this.deps.sidebarOps.worktreeCache, workspaceCwd, { includeDead: true });
+    for (const e of entries) {
+      const fromMeta = overrides[e.id]?.worktreeLabel;
+      if (fromMeta) {
+        e.worktreeLabel = fromMeta;
+        continue;
+      }
+      const hit = matchWorktreeForCwd(e.cwd, repoWts);
+      if (hit) e.worktreeLabel = hit.label;
+      else if (e.cwd && !pathsEqual(e.cwd, workspaceCwd)) {
+        // Session lives outside the workspace (likely a worktree we no longer
+        // track) — still surface the basename so the row is distinguishable.
+        e.worktreeLabel = path.basename(e.cwd);
+      }
+    }
+  }
+
+/** Answer `listRepoSessions`: the newest few sessions for ONE repo, without
+   *  making it the client's selection. `cwd` is matched against the catalog the
+   *  client was already sent. Unknown and unavailable paths receive the same
+   *  coarse empty refusal, so a remote cannot use the answer to probe whether
+   *  an arbitrary path exists on the host. Both local and remote use
+   *  {@link localRepoCatalogEntries} (open folders on desktop, full catalog on
+   *  VS Code) so the preview scope cannot exceed the trust set. */
+  public buildRepoSessionsPreview(
+    cwd: string,
+    limit: number | undefined,
+    activeId: string | null | undefined,
+  ): HostMsg {
+    const testOverride = this.deps.getOverride?.<typeof this.buildRepoSessionsPreview>("buildRepoSessionsPreview");
+    if (testOverride) return testOverride(cwd, limit, activeId);
+
+    const hit = this.deps.sidebarOps.resolveLocalRepoTarget(cwd);
+    if (!hit || !hit.available) {
+      this.deps.sidebarOps.host.appendLine(`[rail] listRepoSessions failed: project unavailable`);
+      return { type: "repoSessions", cwd, entries: [], dots: {}, total: 0, error: "project-unavailable" };
+    }
+    // Clamp: the rail wants a handful, and an unbounded limit would make every
+    // repo row a full history read.
+    const size = Math.max(1, Math.min(20, Math.trunc(Number(limit)) || REPO_PREVIEW_SIZE));
+    const list = this.buildSessionsList(
+      hit.cwd,
+      { offset: 0, limit: size },
+      activeId,
+    );
+    if (list.type !== "sessions") {
+      this.deps.sidebarOps.host.appendLine(`[rail] listRepoSessions failed: session list unavailable`);
+      return { type: "repoSessions", cwd: hit.cwd, entries: [], dots: {}, total: 0, error: "sessions-unavailable" };
+    }
+    return {
+      type: "repoSessions",
+      // The host's own spelling, not the one the client sent — the rail keys its
+      // rows on this, and echoing an arbitrary casing would split one repo into
+      // two rail entries.
+      cwd: hit.cwd,
+      entries: list.entries,
+      dots: list.dots,
+      total: list.total
+    };
+  }
+
+public sendLocalRepoSessionsPreview(cwd: string, limit?: number): void {
+    const testOverride = this.deps.getOverride?.<typeof this.sendLocalRepoSessionsPreview>("sendLocalRepoSessionsPreview");
+    if (testOverride) return testOverride(cwd, limit);
+
+    this.deps.sidebarOps.postLocal(this.buildRepoSessionsPreview(cwd, limit, this.deps.sidebarOps.focused.activeSessionId));
+  }
+
+/** Pin/unpin one conversation. Stored on the session's own override entry, so
+   *  it survives a rename and travels with nothing else — `pinnedCwd` is kept
+   *  alongside because the Pinned group spans repos and has to know where to
+   *  read each session from without scanning every checkout. */
+  public async toggleSessionPin(id: string, cwd: string | undefined, pinned: boolean): Promise<void> {
+    const testOverride = this.deps.getOverride?.<typeof this.toggleSessionPin>("toggleSessionPin");
+    if (testOverride) return testOverride(id, cwd, pinned);
+
+    if (!id) return;
+    await this.updateSessionMeta((overrides) => {
+      const existing = overrides[id];
+      // Resolve the home repo once, at pin time: the client sends the row's own
+      // cwd (already gated against the catalog), and falling back to whatever
+      // repo happens to be selected would file the pin under the wrong project.
+      const cachedAdapterCwd = [...this.deps.sidebarOps.allAdapterCatalogs()].flat().find((entry) => entry.id === id)?.cwd;
+      const home = cwd || existing?.pinnedCwd || this.deps.sidebarOps.sessionCache.get(id)?.entry.cwd || cachedAdapterCwd;
+      if (!home) return null; // nothing to write (pin or unpin)
+      // Authorization is not only "cwd was once in the catalog": a remote client
+      // that knows a session id must not mutate pin state for a closed project.
+      // No protocol change — wire still allows optional cwd; we re-check home.
+      if (!this.deps.sidebarOps.isAuthorizedCwd(home)) return null;
+      const next: SessionMetaOverrides = { ...overrides };
+      const entry = { ...(existing ?? {}) };
+      if (pinned) {
+        entry.pinnedAt = Date.now();
+        entry.pinnedCwd = home;
+      } else {
+        delete entry.pinnedAt;
+        delete entry.pinnedCwd;
+      }
+      // An override that now carries nothing is noise in globalState — drop it
+      // rather than accumulating empty objects for every session ever unpinned.
+      if (Object.keys(entry).length === 0) delete next[id];
+      else next[id] = entry;
+      return next;
+    });
+    // The pin lives in globalState, not in the session's summary.json, so the
+    // file's mtime does not move and the entry cache would keep serving a row
+    // with the OLD pin state — the pin control would then still say "Pin" right
+    // after pinning, and clicking it would pin again instead of unpinning. Same
+    // reason `customName` invalidates here: an override changes the entry
+    // without touching disk.
+    this.deps.sidebarOps.sessionCache.delete(id);
+    this.deps.sidebarOps.postSessionsList(); // fans out the pinned refresh too
+  }
+
+public updateSessionMeta(
+    mutate: (current: SessionMetaOverrides) => SessionMetaOverrides | null,
+  ): Promise<void> {
+    const testOverride = this.deps.getOverride?.<typeof this.updateSessionMeta>("updateSessionMeta");
+    if (testOverride) return testOverride(mutate);
+
+    const run = this.sessionMetaWrites.then(async () => {
+      const current = this.deps.sidebarOps.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
+      const next = mutate(current);
+      if (next) await this.deps.sidebarOps.state.update(SESSION_META_KEY, capSessionMetaAutoNames(next).value);
+    });
+    // Keep the chain alive even if one link throws, or every later write dies.
+    this.sessionMetaWrites = run.catch(() => {});
+    return run;
+  }
+
+/** Session catalogs to index for a repo row: the checkout itself plus the
+   *  isolated worktrees that belong to it. Worktrees are deliberately NOT repo
+   *  rows (a worktree is not a checkout you choose between, and `discoverRepos`
+   *  excludes `<grokHome>/worktrees` by path), so their sessions have to surface
+   *  under the parent — otherwise leaving a worktree session strands it. */
+  public sessionCwdsForRepo(repoCwd: string, overrides: SessionMetaOverrides): string[] {
+    const testOverride = this.deps.getOverride?.<typeof this.sessionCwdsForRepo>("sessionCwdsForRepo");
+    if (testOverride) return testOverride(repoCwd, overrides);
+
+    const cwds: string[] = [];
+    const seen = new Set<string>();
+    const add = (p?: string) => {
+      if (!p) return;
+      const key = normalizeFsPath(p);
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      cwds.push(p);
+    };
+    add(repoCwd);
+    const known: WorktreeParentRef[] = [
+      ...Object.values(overrides)
+        .filter((o) => o.worktreePath)
+        .map((o) => ({ path: o.worktreePath!, sourceGitRoot: o.sourceGitRoot })),
+      ...this.deps.sidebarOps.worktreeCache.map((wt) => ({ path: wt.path, sourceGitRoot: wt.sourceRepo })),
+      ...[...this.deps.sidebarOps.pool]
+        .filter((s) => s.worktree)
+        .map((s) => ({ path: s.worktree!.path, sourceGitRoot: s.worktree!.sourceGitRoot })),
+    ];
+    for (const p of worktreeCwdsForRepo({
+      repoCwd,
+      repoGitRoot: gitRootForPath(repoCwd, defaultFs) ?? repoCwd,
+      worktrees: known
+    })) {
+      add(p);
+    }
+    return cwds;
+  }
+
+/** The dashboard dot for a grok-session id, from live status (if it's a live pool
+   *  member) plus the persisted unread badge (which outlives the live process). */
+  public dotForId(id: string): Dot {
+    const testOverride = this.deps.getOverride?.<typeof this.dotForId>("dotForId");
+    if (testOverride) return testOverride(id);
+
+    const live = [...this.deps.sidebarOps.pool].find((s) => s.activeSessionId === id);
+    const meta = this.deps.sidebarOps.state.get<SessionMetaOverrides>(SESSION_META_KEY, {})[id];
+    return computeDot({ liveStatus: live?.status, unread: meta?.unread, unreadError: meta?.unreadError });
+  }
+
+/** Persist (or clear) a session's unread badge in globalState session-meta. */
+  public setMetaUnread(id: string | undefined, unread: boolean, error: boolean): void {
+    const testOverride = this.deps.getOverride?.<typeof this.setMetaUnread>("setMetaUnread");
+    if (testOverride) return testOverride(id, unread, error);
+
+    if (!id) return;
+    const overrides = this.deps.sidebarOps.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
+    const cur = overrides[id] ?? {};
+    const next: SessionMetaOverrides = { ...overrides };
+    if (unread) {
+      if (cur.unread && !!cur.unreadError === error) return; // unchanged
+      next[id] = { ...cur, unread: true, unreadError: error || undefined };
+    } else {
+      if (!cur.unread && !cur.unreadError) return; // nothing to clear
+      const { unread: _u, unreadError: _e, ...rest } = cur;
+      if (Object.keys(rest).length === 0) delete next[id];
+      else next[id] = rest;
+    }
+    void this.deps.sidebarOps.state.update(SESSION_META_KEY, next);
+  }
+
+/** Clear a session's unread badge (it's being opened/viewed) and refresh its dot. */
+  public markRead(session: Session): void {
+    const testOverride = this.deps.getOverride?.<typeof this.markRead>("markRead");
+    if (testOverride) return testOverride(session);
+
+    const id = session.activeSessionId;
+    if (!id) return;
+    const meta = this.deps.sidebarOps.state.get<SessionMetaOverrides>(SESSION_META_KEY, {})[id];
+    if (!meta?.unread && !meta?.unreadError) return;
+    this.setMetaUnread(id, false, false);
+    this.deps.sidebarOps.pushDot(session);
+  }
+
+/**
+   * Mark a conversation as used NOW, and re-push the lists that order by it.
+   *
+   * Called when a message is sent and when a session is created — the two
+   * moments a person would expect their conversation to jump to the top. The
+   * lists order by the recency clock (`updates.jsonl` mtime for grok; host
+   * `activeAt` for adapters), and grok writes that file about 2.1 seconds
+   * after a send (measured), so without this the row sits still through
+   * the whole wait and a brand-new conversation is missing entirely.
+   *
+   * Every project and every session is treated the same; there is no special
+   * case for archived, which is a client presentation concept and has no
+   * business in the activity path.
+   */
+  public noteSessionActivity(session: Session): void {
+    const testOverride = this.deps.getOverride?.<typeof this.noteSessionActivity>("noteSessionActivity");
+    if (testOverride) return testOverride(session);
+
+    const sid = session.activeSessionId ?? session.client?.sessionId;
+    if (!sid) return;
+    const activeAt = Date.now();
+    const overrides = this.deps.sidebarOps.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
+    void this.deps.sidebarOps.state.update(SESSION_META_KEY, {
+      ...overrides,
+      [sid]: { ...(overrides[sid] ?? {}), activeAt }
+    });
+    for (const provider of (["codex", "claude", "gemini", "muse"] as const)) {
+      const history = this.deps.sidebarOps.adapterHistory(provider);
+      if (!history) continue;
+      for (const [key, entries] of history.cache) {
+        history.cache.set(key, entries.map((entry) =>
+          entry.id === sid ? { ...entry, updatedAt: activeAt } : entry));
+      }
+    }
+    const cwd = this.deps.sidebarOps.sessionCwd(session);
+    this.deps.sidebarOps.postSessionsList();
+    if (cwd) this.sendLocalRepoSessionsPreview(cwd);
+  }
+
+/**
+   * Re-push the project preview a finished turn just reordered.
+   *
+   * The rail's Recent group ranks by `updatedAt`, which is the session FILE's
+   * mtime — and the extension is not what writes that file, the agent process
+   * is. So rename and delete refresh (we do those) while sending a message did
+   * not: nothing in here knew the row had moved. Recent stayed on whatever
+   * order it was built with until something unrelated happened to redraw it.
+   *
+   * The turn ending is the closest signal we own. The agent writes the
+   * transcript around the same moment, not necessarily before, so this reads a
+   * beat later — and once more after that, because a single delay is a guess
+   * about someone else's disk write. Two cheap directory scans, only when a
+   * turn actually ended.
+   */
+  public refreshSessionOrderAfterTurn(session: Session): void {
+    const testOverride = this.deps.getOverride?.<typeof this.refreshSessionOrderAfterTurn>("refreshSessionOrderAfterTurn");
+    if (testOverride) return testOverride(session);
+
+    const cwd = this.deps.sidebarOps.sessionCwd(session);
+    if (!cwd) return;
+    for (const delay of [400, 1600]) {
+      const timer = setTimeout(() => {
+        this.turnOrderTimers.delete(timer);
+        try {
+          this.sendLocalRepoSessionsPreview(cwd);
+        } catch {
+          /* a preview refresh is never worth failing a turn over */
+        }
+      }, delay);
+      this.turnOrderTimers.add(timer);
+    }
+  }
+
+/** Adapter catalogs own their persistence, so abandoning an empty conversation
+   *  must use the advertised ACP delete rather than touching Grok's store. */
+  public async discardAdapterEmptySession(
+    provider: AcpProvider,
+    id: string | undefined,
+    cwd: string,
+    liveClient?: AcpClient,
+  ): Promise<boolean> {
+    const testOverride = this.deps.getOverride?.<typeof this.discardAdapterEmptySession>("discardAdapterEmptySession");
+    if (testOverride) return testOverride(provider, id, cwd, liveClient);
+
+    if (!id || !isAdapterProvider(provider)) return false;
+    // A live client proves this conversation already ran; a temporary one may
+    // only be spawned for a connected agent (#171).
+    if (!liveClient && !this.deps.sidebarOps.hasProviderConsent(provider)) return false;
+    let temporary: AcpClient | undefined;
+    try {
+      let client = liveClient;
+      if (!client) {
+        const cliPath = this.deps.sidebarOps.locateProvider(provider);
+        const backend = this.deps.sidebarOps.createProviderBackend(provider);
+        if (!cliPath || !backend) throw new Error(`${providerDisplayName(provider)} CLI is not available.`);
+        client = temporary = new AcpClient({
+          cliPath,
+          cwd,
+          env: { ...process.env },
+          backend,
+          log: (message) => this.deps.sidebarOps.host.appendLine(message)
+        });
+        await client.start();
+      }
+      await client.deleteSession(id);
+      const history = this.deps.sidebarOps.adapterHistory(provider);
+      if (history) {
+        for (const [key, entries] of history.cache) {
+          history.cache.set(key, entries.filter((entry) => entry.id !== id));
+        }
+      }
+      const overrides = this.deps.sidebarOps.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
+      if (overrides[id]) {
+        const next = { ...overrides };
+        delete next[id];
+        await this.deps.sidebarOps.state.update(SESSION_META_KEY, next);
+      }
+      return true;
+    } catch (error) {
+      this.deps.sidebarOps.host.appendLine(`[${provider}] could not discard empty session ${id}: ${(error as Error).message}`);
+      return false;
+    } finally {
+      if (temporary) await temporary.dispose();
+    }
+  }
+
+/** Retire choices superseded by transcript activity, including worktrees.
+   *  Store maintenance only, performed when publishing the catalog. */
+  public normalizeArchiveChoices(): void {
+    const testOverride = this.deps.getOverride?.<typeof this.normalizeArchiveChoices>("normalizeArchiveChoices");
+    if (testOverride) return testOverride();
+
+    if (!this.deps.sidebarOps.host.canArchiveRepos) return;
+    const archives = this.deps.sidebarOps.state.get<RepoArchives>(REPO_ARCHIVES_KEY, {});
+    if (!Object.keys(archives).length) return;
+    const overrides = this.deps.sidebarOps.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
+    const grokHome = resolveGrokHome(process.env);
+    const expired = expiredArchiveChoiceKeys({
+      archives,
+      newestActivityAt: (cwd: string) => {
+        let newest = 0;
+        for (const c of this.sessionCwdsForRepo(cwd, overrides)) {
+          const at = newestTranscriptMtime({ fs: defaultFs, grokHome, cwd: c });
+          if (at > newest) newest = at;
+        }
+        return newest;
+      }
+    });
+    if (!expired.length) return;
+    const next: RepoArchives = { ...archives };
+    for (const key of expired) {
+      this.deps.sidebarOps.host.appendLine(`[archive] ${next[key]?.cwd ?? key} has been worked in since — its archive choice no longer applies`);
+      delete next[key];
+    }
+    void this.deps.sidebarOps.state.update(REPO_ARCHIVES_KEY, next);
+  }
+
+public sessionMetaWrites: Promise<void> = Promise.resolve();
+
+public turnOrderTimers = new Set<ReturnType<typeof setTimeout>>();
+
+  dispose(): void {
+    for (const timer of this.turnOrderTimers) clearTimeout(timer);
+    this.turnOrderTimers.clear();
   }
 }
 

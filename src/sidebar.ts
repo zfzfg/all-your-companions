@@ -48,7 +48,7 @@ import  {
   QuestionRequest
 } from "./acp";
 import type { AcpProvider } from "./acp-backend";
-import { isAdapterProvider } from "./acp-backend";
+
 import { providerCapability } from "./provider-capabilities";
 import  {
   dropReviewTurnsAfter,
@@ -102,12 +102,7 @@ import  {
   turnIsInFlight,
   type QuestionResponder
 } from "./session";
-import  {
-  buildReapCandidates,
-  selectReapable,
-  computeDot,
-  Dot
-} from "./session-pool";
+import { buildReapCandidates, selectReapable, Dot } from "./session-pool";
 import  {
   resolveVoiceKey,
   extractGrokAuthKey,
@@ -238,19 +233,13 @@ import  {
   RepoColors,
   RepoListEntry,
   RepoPins,
-  capSessionMetaAutoNames,
   carrySessionName,
-  cliSessionTitle,
   defaultFs,
   deleteSessionDir,
-  fallbackName,
   isRepoColor,
   normalizeRepoPath,
   persistSessionContext,
   contextUsageFromLog,
-  readSessionEntries,
-  expiredArchiveChoiceKeys,
-  newestTranscriptMtime,
   resolveGrokHome,
   sessionCatalogDirs,
   sessionDirFor
@@ -281,16 +270,7 @@ import  {
 } from "./target-eligibility";
 import { resolveChatOpenFilePath } from "./media-serve";
 import { type FfmpegResolution } from "./ffmpeg-locate";
-import  {
-  gitRootForPath,
-  matchWorktreeForCwd,
-  normalizeFsPath,
-  pathsEqual,
-  type WorktreeParentRef,
-  type WorktreeRecord,
-  worktreeCwdsForRepo,
-  worktreesForRepo
-} from "./worktree";
+import { matchWorktreeForCwd, pathsEqual, type WorktreeRecord } from "./worktree";
 import { cwdIsAuthorized } from "./workspace-auth";
 import { historyEventCount, checkWorkspaceGitStatus, truncateReplayBuffer } from "./rewind";
 import { decideFeedbackAvailability } from "./feedback";
@@ -338,7 +318,6 @@ type GrokSessionsListMessage = Extract<HostMsg, { type: "sessions" }>;
 
 /** Rows a `listRepoSessions` preview returns when the client names no limit —
  *  the projects rail shows a few per repo and links out for the rest. */
-const REPO_PREVIEW_SIZE = 3;
 
 /** How long a cancelled turn may go unanswered before the host settles it
  *  itself. Generous: an honoured cancel comes back well inside a second, so this
@@ -1049,69 +1028,57 @@ export class GrokSidebar {
       getWorktreeCache: () => self.worktreeCache,
 
       repoOps: {
-        openWorkspaceFolders: (...args: any[]) => (self as any).openWorkspaceFolders(...args),
-        extraProjectFolders: (...args: any[]) => (self as any).extraProjectFolders(...args),
-        removedProjectFolderKeys: (...args: any[]) => (self as any).removedProjectFolderKeys(...args),
-        sessionCwdsForRepo: (...args: any[]) => (self as any).sessionCwdsForRepo(...args),
-        defaultProviderForProject: (...args: any[]) => (self as any).defaultProviderForProject(...args),
-        selectedHistoryCwd: (...args: any[]) => (self as any).selectedHistoryCwd(...args),
-        getSelectedRepoCwd: () => self.selectedRepoCwd,
-        setSelectedRepoCwd: (cwd) => { self.selectedRepoCwd = cwd; },
-        workspaceRoot: (...args: any[]) => (self as any).workspaceRoot(...args),
-        canAddProjectFolder: (...args: any[]) => (self as any).canAddProjectFolder(...args),
-        normalizeArchiveChoices: (...args: any[]) => (self as any).normalizeArchiveChoices(...args),
-        refreshWorktreeCache: (...args: any[]) => (self as any).refreshWorktreeCache(...args)
-  },
+openWorkspaceFolders: (...args: any[]) => (self as any).openWorkspaceFolders(...args),
+extraProjectFolders: (...args: any[]) => (self as any).extraProjectFolders(...args),
+removedProjectFolderKeys: (...args: any[]) => (self as any).removedProjectFolderKeys(...args),
+defaultProviderForProject: (...args: any[]) => (self as any).defaultProviderForProject(...args),
+selectedHistoryCwd: (...args: any[]) => (self as any).selectedHistoryCwd(...args),
+getSelectedRepoCwd: () => self.selectedRepoCwd,
+setSelectedRepoCwd: (cwd) => { self.selectedRepoCwd = cwd; },
+workspaceRoot: (...args: any[]) => (self as any).workspaceRoot(...args),
+canAddProjectFolder: (...args: any[]) => (self as any).canAddProjectFolder(...args),
+refreshWorktreeCache: (...args: any[]) => (self as any).refreshWorktreeCache(...args)
+},
 
       adapterOps: {
-        connectedProviders: (...args: any[]) => (self as any).connectedProviders(...args),
-        locateProvider: (...args: any[]) => (self as any).locateProvider(...args),
-        createProviderBackend: (...args: any[]) => (self as any).createProviderBackend(...args),
-        hasProviderConsent: (...args: any[]) => (self as any).hasProviderConsent(...args),
-        setProviderNeedsLogin: (...args: any[]) => (self as any).setProviderNeedsLogin(...args),
-        adapterHistory: (...args: any[]) => (self as any).adapterHistory(...args),
-        allAdapterCatalogs: (...args: any[]) => (self as any).allAdapterCatalogs(...args),
-        getCodexSessionCache: () => self.codexSessionCache,
-        getClaudeSessionCache: () => self.claudeSessionCache,
-        getGeminiSessionCache: () => self.geminiSessionCache,
-        getMuseSessionCache: () => self.museSessionCache,
-        isProviderCredentialError: (provider, error) => self.providerSetup.isProviderCredentialError(provider, error),
-        discardAdapterEmptySession: (...args: any[]) => (self as any).discardAdapterEmptySession(...args)
-  },
+connectedProviders: (...args: any[]) => (self as any).connectedProviders(...args),
+locateProvider: (...args: any[]) => (self as any).locateProvider(...args),
+createProviderBackend: (...args: any[]) => (self as any).createProviderBackend(...args),
+hasProviderConsent: (...args: any[]) => (self as any).hasProviderConsent(...args),
+setProviderNeedsLogin: (...args: any[]) => (self as any).setProviderNeedsLogin(...args),
+adapterHistory: (...args: any[]) => (self as any).adapterHistory(...args),
+allAdapterCatalogs: (...args: any[]) => (self as any).allAdapterCatalogs(...args),
+getCodexSessionCache: () => self.codexSessionCache,
+getClaudeSessionCache: () => self.claudeSessionCache,
+getGeminiSessionCache: () => self.geminiSessionCache,
+getMuseSessionCache: () => self.museSessionCache,
+isProviderCredentialError: (provider, error) => self.providerSetup.isProviderCredentialError(provider, error)
+},
 
       sessionOps: {
-        authorizedSessionCwds: (...args: any[]) => (self as any).authorizedSessionCwds(...args),
-        historyCwdFor: (...args: any[]) => (self as any).historyCwdFor(...args),
-        sessionCwd: (...args: any[]) => (self as any).sessionCwd(...args),
-        setSessionCwd: (...args: any[]) => (self as any).setSessionCwd(...args),
-        readEntriesCachedMulti: (...args: any[]) => (self as any).readEntriesCachedMulti(...args),
-        liveSessionEntry: (...args: any[]) => (self as any).liveSessionEntry(...args),
-        dotForId: (...args: any[]) => (self as any).dotForId(...args),
-        annotateWorktreeLabels: (...args: any[]) => (self as any).annotateWorktreeLabels(...args),
-        workflowStore: (...args: any[]) => (self as any).workflowStore(...args),
-        workflowRuns: (...args: any[]) => (self as any).workflowRuns(...args),
-        resolveWorkflow: (...args: any[]) => (self as any).resolveWorkflow(...args),
-        updateSessionMeta: (...args: any[]) => (self as any).updateSessionMeta(...args),
-        touch: (...args: any[]) => (self as any).touch(...args),
-        markRead: (...args: any[]) => (self as any).markRead(...args),
-        refreshWorkflowCompletions: (...args: any[]) => (self as any).refreshWorkflowCompletions(...args)
-  },
+authorizedSessionCwds: (...args: any[]) => (self as any).authorizedSessionCwds(...args),
+historyCwdFor: (...args: any[]) => (self as any).historyCwdFor(...args),
+sessionCwd: (...args: any[]) => (self as any).sessionCwd(...args),
+setSessionCwd: (...args: any[]) => (self as any).setSessionCwd(...args),
+workflowStore: (...args: any[]) => (self as any).workflowStore(...args),
+workflowRuns: (...args: any[]) => (self as any).workflowRuns(...args),
+resolveWorkflow: (...args: any[]) => (self as any).resolveWorkflow(...args),
+touch: (...args: any[]) => (self as any).touch(...args),
+refreshWorkflowCompletions: (...args: any[]) => (self as any).refreshWorkflowCompletions(...args)
+},
 
       uiOps: {
-        postLocal: (...args: any[]) => (self as any).postLocal(...args),
-        postSessionName: (...args: any[]) => (self as any).postSessionName(...args),
-        postSessionsList: (...args: any[]) => (self as any).postSessionsList(...args),
-        sendLocalRepoSessionsPreview: (...args: any[]) => (self as any).sendLocalRepoSessionsPreview(...args),
-        postMode: (...args: any[]) => (self as any).postMode(...args),
-        postChildContext: (...args: any[]) => (self as any).postChildContext(...args),
-        postSessionRemoved: (...args: any[]) => (self as any).postSessionRemoved(...args),
-        sessionIdentityFrame: (...args: any[]) => (self as any).sessionIdentityFrame(...args),
-        localizeHistoryMessage: (...args: any[]) => (self as any).localizeHistoryMessage(...args),
-        localPreviewChips: (...args: any[]) => (self as any).localPreviewChips(...args),
-        displayMode: (...args: any[]) => (self as any).displayMode(...args),
-        getWebview: () => self.view?.webview,
-        hasProjectsRail: () => !!self.projectsRail
-  },
+postLocal: (...args: any[]) => (self as any).postLocal(...args),
+postSessionsList: (...args: any[]) => (self as any).postSessionsList(...args),
+postMode: (...args: any[]) => (self as any).postMode(...args),
+postChildContext: (...args: any[]) => (self as any).postChildContext(...args),
+postSessionRemoved: (...args: any[]) => (self as any).postSessionRemoved(...args),
+localizeHistoryMessage: (...args: any[]) => (self as any).localizeHistoryMessage(...args),
+localPreviewChips: (...args: any[]) => (self as any).localPreviewChips(...args),
+displayMode: (...args: any[]) => (self as any).displayMode(...args),
+getWebview: () => self.view?.webview,
+hasProjectsRail: () => !!self.projectsRail
+},
 
       lifecycleOps: {
         startSession: (...args: any[]) => (self as any).startSession(...args),
@@ -1133,7 +1100,29 @@ export class GrokSidebar {
         getLastSweepAt: () => self.lastSweepAt,
         getProvenNonEmpty: () => self.provenNonEmpty
   }
-  });
+  ,
+sidebarOps: {
+modelsForSession: (...args) => self.modelsForSession(...args),
+get state() { return self.state; },
+sessionCwd: (...args) => self.sessionCwd(...args),
+resolveLocalRepoTarget: (...args) => self.resolveLocalRepoTarget(...args),
+get focused() { return self.focused; },
+postLocal: (...args) => self.postLocal(...args),
+get sessionCache() { return self.sessionCache; },
+workspaceRoot: (...args) => self.workspaceRoot(...args),
+get worktreeCache() { return self.worktreeCache; },
+get host() { return self.host; },
+allAdapterCatalogs: (...args) => self.allAdapterCatalogs(...args),
+isAuthorizedCwd: (...args) => self.isAuthorizedCwd(...args),
+postSessionsList: (...args) => self.postSessionsList(...args),
+get pool() { return self.pool; },
+pushDot: (...args) => self.pushDot(...args),
+adapterHistory: (...args) => self.adapterHistory(...args),
+hasProviderConsent: (...args) => self.hasProviderConsent(...args),
+locateProvider: (...args) => self.locateProvider(...args),
+createProviderBackend: (...args) => self.createProviderBackend(...args)
+}
+});
   }
 
   private createSessionStart(): SessionStart {
@@ -3283,23 +3272,7 @@ showQuestion: (session: Session, question: any, handlers: any) => self.showQuest
    * startSession passes for a resume.
    */
   private sessionIdentityFrame(session: Session): HostMsg | undefined {
-    const client = session.client;
-    if (!client?.sessionId) return undefined;
-    return {
-      type: "session",
-      sessionId: client.sessionId,
-      // `?? []` is load-bearing. A session can have a sessionId before its
-      // model list arrives — a phone JOINING a conversation the desk already
-      // holds is the ordinary case — and `modelsForSession` maps over this
-      // array unconditionally. Without the fallback it threw here, after
-      // `clearMessages` had already gone out, so the client was left cleared
-      // with an error instead of a transcript. Ten integration tests said so
-      // and I had not run them.
-      models: this.modelsForSession(session, client.availableModels ?? [], client.currentModelId, false),
-      currentModelId: client.currentModelId,
-      worktree: !!session.worktree,
-      provider: session.provider
-    };
+    return this.sessionCatalog.sessionIdentityFrame(session);
   }
 
   private postSessionModels(session: Session): void {
@@ -3869,25 +3842,7 @@ ${detail}`,
    * business in the activity path.
    */
   private noteSessionActivity(session: Session): void {
-    const sid = session.activeSessionId ?? session.client?.sessionId;
-    if (!sid) return;
-    const activeAt = Date.now();
-    const overrides = this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
-    void this.state.update(SESSION_META_KEY, {
-      ...overrides,
-      [sid]: { ...(overrides[sid] ?? {}), activeAt }
-    });
-    for (const provider of (["codex", "claude", "gemini", "muse"] as const)) {
-      const history = this.adapterHistory(provider);
-      if (!history) continue;
-      for (const [key, entries] of history.cache) {
-        history.cache.set(key, entries.map((entry) =>
-          entry.id === sid ? { ...entry, updatedAt: activeAt } : entry));
-      }
-    }
-    const cwd = this.sessionCwd(session);
-    this.postSessionsList();
-    if (cwd) this.sendLocalRepoSessionsPreview(cwd);
+    return this.sessionCatalog.noteSessionActivity(session);
   }
 
   /** Persist an answered permission card (title + allowed/rejected + position) so
@@ -4611,33 +4566,7 @@ ${detail}`,
    *  excludes `<grokHome>/worktrees` by path), so their sessions have to surface
    *  under the parent — otherwise leaving a worktree session strands it. */
   private sessionCwdsForRepo(repoCwd: string, overrides: SessionMetaOverrides): string[] {
-    const cwds: string[] = [];
-    const seen = new Set<string>();
-    const add = (p?: string) => {
-      if (!p) return;
-      const key = normalizeFsPath(p);
-      if (!key || seen.has(key)) return;
-      seen.add(key);
-      cwds.push(p);
-    };
-    add(repoCwd);
-    const known: WorktreeParentRef[] = [
-      ...Object.values(overrides)
-        .filter((o) => o.worktreePath)
-        .map((o) => ({ path: o.worktreePath!, sourceGitRoot: o.sourceGitRoot })),
-      ...this.worktreeCache.map((wt) => ({ path: wt.path, sourceGitRoot: wt.sourceRepo })),
-      ...[...this.pool]
-        .filter((s) => s.worktree)
-        .map((s) => ({ path: s.worktree!.path, sourceGitRoot: s.worktree!.sourceGitRoot })),
-    ];
-    for (const p of worktreeCwdsForRepo({
-      repoCwd,
-      repoGitRoot: gitRootForPath(repoCwd, defaultFs) ?? repoCwd,
-      worktrees: known
-    })) {
-      add(p);
-    }
-    return cwds;
+    return this.sessionCatalog.sessionCwdsForRepo(repoCwd, overrides);
   }
 
   /**
@@ -5304,29 +5233,7 @@ ${detail}`,
   /** Retire choices superseded by transcript activity, including worktrees.
    *  Store maintenance only, performed when publishing the catalog. */
   private normalizeArchiveChoices(): void {
-    if (!this.host.canArchiveRepos) return;
-    const archives = this.state.get<RepoArchives>(REPO_ARCHIVES_KEY, {});
-    if (!Object.keys(archives).length) return;
-    const overrides = this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
-    const grokHome = resolveGrokHome(process.env);
-    const expired = expiredArchiveChoiceKeys({
-      archives,
-      newestActivityAt: (cwd: string) => {
-        let newest = 0;
-        for (const c of this.sessionCwdsForRepo(cwd, overrides)) {
-          const at = newestTranscriptMtime({ fs: defaultFs, grokHome, cwd: c });
-          if (at > newest) newest = at;
-        }
-        return newest;
-      }
-    });
-    if (!expired.length) return;
-    const next: RepoArchives = { ...archives };
-    for (const key of expired) {
-      this.host.appendLine(`[archive] ${next[key]?.cwd ?? key} has been worked in since — its archive choice no longer applies`);
-      delete next[key];
-    }
-    void this.state.update(REPO_ARCHIVES_KEY, next);
+    return this.sessionCatalog.normalizeArchiveChoices();
   }
 
   private postRepoCatalog(): void {
@@ -5357,37 +5264,11 @@ ${detail}`,
     limit: number | undefined,
     activeId: string | null | undefined,
   ): HostMsg {
-    const hit = this.resolveLocalRepoTarget(cwd);
-    if (!hit || !hit.available) {
-      this.host.appendLine(`[rail] listRepoSessions failed: project unavailable`);
-      return { type: "repoSessions", cwd, entries: [], dots: {}, total: 0, error: "project-unavailable" };
-    }
-    // Clamp: the rail wants a handful, and an unbounded limit would make every
-    // repo row a full history read.
-    const size = Math.max(1, Math.min(20, Math.trunc(Number(limit)) || REPO_PREVIEW_SIZE));
-    const list = this.buildSessionsList(
-      hit.cwd,
-      { offset: 0, limit: size },
-      activeId,
-    );
-    if (list.type !== "sessions") {
-      this.host.appendLine(`[rail] listRepoSessions failed: session list unavailable`);
-      return { type: "repoSessions", cwd: hit.cwd, entries: [], dots: {}, total: 0, error: "sessions-unavailable" };
-    }
-    return {
-      type: "repoSessions",
-      // The host's own spelling, not the one the client sent — the rail keys its
-      // rows on this, and echoing an arbitrary casing would split one repo into
-      // two rail entries.
-      cwd: hit.cwd,
-      entries: list.entries,
-      dots: list.dots,
-      total: list.total
-    };
+    return this.sessionCatalog.buildRepoSessionsPreview(cwd, limit, activeId);
   }
 
   private sendLocalRepoSessionsPreview(cwd: string, limit?: number): void {
-    this.postLocal(this.buildRepoSessionsPreview(cwd, limit, this.focused.activeSessionId));
+    return this.sessionCatalog.sendLocalRepoSessionsPreview(cwd, limit);
   }
 
   /**
@@ -5643,69 +5524,12 @@ ${detail}`,
    *  alongside because the Pinned group spans repos and has to know where to
    *  read each session from without scanning every checkout. */
   private async toggleSessionPin(id: string, cwd: string | undefined, pinned: boolean): Promise<void> {
-    if (!id) return;
-    await this.updateSessionMeta((overrides) => {
-      const existing = overrides[id];
-      // Resolve the home repo once, at pin time: the client sends the row's own
-      // cwd (already gated against the catalog), and falling back to whatever
-      // repo happens to be selected would file the pin under the wrong project.
-      const cachedAdapterCwd = [...this.allAdapterCatalogs()].flat().find((entry) => entry.id === id)?.cwd;
-      const home = cwd || existing?.pinnedCwd || this.sessionCache.get(id)?.entry.cwd || cachedAdapterCwd;
-      if (!home) return null; // nothing to write (pin or unpin)
-      // Authorization is not only "cwd was once in the catalog": a remote client
-      // that knows a session id must not mutate pin state for a closed project.
-      // No protocol change — wire still allows optional cwd; we re-check home.
-      if (!this.isAuthorizedCwd(home)) return null;
-      const next: SessionMetaOverrides = { ...overrides };
-      const entry = { ...(existing ?? {}) };
-      if (pinned) {
-        entry.pinnedAt = Date.now();
-        entry.pinnedCwd = home;
-      } else {
-        delete entry.pinnedAt;
-        delete entry.pinnedCwd;
-      }
-      // An override that now carries nothing is noise in globalState — drop it
-      // rather than accumulating empty objects for every session ever unpinned.
-      if (Object.keys(entry).length === 0) delete next[id];
-      else next[id] = entry;
-      return next;
-    });
-    // The pin lives in globalState, not in the session's summary.json, so the
-    // file's mtime does not move and the entry cache would keep serving a row
-    // with the OLD pin state — the pin control would then still say "Pin" right
-    // after pinning, and clicking it would pin again instead of unpinning. Same
-    // reason `customName` invalidates here: an override changes the entry
-    // without touching disk.
-    this.sessionCache.delete(id);
-    this.postSessionsList(); // fans out the pinned refresh too
+    return this.sessionCatalog.toggleSessionPin(id, cwd, pinned);
   }
-
-  /** Read-modify-write on the session-meta map, serialised.
-   *
-   *  Every writer of this map reads the whole object, edits a copy and writes it
-   *  back. The read is synchronous but the write awaits, so two updates started
-   *  in the same tick both read the OLD map and the second silently discards the
-   *  first — pin A then immediately pin B, and only B survives. Remote messages
-   *  are not serialised, so "the same tick" is an ordinary double click.
-   *
-   *  Chaining every call through one promise makes the read-modify-write atomic
-   *  with respect to other users of this helper. It is the mechanism the older
-   *  writers should migrate onto (ROADMAP § Concurrent writes); until they do,
-   *  a pin can still lose a race against a rename, which is far rarer than two
-   *  pins in a row. Returning null from the mutator means "nothing to write". */
-  private sessionMetaWrites: Promise<void> = Promise.resolve();
   private updateSessionMeta(
     mutate: (current: SessionMetaOverrides) => SessionMetaOverrides | null,
   ): Promise<void> {
-    const run = this.sessionMetaWrites.then(async () => {
-      const current = this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
-      const next = mutate(current);
-      if (next) await this.state.update(SESSION_META_KEY, capSessionMetaAutoNames(next).value);
-    });
-    // Keep the chain alive even if one link throws, or every later write dies.
-    this.sessionMetaWrites = run.catch(() => {});
-    return run;
+    return this.sessionCatalog.updateSessionMeta(mutate);
   }
 
   /** Park a composer draft on the conversation it was typed into, because that
@@ -5774,21 +5598,7 @@ ${detail}`,
     overrides: SessionMetaOverrides,
     workspaceCwd: string,
   ): void {
-    const repoWts = worktreesForRepo(this.worktreeCache, workspaceCwd, { includeDead: true });
-    for (const e of entries) {
-      const fromMeta = overrides[e.id]?.worktreeLabel;
-      if (fromMeta) {
-        e.worktreeLabel = fromMeta;
-        continue;
-      }
-      const hit = matchWorktreeForCwd(e.cwd, repoWts);
-      if (hit) e.worktreeLabel = hit.label;
-      else if (e.cwd && !pathsEqual(e.cwd, workspaceCwd)) {
-        // Session lives outside the workspace (likely a worktree we no longer
-        // track) — still surface the basename so the row is distinguishable.
-        e.worktreeLabel = path.basename(e.cwd);
-      }
-    }
+    return this.sessionCatalog.annotateWorktreeLabels(entries, overrides, workspaceCwd);
   }
 
   /**
@@ -5863,8 +5673,7 @@ ${detail}`,
     this._routineScheduler?.dispose();
     if (this.workflowTimer) { clearInterval(this.workflowTimer); this.workflowTimer = undefined; }
     this._providerSetup?.dispose();
-    for (const timer of this.turnOrderTimers) clearTimeout(timer);
-    this.turnOrderTimers.clear();
+    this._sessionCatalog?.dispose();
     // Window reload and extension deactivation both land here. Closing the pipe
     // cancels every outstanding question first — a CLI blocked inside
     // `tools/call` has no timeout of its own and would wait for ever.
@@ -6461,52 +6270,14 @@ ${detail}`,
    *  internal title into a fork would propagate it forever. `cliSessionTitle`
    *  rejects it and we fall through to something real. */
   private sessionDisplayName(session: Session): string {
-    const id = session.activeSessionId;
-    if (!id) return "";
-    const override = this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {})[id];
-    const custom = override?.customName?.trim();
-    if (custom) return custom;
-    // A live empty session is deliberately shown as "New session" in the
-    // history list, even if grok has already left a summary file behind.
-    if (!session.hasHistory) return "New session";
-    try {
-      const cwd = this.sessionCwd(session);
-      const grokHome = resolveGrokHome(process.env);
-      const sessDir = sessionDirFor(grokHome, cwd, id, { fs: defaultFs });
-      if (!sessDir) throw new Error("no session dir");
-      const raw = JSON.parse(fs.readFileSync(path.join(sessDir, "summary.json"), "utf8"));
-      const title = cliSessionTitle(raw?.session_summary, raw?.generated_title);
-      if (title) return fallbackName(title, Date.now());
-    } catch {
-      // No summary yet (grok flushes it at turn end) — fall through.
-    }
-    // Same last resort the history list uses ("Untitled (<date>)"), so a fork of
-    // a nameless session reads like a row rather than a bare "(Fork)".
-    const generated = (override?.autoName || "").trim();
-    const opening = (session.firstUserMessageForTitle || "").trim();
-    const first = session.client && isAdapterProvider(session.client.provider) ? generated || opening : opening || generated;
-    return fallbackName(first, Date.now());
+    return this.sessionCatalog.sessionDisplayName(session);
   }
 
   /** Push the focused conversation's title independently of history pagination.
    *  The VS Code webview must not depend on the history popover having been
    *  opened. */
   private postSessionName(session: Session, name = this.sessionDisplayName(session)): void {
-    const id = session.activeSessionId;
-    if (!id) return;
-    const cwd = this.sessionCwd(session);
-    // The owning PROJECT, resolved the same way the rail groups worktrees under
-    // their parent. Only when it differs from the cwd — an ordinary session is
-    // its own project and the field would be noise.
-    const owner = this.resolveLocalRepoTarget(cwd)?.cwd;
-    const message: HostMsg = {
-      type: "sessionName",
-      sessionId: id,
-      name,
-      cwd,
-      ...(owner && !pathsEqual(owner, cwd) ? { repoCwd: owner } : {})
-    };
-    if (session === this.focused) this.postLocal(message);
+    return this.sessionCatalog.postSessionName(session, name);
   }
 
   private postSessionRemoved(id: string | undefined, cwd: string): void {
@@ -6521,26 +6292,7 @@ ${detail}`,
     cwd: string,
     overrides: SessionMetaOverrides,
   ): SessionListEntry {
-    const now = Date.now();
-    const customName = overrides[id]?.customName?.trim() || undefined;
-    // No summary.json to read yet, so grok has no title for this one — the best
-    // we have is the opening message, live or as the stored `autoName`.
-    const firstMsg = (session.firstUserMessageForTitle || "").trim()
-      || (overrides[id]?.autoName || "").trim();
-    const displayName = customName || (firstMsg ? fallbackName(firstMsg, now) : "New session");
-    const ts = session.lastActiveAt || now;
-    return {
-      id,
-      cwd,
-      displayName,
-      rawSummary: firstMsg,
-      customName,
-      updatedAt: ts,
-      createdAt: ts,
-      numMessages: session.userMessageCount,
-      modelId: undefined,
-      provider: session.provider
-    };
+    return this.sessionCatalog.liveSessionEntry(session, id, cwd, overrides);
   }
 
   /**
@@ -6556,22 +6308,7 @@ ${detail}`,
     grokHome: string,
     log: (m: string) => void,
   ): SessionListEntry[] {
-    const staleByCwd = new Map<string, string[]>();
-    for (const id of ids) {
-      const cached = this.sessionCache.get(id);
-      if (cached && cached.mtimeMs === (mtimeById.get(id) ?? -1)) continue;
-      const c = cwdById.get(id) || this.workspaceRoot();
-      const list = staleByCwd.get(c) ?? [];
-      list.push(id);
-      staleByCwd.set(c, list);
-    }
-    for (const [c, stale] of staleByCwd) {
-      const fresh = readSessionEntries({ fs: defaultFs, grokHome, cwd: c, ids: stale, overrides, log });
-      for (const e of fresh) {
-        this.sessionCache.set(e.id, { mtimeMs: mtimeById.get(e.id) ?? 0, entry: e });
-      }
-    }
-    return ids.map((id) => this.sessionCache.get(id)?.entry).filter((e): e is SessionListEntry => !!e);
+    return this.sessionCatalog.readEntriesCachedMulti(ids, mtimeById, cwdById, overrides, grokHome, log);
   }
 
   private renameSession(
@@ -8291,23 +8028,8 @@ ${detail}`,
    * turn actually ended.
    */
   private refreshSessionOrderAfterTurn(session: Session): void {
-    const cwd = this.sessionCwd(session);
-    if (!cwd) return;
-    for (const delay of [400, 1600]) {
-      const timer = setTimeout(() => {
-        this.turnOrderTimers.delete(timer);
-        try {
-          this.sendLocalRepoSessionsPreview(cwd);
-        } catch {
-          /* a preview refresh is never worth failing a turn over */
-        }
-      }, delay);
-      this.turnOrderTimers.add(timer);
-    }
+    return this.sessionCatalog.refreshSessionOrderAfterTurn(session);
   }
-
-  /** Pending {@link refreshSessionOrderAfterTurn} timers, so dispose can clear them. */
-  private turnOrderTimers = new Set<ReturnType<typeof setTimeout>>();
 
   // ---------- question cards (AP-05) ----------
   //
@@ -8404,27 +8126,12 @@ ${detail}`,
   /** The dashboard dot for a grok-session id, from live status (if it's a live pool
    *  member) plus the persisted unread badge (which outlives the live process). */
   private dotForId(id: string): Dot {
-    const live = [...this.pool].find((s) => s.activeSessionId === id);
-    const meta = this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {})[id];
-    return computeDot({ liveStatus: live?.status, unread: meta?.unread, unreadError: meta?.unreadError });
+    return this.sessionCatalog.dotForId(id);
   }
 
   /** Persist (or clear) a session's unread badge in globalState session-meta. */
   private setMetaUnread(id: string | undefined, unread: boolean, error: boolean): void {
-    if (!id) return;
-    const overrides = this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
-    const cur = overrides[id] ?? {};
-    const next: SessionMetaOverrides = { ...overrides };
-    if (unread) {
-      if (cur.unread && !!cur.unreadError === error) return; // unchanged
-      next[id] = { ...cur, unread: true, unreadError: error || undefined };
-    } else {
-      if (!cur.unread && !cur.unreadError) return; // nothing to clear
-      const { unread: _u, unreadError: _e, ...rest } = cur;
-      if (Object.keys(rest).length === 0) delete next[id];
-      else next[id] = rest;
-    }
-    void this.state.update(SESSION_META_KEY, next);
+    return this.sessionCatalog.setMetaUnread(id, unread, error);
   }
 
   /** Adapter catalogs own their persistence, so abandoning an empty conversation
@@ -8435,46 +8142,7 @@ ${detail}`,
     cwd: string,
     liveClient?: AcpClient,
   ): Promise<boolean> {
-    if (!id || !isAdapterProvider(provider)) return false;
-    // A live client proves this conversation already ran; a temporary one may
-    // only be spawned for a connected agent (#171).
-    if (!liveClient && !this.hasProviderConsent(provider)) return false;
-    let temporary: AcpClient | undefined;
-    try {
-      let client = liveClient;
-      if (!client) {
-        const cliPath = this.locateProvider(provider);
-        const backend = this.createProviderBackend(provider);
-        if (!cliPath || !backend) throw new Error(`${providerDisplayName(provider)} CLI is not available.`);
-        client = temporary = new AcpClient({
-          cliPath,
-          cwd,
-          env: { ...process.env },
-          backend,
-          log: (message) => this.host.appendLine(message)
-        });
-        await client.start();
-      }
-      await client.deleteSession(id);
-      const history = this.adapterHistory(provider);
-      if (history) {
-        for (const [key, entries] of history.cache) {
-          history.cache.set(key, entries.filter((entry) => entry.id !== id));
-        }
-      }
-      const overrides = this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
-      if (overrides[id]) {
-        const next = { ...overrides };
-        delete next[id];
-        await this.state.update(SESSION_META_KEY, next);
-      }
-      return true;
-    } catch (error) {
-      this.host.appendLine(`[${provider}] could not discard empty session ${id}: ${(error as Error).message}`);
-      return false;
-    } finally {
-      if (temporary) await temporary.dispose();
-    }
+    return this.sessionCatalog.discardAdapterEmptySession(provider, id, cwd, liveClient);
   }
 
   /**
@@ -8566,12 +8234,7 @@ ${detail}`,
 
   /** Clear a session's unread badge (it's being opened/viewed) and refresh its dot. */
   private markRead(session: Session): void {
-    const id = session.activeSessionId;
-    if (!id) return;
-    const meta = this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {})[id];
-    if (!meta?.unread && !meta?.unreadError) return;
-    this.setMetaUnread(id, false, false);
-    this.pushDot(session);
+    return this.sessionCatalog.markRead(session);
   }
 
   /** Tear down every live session (logout, CLI update, extension teardown).
@@ -8859,6 +8522,12 @@ ${detail}`,
 
   get grokVersionProbe(): Promise<string> | undefined { return this.cliUpdateHost.grokVersionProbe; }
   set grokVersionProbe(value: Promise<string> | undefined) { this.cliUpdateHost.grokVersionProbe = value; }
+
+  get sessionMetaWrites(): Promise<void> { return this.sessionCatalog.sessionMetaWrites; }
+  set sessionMetaWrites(value: Promise<void>) { this.sessionCatalog.sessionMetaWrites = value; }
+
+  get turnOrderTimers(): Set<NodeJS.Timeout> { return this.sessionCatalog.turnOrderTimers; }
+  set turnOrderTimers(value: Set<NodeJS.Timeout>) { this.sessionCatalog.turnOrderTimers = value; }
 }
 
 /**

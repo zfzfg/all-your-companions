@@ -8,6 +8,7 @@ import { Session } from "../src/session";
 import { sessionsDirFor, type SessionListEntry } from "../src/sessions";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const providerSessionSrc = fs.readFileSync(path.join(root, "src", "provider-session.ts"), "utf8");
 const sidebar = fs.readFileSync(path.join(root, "src", "sidebar.ts"), "utf8").replace(/\r\n/g, "\n");
 const sessionStartSrc = fs.readFileSync(path.join(root, "src", "session-start.ts"), "utf8").replace(/\r\n/g, "\n");
 const providerSetupSrc = fs.readFileSync(path.join(root, "src", "provider-setup.ts"), "utf8").replace(/\r\n/g, "\n");
@@ -116,7 +117,7 @@ describe("multi-provider review regressions", () => {
   });
 
   it("observes Codex logout success before entering the synchronous logout reset", () => {
-    const body = sidebar.slice(sidebar.indexOf("async logout("), sidebar.indexOf("dispose(): void"));
+    const body = providerSessionSrc.slice(providerSessionSrc.indexOf("async logout("), providerSessionSrc.indexOf("public finishProviderLogout("));
     const exec = body.indexOf("await execGrokCli(cliPath, logoutArgs");
     // Matched without its argument list: the invariant is the ORDER — the CLI is
     // observed to succeed before the reset — not the call's exact shape. Pinning
@@ -128,8 +129,8 @@ describe("multi-provider review regressions", () => {
     expect(disconnect).toBeGreaterThan(exec);
     expect(body.slice(exec, disconnect)).toContain("catch (error)");
     expect(body).toContain("The account remains connected");
-    expect(body).toContain("this.locateProvider(provider)");
-    expect(body).toContain('this.locateProvider("grok")');
+    expect(body).toContain("this.deps.sidebarOps.locateProvider(provider)");
+    expect(body).toContain('this.deps.sidebarOps.locateProvider("grok")');
     expect(body).toContain("await this.finishProviderLogout(provider");
     expect(body).toContain('await this.finishProviderLogout("grok"');
   });
