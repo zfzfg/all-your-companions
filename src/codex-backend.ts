@@ -1,3 +1,4 @@
+import { hostModeSequence, type HostMode } from "./provider-modes";
 import * as path from "node:path";
 import packageManifest from "../package.json";
 import { grokCliNeedsShell } from "./cli-process";
@@ -339,6 +340,7 @@ export class CodexBackend implements AcpBackend {
     return level ? { method: "session/set_config_option", params: { sessionId, configId: "reasoning_effort", value: level } } : null;
   }
 
+  hostModeSequence(mode: HostMode): readonly string[] { return hostModeSequence("codex", mode); }
   setMode(sessionId: string, modeId: string): { method: string; params: any } {
     if (modeId === "plan" || modeId === "default") {
       return { method: "session/set_config_option", params: { sessionId, configId: "collaboration_mode", value: modeId } };

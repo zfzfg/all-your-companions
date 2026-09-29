@@ -1,3 +1,4 @@
+import { unwiredOps } from "./unwired-ops";
 import { describe, expect, it, vi } from "vitest";
 import { TurnEdit, createTurnEdit, type TurnEditDeps } from "../src/turn-edit";
 import { Session } from "../src/session";
@@ -7,6 +8,7 @@ function makeMockDeps(): TurnEditDeps {
   session.activeSessionId = "sess-1";
   session.provider = "grok";
   return {
+    sidebarOps: unwiredOps(),
     host: {
       appendLine: vi.fn(),
       showInformationMessage: vi.fn(async () => undefined),
@@ -64,7 +66,6 @@ function makeMockDeps(): TurnEditDeps {
       noteLiveTurnEnded: vi.fn(),
       maybeGenerateTitle: vi.fn(),
       postSessionName: vi.fn(),
-      surfaceLimitError: vi.fn(() => false),
       onboardingForSession: vi.fn(() => "none"),
     },
     feedbackOps: {

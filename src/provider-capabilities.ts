@@ -1,6 +1,6 @@
 // Single source of truth for ACP provider capabilities (AP-01).
 //
-// Defines what each provider can do across 11 distinct capability dimensions.
+// Defines what each provider can do across 25 distinct capability dimensions.
 // Every combination is set explicitly without fallback or default cells; each
 // is documented with code or architectural references.
 //
@@ -30,7 +30,12 @@ export type ProviderCapability =
   | "adapterHistory" // Conversations live in an adapter catalog, not ~/.grok
   | "modeSwitching"  // session/set_mode (Agent / Auto-accept / Plan) is honoured
   | "perCallContext" // usage_update.used is billed per model call, not occupancy
-  | "clientMcp";     // The host sends its MCP servers on session/new
+  | "clientMcp"
+  | "nativeRewind"
+  | "nativeWorktree"
+  | "sessionInfo"
+  | "subscriptionUsage"
+  | "nearFullPrompt";     // The host sends its MCP servers on session/new
 
 export type CapabilitySupport =
   | { state: "yes" }
@@ -58,6 +63,11 @@ export const PROVIDER_CAPABILITY_NAMES: readonly ProviderCapability[] = [
   "modeSwitching",
   "perCallContext",
   "clientMcp",
+  "nativeRewind",
+  "nativeWorktree",
+  "sessionInfo",
+  "subscriptionUsage",
+  "nearFullPrompt",
 ] as const;
 
 /**
@@ -111,6 +121,12 @@ export const PROVIDER_CAPABILITIES: Record<
     // grok reports context occupancy (session/info, signals.json), not per-call billing.
     perCallContext: { state: "no", reason: "Grok reports context occupancy directly." },
     clientMcp: { state: "yes" },
+
+    nativeRewind: { state: "yes" },
+    nativeWorktree: { state: "yes" },
+    sessionInfo: { state: "yes" },
+    subscriptionUsage: { state: "yes" },
+    nearFullPrompt: { state: "yes" },
   },
   codex: {
     // codex-acp >= 1.11 registers `_session/steering` and advertises it at
@@ -168,6 +184,12 @@ export const PROVIDER_CAPABILITIES: Record<
     modeSwitching: { state: "yes" },
     perCallContext: { state: "yes" },
     clientMcp: { state: "yes" },
+
+    nativeRewind: { state: "no", reason: "nativeRewind is not provided by this backend; retain the host fallback where available." },
+    nativeWorktree: { state: "no", reason: "nativeWorktree is not provided by this backend; retain the host fallback where available." },
+    sessionInfo: { state: "no", reason: "sessionInfo is not provided by this backend; retain the host fallback where available." },
+    subscriptionUsage: { state: "yes" },
+    nearFullPrompt: { state: "yes" },
   },
   claude: {
     // Claude Code has no interjection RPC; queued send is used instead (media/chat.js:4151)
@@ -224,6 +246,12 @@ export const PROVIDER_CAPABILITIES: Record<
     modeSwitching: { state: "yes" },
     perCallContext: { state: "yes" },
     clientMcp: { state: "yes" },
+
+    nativeRewind: { state: "no", reason: "nativeRewind is not provided by this backend; retain the host fallback where available." },
+    nativeWorktree: { state: "no", reason: "nativeWorktree is not provided by this backend; retain the host fallback where available." },
+    sessionInfo: { state: "no", reason: "sessionInfo is not provided by this backend; retain the host fallback where available." },
+    subscriptionUsage: { state: "yes" },
+    nearFullPrompt: { state: "yes" },
   },
   gemini: {
     // Steer not supported by Gemini / Antigravity (media/chat.js:4158)
@@ -301,6 +329,12 @@ export const PROVIDER_CAPABILITIES: Record<
     perCallContext: { state: "no", reason: "Antigravity reports context occupancy directly." },
     // Sent on session/new; whether it is consumed is the hostMcp probe.
     clientMcp: { state: "yes" },
+
+    nativeRewind: { state: "no", reason: "nativeRewind is not provided by this backend; retain the host fallback where available." },
+    nativeWorktree: { state: "no", reason: "nativeWorktree is not provided by this backend; retain the host fallback where available." },
+    sessionInfo: { state: "yes" },
+    subscriptionUsage: { state: "no", reason: "subscriptionUsage is not provided by this backend; retain the host fallback where available." },
+    nearFullPrompt: { state: "yes" },
   },
   // Meta's Muse Code, through our own ACP adapter (adapters/muse, upstream
   // 9a4aa6b). Values mirror upstream's PROVIDER_ACTIONS row and the adapter's
@@ -328,6 +362,12 @@ export const PROVIDER_CAPABILITIES: Record<
     modeSwitching: { state: "no", reason: "Muse does not support mode switching over ACP." },
     perCallContext: { state: "no", reason: "Muse reports context occupancy directly." },
     clientMcp: { state: "no", reason: "The Muse adapter does not take host MCP servers." },
+
+    nativeRewind: { state: "no", reason: "nativeRewind is not provided by this backend; retain the host fallback where available." },
+    nativeWorktree: { state: "no", reason: "nativeWorktree is not provided by this backend; retain the host fallback where available." },
+    sessionInfo: { state: "no", reason: "sessionInfo is not provided by this backend; retain the host fallback where available." },
+    subscriptionUsage: { state: "no", reason: "subscriptionUsage is not provided by this backend; retain the host fallback where available." },
+    nearFullPrompt: { state: "no", reason: "nearFullPrompt is not provided by this backend; retain the host fallback where available." },
   },
 };
 

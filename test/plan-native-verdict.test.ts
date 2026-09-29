@@ -249,7 +249,7 @@ describe("unavailable Plan recovery", () => {
   it("cancels a live untrusted planning turn and requires both settlement and Agent mode", () => {
     const raise = recoverUnavailablePlanMode.indexOf("this.deps.uiOps.setPlanActive(session, true)");
     const cancel = recoverUnavailablePlanMode.indexOf('client.cancel("unavailable Plan recovery")');
-    const setMode = recoverUnavailablePlanMode.indexOf("client.setMode(ACT_MODE_ID)");
+    const setMode = recoverUnavailablePlanMode.indexOf('applyHostMode(client, session.provider, "agent")');
     const modeConfirmed = recoverUnavailablePlanMode.indexOf("recovery.modeConfirmed = true", setMode);
     const requireMode = recoverUnavailablePlanMode.indexOf("!recovery.modeConfirmed");
     const requireSettlement = recoverUnavailablePlanMode.indexOf("!recovery.turnSettled", requireMode);

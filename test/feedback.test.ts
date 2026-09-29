@@ -135,7 +135,8 @@ describe("availability", () => {
     const inbound = readFileSync(new URL("../src/sidebar-inbound.ts", import.meta.url), "utf8");
     expect(src).toContain("userEnabled: this.thumbsFeedbackEnabled()");
     expect(inbound).toContain('update("thumbsFeedback"');
-    expect(src).toMatch(/affectsConfiguration\("grok\.thumbsFeedback"\)/);
+    const viewHostSrc = readFileSync(new URL("../src/sidebar-view-host.ts", import.meta.url), "utf8");
+    expect(viewHostSrc).toMatch(/affectsConfiguration\("grok\.thumbsFeedback"\)/);
     const start = turnEditSrc.indexOf("public async handleTurnFeedback(");
     const end = turnEditSrc.indexOf("public async forkFocusedSession", start);
     expect(start).toBeGreaterThan(-1);

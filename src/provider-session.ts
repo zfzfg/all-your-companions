@@ -1,3 +1,7 @@
+import { providerCapability } from "./provider-capabilities";
+import { customModelItem } from "./provider-ui";
+import { PROVIDER_CLI } from "./provider-cli";
+import { applyHostMode } from "./provider-modes";
 import { HostMsg } from "./protocol";
 import { OpenClock } from "./open-timing";
 import { configWriteTarget, withRememberedEffort, type EffortPrefs } from "./mode-prefs";
@@ -185,15 +189,8 @@ export class ProviderSession {
       modelId: m.modelId,
       provider: m.provider,
     }));
-    if (focused.provider === "gemini") {
-      items.push({
-        label: "$(edit) Custom Gemini model ID...",
-        description: "",
-        detail: "Enter a custom Antigravity/Gemini model name (e.g. gemini-3.9-pro)",
-        modelId: "__custom__",
-        provider: "gemini",
-      });
-    }
+    const custom = customModelItem(focused.provider);
+    if (custom) items.push(custom);
     const picked = await this.deps.host.showQuickPick(items, {
       placeHolder: focused.hasHistory ? "Pick a model" : "Pick an agent and model",
     });
@@ -318,22 +315,20 @@ export class ProviderSession {
       this.deps.uiOps.autoApprovePendingPermissions(session);
       if (session.client && supportsModeSwitching(session.provider)) {
         try {
-          if (session.provider === "codex") {
-            await session.client.setMode("default");
-            await session.client.setMode("agent-full-access");
-          } else if (session.provider === "claude" || session.provider === "gemini") {
-            await session.client.setMode("yolo");
-          } else {
-            await session.client.setMode(ACT_MODE_ID);
-          }
+          await applyHostMode(session.client, session.provider, "yolo");
         } catch { /* CLI stays put; gate is what matters */ }
       }
       return;
     }
     if (modeId === "plan") {
+      const support = providerCapability(session.provider, "modeSwitching");
+      if (support.state === "no") {
+        this.deps.uiOps.notifyUser("error", `Couldn't switch mode: ${support.reason}`);
+        return;
+      }
       if (session.client) {
         try {
-          await session.client.setMode("plan");
+          await applyHostMode(session.client, session.provider, "plan");
           session.autoApprove = false;
           this.deps.uiOps.setPlanActive(session, true);
         } catch (e) {
@@ -346,14 +341,7 @@ export class ProviderSession {
     this.deps.uiOps.setPlanActive(session, false);
     if (session.client && supportsModeSwitching(session.provider)) {
       try {
-        if (session.provider === "codex") {
-          await session.client.setMode("default");
-          await session.client.setMode("agent");
-        } else if (session.provider === "claude" || session.provider === "gemini") {
-          await session.client.setMode("agent");
-        } else {
-          await session.client.setMode(ACT_MODE_ID);
-        }
+        await applyHostMode(session.client, session.provider, "agent");
       } catch (e) {
         this.deps.uiOps.notifyUser("error", `Couldn't switch mode: ${(e as Error).message}`);
       }
@@ -526,7 +514,7 @@ export class ProviderSession {
       });
     }, 10_000);
 
-    void client.setMode(ACT_MODE_ID).then(() => {
+    void applyHostMode(client, session.provider, "agent").then(() => {
       if (
         gen !== session.gen ||
         session.client !== client ||
@@ -1074,7 +1062,7 @@ public modelsForSession(session: Session, ownModels: readonly any[], currentMode
         "Sign Out",
       );
       if (choice !== "Sign Out") return;
-      const logoutArgs = (provider === "claude" || provider === "gemini") ? ["auth", "logout"] : ["logout"];
+      const logoutArgs = [...PROVIDER_CLI[provider].logoutArgs];
       try {
         await execGrokCli(cliPath, logoutArgs, { timeout: 30_000, windowsHide: true });
       } catch (error) {

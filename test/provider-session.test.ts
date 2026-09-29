@@ -123,6 +123,18 @@ describe("ProviderSession (W-15 S4)", () => {
   });
 
   describe("setMode", () => {
+    it("does not raise a Plan gate for a provider with no mode switching", async () => {
+      const deps = makeMockDeps();
+      const session = deps.getFocused();
+      session.provider = "muse";
+      session.planModeAvailable = true;
+      const setMode = vi.fn(async () => {});
+      session.client = { sessionId: "muse-session", setMode } as any;
+      await createProviderSession(deps).setMode("plan", session);
+      expect(setMode).not.toHaveBeenCalled();
+      expect(deps.uiOps.setPlanActive).not.toHaveBeenCalledWith(session, true);
+      expect(deps.uiOps.notifyUser).toHaveBeenCalledWith("error", expect.stringContaining("Couldn't switch mode:"));
+    });
     it("updates planActive and calls client.setMode without remembering plan mode", async () => {
       const deps = makeMockDeps();
       const ps = createProviderSession(deps);

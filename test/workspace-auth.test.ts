@@ -238,13 +238,13 @@ describe("sidebar close-revocation wiring (source)", () => {
 
 
   it("toggleSessionPin refuses unauthorized home cwd (no protocol change)", () => {
-    const src = sidebarSrc();
-    const pinStart = src.indexOf("private async toggleSessionPin(");
-    const pinEnd = src.indexOf("private buildPinnedSessions(", pinStart);
+    const src = fs.readFileSync(new URL("../src/session-catalog.ts", import.meta.url), "utf8");
+    const pinStart = src.indexOf("public async toggleSessionPin(");
+    const pinEnd = src.indexOf("public updateSessionMeta(", pinStart);
     const pinBody = src.slice(pinStart, pinEnd);
     expect(pinBody).toContain("isAuthorizedCwd(home)");
     // Must not mutate when home is only in cache/metadata after project close.
-    expect(pinBody).toMatch(/if\s*\(\s*!this\.isAuthorizedCwd\(home\)\s*\)\s*return null/);
+    expect(pinBody).toMatch(/if\s*\(\s*!this\.deps\.sidebarOps\.isAuthorizedCwd\(home\)\s*\)\s*return null/);
   });
 
 

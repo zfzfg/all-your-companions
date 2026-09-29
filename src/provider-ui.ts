@@ -331,3 +331,25 @@ export function mergeProviderHistoryPage(
     hasMore: grokHasMore || codexPage.length < codexRemaining.length,
   };
 }
+
+/** Provider-specific copy stays beside model/onboarding presentation. */
+export function customModelItem(provider: AcpProvider): { label: string; description: string; detail: string; modelId: string; provider: AcpProvider } | undefined {
+  if (provider !== "gemini") return undefined;
+  return {
+    label: "$(edit) Custom Gemini model ID...", description: "",
+    detail: "Enter a custom Antigravity/Gemini model name (e.g. gemini-3.9-pro)",
+    modelId: "__custom__", provider,
+  };
+}
+
+export function compactNotice(provider: AcpProvider): string | undefined {
+  return provider === "gemini"
+    ? "Antigravity manages and compacts context automatically in the background. No manual compaction is needed — you can continue chatting normally."
+    : undefined;
+}
+
+export function steerUnavailableNotice(provider: AcpProvider): string {
+  return provider === "grok"
+    ? "Steering needs a newer Grok Build CLI — your message was queued instead. Update via Settings → About."
+    : "This agent cannot steer mid-turn — your message was queued instead. It will send when the turn finishes.";
+}

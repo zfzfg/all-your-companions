@@ -193,8 +193,6 @@ export interface SessionCatalogLifecycleOps {
   findUnusedEmptySession(targetCwd: string, leavingId: string | null | undefined): any;
   persistWorktreeBinding(session: Session): Promise<void>;
   getSwitchQueue(): { run<T>(op: () => Promise<T>): Promise<T> };
-  getLastSweepAt(): Map<string, number>;
-  getProvenNonEmpty(): Map<string, Set<string>>;
 }
 
 /**
@@ -1359,7 +1357,7 @@ export class SessionCatalog {
     if (!cwd) return;
     const repoKey = normalizeRepoPath(cwd);
     const startedAt = Date.now();
-    const lastSweepAt = this.deps.lifecycleOps.getLastSweepAt();
+    const lastSweepAt = this.lastSweepAt;
     const lastSweep = lastSweepAt.get(repoKey) ?? 0;
     if (!opts.force && startedAt - lastSweep < GrokSidebar.SWEEP_INTERVAL_MS) return;
     lastSweepAt.set(repoKey, startedAt);
@@ -1373,7 +1371,7 @@ export class SessionCatalog {
     }
     for (const id of this.deps.lifecycleOps.reservedSessionIds()) liveIds.add(id);
 
-    const provenNonEmpty = this.deps.lifecycleOps.getProvenNonEmpty();
+    const provenNonEmpty = this.provenNonEmpty;
     let proven = provenNonEmpty.get(repoKey);
     if (!proven) {
       proven = new Set<string>();
@@ -2243,6 +2241,19 @@ export class SessionCatalog {
     for (const timer of this.turnOrderTimers) clearTimeout(timer);
     this.turnOrderTimers.clear();
   }
+
+
+  /** Last real sweep per repo, for SWEEP_INTERVAL_MS. */
+  public lastSweepAt = new Map<string, number>();
+
+
+  /** Every session id in a repo that has been PROVEN to hold real work, for this
+   *  activation. The sweep runs on every new/opened session, and without this each
+   *  run would re-read every `summary.json` under the repo; with it, a repeat run
+   *  reads only directories it has never classified. Safe to keep forever: a
+   *  session that has a real user turn never becomes empty again. Keyed by
+   *  {@link normalizeRepoPath}. */
+  public provenNonEmpty = new Map<string, Set<string>>();
 }
 
 export function createSessionCatalog(deps: SessionCatalogDeps): SessionCatalog {

@@ -435,11 +435,12 @@ describe("the surfaces this page has to reach", () => {
   );
 
   function block(marker: string, terminator = "]);"): string {
-    const start = sidebarSrc.indexOf(marker);
+    const source = marker.includes("SETTINGS_PANEL_TYPES") ? readFileSync(new URL("../src/sidebar-view-host.ts", import.meta.url), "utf8") : sidebarSrc;
+    const start = source.indexOf(marker);
     expect(start, marker).toBeGreaterThan(-1);
-    const end = sidebarSrc.indexOf(terminator, start);
+    const end = source.indexOf(terminator, start);
     expect(end, marker).toBeGreaterThan(start);
-    return sidebarSrc.slice(start, end);
+    return source.slice(start, end);
   }
 
   it("the standalone Settings tab LISTENS for the routines frame", () => {

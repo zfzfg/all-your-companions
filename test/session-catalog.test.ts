@@ -132,8 +132,6 @@ function makeCatalog() {
       findUnusedEmptySession: vi.fn(() => undefined),
       persistWorktreeBinding: vi.fn(async () => { }),
       getSwitchQueue: () => ({ run: async (op: any) => op() }),
-      getLastSweepAt: () => new Map(),
-      getProvenNonEmpty: () => new Map(),
     },
   };
 

@@ -159,7 +159,8 @@ describe("live host keeps the entry-store invariants", () => {
   });
 
   it("assigns image numbers at attach and never reindexes them", () => {
-    expect(sidebarSrc).toContain("allocateImageIndex(session.imageIndexHighWater");
+    const uploadSrc = readFileSync(new URL("../src/file-upload-host.ts", import.meta.url), "utf8");
+    expect(uploadSrc).toContain("allocateImageIndex(session.imageIndexHighWater");
     expect(sidebarSrc).not.toContain("composerImageIndexStart");
     expect(sidebarSrc).not.toContain("reindexQueuedImageChips");
     expect(sidebarSrc).not.toContain("withPerMessageImageIndices");

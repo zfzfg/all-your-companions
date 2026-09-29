@@ -1,3 +1,5 @@
+import { PROVIDER_USAGE } from "./provider-usage";
+import { PROVIDER_CLI } from "./provider-cli";
 /**
  * UsageHost: context usage, billing token accumulation, subscription capacity,
  * and near-full prompt handling.
@@ -218,17 +220,17 @@ export class UsageHost {
 
   public bindSubscriptionUsage(session: Session, env: NodeJS.ProcessEnv): void {
     const provider = session.provider;
-    if (provider !== "grok" && provider !== "claude" && provider !== "codex") {
+    if (providerCapability(provider, "subscriptionUsage").state !== "yes") {
       session.subscriptionUsage = undefined;
       return;
     }
     const cwd = this.deps.sessionCwd(session);
     const key = subscriptionCredentialContext(provider, env);
     const caches = this.subscriptionUsageCaches ??= new Map();
-    let cache = provider === "claude" ? new SubscriptionUsageCache() : caches.get(key);
+    let cache = PROVIDER_USAGE[provider].cache === "session" ? new SubscriptionUsageCache() : caches.get(key);
     if (!cache) caches.set(key, cache = new SubscriptionUsageCache());
     session.subscriptionUsage = new SubscriptionUsageBinding(cache, key, () =>
-      subscriptionCredentialContext(provider, provider === "grok"
+      subscriptionCredentialContext(provider, PROVIDER_CLI[provider].environment === "grok"
         ? { ...process.env, ...this.deps.readDotEnv(cwd) } : process.env));
   }
 
@@ -264,9 +266,9 @@ export class UsageHost {
     const client = session.client;
     this.publishSubscriptionUsage(session);
     if (!binding) return;
-    if (session.provider === "codex") {
+    if (PROVIDER_USAGE[session.provider].source === "codex-file") {
       await binding.refresh(async () => readCodexSubscriptionWindows({ codexHome: resolveCodexHome(process.env) }));
-    } else if (session.provider === "grok") {
+    } else if (PROVIDER_USAGE[session.provider].source === "rpc") {
       if (!client?.sessionId) return;
       await binding.refresh(() => client.getSubscriptionUsage());
     } else return;
@@ -296,7 +298,7 @@ export class UsageHost {
   }
 
   public checkCompactThreshold(session: Session, reported: number | undefined): void {
-    if (session.provider !== "grok" || session.compactThresholdChecked || reported === undefined) return;
+    if (PROVIDER_CLI[session.provider].environment !== "grok" || session.compactThresholdChecked || reported === undefined) return;
     session.compactThresholdChecked = true;
     const desired = session.compactThresholdRequested;
     if (!compactThresholdMismatch(desired, reported)) return;
@@ -315,7 +317,7 @@ export class UsageHost {
   ): void {
     if (used === undefined || window === undefined) return;
     const effective = threshold ?? session.compactThresholdReported;
-    if (session.provider === "muse") return;
+    if (providerCapability(session.provider, "nearFullPrompt").state === "no") return;
     let mode: "ask" | "off" = "ask";
     try {
       mode = this.deps.host.getConfiguration("companions").get<string>("context.nearFullPrompt", "ask") === "off" ? "off" : "ask";
@@ -337,7 +339,7 @@ export class UsageHost {
     gen: number,
     opts: { force?: boolean } = {},
   ): Promise<boolean> {
-    if ((session.provider !== "grok" && session.provider !== "gemini") || gen !== session.gen || session.sessionInfoUnsupported) return false;
+    if (providerCapability(session.provider, "sessionInfo").state === "no" || gen !== session.gen || session.sessionInfoUnsupported) return false;
     const client = session.client;
     if (!client?.sessionId) return false;
     if (!opts.force && !session.sessionInfoStale && sessionInfoCacheFresh(session.lastSessionInfoAt, Date.now())) {

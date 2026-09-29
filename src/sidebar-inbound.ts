@@ -1,3 +1,5 @@
+import { PROVIDER_CLI } from "./provider-cli";
+import { providerCapability } from "./provider-capabilities";
 /**
  * Inbound webview router (W-15 Schritt D1).
  * The sidebar keeps onMessage as a forwarder. Each domain router owns a
@@ -503,7 +505,7 @@ export class SessionInboundRouter {
         void this.deps.sessionSettings.refreshSubscriptionUsage(session);
         break;
       case "refreshContextDetails":
-        if (session.provider === "grok" || session.provider === "gemini") {
+        if (providerCapability(session.provider, "sessionInfo").state === "yes") {
           void this.deps.sessionSettings.refreshContextFromSessionInfo(session, session.gen, {
             force: session.sessionInfoStale,
           });
@@ -1524,7 +1526,7 @@ export class ProjectInboundRouter {
         // runs (#171). Everything after may now execute this agent's binary.
         await this.deps.providers.setProviderConnected(provider, true);
         // Official CLI owns login. For Claude and Gemini this is `auth login`.
-        const loginArgs = (provider === "claude" || provider === "gemini") ? ["auth", "login"] : ["login"];
+        const loginArgs = [...PROVIDER_CLI[provider].loginArgs];
         const term = this.deps.host.createTerminal({
           name: `${providerDisplayName(provider)} Login`,
           shellPath: cliPath,
@@ -1537,7 +1539,7 @@ export class ProjectInboundRouter {
         // remains available for interactive terminals still in progress.
         // Muse has no credential-status probe to poll; Re-check reads its
         // credential file instead (upstream 9a4aa6b).
-        if (provider !== "muse") this.deps.providers.watchProviderLogin(provider);
+        if (PROVIDER_CLI[provider].credentialProbe !== "unavailable") this.deps.providers.watchProviderLogin(provider);
         // Connecting an agent is about the NEXT conversation, not the one on
         // screen. Showing its sign-in panel over a session with history covered
         // that transcript, and the confirmation afterwards had nowhere sensible
@@ -1602,12 +1604,12 @@ export class ProjectInboundRouter {
         // gets the sign-in action, which is what needsLogin is for.
         // Consent was stated by Connect; a re-check only re-reads it (#171).
         if (!this.deps.providers.hasProviderConsent(provider)) break;
-        if (provider === "muse") {
+        if (PROVIDER_CLI[provider].credentialProbe === "unavailable") {
           // No status RPC: the person acknowledges the CLI sign-in here, and a
           // landed credential file is the evidence (upstream). A turn still
           // reports a credential failure through the normal path.
-          this.deps.sessionSettings.setProviderNeedsLogin("muse", !this.deps.providers.providerCredentialFilePresent("muse"));
-          void this.deps.providers.probeProviderVersion("muse");
+          this.deps.sessionSettings.setProviderNeedsLogin(provider, !this.deps.providers.providerCredentialFilePresent(provider));
+          void this.deps.providers.probeProviderVersion(provider);
         } else await this.deps.providers.reprobeProviderCredentials(provider);
         await this.deps.providers.adoptSessionsForConnectedProvider(provider, session);
         break;

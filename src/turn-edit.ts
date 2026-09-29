@@ -1,3 +1,4 @@
+import { steerUnavailableNotice } from "./provider-ui";
 import { explicitVisibleChips } from "./queued-send";
 import { OpenClock } from "./open-timing";
 import { randomUUID } from "node:crypto";
@@ -404,9 +405,7 @@ export class TurnEdit {
         this.emit(session, { type: "agentReset" });
         putBackOnQueue();
         this.notifyUser("warning",
-          session.provider === "grok"
-            ? "Steering needs a newer Grok Build CLI — your message was queued instead. Update via Settings → About."
-            : "This agent cannot steer mid-turn — your message was queued instead. It will send when the turn finishes.",
+          steerUnavailableNotice(session.provider),
         );
         return;
       }
@@ -449,7 +448,7 @@ export class TurnEdit {
       revert();
       return;
     }
-    if (session.provider !== "grok" || !session.feedbackAvailable) {
+    if (providerCapability(session.provider, "feedback").state !== "yes" || !session.feedbackAvailable) {
       this.deps.feedbackOps.latchFeedbackUnavailable(session);
       revert();
       return;
@@ -576,7 +575,7 @@ export class TurnEdit {
       );
     }
     const { client, gen, activeSessionId, userMessageCount } = session;
-    if (session.provider !== "grok") {
+    if (providerCapability(session.provider, "nativeRewind").state !== "yes") {
       await this.deps.rewindOps.rewindFromClientCheckpoints(session, {
         userBubbleIndex, bubbleText: text, totalUserBubbles, edit: true,
       });
@@ -684,7 +683,7 @@ export class TurnEdit {
       return void this.notifyUser("info", "Nothing to rewind yet — this session has no conversation.");
     }
     const { client, gen, activeSessionId, userMessageCount } = session;
-    if (session.provider !== "grok") {
+    if (providerCapability(session.provider, "nativeRewind").state !== "yes") {
       await this.deps.rewindOps.rewindFromClientCheckpoints(session, {
         userBubbleIndex, bubbleText, totalUserBubbles, edit: false,
       });

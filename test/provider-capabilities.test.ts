@@ -8,7 +8,7 @@ import {
 } from "../src/provider-capabilities";
 
 describe("provider-capabilities (AP-01)", () => {
-  it("defines all 20 capabilities explicitly across all 5 ACP providers with no missing cells", () => {
+  it("defines all 25 capabilities explicitly across all 5 ACP providers with no missing cells", () => {
     // 15 since AP-16 added `hostMcp`, `companionSubagentTarget` and
     // `delegationShim` on top of AP-11's `structuredPlan`; 20 since the
     // upstream sync folded PROVIDER_ACTIONS in (`deleteHistory`,
@@ -16,7 +16,7 @@ describe("provider-capabilities (AP-01)", () => {
     // asserted rather than derived so that adding a capability is a deliberate
     // act: every new cell is a claim about a provider that someone has to
     // substantiate.
-    expect(PROVIDER_CAPABILITY_NAMES).toHaveLength(20);
+    expect(PROVIDER_CAPABILITY_NAMES).toHaveLength(25);
     expect(ACP_PROVIDERS).toHaveLength(5);
 
     for (const provider of ACP_PROVIDERS) {
@@ -210,5 +210,19 @@ describe("structuredPlan (AP-11) — does this companion report a step list at a
     // Positive evidence resolves an unknown; it does not overrule a documented
     // protocol fact, or a stray event would flip the cell for everyone.
     expect(providerCapability("grok", "structuredPlan", { sawPlanEntries: true }).state).toBe("no");
+  });
+});
+
+describe("W-16 native and host capabilities", () => {
+  it.each([
+    ["nativeRewind", ["grok"]],
+    ["nativeWorktree", ["grok"]],
+    ["sessionInfo", ["grok","gemini"]],
+    ["subscriptionUsage", ["grok","codex","claude"]],
+    ["nearFullPrompt", ["grok","codex","claude","gemini"]],
+  ] as const)("pins every provider cell for %s", (cap, supported) => {
+    for (const provider of ACP_PROVIDERS) {
+      expect(providerCapability(provider, cap).state).toBe((supported as readonly string[]).includes(provider) ? "yes" : "no");
+    }
   });
 });

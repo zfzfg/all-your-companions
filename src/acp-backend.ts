@@ -116,6 +116,7 @@ export interface AcpBackend<Provider extends string = AcpProvider> {
   normalizePermissionParams(params: any): any;
   setModel(sessionId: string, modelId: string, reasoningEffort?: string): { method: string; params: any };
   setReasoningEffort(sessionId: string, modelId: string | undefined, level: string): { method: string; params: any } | null;
+  hostModeSequence(mode: import("./provider-modes").HostMode): readonly string[];
   setMode(sessionId: string, modeId: string): { method: string; params: any };
   configState(response: any, fallback: BackendConfigState): BackendConfigState;
   modelSetSucceeded(response: any): boolean;

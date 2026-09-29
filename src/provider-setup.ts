@@ -1,3 +1,4 @@
+import { PROVIDER_CLI } from "./provider-cli";
 import { grokShellEnvValue, resolvedTerminalShell } from "./terminal-manager";
 import { grokSubagentEnv } from "./grok-subagent-env";
 import { GROK_COMPACT_ENV, grokCompactThresholdEnv } from "./grok-compaction";
@@ -14,19 +15,19 @@ import { AcpClient } from "./acp";
 import { errorDetail, isCredentialError } from "./acp-dispatch";
 import { ACP_PROVIDERS, type AcpProvider, isAdapterProvider } from "./acp-backend";
 import { CLAUDE_ACP_ADAPTER_VERSION, ClaudeBackend, isClaudeCredentialError } from "./claude-backend";
-import { locateClaudeCli } from "./claude-cli-locator";
+
 import { warmClaudeModelCache } from "./claude-model-cache";
-import { locateGrokCli } from "./cli-locator";
+
 import { CODEX_ACP_ADAPTER_VERSION, CodexBackend, isCodexCredentialError } from "./codex-backend";
-import { locateCodexCli, resolveCodexHome } from "./codex-cli-locator";
+
 import { CODEX_MANAGED_VERSION, installManagedCodex } from "./codex-managed-installer";
 import { warmCodexModelCache } from "./codex-model-cache";
 import { GeminiBackend, isGeminiCredentialError } from "./gemini-backend";
-import { hasAntigravityCredentials, isAntigravityCli, locateGeminiCli } from "./gemini-cli-locator";
+import { hasAntigravityCredentials, isAntigravityCli } from "./gemini-cli-locator";
 import { warmGeminiModelCache } from "./gemini-model-cache";
 import type { Host, HostContext } from "./host";
 import { MuseBackend } from "./muse-backend";
-import { locateMuseCli } from "./muse-cli-locator";
+
 import type { PersistedState } from "./persisted-state";
 import  {
   connectedProviderIds,
@@ -39,7 +40,7 @@ import  {
   versionIsOlder
 } from "./provider-ui";
 import { Session } from "./session";
-import { resolveGrokHome, type SessionListEntry } from "./sessions";
+import { type SessionListEntry } from "./sessions";
 import type { HostMsg } from "./protocol";
 
 export const PROVIDER_CONNECTIONS_KEY = "grok.providerConnections.v2";
@@ -150,49 +151,19 @@ export class ProviderSetup {
   locateProvider(provider: AcpProvider): string | undefined {
     const override = this.deps.getOverride?.<typeof this.locateProvider>("locateProvider");
     if (override) return override(provider);
-    const grokCfg = this.host?.getConfiguration ? this.host.getConfiguration("grok") : undefined;
-    if (provider === "grok") {
-      if (this.cliPath && fs.existsSync(this.cliPath)) return this.cliPath;
-      if (this.testForceMissingGrokCli) {
-        this.cliPath = undefined;
-        return undefined;
-      }
-      const located = locateGrokCli(grokCfg?.get<string>("cliPath", "") ?? "") || undefined;
-      this.cliPath = located;
-      return located;
+    const policy = PROVIDER_CLI[provider];
+    const cached = this[policy.cacheKey];
+    if (cached && fs.existsSync(cached)) return cached;
+    if (policy.environment === "grok" && this.testForceMissingGrokCli) {
+      this[policy.cacheKey] = undefined;
+      return undefined;
     }
-    if (provider === "codex") {
-      if (this.codexCliPath && fs.existsSync(this.codexCliPath)) return this.codexCliPath;
-      const located = locateCodexCli({
-        configuredPath: grokCfg?.get<string>("codexCliPath", "") ?? "",
-        managedStorageRoot: this.context?.globalStorageUri?.fsPath ?? "",
-        arch: process.arch,
-      });
-      this.codexCliPath = located;
-      return located;
-    }
-    if (provider === "claude") {
-      if (this.claudeCliPath && fs.existsSync(this.claudeCliPath)) return this.claudeCliPath;
-      const located = locateClaudeCli({
-        configuredPath: grokCfg?.get<string>("claudeCliPath", "") ?? "",
-      });
-      this.claudeCliPath = located;
-      return located;
-    }
-    if (provider === "muse") {
-      if (this.museCliPath && fs.existsSync(this.museCliPath)) return this.museCliPath;
-      const located = locateMuseCli({
-        configuredPath: grokCfg?.get<string>("museCliPath", "") ?? "",
-      });
-      this.museCliPath = located;
-      return located;
-    }
-    if (this.geminiCliPath && fs.existsSync(this.geminiCliPath)) return this.geminiCliPath;
-    const located = locateGeminiCli({
-      configuredPath: grokCfg?.get<string>("geminiCliPath", "") ?? "",
+    const cfg = this.host?.getConfiguration ? this.host.getConfiguration("grok") : undefined;
+    return this[policy.cacheKey] = policy.locate({
+      configuredPath: cfg?.get<string>(policy.cacheKey, "") ?? "",
+      managedStorageRoot: this.context?.globalStorageUri?.fsPath ?? "",
+      arch: process.arch,
     });
-    this.geminiCliPath = located;
-    return located;
   }
 
   locatedProviders(): Partial<Record<AcpProvider, boolean>> {
@@ -212,19 +183,14 @@ export class ProviderSetup {
     at: Map<string, number>;
     refresh: Map<string, Promise<void>>;
   } | undefined {
-    if (provider === "codex") {
-      return { cache: this.codexSessionCache, at: this.codexSessionCacheAt, refresh: this.codexSessionRefresh };
-    }
-    if (provider === "claude") {
-      return { cache: this.claudeSessionCache, at: this.claudeSessionCacheAt, refresh: this.claudeSessionRefresh };
-    }
-    if (provider === "gemini") {
-      return { cache: this.geminiSessionCache, at: this.geminiSessionCacheAt, refresh: this.geminiSessionRefresh };
-    }
-    if (provider === "muse") {
-      return { cache: this.museSessionCache, at: this.museSessionCacheAt, refresh: this.museSessionRefresh };
-    }
-    return undefined;
+    const histories = {
+      grok: undefined,
+      codex: { cache: this.codexSessionCache, at: this.codexSessionCacheAt, refresh: this.codexSessionRefresh },
+      claude: { cache: this.claudeSessionCache, at: this.claudeSessionCacheAt, refresh: this.claudeSessionRefresh },
+      gemini: { cache: this.geminiSessionCache, at: this.geminiSessionCacheAt, refresh: this.geminiSessionRefresh },
+      muse: { cache: this.museSessionCache, at: this.museSessionCacheAt, refresh: this.museSessionRefresh },
+    };
+    return histories[provider];
   }
 
   allAdapterCatalogs(): Iterable<readonly SessionListEntry[]> {
@@ -478,12 +444,9 @@ export class ProviderSetup {
     const override = this.deps.getOverride?.<typeof this.reprobeProviderCredentials>("reprobeProviderCredentials");
     if (override) return override(provider);
     if (!this.hasProviderConsent(provider)) return false;
-    if (provider === "codex") return this.warmConnectedCodexModels();
-    if (provider === "claude") return this.warmConnectedClaudeModels();
-    if (provider === "gemini") return this.warmConnectedGeminiModels();
-    // Muse exposes no credential-status operation, and a catalog read cannot
-    // prove a sign-in (upstream). A turn reports any credential failure.
-    if (provider === "muse") return false;
+    const probe = PROVIDER_CLI[provider].credentialProbe;
+    if (probe === "unavailable") return false;
+    if (probe !== "native") return this[probe]();
     const cliPath = this.locateProvider("grok");
     if (!cliPath) return false;
     // session/new is what actually proves the account, but grok has no ACP
@@ -526,21 +489,8 @@ export class ProviderSetup {
    *  from "landed, but our probe is unhappy", which lead a person to
    *  different next actions. */
   providerCredentialFilePresent(provider: AcpProvider): boolean {
-    try {
-      if (provider === "codex") return fs.existsSync(path.join(resolveCodexHome(), "auth.json"));
-      if (provider === "muse") return fs.existsSync(path.join(os.homedir(), ".config", "muse", "auth.json"));
-      // GROK_HOME, not a hardcoded ~/.grok: the CLI honours it and so does the
-      // rest of this host, so hardcoding made the fallback miss a credential
-      // that was plainly there and tell the user to sign in again (review).
-      if (provider === "grok") return fs.existsSync(path.join(resolveGrokHome(process.env), "auth.json"));
-      if (provider === "gemini") {
-        const home = process.env.USERPROFILE || process.env.HOME || os.homedir();
-        return fs.existsSync(path.join(home, ".gemini", "oauth.json")) || fs.existsSync(path.join(home, ".gemini", "settings.json"));
-      }
-      return false;
-    } catch {
-      return false;
-    }
+    try { return PROVIDER_CLI[provider].credentialFiles().some((file) => fs.existsSync(file)); }
+    catch { return false; }
   }
 
   /** Observe an interactive terminal login without requiring a reload. Terminal
@@ -774,11 +724,8 @@ export class ProviderSetup {
   }
 
   isProviderCredentialError(provider: AcpProvider, error: unknown): boolean {
-    if (provider === "claude") return isClaudeCredentialError(error);
-    if (provider === "gemini") return isGeminiCredentialError(error);
-    if (provider === "muse") return new MuseBackend().isCredentialError(error);
-    if (provider === "codex") return isCodexCredentialError(error);
-    return isCredentialError(error);
+    const checks = { grok: isCredentialError, codex: isCodexCredentialError, claude: isClaudeCredentialError, gemini: isGeminiCredentialError, muse: (err: unknown) => new MuseBackend().isCredentialError(err) };
+    return checks[provider](error);
   }
 
   dispose(): void {

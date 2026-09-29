@@ -1,3 +1,4 @@
+import { providerCapability } from "./provider-capabilities";
 /** WorktreeHost: GrokSidebar collaborators. Methods moved unchanged. */
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -610,7 +611,7 @@ export class WorktreeHost {
    */
   private liveGrokWorktreeClient(sourcePath: string): AcpClient | undefined {
     const match = (s: Session) =>
-      s.provider === "grok" && !!s.client?.sessionId && pathsEqual(this.sessionCwd(s), sourcePath);
+      providerCapability(s.provider, "nativeWorktree").state === "yes" && !!s.client?.sessionId && pathsEqual(this.sessionCwd(s), sourcePath);
     for (const s of this.pool) {
       if (match(s) && s.client) return s.client;
     }
@@ -747,7 +748,7 @@ export class WorktreeHost {
       if (ok !== "Apply") return;
     }
     const sourceGitRoot = wt.sourceGitRoot || this.workspaceRoot();
-    const grokClient = session.provider === "grok" ? session.client : undefined;
+    const grokClient = providerCapability(session.provider, "nativeWorktree").state === "yes" ? session.client : undefined;
     if (grokClient?.sessionId) {
       this.host.appendLine("[worktree] using Grok RPC (clone mode available)");
       try {
@@ -851,7 +852,7 @@ export class WorktreeHost {
       // Grok RPC when this session is Grok and still has a client — clone-mode
       // checkouts only the CLI can name. Otherwise local `git worktree remove`
       // (AP-13a). We never start Grok just to delete a directory.
-      const grokClient = session.provider === "grok" ? session.client : undefined;
+      const grokClient = providerCapability(session.provider, "nativeWorktree").state === "yes" ? session.client : undefined;
       if (!grokClient?.sessionId) {
         this.host.appendLine("[worktree] using local git (linked worktree; clone mode is Grok-only)");
         const local = await this.worktreeLocal().remove({ worktreePath: wt.path, force: true });

@@ -98,9 +98,10 @@ describe("postVoiceConfigured dedupes identical frames", () => {
 describe("voiceConfigured cache dies with the renderer", () => {
   it("resolveWebviewView and postInitialState drop the local entry", () => {
     const src = readFileSync(new URL("../src/sidebar.ts", import.meta.url), "utf8");
-    const resolveStart = src.indexOf("resolveWebviewView(");
-    const resolveEnd = src.indexOf("resolveProjectsRailView(", resolveStart);
-    const resolveBody = src.slice(resolveStart, resolveEnd);
+    const viewHost = readFileSync(new URL("../src/sidebar-view-host.ts", import.meta.url), "utf8");
+    const resolveStart = viewHost.indexOf("resolveWebviewView(");
+    const resolveEnd = viewHost.indexOf("resolveProjectsRailView(", resolveStart);
+    const resolveBody = viewHost.slice(resolveStart, resolveEnd);
     expect(resolveBody).toContain('forgetPostedVoiceConfigured("local")');
 
     const initialStart = src.indexOf("private postInitialState(");

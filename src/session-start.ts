@@ -1,8 +1,9 @@
+import { compactNotice } from "./provider-ui";
+import { PROVIDER_CLI } from "./provider-cli";
+import { providerCapability } from "./provider-capabilities";
+import { applyHostMode } from "./provider-modes";
 export interface SessionStartSidebarOps {
   readonly focused: Session;
-  waitForSessionStart: (session: Session) => Promise<void>;
-  startSession: (resumeId?: string, target?: Session, intent?: SessionStartIntent, clock?: OpenClock) => Promise<AcpClient | undefined>;
-  emit: (session: Session, message: HostMsg) => void;
 }
 /**
  * Session lifecycle management: exclusive startup, process spawning,
@@ -112,7 +113,6 @@ import { GROK_STDIO_DOWNGRADE_TARGET, parseGrokVersion, shouldReactivelyDowngrad
 import { parseRunProgressUpdate } from "./run-progress";
 import type { SubscriptionWindow } from "./subscription-usage";
 
-const ACT_MODE_ID = "agent";
 
 type OnboardingState = Extract<HostMsg, { type: "onboarding" }>["state"];
 
@@ -416,7 +416,7 @@ export class SessionStart {
     }
 
     const consentAt = clock.now();
-    if (target.provider === "grok" && !(await this.deps.eventOps.confirmRepoForcedAutoApprove(this.deps.sessionCwd(target)))) {
+    if (providerCapability(target.provider, "clientPlanGate").state === "yes" && !(await this.deps.eventOps.confirmRepoForcedAutoApprove(this.deps.sessionCwd(target)))) {
       return undefined;
     }
     approveGateMs = clock.elapsed(consentAt);
@@ -479,7 +479,7 @@ export class SessionStart {
       this.deps.host.getConfiguration("grok").get<string>("defaultMode", ""),
       !!resumeId,
     );
-    const configAutoApprove = session.provider === "grok" && this.deps.eventOps.configForcesAutoApprove(this.deps.sessionCwd(session));
+    const configAutoApprove = providerCapability(session.provider, "clientPlanGate").state === "yes" && this.deps.eventOps.configForcesAutoApprove(this.deps.sessionCwd(session));
     session.autoApprove = rememberedYolo || configAutoApprove;
     session.planActive = false;
     session.sessionPermissionRules = [];
@@ -598,18 +598,11 @@ export class SessionStart {
 
           if (startOverrides?.mode === "plan" && session.planModeAvailable) {
             this.deps.reviewAndPlanOps.setPlanActive(session, true);
-            try { await client.setMode("plan"); } catch { /* best-effort */ }
+            try { await applyHostMode(client, session.provider, "plan"); } catch { /* best-effort */ }
           }
           if (session.autoApprove) {
             try {
-              if (session.provider === "codex") {
-                await client.setMode("default");
-                await client.setMode("agent-full-access");
-              } else if (session.provider === "claude" || session.provider === "gemini") {
-                await client.setMode("yolo");
-              } else {
-                await client.setMode(ACT_MODE_ID);
-              }
+              await applyHostMode(client, session.provider, "yolo");
             } catch { /* best-effort */ }
           }
         }
@@ -749,7 +742,7 @@ export class SessionStart {
     let grokHandshakeVersion: string | undefined;
     let grokVersionVerified = false;
 
-    if (session.provider === "grok") {
+    if (providerCapability(session.provider, "planMode").state === "probe") {
       await this.deps.providerOps.maybeUpdateCliOnUpgrade(cliPath);
       if (gen !== session.gen) return { grokVersionVerified: false };
       await this.deps.providerOps.maybePinBrokenCli(cliPath);
@@ -803,7 +796,7 @@ export class SessionStart {
     if (mcpReady !== undefined) await mcpReady;
     if (gen !== session.gen) return { cwd, env: process.env, effort: undefined };
 
-    const env = session.provider === "grok" ? this.deps.providerOps.buildEnv(cwd) : { ...process.env };
+    const env = PROVIDER_CLI[session.provider].environment === "grok" ? this.deps.providerOps.buildEnv(cwd) : { ...process.env };
     session.compactThresholdRequested = session.provider === "grok" ? normalizeCompactThreshold(env[GROK_COMPACT_ENV]) : undefined;
     session.compactThresholdChecked = false;
 
@@ -937,7 +930,7 @@ export class SessionStart {
         worktree: !!session.worktree,
         provider: session.provider,
       });
-      if (session.provider === "grok") {
+      if (providerCapability(session.provider, "feedback").state === "yes") {
         const metaEnabled = parseFeedbackEnabledMeta(res);
         if (metaEnabled !== undefined) session.feedbackMetaEnabled = metaEnabled;
         this.deps.providerOps.refreshFeedbackAvailability(session);
@@ -995,7 +988,7 @@ export class SessionStart {
         }
       }
       this.deps.emit(session, { type: "commandsUpdate", commands: merged });
-      if (session.provider === "grok") {
+      if (providerCapability(session.provider, "feedback").state === "yes") {
         session.feedbackCommandsAdvertise = commandsAdvertiseFeedback(cmds);
         this.deps.providerOps.refreshFeedbackAvailability(session);
       }
@@ -1438,14 +1431,14 @@ export class SessionStart {
       } else {
         const restorePlan = decision.planActive && session.planModeAvailable;
         this.deps.reviewAndPlanOps.setPlanActive(session, restorePlan);
-        const targetMode = restorePlan ? "plan" : ACT_MODE_ID;
-        try { await client.setMode(targetMode); } catch { /* best-effort */ }
+        const targetMode = restorePlan ? "plan" : "agent";
+        try { await applyHostMode(client, session.provider, targetMode); } catch { /* best-effort */ }
       }
     }
 
     // Seed the context donut
     this.deps.usageOps.emitContextUsage(session);
-    if (session.provider === "grok" || session.provider === "gemini") {
+    if (providerCapability(session.provider, "sessionInfo").state === "yes") {
       void this.deps.usageOps.refreshContextFromSessionInfo(session, gen, { force: true });
     }
     this.deps.usageOps.restoreUsage(session);
@@ -1638,10 +1631,11 @@ export class SessionStart {
       session.compactUsageArmed = false;
       session.adapterTurnCallUsed = [];
 
-      if (slashCommand === "compact" && session.provider === "gemini") {
+      const notice = slashCommand === "compact" ? compactNotice(session.provider) : undefined;
+      if (notice) {
         this.deps.emit(session, {
           type: "messageChunk",
-          text: "Antigravity manages and compacts context automatically in the background. No manual compaction is needed — you can continue chatting normally.",
+          text: notice,
         });
         if (endTurn(session, turn)) {
           if (!turnIsInFlight(session)) this.deps.emit(session, { type: "agentEnd" });
@@ -1748,9 +1742,9 @@ export class SessionStart {
     // conversation (a bare startSession would open a blank-context session
     // under the old transcript). Fresh/unstarted sessions have no id and start
     // clean as before.
-    await this.deps.sidebarOps.waitForSessionStart(session);
+    await this.waitForSessionStart(session);
     if (session.client) return session.client;
-    return this.deps.sidebarOps.startSession(session.activeSessionId, session, "ensure");
+    return this.startSession(session.activeSessionId, session, "ensure");
   }
 
   /** Restart the session. "clear" drops the visible history; "summarize" first
@@ -1761,12 +1755,12 @@ export class SessionStart {
     if (testOverride) return testOverride(mode, session);
 
     if (mode === "clear") {
-      this.deps.sidebarOps.emit(session, { type: "clearMessages" });
-      await this.deps.sidebarOps.startSession(undefined, session);
+      this.emit(session, { type: "clearMessages" });
+      await this.startSession(undefined, session);
       return;
     }
     const currentClient = session.client;
-    this.deps.sidebarOps.emit(session, { type: "summarizing" });
+    this.emit(session, { type: "summarizing" });
     const chunks: string[] = [];
     const captureChunk = (t: string) => chunks.push(t);
     currentClient?.on("messageChunk", captureChunk);
@@ -1781,10 +1775,10 @@ export class SessionStart {
     }
     const summary = chunks.join("").trim();
 
-    await this.deps.sidebarOps.startSession(undefined, session); // resets suppressContent
+    await this.startSession(undefined, session); // resets suppressContent
 
     if (summary && session.client) {
-      this.deps.sidebarOps.emit(session, { type: "sessionContext" });
+      this.emit(session, { type: "sessionContext" });
       session.suppressContent = true;
       try {
         await session.client.prompt(`[Context from previous session]\n${summary}`);

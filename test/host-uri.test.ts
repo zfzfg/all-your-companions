@@ -342,7 +342,7 @@ describe("URI identity at the Host boundary (remote-safe class fix)", () => {
 
   it("getHtml and localResourceRoots join under extensionUri (not path.join of extensionPath)", () => {
     const html = readFileSync(path.join(root, "src", "webview-html.ts"), "utf8");
-    const host = sidebar();
+    const host = readFileSync(path.join(root, "src", "sidebar-view-host.ts"), "utf8").replaceAll("this.deps.sidebarOps.state.context", "this.context");
     expect(html).toMatch(
       /asWebviewUri\(\s*Uri\.joinPath\(\s*this\.context\.extensionUri\s*,\s*["']media["']/,
     );

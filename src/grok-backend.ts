@@ -1,3 +1,4 @@
+import { hostModeSequence } from "./provider-modes";
 import { isCredentialError } from "./acp-dispatch";
 import type { AcpBackend, BackendConfigState, BackendSessionListResult, BackendSpawnOptions } from "./acp-backend";
 import type { EffortLevel, PromptContentBlock } from "./acp-types";
@@ -83,6 +84,7 @@ export const grokBackend: AcpBackend = {
       params: { sessionId, modelId, _meta: { reasoningEffort: level } },
     } : null;
   },
+  hostModeSequence: (mode) => hostModeSequence("grok", mode),
   setMode(sessionId, modeId) {
     return { method: "session/set_mode", params: { sessionId, modeId } };
   },

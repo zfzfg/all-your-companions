@@ -101,7 +101,8 @@ describe("multi-provider review regressions", () => {
   });
 
   it("routes every sidebar Codex discovery through the class-owned locator", () => {
-    expect(providerSetupSrc.match(/locateCodexCli\(/g)).toHaveLength(1);
+    const cli = fs.readFileSync(path.join(root, "src", "provider-cli.ts"), "utf8");
+    expect(cli.match(/locateCodexCli\(/g)).toHaveLength(1);
     const startAt = sessionStartSrc.indexOf("public async startSessionBody(");
     expect(startAt, "public async startSessionBody( must exist").toBeGreaterThan(-1);
     const startEnd = sessionStartSrc.indexOf("\n  private ", startAt + 1);
@@ -155,8 +156,10 @@ describe("multi-provider review regressions", () => {
     expect(reprobeStart).toBeGreaterThan(-1);
     const reprobeEnd = providerSetupSrc.indexOf("\n  private providerCredentialFilePresent(", reprobeStart);
     const reprobe = providerSetupSrc.slice(reprobeStart, reprobeEnd > 0 ? reprobeEnd : undefined);
-    expect(reprobe).toContain('if (provider === "codex")');
-    expect(reprobe).toContain("this.warmConnectedCodexModels()");
+    expect(reprobe).toContain("PROVIDER_CLI[provider].credentialProbe");
+    expect(reprobe).toContain("return this[probe]()");
+    const cli = fs.readFileSync(path.join(root, "src", "provider-cli.ts"), "utf8");
+    expect(cli).toContain('credentialProbe: "warmConnectedCodexModels"');
     const inboundSrc = fs.readFileSync(path.join(root, "src", "sidebar-inbound.ts"), "utf8").replace(/\r\n/g, "\n");
     const recheck = inboundSrc.slice(inboundSrc.indexOf('case "recheckConnection":'), inboundSrc.indexOf('case "logout":'));
     expect(recheck).toContain("await this.deps.providers.reprobeProviderCredentials(provider)");

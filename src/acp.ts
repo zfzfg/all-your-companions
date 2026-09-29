@@ -1708,4 +1708,8 @@ export class AcpClient extends EventEmitter {
       }
     }
   }
+
+  async setHostMode(mode: import("./provider-modes").HostMode): Promise<void> {
+    for (const step of this.backend.hostModeSequence(mode)) await this.setMode(step);
+  }
 }

@@ -1,3 +1,4 @@
+import { hostModeSequence, type HostMode } from "./provider-modes";
 import * as path from "node:path";
 import type { AcpBackend, BackendConfigState, BackendSpawnOptions } from "./acp-backend";
 
@@ -30,6 +31,7 @@ export class MuseBackend implements AcpBackend<"muse"> {
   setReasoningEffort(sessionId: string, _modelId: string | undefined, level: string) {
     return { method: "session/set_config_option", params: { sessionId, configId: "reasoning_effort", value: level } };
   }
+  hostModeSequence(mode: HostMode): readonly string[] { return hostModeSequence("muse", mode); }
   setMode(_sessionId: string, _modeId: string): never {
     throw new Error("Muse mode switching is unavailable");
   }

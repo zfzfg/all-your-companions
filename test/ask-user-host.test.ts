@@ -260,7 +260,7 @@ describe("the sidebar source keeps the AP-05 wiring", () => {
 
   it("withholds the MCP question tool from grok, which has its own RPC", () => {
     const method = questionHost.slice(questionHost.indexOf("async askUserMcpServer("));
-    expect(method.slice(0, 500)).toContain('if (session.provider === "grok") return undefined;');
+    expect(method.slice(0, 500)).toContain('if (providerCapability(session.provider, "questionRpc").state === "yes") return undefined;');
   });
 
   it("skips our server when the provider already loads one by that name", () => {

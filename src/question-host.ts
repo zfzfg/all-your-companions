@@ -1,3 +1,4 @@
+import { providerCapability } from "./provider-capabilities";
 /** QuestionHost: GrokSidebar collaborators. Methods moved unchanged. */
 import type { Host, HostContext } from "./host";
 import * as path from "node:path";
@@ -251,7 +252,7 @@ export class QuestionHost {
    * rule the connectors use: skip ours rather than shadow theirs.
    */
   async askUserMcpServer(session: Session): Promise<AcpMcpStdioServer | undefined> {
-    if (session.provider === "grok") return undefined;
+    if (providerCapability(session.provider, "questionRpc").state === "yes") return undefined;
     const reserved = this.reservedMcpIdentityFor(session);
     if (reserved.names.some((name) => normalizeMcpName(name) === ASK_USER_SERVER_NAME)) {
       this.host.appendLine(`[ask_user] a provider MCP server is already named "${ASK_USER_SERVER_NAME}" — not adding ours`);

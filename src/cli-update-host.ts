@@ -1,3 +1,5 @@
+import { PROVIDER_CLI } from "./provider-cli";
+import { isAcpProvider } from "./acp-backend";
 
 export interface CliUpdateHostSidebarOps {
   hasProviderConsent: (provider: AcpProvider) => boolean;
@@ -23,11 +25,11 @@ import type { AcpProvider } from "./acp-backend";
 import type { Session } from "./session";
 import type { MementoLike } from "./usage-host";
 import { pathsEqual } from "./worktree";
-import { cliUpdatePlan, selfUpdateArgs, CLI_NPM_PACKAGE } from "./cli-update-plan";
+import { cliUpdatePlan, selfUpdateArgs } from "./cli-update-plan";
 import { providerDisplayName, parseCodexVersionOutput, type ProviderModelCache } from "./provider-ui";
 import { execGrokCli } from "./cli-process";
 import { isLockedBinaryError, grokUpdatePolicy } from "./cli-locator";
-import { CODEX_MANAGED_VERSION } from "./codex-managed-installer";
+
 import { parseClaudeVersionOutput } from "./claude-cli-locator";
 import { parseMuseVersionOutput } from "./muse-cli-locator";
 import { parseGeminiVersionOutput } from "./gemini-cli-locator";
@@ -67,14 +69,16 @@ export class CliUpdateHost {
   constructor(private readonly deps: CliUpdateHostDeps) {}
 
   public async updateProviderCli(provider: unknown): Promise<void> {
-    if (provider !== "codex" && provider !== "claude") return;
+    if (!isAcpProvider(provider)) return;
+    const update = PROVIDER_CLI[provider].update;
+    if (!update) return;
     if (!this.deps.hasProviderConsent(provider)) return;
     const cliPath = this.deps.locateProvider(provider);
     if (!cliPath) return;
     let realPath = cliPath;
     try { realPath = fs.realpathSync(cliPath); } catch { /* keep the located path */ }
     const managedRoot = this.deps.context.globalStorageUri.fsPath;
-    const managed = provider === "codex" && pathsEqual(realPath.slice(0, managedRoot.length), managedRoot);
+    const managed = update.managed && pathsEqual(realPath.slice(0, managedRoot.length), managedRoot);
     if (managed) {
       await this.deps.installManagedCodexCli();
       return;
@@ -82,19 +86,18 @@ export class CliUpdateHost {
     const plan = cliUpdatePlan({
       managed: false,
       realPath,
-      packageName: CLI_NPM_PACKAGE[provider],
-      targetVersion: provider === "codex" ? CODEX_MANAGED_VERSION : undefined,
+      packageName: update.packageName,
+      targetVersion: update.targetVersion,
     });
     const quote = (value: string) => `"${value.replace(/"/g, '\\"')}"`;
     const command = plan.kind === "npm"
       ? `npm install -g --prefix ${quote(plan.prefix)} ${plan.packageSpec}`
-      : [quote(cliPath), ...selfUpdateArgs(provider, plan.kind === "self" ? plan.target : undefined)].join(" ");
+      : [quote(cliPath), ...selfUpdateArgs(update.provider, plan.kind === "self" ? plan.target : undefined)].join(" ");
     const term = this.deps.host.createTerminal({ name: `Update ${providerDisplayName(provider)} CLI` });
     term.show();
     term.sendText(command);
     this.deps.host.appendLine(`[${provider}] CLI update started in a terminal: ${command}`);
-    if (provider === "codex") this.codexVersionProbe = undefined;
-    else this.claudeVersionProbe = undefined;
+    this[update.provider === "codex" ? "codexVersionProbe" : "claudeVersionProbe"] = undefined;
   }
 
   public async refreshModelsIfCliChanged(provider: AcpProvider, version: string): Promise<void> {
@@ -311,10 +314,14 @@ public probeProviderVersion(provider: AcpProvider): Promise<string> {
     if (override) return override(provider);
 
     if (!this.deps.sidebarOps.hasProviderConsent(provider)) return Promise.resolve("");
-    if (provider === "codex") return this.deps.sidebarOps.probeCodexVersion();
-    if (provider === "claude") return this.deps.sidebarOps.probeClaudeVersion();
-    if (provider === "gemini") return this.deps.sidebarOps.probeGeminiVersion();
-    if (provider === "muse") return this.deps.sidebarOps.probeMuseVersion();
+    const probe = PROVIDER_CLI[provider].versionProbe;
+    if (probe === "probeGrokVersion") return this.probeGrokVersion();
+    return this.deps.sidebarOps[probe]();
+  }
+
+  grokVersionProbe?: Promise<string>;
+
+  private probeGrokVersion(): Promise<string> {
     if (this.grokVersionProbe) return this.grokVersionProbe;
     this.grokVersionProbe = (async () => {
       const cliPath = this.deps.sidebarOps.locateProvider("grok");
@@ -325,8 +332,6 @@ public probeProviderVersion(provider: AcpProvider): Promise<string> {
     })();
     return this.grokVersionProbe;
   }
-
-  grokVersionProbe?: Promise<string>;
 }
 
 export function createCliUpdateHost(deps: CliUpdateHostDeps): CliUpdateHost {

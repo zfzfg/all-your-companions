@@ -418,8 +418,6 @@ export class GrokSidebar {
    *  SWEEP_MIN_AGE_MS, so a shell waits at most SWEEP_MIN_AGE_MS + this before
    *  it is collected — while the walk stops being something a click pays for. */
   public static readonly SWEEP_INTERVAL_MS = 10 * 60 * 1000;
-  /** Last real sweep per repo, for SWEEP_INTERVAL_MS. */
-  private readonly lastSweepAt = new Map<string, number>();
   /** A whole-list refresh is already queued for this tick. See postSessionsList. */
   private sessionsListScheduled = false;
   private oauthShadowWarningShown = false;
@@ -989,8 +987,6 @@ export class GrokSidebar {
         findUnusedEmptySession: (...args: any[]) => (self as any).findUnusedEmptySession(...args),
         persistWorktreeBinding: (...args: any[]) => (self as any).persistWorktreeBinding(...args),
         getSwitchQueue: () => self.localWorkspaceSwitchQueue,
-        getLastSweepAt: () => self.lastSweepAt,
-        getProvenNonEmpty: () => self.provenNonEmpty
       }
       ,
       sidebarOps: {
@@ -1178,12 +1174,7 @@ export class GrokSidebar {
 
       getOverride: (...args: any[]) => (self as any).sidebarTestOverride(...args)
       ,
-      sidebarOps: {
-get focused() { return self.focused; },
-        waitForSessionStart: (...args) => self.waitForSessionStart(...args),
-        startSession: (...args) => self.startSession(...args),
-        emit: (...args) => self.emit(...args)
-}
+      sidebarOps: { get focused() { return self.focused; } }
     });
   }
 
@@ -1892,6 +1883,7 @@ get host() { return self.host; },
   }
 
   private sidebarTestOverride(name: string): any {
+    if (this.activeSidebarDelegations?.has(name)) return undefined;
     const descriptor = Object.getOwnPropertyDescriptor(this, name);
     if (!descriptor || !("value" in descriptor)) return undefined;
     const override = descriptor.value;
@@ -2046,23 +2038,23 @@ grokCompactThresholdSetting: (...args) => self.grokCompactThresholdSetting(...ar
   }
   /** * A record map keyed by id, NOT an array — twice over. */
   private loadRoutines(): Routine[] {
-    return this.routineScheduler.loadRoutines();
+    return this.delegateSidebarMethod("loadRoutines", () => this.routineScheduler.loadRoutines());
   }
 
   private async saveRoutines(routines: readonly Routine[]): Promise<void> {
-    return this.routineScheduler.saveRoutines(routines);
+    return this.delegateSidebarMethod("saveRoutines", () => this.routineScheduler.saveRoutines(routines));
   }
 
   private startRoutineScheduler(): void {
-    this.routineScheduler.startRoutineScheduler();
+    this.delegateSidebarMethod("startRoutineScheduler", () => this.routineScheduler.startRoutineScheduler());
   }
 
   private async tickRoutines(): Promise<void> {
-    return this.routineScheduler.tickRoutines();
+    return this.delegateSidebarMethod("tickRoutines", () => this.routineScheduler.tickRoutines());
   }
 
   private async runRoutine(routine: Routine, windowKey: string, startedAt: number): Promise<void> {
-    return this.routineScheduler.runRoutine(routine, windowKey, startedAt);
+    return this.delegateSidebarMethod("runRoutine", () => this.routineScheduler.runRoutine(routine, windowKey, startedAt));
   }
 
   /* --------------------------------------------------------------- /agent */
@@ -2138,12 +2130,12 @@ grokCompactThresholdSetting: (...args) => self.grokCompactThresholdSetting(...ar
   }
   /** * Which provider actually answers for this role. */
   private resolveRoleProvider(role: AgentRole, caller: Session): { provider: AcpProvider } | { error: string } {
-    return this.agentAuthoring.resolveRoleProvider(role, caller);
+    return this.delegateSidebarMethod("resolveRoleProvider", () => this.agentAuthoring.resolveRoleProvider(role, caller));
   }
 
   /** Post a plain line into the calling thread and log it. */
   private agentNotice(session: Session, level: "info" | "warning", text: string): void {
-    return this.agentAuthoring.agentNotice(session, level, text);
+    return this.delegateSidebarMethod("agentNotice", () => this.agentAuthoring.agentNotice(session, level, text));
   }
 
   /**
@@ -2183,7 +2175,7 @@ grokCompactThresholdSetting: (...args) => self.grokCompactThresholdSetting(...ar
   }
   /** * `/agent <name> <task>` — commission one named role (AP-10, crew stage 1). */
   private async handleAgentCommand(text: string, session: Session): Promise<boolean> {
-    return this.agentAuthoring.handleAgentCommand(text, session);
+    return this.delegateSidebarMethod("handleAgentCommand", () => this.agentAuthoring.handleAgentCommand(text, session));
   }
   /** * Start the role session, brief it, and turn its reply into a card. */
   private async runAgentRole(
@@ -2245,25 +2237,25 @@ grokCompactThresholdSetting: (...args) => self.grokCompactThresholdSetting(...ar
     /** AP-16: the child's whole reply, for `await` with `action: "read"`. */
     rawReply?: string;
   }> {
-    return this.agentAuthoring.runAgentRole(role, brief, trigger, caller, coords);
+    return this.delegateSidebarMethod("runAgentRole", () => this.agentAuthoring.runAgentRole(role, brief, trigger, caller, coords));
   }
 
   /** Name a role session before its turn, for the reason routines do the same:
    *  an interrupted run still leaves a row, and an untitled one is the hardest
    *  to account for afterwards. */
   private nameAgentRoleSession(roleSession: Session, role: AgentRole, runId: string, step: number): void {
-    return this.agentAuthoring.nameAgentRoleSession(roleSession, role, runId, step);
+    return this.delegateSidebarMethod("nameAgentRoleSession", () => this.agentAuthoring.nameAgentRoleSession(roleSession, role, runId, step));
   }
 
   /** A role session that produced nothing is removed outright — the same path
    *  as an abandoned empty "New session" (see {@link teardownEmptySession}). */
   private discardAgentRoleSession(roleSession: Session): void {
-    return this.agentAuthoring.discardAgentRoleSession(roleSession);
+    return this.delegateSidebarMethod("discardAgentRoleSession", () => this.agentAuthoring.discardAgentRoleSession(roleSession));
   }
 
   /** Stop the running role, if any. Returns true when there was one. */
   private cancelAgentRun(caller: Session): boolean {
-    return this.agentAuthoring.cancelAgentRun(caller);
+    return this.delegateSidebarMethod("cancelAgentRun", () => this.agentAuthoring.cancelAgentRun(caller));
   }
 
   private emitCrewRun(session: Session): void {
@@ -2283,24 +2275,24 @@ grokCompactThresholdSetting: (...args) => self.grokCompactThresholdSetting(...ar
   }
 
   private workflowStore(): NonNullable<GrokSidebar["workflowState"]> {
-    return this.workflowStageRunner.workflowStore();
+    return this.delegateSidebarMethod("workflowStore", () => this.workflowStageRunner.workflowStore());
   }
 
-  private workflowRuns(): WorkflowRunStore { return this.workflowStageRunner.workflowRuns(); }
+  private workflowRuns(): WorkflowRunStore { return this.delegateSidebarMethod("workflowRuns", () => this.workflowStageRunner.workflowRuns()); }
 
   private get generatorState(): AgentAuthoring["generatorState"] { return this.agentAuthoring.generatorState; }
   private set generatorState(value: AgentAuthoring["generatorState"]) { this.agentAuthoring.generatorState = value; }
 
   private generatorStore(): NonNullable<GrokSidebar["generatorState"]> {
-    return this.agentAuthoring.generatorStore();
+    return this.delegateSidebarMethod("generatorStore", () => this.agentAuthoring.generatorStore());
   }
 
   private postWorkflowGenerator(view: import("./protocol").WorkflowGeneratorView): void {
-    return this.agentAuthoring.postWorkflowGenerator(view);
+    return this.delegateSidebarMethod("postWorkflowGenerator", () => this.agentAuthoring.postWorkflowGenerator(view));
   }
 
   private handleGeneratorTool(session: Session, call: CompanionsCall): void {
-    return this.agentAuthoring.handleGeneratorTool(session, call);
+    return this.delegateSidebarMethod("handleGeneratorTool", () => this.agentAuthoring.handleGeneratorTool(session, call));
   }
 
   get fileClaims(): FileClaimStore | undefined {
@@ -2311,79 +2303,79 @@ grokCompactThresholdSetting: (...args) => self.grokCompactThresholdSetting(...ar
   }
 
   private inThreadCrewCommand(): boolean {
-    return this.workflowStageRunner.inThreadCrewCommand();
+    return this.delegateSidebarMethod("inThreadCrewCommand", () => this.workflowStageRunner.inThreadCrewCommand());
   }
 
   private defaultWorkflowName(): string {
-    return this.workflowStageRunner.defaultWorkflowName();
+    return this.delegateSidebarMethod("defaultWorkflowName", () => this.workflowStageRunner.defaultWorkflowName());
   }
 
   private autoStartNextStage(): boolean {
-    return this.workflowStageRunner.autoStartNextStage();
+    return this.delegateSidebarMethod("autoStartNextStage", () => this.workflowStageRunner.autoStartNextStage());
   }
 
   private maxFixerPasses(): number {
-    return this.workflowStageRunner.maxFixerPasses();
+    return this.delegateSidebarMethod("maxFixerPasses", () => this.workflowStageRunner.maxFixerPasses());
   }
 
   private resolveWorkflow(session: Session, name?: string): WorkflowDefinition {
-    return this.workflowStageRunner.resolveWorkflow(session, name);
+    return this.delegateSidebarMethod("resolveWorkflow", () => this.workflowStageRunner.resolveWorkflow(session, name));
   }
 
   private postWorkflowList(session: Session, preferred?: string): void {
-    this.workflowStageRunner.postWorkflowList(session, preferred);
+    this.delegateSidebarMethod("postWorkflowList", () => this.workflowStageRunner.postWorkflowList(session, preferred));
   }
 
   private emitWorkflowRun(session: Session, extra?: { staleDetails?: string[]; missing?: string[] }): void {
-    this.workflowStageRunner.emitWorkflowRun(session, extra);
+    this.delegateSidebarMethod("emitWorkflowRun", () => this.workflowStageRunner.emitWorkflowRun(session, extra));
   }
 
   private workflowAutonomy(run: WorkflowRun): Autonomy {
-    return this.workflowStageRunner.workflowAutonomy(run);
+    return this.delegateSidebarMethod("workflowAutonomy", () => this.workflowStageRunner.workflowAutonomy(run));
   }
 
   private workflowReportPath(runId: string): string | undefined {
-    return this.workflowStageRunner.workflowReportPath(runId);
+    return this.delegateSidebarMethod("workflowReportPath", () => this.workflowStageRunner.workflowReportPath(runId));
   }
 
   private lineupForRun(session: Session, run: WorkflowRun | undefined, def: WorkflowDefinition): WorkflowLineupView[] {
-    return this.workflowStageRunner.lineupForRun(session, run, def);
+    return this.delegateSidebarMethod("lineupForRun", () => this.workflowStageRunner.lineupForRun(session, run, def));
   }
 
   private rememberedLineup(cwd: string, workflow: string): Record<string, RunLineupEntry> | undefined {
-    return this.workflowStageRunner.rememberedLineup(cwd, workflow);
+    return this.delegateSidebarMethod("rememberedLineup", () => this.workflowStageRunner.rememberedLineup(cwd, workflow));
   }
 
   private async rememberLineup(cwd: string, workflow: string, lineup: Record<string, RunLineupEntry>): Promise<void> {
-    return this.workflowStageRunner.rememberLineup(cwd, workflow, lineup);
+    return this.delegateSidebarMethod("rememberLineup", () => this.workflowStageRunner.rememberLineup(cwd, workflow, lineup));
   }
 
   private verifySuggestions(cwd: string): string[] {
-    return this.workflowStageRunner.verifySuggestions(cwd);
+    return this.delegateSidebarMethod("verifySuggestions", () => this.workflowStageRunner.verifySuggestions(cwd));
   }
 
   private withGatePreselection(session: Session, run: WorkflowRun, def: WorkflowDefinition): WorkflowRun {
-    return this.workflowStageRunner.withGatePreselection(session, run, def);
+    return this.delegateSidebarMethod("withGatePreselection", () => this.workflowStageRunner.withGatePreselection(session, run, def));
   }
 
   private nextStageScope(run: WorkflowRun, def: WorkflowDefinition): { globs: string[]; note?: string } | undefined {
-    return this.workflowStageRunner.nextStageScope(run, def);
+    return this.delegateSidebarMethod("nextStageScope", () => this.workflowStageRunner.nextStageScope(run, def));
   }
 
   private persistWorkflowRun(session: Session): void {
-    this.workflowStageRunner.persistWorkflowRun(session);
+    this.delegateSidebarMethod("persistWorkflowRun", () => this.workflowStageRunner.persistWorkflowRun(session));
   }
 
   private crewEligibilityInput(session: Session): EligibilityInput {
-    return this.workflowStageRunner.crewEligibilityInput(session);
+    return this.delegateSidebarMethod("crewEligibilityInput", () => this.workflowStageRunner.crewEligibilityInput(session));
   }
 
   private async restoreWorkflowRun(session: Session, runId: string): Promise<void> {
-    return this.workflowStageRunner.restoreWorkflowRun(session, runId);
+    return this.delegateSidebarMethod("restoreWorkflowRun", () => this.workflowStageRunner.restoreWorkflowRun(session, runId));
   }
 
   private loadWorkflowPackets(run: WorkflowRun): string[] {
-    return this.workflowStageRunner.loadWorkflowPackets(run);
+    return this.delegateSidebarMethod("loadWorkflowPackets", () => this.workflowStageRunner.loadWorkflowPackets(run));
   }
 
   private async currentWorkspaceStamp(run: WorkflowRun): Promise<{
@@ -2392,7 +2384,7 @@ grokCompactThresholdSetting: (...args) => self.grokCompactThresholdSetting(...ar
     worktreeExists?: boolean;
     worktree?: string;
   }> {
-    return this.workflowStageRunner.currentWorkspaceStamp(run);
+    return this.delegateSidebarMethod("currentWorkspaceStamp", () => this.workflowStageRunner.currentWorkspaceStamp(run));
   }
 
   private async startWorkflowRun(
@@ -2401,7 +2393,7 @@ grokCompactThresholdSetting: (...args) => self.grokCompactThresholdSetting(...ar
     workflowName: string,
     options?: any,
   ): Promise<void> {
-    return this.workflowStageRunner.startWorkflowRun(session, idea, workflowName, options);
+    return this.delegateSidebarMethod("startWorkflowRun", () => this.workflowStageRunner.startWorkflowRun(session, idea, workflowName, options));
   }
 
   private async openNewCrewSession(
@@ -2409,88 +2401,88 @@ grokCompactThresholdSetting: (...args) => self.grokCompactThresholdSetting(...ar
     workflowName: string,
     options?: any,
   ): Promise<void> {
-    return this.workflowStageRunner.openNewCrewSession(idea, workflowName, options);
+    return this.delegateSidebarMethod("openNewCrewSession", () => this.workflowStageRunner.openNewCrewSession(idea, workflowName, options));
   }
 
   private applyWorkflowPlanEdit(
     session: Session,
     edit: any,
   ): void {
-    this.workflowStageRunner.applyWorkflowPlanEdit(session, edit);
+    this.delegateSidebarMethod("applyWorkflowPlanEdit", () => this.workflowStageRunner.applyWorkflowPlanEdit(session, edit));
   }
 
   private async handleHostGateAction(
     session: Session,
     action: any,
   ): Promise<boolean> {
-    return this.workflowStageRunner.handleHostGateAction(session, action);
+    return this.delegateSidebarMethod("handleHostGateAction", () => this.workflowStageRunner.handleHostGateAction(session, action));
   }
 
   private gateActionFromMsg(
     msg: any,
   ): any {
-    return this.workflowStageRunner.gateActionFromMsg(msg);
+    return this.delegateSidebarMethod("gateActionFromMsg", () => this.workflowStageRunner.gateActionFromMsg(msg));
   }
 
   private async handleWorkflowGateAction(
     session: Session,
     action: any,
   ): Promise<void> {
-    return this.workflowStageRunner.handleWorkflowGateAction(session, action);
+    return this.delegateSidebarMethod("handleWorkflowGateAction", () => this.workflowStageRunner.handleWorkflowGateAction(session, action));
   }
 
   private async createCrewWorktree(
     sourcePath: string,
     label: string,
   ): Promise<{ path: string; label: string; sourceGitRoot: string } | { error: string }> {
-    return this.workflowStageRunner.createCrewWorktree(sourcePath, label);
+    return this.delegateSidebarMethod("createCrewWorktree", () => this.workflowStageRunner.createCrewWorktree(sourcePath, label));
   }
 
   private async applyCrewWorktree(
     session: Session,
     wt: { path: string; label: string; sourceGitRoot: string },
   ): Promise<void> {
-    return this.workflowStageRunner.applyCrewWorktree(session, wt);
+    return this.delegateSidebarMethod("applyCrewWorktree", () => this.workflowStageRunner.applyCrewWorktree(session, wt));
   }
 
   private finishWorkflowRun(session: Session, def: WorkflowDefinition): void {
-    this.workflowStageRunner.finishWorkflowRun(session, def);
+    this.delegateSidebarMethod("finishWorkflowRun", () => this.workflowStageRunner.finishWorkflowRun(session, def));
   }
 
   private writeWorkflowReport(session: Session, def: WorkflowDefinition): string | undefined {
-    return this.workflowStageRunner.writeWorkflowReport(session, def);
+    return this.delegateSidebarMethod("writeWorkflowReport", () => this.workflowStageRunner.writeWorkflowReport(session, def));
   }
 
   private poolSessionById(sessionId: string | undefined): Session | undefined {
-    return this.workflowStageRunner.poolSessionById(sessionId);
+    return this.delegateSidebarMethod("poolSessionById", () => this.workflowStageRunner.poolSessionById(sessionId));
   }
 
   private async finishWorkflowStage(session: Session, def: WorkflowDefinition, packet: HandoffPacket): Promise<void> {
-    return this.workflowStageRunner.finishWorkflowStage(session, def, packet);
+    return this.delegateSidebarMethod("finishWorkflowStage", () => this.workflowStageRunner.finishWorkflowStage(session, def, packet));
   }
 
   private planStepsFor(run: WorkflowRun): HandoffPlanStep[] {
-    return this.workflowStageRunner.planStepsFor(run);
+    return this.delegateSidebarMethod("planStepsFor", () => this.workflowStageRunner.planStepsFor(run));
   }
 
   private packetMap(runId: string): Map<string, HandoffPacket> {
-    return this.workflowStageRunner.packetMap(runId);
+    return this.delegateSidebarMethod("packetMap", () => this.workflowStageRunner.packetMap(runId));
   }
 
   private packetsFor(runId: string): HandoffPacket[] {
-    return this.workflowStageRunner.packetsFor(runId);
+    return this.delegateSidebarMethod("packetsFor", () => this.workflowStageRunner.packetsFor(runId));
   }
 
   private async revertWorkflowRun(session: Session): Promise<void> {
-    return this.workflowStageRunner.revertWorkflowRun(session);
+    return this.delegateSidebarMethod("revertWorkflowRun", () => this.workflowStageRunner.revertWorkflowRun(session));
   }
 
   private async revertWorkflowStage(session: Session, def: WorkflowDefinition, ordinal: number): Promise<void> {
-    return this.workflowStageRunner.revertWorkflowStage(session, def, ordinal);
+    return this.delegateSidebarMethod("revertWorkflowStage", () => this.workflowStageRunner.revertWorkflowStage(session, def, ordinal));
   }
 
   private async handleCrewSessionInput(text: string, session: Session): Promise<void> {
-    return this.workflowStageRunner.handleCrewSessionInput(text, session);
+    return this.delegateSidebarMethod("handleCrewSessionInput", () => this.workflowStageRunner.handleCrewSessionInput(text, session));
   }
 
   private crewPresetSet(cwd: string): CrewPresetSet {
@@ -2507,27 +2499,27 @@ grokCompactThresholdSetting: (...args) => self.grokCompactThresholdSetting(...ar
     targetHint?: any,
     opts?: any,
   ): Promise<void> {
-    return this.workflowStageRunner.executeWorkflowStage(session, def, run, targetHint, opts);
+    return this.delegateSidebarMethod("executeWorkflowStage", () => this.workflowStageRunner.executeWorkflowStage(session, def, run, targetHint, opts));
   }
 
   private async handleCrewCommand(text: string, session: Session): Promise<boolean> {
-    return this.workflowStageRunner.handleCrewCommand(text, session);
+    return this.delegateSidebarMethod("handleCrewCommand", () => this.workflowStageRunner.handleCrewCommand(text, session));
   }
 
   private async runCrewVerify(command: string, cwd: string): Promise<{ code: number; output: string }> {
-    return this.workflowStageRunner.runCrewVerify(command, cwd);
+    return this.delegateSidebarMethod("runCrewVerify", () => this.workflowStageRunner.runCrewVerify(command, cwd));
   }
 
   private uniqueCrewPaths(paths: readonly string[]): string[] {
-    return this.workflowStageRunner.uniqueCrewPaths(paths);
+    return this.delegateSidebarMethod("uniqueCrewPaths", () => this.workflowStageRunner.uniqueCrewPaths(paths));
   }
 
   private crewUnreapableCount(): number {
-    return this.workflowStageRunner.crewUnreapableCount();
+    return this.delegateSidebarMethod("crewUnreapableCount", () => this.workflowStageRunner.crewUnreapableCount());
   }
 
   private crewFileClaims(): FileClaimStore {
-    return this.workflowStageRunner.crewFileClaims();
+    return this.delegateSidebarMethod("crewFileClaims", () => this.workflowStageRunner.crewFileClaims());
   }
 
   private logAgentRun(entry: Parameters<AgentRunStore["appendLog"]>[0]): void {
@@ -2606,7 +2598,7 @@ grokCompactThresholdSetting: (...args) => self.grokCompactThresholdSetting(...ar
   }
   /** * The running role, re-read AFTER an await. */
   private runningRoleName(session: Session): string | undefined {
-    return this.agentAuthoring.runningRoleName(session);
+    return this.delegateSidebarMethod("runningRoleName", () => this.agentAuthoring.runningRoleName(session));
   }
 
   private async startHandoff(
@@ -2615,7 +2607,7 @@ grokCompactThresholdSetting: (...args) => self.grokCompactThresholdSetting(...ar
     session: Session,
     confirm: boolean,
   ): Promise<void> {
-    return this.agentAuthoring.startHandoff(kind, roleName, session, confirm);
+    return this.delegateSidebarMethod("startHandoff", () => this.agentAuthoring.startHandoff(kind, roleName, session, confirm));
   }
 
   /**
@@ -2624,11 +2616,11 @@ grokCompactThresholdSetting: (...args) => self.grokCompactThresholdSetting(...ar
    * open steps, changed files — never the transcript.
    */
   private async continueInFreshSession(session: Session): Promise<void> {
-    return this.agentAuthoring.continueInFreshSession(session);
+    return this.delegateSidebarMethod("continueInFreshSession", () => this.agentAuthoring.continueInFreshSession(session));
   }
   /** * `/handoff [role]` and `/second-opinion [role]` — the typed form (AP-11). */
   private async handleHandoffCommand(text: string, session: Session): Promise<boolean> {
-    return this.agentAuthoring.handleHandoffCommand(text, session);
+    return this.delegateSidebarMethod("handleHandoffCommand", () => this.agentAuthoring.handleHandoffCommand(text, session));
   }
 
   /** Connected models, in the shape the Routines form needs. */
@@ -2704,11 +2696,11 @@ grokCompactThresholdSetting: (...args) => self.grokCompactThresholdSetting(...ar
   private set agentRolesError(value: AgentAuthoring["agentRolesError"]) { this.agentAuthoring.agentRolesError = value; }
   /** * The whole Agents & Crew page: roles, flows, the companions a role may be pointed at, and the parser's complaints about both file sets. */
   private buildAgentRolesMessage(): Extract<HostMsg, { type: "agentRoles" }> {
-    return this.agentAuthoring.buildAgentRolesMessage();
+    return this.delegateSidebarMethod("buildAgentRolesMessage", () => this.agentAuthoring.buildAgentRolesMessage());
   }
   /** * Which companion a BUILT-IN role would actually run on right now. */
   private effectiveRoleProvider(role: AgentRole): AcpProvider {
-    return this.agentAuthoring.effectiveRoleProvider(role);
+    return this.delegateSidebarMethod("effectiveRoleProvider", () => this.agentAuthoring.effectiveRoleProvider(role));
   }
 
   public companionsSetting<T>(key: string, fallback: T): T {
@@ -2763,23 +2755,23 @@ grokCompactThresholdSetting: (...args) => self.grokCompactThresholdSetting(...ar
   }
 
   private postAgentRoles(): void {
-    return this.agentAuthoring.postAgentRoles();
+    return this.delegateSidebarMethod("postAgentRoles", () => this.agentAuthoring.postAgentRoles());
   }
   /** * The directory one scope's files are written into. */
   private companionsWriteDir(scope: RoleScope, kind: "agents" | "crews"): string | undefined {
-    return this.agentAuthoring.companionsWriteDir(scope, kind);
+    return this.delegateSidebarMethod("companionsWriteDir", () => this.agentAuthoring.companionsWriteDir(scope, kind));
   }
 
   /** Record a refusal against one card and repaint. The page keeps the draft,
    *  so the reason lands on the text that caused it rather than a blank form. */
   private refuseAgentRoles(id: string | undefined, message: string): void {
-    return this.agentAuthoring.refuseAgentRoles(id, message);
+    return this.delegateSidebarMethod("refuseAgentRoles", () => this.agentAuthoring.refuseAgentRoles(id, message));
   }
 
   /** Names already taken in one scope — what a save is checked against. A
    *  built-in name is NOT taken: writing it is how you override the built-in. */
   private agentRoleNamesInScope(scope: RoleScope, kind: "agents" | "crews"): string[] {
-    return this.agentAuthoring.agentRoleNamesInScope(scope, kind);
+    return this.delegateSidebarMethod("agentRoleNamesInScope", () => this.agentAuthoring.agentRoleNamesInScope(scope, kind));
   }
   /** * Remove the file a save has just superseded. */
   private dropSupersededCompanionFile(opts: {
@@ -2789,30 +2781,30 @@ grokCompactThresholdSetting: (...args) => self.grokCompactThresholdSetting(...ar
     originalName?: string;
     originalScope?: RoleScope;
   }): void {
-    return this.agentAuthoring.dropSupersededCompanionFile(opts);
+    return this.delegateSidebarMethod("dropSupersededCompanionFile", () => this.agentAuthoring.dropSupersededCompanionFile(opts));
   }
 
   private async handleSaveAgentRole(
     msg: { scope: RoleScope; originalName?: string; originalScope?: RoleScope; draft: AgentRoleDraft },
   ): Promise<void> {
-    return this.agentAuthoring.handleSaveAgentRole(msg);
+    return this.delegateSidebarMethod("handleSaveAgentRole", () => this.agentAuthoring.handleSaveAgentRole(msg));
   }
 
   private async handleSaveCrewFlow(
     msg: { scope: RoleScope; originalName?: string; originalScope?: RoleScope; draft: CrewFlowDraft },
   ): Promise<void> {
-    return this.agentAuthoring.handleSaveCrewFlow(msg);
+    return this.delegateSidebarMethod("handleSaveCrewFlow", () => this.agentAuthoring.handleSaveCrewFlow(msg));
   }
 
   private workflowValidateContext(over: Partial<ValidateWorkflowContext> = {}): ValidateWorkflowContext {
-    return this.agentAuthoring.workflowValidateContext(over);
+    return this.delegateSidebarMethod("workflowValidateContext", () => this.agentAuthoring.workflowValidateContext(over));
   }
 
   private buildWorkflowViews(
     flowSet: CrewPresetSet,
     roleNames: string[],
   ): import("./protocol").WorkflowManagerView[] {
-    return this.agentAuthoring.buildWorkflowViews(flowSet, roleNames);
+    return this.delegateSidebarMethod("buildWorkflowViews", () => this.agentAuthoring.buildWorkflowViews(flowSet, roleNames));
   }
 
   private async handleSaveWorkflow(msg: {
@@ -2822,15 +2814,15 @@ grokCompactThresholdSetting: (...args) => self.grokCompactThresholdSetting(...ar
     draft: WorkflowDraft;
     setDefault?: boolean;
   }): Promise<void> {
-    return this.agentAuthoring.handleSaveWorkflow(msg);
+    return this.delegateSidebarMethod("handleSaveWorkflow", () => this.agentAuthoring.handleSaveWorkflow(msg));
   }
 
   private postWorkflowValidation(draft: WorkflowDraft): void {
-    return this.agentAuthoring.postWorkflowValidation(draft);
+    return this.delegateSidebarMethod("postWorkflowValidation", () => this.agentAuthoring.postWorkflowValidation(draft));
   }
 
   private async handleAddWorkflowStagesBlock(scope: RoleScope, name: string): Promise<void> {
-    return this.agentAuthoring.handleAddWorkflowStagesBlock(scope, name);
+    return this.delegateSidebarMethod("handleAddWorkflowStagesBlock", () => this.agentAuthoring.handleAddWorkflowStagesBlock(scope, name));
   }
 
   private async handleGenerateWorkflow(msg: {
@@ -2845,15 +2837,15 @@ grokCompactThresholdSetting: (...args) => self.grokCompactThresholdSetting(...ar
     effort?: string;
     refine?: string;
   }): Promise<void> {
-    return this.agentAuthoring.handleGenerateWorkflow(msg);
+    return this.delegateSidebarMethod("handleGenerateWorkflow", () => this.agentAuthoring.handleGenerateWorkflow(msg));
   }
 
   private cancelWorkflowGenerate(): void {
-    return this.agentAuthoring.cancelWorkflowGenerate();
+    return this.delegateSidebarMethod("cancelWorkflowGenerate", () => this.agentAuthoring.cancelWorkflowGenerate());
   }
   /** * Delete one role or flow file. */
   private handleDeleteCompanionFile(scope: RoleScope, kind: "agents" | "crews", rawName: string): void {
-    return this.agentAuthoring.handleDeleteCompanionFile(scope, kind, rawName);
+    return this.delegateSidebarMethod("handleDeleteCompanionFile", () => this.agentAuthoring.handleDeleteCompanionFile(scope, kind, rawName));
   }
 
   private postRoutines(): void {
@@ -2901,123 +2893,123 @@ grokCompactThresholdSetting: (...args) => self.grokCompactThresholdSetting(...ar
   }
 
   private providerConnections(): ProviderConnections {
-    return this.providerSetup.providerConnections();
+    return this.delegateSidebarMethod("providerConnections", () => this.providerSetup.providerConnections());
   }
 
   private hasProviderConsent(provider: AcpProvider): boolean {
-    return this.providerSetup.hasProviderConsent(provider);
+    return this.delegateSidebarMethod("hasProviderConsent", () => this.providerSetup.hasProviderConsent(provider));
   }
 
   private acpClientTimeouts() {
-    return this.providerSetup.acpClientTimeouts();
+    return this.delegateSidebarMethod("acpClientTimeouts", () => this.providerSetup.acpClientTimeouts());
   }
 
   private locateProvider(provider: AcpProvider): string | undefined {
-    return this.providerSetup.locateProvider(provider);
+    return this.delegateSidebarMethod("locateProvider", () => this.providerSetup.locateProvider(provider));
   }
 
   private locatedProviders(): Partial<Record<AcpProvider, boolean>> {
-    return this.providerSetup.locatedProviders();
+    return this.delegateSidebarMethod("locatedProviders", () => this.providerSetup.locatedProviders());
   }
 
   private adapterHistory(provider: AcpProvider) {
-    return this.providerSetup.adapterHistory(provider);
+    return this.delegateSidebarMethod("adapterHistory", () => this.providerSetup.adapterHistory(provider));
   }
 
   private allAdapterCatalogs(): Iterable<readonly SessionListEntry[]> {
-    return this.providerSetup.allAdapterCatalogs();
+    return this.delegateSidebarMethod("allAdapterCatalogs", () => this.providerSetup.allAdapterCatalogs());
   }
 
   private createProviderBackend(provider: AcpProvider, effort?: string) {
-    return this.providerSetup.createProviderBackend(provider, effort);
+    return this.delegateSidebarMethod("createProviderBackend", () => this.providerSetup.createProviderBackend(provider, effort));
   }
 
   private connectedProviders(): AcpProvider[] {
-    return this.providerSetup.connectedProviders();
+    return this.delegateSidebarMethod("connectedProviders", () => this.providerSetup.connectedProviders());
   }
 
   private usableProviders(): AcpProvider[] {
-    return this.providerSetup.usableProviders();
+    return this.delegateSidebarMethod("usableProviders", () => this.providerSetup.usableProviders());
   }
 
   private onboardingForSession(session: Session) {
-    return this.providerSetup.onboardingForSession(session);
+    return this.delegateSidebarMethod("onboardingForSession", () => this.providerSetup.onboardingForSession(session));
   }
 
   private migrateProviderConnections(): ProviderConnections {
-    return this.providerSetup.migrateProviderConnections();
+    return this.delegateSidebarMethod("migrateProviderConnections", () => this.providerSetup.migrateProviderConnections());
   }
 
   private setProviderConnectedInMemory(provider: AcpProvider, connected: boolean): void {
-    this.providerSetup.setProviderConnectedInMemory(provider, connected);
+    this.delegateSidebarMethod("setProviderConnectedInMemory", () => this.providerSetup.setProviderConnectedInMemory(provider, connected));
   }
 
   private async persistProviderConnections(): Promise<void> {
-    return this.providerSetup.persistProviderConnections();
+    return this.delegateSidebarMethod("persistProviderConnections", () => this.providerSetup.persistProviderConnections());
   }
 
   private async setProviderConnected(provider: AcpProvider, connected: boolean): Promise<void> {
-    return this.providerSetup.setProviderConnected(provider, connected);
+    return this.delegateSidebarMethod("setProviderConnected", () => this.providerSetup.setProviderConnected(provider, connected));
   }
 
   private setProviderNeedsLogin(provider: AcpProvider, needsLogin: boolean): void {
-    this.providerSetup.setProviderNeedsLogin(provider, needsLogin);
+    this.delegateSidebarMethod("setProviderNeedsLogin", () => this.providerSetup.setProviderNeedsLogin(provider, needsLogin));
   }
 
   private rearmAuthRecovery(provider: AcpProvider): void {
-    this.providerSetup.rearmAuthRecovery(provider);
+    this.delegateSidebarMethod("rearmAuthRecovery", () => this.providerSetup.rearmAuthRecovery(provider));
   }
 
   private async warmConnectedCodexModels(): Promise<boolean> {
-    return this.providerSetup.warmConnectedCodexModels();
+    return this.delegateSidebarMethod("warmConnectedCodexModels", () => this.providerSetup.warmConnectedCodexModels());
   }
 
   private async warmConnectedClaudeModels(): Promise<boolean> {
-    return this.providerSetup.warmConnectedClaudeModels();
+    return this.delegateSidebarMethod("warmConnectedClaudeModels", () => this.providerSetup.warmConnectedClaudeModels());
   }
 
   private async warmConnectedGeminiModels(): Promise<boolean> {
-    return this.providerSetup.warmConnectedGeminiModels();
+    return this.delegateSidebarMethod("warmConnectedGeminiModels", () => this.providerSetup.warmConnectedGeminiModels());
   }
 
   private async reprobeProviderCredentials(provider: AcpProvider): Promise<boolean> {
-    return this.providerSetup.reprobeProviderCredentials(provider);
+    return this.delegateSidebarMethod("reprobeProviderCredentials", () => this.providerSetup.reprobeProviderCredentials(provider));
   }
 
   private providerCredentialFilePresent(provider: AcpProvider): boolean {
-    return this.providerSetup.providerCredentialFilePresent(provider);
+    return this.delegateSidebarMethod("providerCredentialFilePresent", () => this.providerSetup.providerCredentialFilePresent(provider));
   }
 
   private watchProviderLogin(provider: AcpProvider): void {
-    this.providerSetup.watchProviderLogin(provider);
+    this.delegateSidebarMethod("watchProviderLogin", () => this.providerSetup.watchProviderLogin(provider));
   }
 
   private async installManagedCodexCli(): Promise<void> {
-    return this.providerSetup.installManagedCodexCli();
+    return this.delegateSidebarMethod("installManagedCodexCli", () => this.providerSetup.installManagedCodexCli());
   }
 
   private providerStateMessage(): Extract<HostMsg, { type: "providerState" }> {
-    return this.providerSetup.providerStateMessage();
+    return this.delegateSidebarMethod("providerStateMessage", () => this.providerSetup.providerStateMessage());
   }
 
   private postProviderState(): void {
-    this.providerSetup.postProviderState();
+    this.delegateSidebarMethod("postProviderState", () => this.providerSetup.postProviderState());
   }
 
   private async refreshProviderStates(): Promise<void> {
-    return this.providerSetup.refreshProviderStates();
+    return this.delegateSidebarMethod("refreshProviderStates", () => this.providerSetup.refreshProviderStates());
   }
 
   private defaultProviderForProject(cwd: string): AcpProvider {
-    return this.providerSetup.defaultProviderForProject(cwd);
+    return this.delegateSidebarMethod("defaultProviderForProject", () => this.providerSetup.defaultProviderForProject(cwd));
   }
 
   private providerDefaultForProject(cwd: string, provider: AcpProvider): string | undefined {
-    return this.providerSetup.providerDefaultForProject(cwd, provider);
+    return this.delegateSidebarMethod("providerDefaultForProject", () => this.providerSetup.providerDefaultForProject(cwd, provider));
   }
 
   private async rememberProjectProvider(cwd: string, provider: AcpProvider, modelId?: string): Promise<void> {
-    return this.providerSetup.rememberProjectProvider(cwd, provider, modelId);
+    return this.delegateSidebarMethod("rememberProjectProvider", () => this.providerSetup.rememberProjectProvider(cwd, provider, modelId));
   }
 
   private cacheProviderModels(
@@ -3025,7 +3017,7 @@ grokCompactThresholdSetting: (...args) => self.grokCompactThresholdSetting(...ar
     models: readonly ProviderModelInfo[] | readonly any[],
     currentModelId?: string,
   ): PromiseLike<void> {
-    return this.providerSession.cacheProviderModels(provider, models, currentModelId);
+    return this.delegateSidebarMethod("cacheProviderModels", () => this.providerSession.cacheProviderModels(provider, models, currentModelId));
   }
 
   /** Sessions whose picker may be refreshed in place: no history, so there is
@@ -3033,31 +3025,31 @@ grokCompactThresholdSetting: (...args) => self.grokCompactThresholdSetting(...ar
   /** Every session with a live client. Used only when a provider appears for
    *  the first time, where the change is purely additive. */
   private sessionsForModelRefresh(): Session[] {
-    return this.providerSession.sessionsForModelRefresh();
+    return this.delegateSidebarMethod("sessionsForModelRefresh", () => this.providerSession.sessionsForModelRefresh());
   }
 
   private emptySessionsForModelRefresh(): Session[] {
-    return this.providerSession.emptySessionsForModelRefresh();
+    return this.delegateSidebarMethod("emptySessionsForModelRefresh", () => this.providerSession.emptySessionsForModelRefresh());
   }
   /** * The identity frame for a conversation that is already live. */
   private sessionIdentityFrame(session: Session): HostMsg | undefined {
-    return this.sessionCatalog.sessionIdentityFrame(session);
+    return this.delegateSidebarMethod("sessionIdentityFrame", () => this.sessionCatalog.sessionIdentityFrame(session));
   }
 
   private postSessionModels(session: Session): void {
-    return this.providerSession.postSessionModels(session);
+    return this.delegateSidebarMethod("postSessionModels", () => this.providerSession.postSessionModels(session));
   }
 
   private modelsForSession(session: Session, ownModels: readonly any[], currentModelId?: string, newSession = false): ProviderModelInfo[] {
-    return this.providerSession.modelsForSession(session, ownModels, currentModelId, newSession);
+    return this.delegateSidebarMethod("modelsForSession", () => this.providerSession.modelsForSession(session, ownModels, currentModelId, newSession));
   }
 
   private providerForRequestedModel(modelId: string, fallback: AcpProvider): AcpProvider {
-    return this.providerSession.providerForRequestedModel(modelId, fallback);
+    return this.delegateSidebarMethod("providerForRequestedModel", () => this.providerSession.providerForRequestedModel(modelId, fallback));
   }
 
   resolveWebviewView(view: HostWebviewView): void {
-    return this.sidebarViewHost.resolveWebviewView(view);
+    return this.delegateSidebarMethod("resolveWebviewView", () => this.sidebarViewHost.resolveWebviewView(view));
   }
 
   /**
@@ -3066,16 +3058,16 @@ grokCompactThresholdSetting: (...args) => self.grokCompactThresholdSetting(...ar
    * never chat traffic — a second `chat.js` client would double-own sessions.
    */
   resolveProjectsRailView(view: HostWebviewView): void {
-    return this.sidebarViewHost.resolveProjectsRailView(view);
+    return this.delegateSidebarMethod("resolveProjectsRailView", () => this.sidebarViewHost.resolveProjectsRailView(view));
   }
 
   /** Drop the rail handle when the view is disposed (or re-created). */
   disposeProjectsRailView(): void {
-    return this.sidebarViewHost.disposeProjectsRailView();
+    return this.delegateSidebarMethod("disposeProjectsRailView", () => this.sidebarViewHost.disposeProjectsRailView());
   }
 
   private chatLocalResourceRoots(): Uri[] {
-    return this.sidebarViewHost.chatLocalResourceRoots();
+    return this.delegateSidebarMethod("chatLocalResourceRoots", () => this.sidebarViewHost.chatLocalResourceRoots());
   }
 
   /**
@@ -3084,12 +3076,12 @@ grokCompactThresholdSetting: (...args) => self.grokCompactThresholdSetting(...ar
    * one host path for resume/pin/rename/delete.
    */
   private async onProjectsRailMessage(msg: WebviewMsg): Promise<void> {
-    return this.sidebarViewHost.onProjectsRailMessage(msg);
+    return this.delegateSidebarMethod("onProjectsRailMessage", () => this.sidebarViewHost.onProjectsRailMessage(msg));
   }
 
   /** Catalog snapshot for a freshly-resolved rail (or its ready handshake). */
   private pushProjectsRailCatalog(): void {
-    return this.sidebarViewHost.pushProjectsRailCatalog();
+    return this.delegateSidebarMethod("pushProjectsRailCatalog", () => this.sidebarViewHost.pushProjectsRailCatalog());
   }
 
   /** Push the `grok.terminalShell` preference (#46) into the shared shell
@@ -3110,7 +3102,7 @@ grokCompactThresholdSetting: (...args) => self.grokCompactThresholdSetting(...ar
   }
 
   async pickModel(): Promise<void> {
-    return this.providerSession.pickModel();
+    return this.delegateSidebarMethod("pickModel", () => this.providerSession.pickModel());
   }
 
   async switchModel(
@@ -3118,7 +3110,7 @@ grokCompactThresholdSetting: (...args) => self.grokCompactThresholdSetting(...ar
     session: Session = this.focused,
     provider: AcpProvider = session.provider,
   ): Promise<void> {
-    return this.providerSession.switchModel(modelId, session, provider);
+    return this.delegateSidebarMethod("switchModel", () => this.providerSession.switchModel(modelId, session, provider));
   }
 
   openModePopover(): void {
@@ -3217,19 +3209,19 @@ ${detail}`,
   }
 
   private autoApproveSource(cwd: string = this.workspaceRoot()): "project" | "global" | undefined {
-    return this.permissionHost.autoApproveSource(cwd);
+    return this.delegateSidebarMethod("autoApproveSource", () => this.permissionHost.autoApproveSource(cwd));
   }
 
   private async confirmRepoForcedAutoApprove(cwd: string): Promise<boolean> {
-    return this.permissionHost.confirmRepoForcedAutoApprove(cwd);
+    return this.delegateSidebarMethod("confirmRepoForcedAutoApprove", () => this.permissionHost.confirmRepoForcedAutoApprove(cwd));
   }
 
   private configForcesAutoApprove(cwd: string = this.workspaceRoot()): boolean {
-    return this.permissionHost.configForcesAutoApprove(cwd);
+    return this.delegateSidebarMethod("configForcesAutoApprove", () => this.permissionHost.configForcesAutoApprove(cwd));
   }
 
   private noticeAlwaysApproveOnce(cwd: string = this.workspaceRoot()): void {
-    this.permissionHost.noticeAlwaysApproveOnce(cwd);
+    this.delegateSidebarMethod("noticeAlwaysApproveOnce", () => this.permissionHost.noticeAlwaysApproveOnce(cwd));
   }
 
   /** Toggle the client-enforced plan gate and keep the live client in sync. Only
@@ -3255,7 +3247,7 @@ ${detail}`,
     modeId: "agent" | "plan" | "yolo",
     session: Session = this.focused,
   ): Promise<void> {
-    return this.providerSession.setMode(modeId, session);
+    return this.delegateSidebarMethod("setMode", () => this.providerSession.setMode(modeId, session));
   }
 
   private handleExitPlan(
@@ -3264,11 +3256,11 @@ ${detail}`,
     comment?: string,
     session: Session = this.focused,
   ): void {
-    return this.providerSession.handleExitPlan(requestId, verdict, comment, session);
+    return this.delegateSidebarMethod("handleExitPlan", () => this.providerSession.handleExitPlan(requestId, verdict, comment, session));
   }
 
   private queueInFlightPlanCommentsOnExit(session: Session, client: AcpClient, gen: number): void {
-    return this.providerSession.queueInFlightPlanCommentsOnExit(session, client, gen);
+    return this.delegateSidebarMethod("queueInFlightPlanCommentsOnExit", () => this.providerSession.queueInFlightPlanCommentsOnExit(session, client, gen));
   }
 
   private recoverUnavailablePlanMode(
@@ -3277,7 +3269,7 @@ ${detail}`,
     gen: number,
     exitPlanRequestId?: number | string,
   ): void {
-    return this.providerSession.recoverUnavailablePlanMode(session, client, gen, exitPlanRequestId);
+    return this.delegateSidebarMethod("recoverUnavailablePlanMode", () => this.providerSession.recoverUnavailablePlanMode(session, client, gen, exitPlanRequestId));
   }
 
   private finishUnavailablePlanRecovery(
@@ -3286,11 +3278,11 @@ ${detail}`,
     gen: number,
     recovery: NonNullable<Session["planModeRecovery"]>,
   ): void {
-    return this.providerSession.finishUnavailablePlanRecovery(session, client, gen, recovery);
+    return this.delegateSidebarMethod("finishUnavailablePlanRecovery", () => this.providerSession.finishUnavailablePlanRecovery(session, client, gen, recovery));
   }
 
   private settleUnavailablePlanTurn(session: Session, client: AcpClient, gen: number): void {
-    return this.providerSession.settleUnavailablePlanTurn(session, client, gen);
+    return this.delegateSidebarMethod("settleUnavailablePlanTurn", () => this.providerSession.settleUnavailablePlanTurn(session, client, gen));
   }
 
   /** Persist this plan (text + verdict) so the resume view can replay every plan
@@ -3393,7 +3385,7 @@ ${detail}`,
   }
   /** * Mark a conversation as used NOW, and re-push the lists that order by it. */
   private noteSessionActivity(session: Session): void {
-    return this.sessionCatalog.noteSessionActivity(session);
+    return this.delegateSidebarMethod("noteSessionActivity", () => this.sessionCatalog.noteSessionActivity(session));
   }
 
   /** Persist an answered permission card (title + allowed/rejected + position) so
@@ -3431,7 +3423,7 @@ ${detail}`,
     req: PermissionRequest,
     cwd: string,
   ): void {
-    return this.providerSession.handlePermissionRequest(session, client, req, cwd);
+    return this.delegateSidebarMethod("handlePermissionRequest", () => this.providerSession.handlePermissionRequest(session, client, req, cwd));
   }
 
   private applyPermissionRules(
@@ -3440,15 +3432,15 @@ ${detail}`,
     req: PermissionRequest,
     cwd: string,
   ): boolean {
-    return this.providerSession.applyPermissionRules(session, client, req, cwd);
+    return this.delegateSidebarMethod("applyPermissionRules", () => this.providerSession.applyPermissionRules(session, client, req, cwd));
   }
 
   private permissionRulesFs(): PermissionRulesFs {
-    return this.permissionHost.permissionRulesFs();
+    return this.delegateSidebarMethod("permissionRulesFs", () => this.permissionHost.permissionRulesFs());
   }
 
   private loadPermissionRuleState(cwd: string) {
-    return this.permissionHost.loadPermissionRuleState(cwd);
+    return this.delegateSidebarMethod("loadPermissionRuleState", () => this.permissionHost.loadPermissionRuleState(cwd));
   }
 
   private maybePromptWorkspaceRulesAdoption(
@@ -3456,7 +3448,7 @@ ${detail}`,
     cwd: string,
     loaded: ReturnType<PermissionHost["loadPermissionRuleState"]>,
   ): void {
-    this.permissionHost.maybePromptWorkspaceRulesAdoption(session, cwd, loaded);
+    this.delegateSidebarMethod("maybePromptWorkspaceRulesAdoption", () => this.permissionHost.maybePromptWorkspaceRulesAdoption(session, cwd, loaded));
   }
 
   private async offerWorkspaceRulesAdoption(
@@ -3464,26 +3456,26 @@ ${detail}`,
     cwd: string,
     loaded: ReturnType<PermissionHost["loadPermissionRuleState"]>,
   ): Promise<void> {
-    return this.permissionHost.offerWorkspaceRulesAdoption(session, cwd, loaded);
+    return this.delegateSidebarMethod("offerWorkspaceRulesAdoption", () => this.permissionHost.offerWorkspaceRulesAdoption(session, cwd, loaded));
   }
 
   private postPermissionRules(session: Session = this.focused): void {
-    this.permissionHost.postPermissionRules(session);
+    this.delegateSidebarMethod("postPermissionRules", () => this.permissionHost.postPermissionRules(session));
   }
 
   private addSessionAllowRule(session: Session, matchRaw: unknown): void {
-    this.permissionHost.addSessionAllowRule(session, matchRaw);
+    this.delegateSidebarMethod("addSessionAllowRule", () => this.permissionHost.addSessionAllowRule(session, matchRaw));
   }
 
   private async persistAllowRuleFromCard(
     session: Session,
     matchRaw: unknown,
   ): Promise<void> {
-    return this.permissionHost.persistAllowRuleFromCard(session, matchRaw);
+    return this.delegateSidebarMethod("persistAllowRuleFromCard", () => this.permissionHost.persistAllowRuleFromCard(session, matchRaw));
   }
 
   private async addPermissionRule(session: Session, created: PermissionRule): Promise<void> {
-    return this.permissionHost.addPermissionRule(session, created);
+    return this.delegateSidebarMethod("addPermissionRule", () => this.permissionHost.addPermissionRule(session, created));
   }
 
   private async rememberAdoption(
@@ -3491,11 +3483,11 @@ ${detail}`,
     hash: string,
     status: AdoptionRecord["status"],
   ): Promise<void> {
-    return this.permissionHost.rememberAdoption(cwd, hash, status);
+    return this.delegateSidebarMethod("rememberAdoption", () => this.permissionHost.rememberAdoption(cwd, hash, status));
   }
 
   private async deletePermissionRule(session: Session, id: string): Promise<void> {
-    return this.permissionHost.deletePermissionRule(session, id);
+    return this.delegateSidebarMethod("deletePermissionRule", () => this.permissionHost.deletePermissionRule(session, id));
   }
 
   private async adoptPermissionRules(
@@ -3503,7 +3495,7 @@ ${detail}`,
     adopt: boolean,
     cwd: string = this.sessionCwd(session),
   ): Promise<void> {
-    return this.permissionHost.adoptPermissionRules(session, adopt, cwd);
+    return this.delegateSidebarMethod("adoptPermissionRules", () => this.permissionHost.adoptPermissionRules(session, adopt, cwd));
   }
 
   /** Auto-approve routine permission cards currently awaiting the user (#64).
@@ -3572,7 +3564,7 @@ ${detail}`,
     requestedChips?: ContextChip[],
     fromQueue = false,
   ): Promise<void> {
-    return this.turnEdit.steerSend(text, session, requestedChips, fromQueue);
+    return this.delegateSidebarMethod("steerSend", () => this.turnEdit.steerSend(text, session, requestedChips, fromQueue));
   }
 
   private refreshFeedbackAvailability(session: Session): void {
@@ -3666,7 +3658,7 @@ ${detail}`,
     rating: unknown,
     session: Session,
   ): Promise<void> {
-    return this.turnEdit.handleTurnFeedback(rating, session);
+    return this.delegateSidebarMethod("handleTurnFeedback", () => this.turnEdit.handleTurnFeedback(rating, session));
   }
 
   /**
@@ -3679,7 +3671,7 @@ ${detail}`,
    * model has forgotten (see research/grok-build-oss-findings.md § 3a).
    */
   private async forkFocusedSession(session: Session = this.focused): Promise<void> {
-    return this.turnEdit.forkFocusedSession(session);
+    return this.delegateSidebarMethod("forkFocusedSession", () => this.turnEdit.forkFocusedSession(session));
   }
 
   /**
@@ -3714,7 +3706,7 @@ ${detail}`,
     totalUserBubbles?: number,
     session: Session = this.focused,
   ): Promise<void> {
-    return this.turnEdit.editLastMessage(userBubbleIndex, text, totalUserBubbles, session);
+    return this.delegateSidebarMethod("editLastMessage", () => this.turnEdit.editLastMessage(userBubbleIndex, text, totalUserBubbles, session));
   }
 
   /**
@@ -3779,7 +3771,7 @@ ${detail}`,
     totalUserBubbles?: number,
     session: Session = this.focused,
   ): Promise<void> {
-    return this.turnEdit.rewindFocusedSession(userBubbleIndex, bubbleText, totalUserBubbles, session);
+    return this.delegateSidebarMethod("rewindFocusedSession", () => this.turnEdit.rewindFocusedSession(userBubbleIndex, bubbleText, totalUserBubbles, session));
   }
 
   /**
@@ -3968,11 +3960,11 @@ ${detail}`,
   }
 
   async newWorktreeSession(): Promise<void> {
-    return this.worktreeHost.newWorktreeSession();
+    return this.delegateSidebarMethod("newWorktreeSession", () => this.worktreeHost.newWorktreeSession());
   }
 
   async applyFocusedWorktree(session: Session = this.focused, skipConfirm = false): Promise<void> {
-    return this.worktreeHost.applyFocusedWorktree(session, skipConfirm);
+    return this.delegateSidebarMethod("applyFocusedWorktree", () => this.worktreeHost.applyFocusedWorktree(session, skipConfirm));
   }
 
   private async applyWorktreeViaLocalGit(
@@ -3981,19 +3973,19 @@ ${detail}`,
     sourceGitRoot: string,
     label: string,
   ): Promise<void> {
-    return this.worktreeHost.applyWorktreeViaLocalGit(session, worktreePath, sourceGitRoot, label);
+    return this.delegateSidebarMethod("applyWorktreeViaLocalGit", () => this.worktreeHost.applyWorktreeViaLocalGit(session, worktreePath, sourceGitRoot, label));
   }
 
   async removeFocusedWorktree(session: Session = this.focused, skipConfirm = false): Promise<void> {
-    return this.worktreeHost.removeFocusedWorktree(session, skipConfirm);
+    return this.delegateSidebarMethod("removeFocusedWorktree", () => this.worktreeHost.removeFocusedWorktree(session, skipConfirm));
   }
 
   private async refreshWorktreeCache(): Promise<void> {
-    return this.worktreeHost.refreshWorktreeCache();
+    return this.delegateSidebarMethod("refreshWorktreeCache", () => this.worktreeHost.refreshWorktreeCache());
   }
 
   private worktreeLocal(): LocalGitWorktrees {
-    return this.worktreeHost.worktreeLocal();
+    return this.delegateSidebarMethod("worktreeLocal", () => this.worktreeHost.worktreeLocal());
   }
 
   get worktreeCache(): WorktreeRecord[] {
@@ -4064,11 +4056,11 @@ ${detail}`,
   }
 
   private repoCatalog(): RepoListEntry[] {
-    return this.sessionCatalog.repoCatalog();
+    return this.delegateSidebarMethod("repoCatalog", () => this.sessionCatalog.repoCatalog());
   }
   /** * Project rows for the local rail (and, on desktop, for remotes attached to this host). Desktop multi-folder: only open project folders. VS Code: the full discoverRepos catalog. Archive fields are stripped when the host cannot archive ({@link Host.canArchiveRepos}) so the client hides Project Archive without an `IS_DESKTOP` flag. */
   private localRepoCatalogEntries(): RepoListEntry[] {
-    return this.sessionCatalog.localRepoCatalogEntries();
+    return this.delegateSidebarMethod("localRepoCatalogEntries", () => this.sessionCatalog.localRepoCatalogEntries());
   }
 
   /** Drop archive fields when the host does not support archiving. */
@@ -4087,7 +4079,7 @@ ${detail}`,
    *  excludes `<grokHome>/worktrees` by path), so their sessions have to surface
    *  under the parent — otherwise leaving a worktree session strands it. */
   private sessionCwdsForRepo(repoCwd: string, overrides: SessionMetaOverrides): string[] {
-    return this.sessionCatalog.sessionCwdsForRepo(repoCwd, overrides);
+    return this.delegateSidebarMethod("sessionCwdsForRepo", () => this.sessionCatalog.sessionCwdsForRepo(repoCwd, overrides));
   }
 
   /**
@@ -4113,12 +4105,12 @@ ${detail}`,
   }
   /** * What a brand-new session starts as (`companions.sessionType.default`). */
   private configuredDefaultSessionType(): SessionType {
-    return this.sessionMetadataHost.configuredDefaultSessionType();
+    return this.delegateSidebarMethod("configuredDefaultSessionType", () => this.sessionMetadataHost.configuredDefaultSessionType());
   }
 
   /** The stored AP-15 metadata for a session, or undefined before it has an id. */
   private sessionTypeMetaFor(session: Session): SessionTypeMeta | undefined {
-    return this.sessionMetadataHost.sessionTypeMetaFor(session);
+    return this.delegateSidebarMethod("sessionTypeMetaFor", () => this.sessionMetadataHost.sessionTypeMetaFor(session));
   }
 
   /**
@@ -4141,33 +4133,33 @@ ${detail}`,
 
   /** Tell the webview which control to draw. */
   private postSessionType(session: Session): void {
-    return this.sessionMetadataHost.postSessionType(session);
+    return this.delegateSidebarMethod("postSessionType", () => this.sessionMetadataHost.postSessionType(session));
   }
 
   /** S-03: the composer's delegation switch, and the targets `@subagent:` offers. */
   private postSessionDelegation(session: Session): void {
-    return this.sessionMetadataHost.postSessionDelegation(session);
+    return this.delegateSidebarMethod("postSessionDelegation", () => this.sessionMetadataHost.postSessionDelegation(session));
   }
 
   /** S-03: set this session's delegation from the composer. */
   private setSessionDelegation(session: Session, value: string): void {
-    return this.sessionMetadataHost.setSessionDelegation(session, value);
+    return this.delegateSidebarMethod("setSessionDelegation", () => this.sessionMetadataHost.setSessionDelegation(session, value));
   }
   /** * Write the type into `grok.sessionMeta`. */
   private persistSessionType(session: Session): void {
-    return this.sessionMetadataHost.persistSessionType(session);
+    return this.delegateSidebarMethod("persistSessionType", () => this.sessionMetadataHost.persistSessionType(session));
   }
   /** * Read the type back for a session restored from history (ST-3). */
   private restoreSessionType(session: Session): void {
-    return this.sessionMetadataHost.restoreSessionType(session);
+    return this.delegateSidebarMethod("restoreSessionType", () => this.sessionMetadataHost.restoreSessionType(session));
   }
   /** * ST-2 — the lock, at the first submitted content. */
   private lockSessionTypeNow(session: Session): void {
-    return this.sessionMetadataHost.lockSessionTypeNow(session);
+    return this.delegateSidebarMethod("lockSessionTypeNow", () => this.sessionMetadataHost.lockSessionTypeNow(session));
   }
   /** * ST-1 — a pre-lock switch, or the host's refusal. */
   private setSessionType(session: Session, next: unknown): void {
-    return this.sessionMetadataHost.setSessionType(session, next);
+    return this.delegateSidebarMethod("setSessionType", () => this.sessionMetadataHost.setSessionType(session, next));
   }
 
   // ---------------------------------------------------------------- AP-16 --
@@ -4254,63 +4246,63 @@ ${detail}`,
   public get subagentOutcomes(): Map<string, any> { return this.subagentHost.outcomes; }
 
   private subagentStore(): SubagentState {
-    return this.subagentHost.subagentStore();
+    return this.delegateSidebarMethod("subagentStore", () => this.subagentHost.subagentStore());
   }
 
   private companions(): CompanionsHostServer {
-    return this.subagentHost.companions();
+    return this.delegateSidebarMethod("companions", () => this.subagentHost.companions());
   }
 
   private sessionForCompanionsToken(token: string): Session | undefined {
-    return this.subagentHost.sessionForCompanionsToken(token);
+    return this.delegateSidebarMethod("sessionForCompanionsToken", () => this.subagentHost.sessionForCompanionsToken(token));
   }
 
   private revokeCompanionsToken(session: Session): void {
-    this.subagentHost.revokeCompanionsToken(session);
+    this.delegateSidebarMethod("revokeCompanionsToken", () => this.subagentHost.revokeCompanionsToken(session));
   }
 
   private async companionsMcpServer(session: Session): Promise<AcpMcpStdioServer | undefined> {
-    return this.subagentHost.companionsMcpServer(session);
+    return this.delegateSidebarMethod("companionsMcpServer", () => this.subagentHost.companionsMcpServer(session));
   }
 
   private noteCompanionsSkip(session: Session, reason: CompanionsSkipReason): void {
-    this.subagentHost.noteCompanionsSkip(session, reason);
+    this.delegateSidebarMethod("noteCompanionsSkip", () => this.subagentHost.noteCompanionsSkip(session, reason));
   }
 
   private subagentMaxDepth(): 1 | 2 {
-    return this.subagentHost.subagentMaxDepth();
+    return this.delegateSidebarMethod("subagentMaxDepth", () => this.subagentHost.subagentMaxDepth());
   }
 
   private stageMayDelegate(session: Session): boolean {
-    return this.subagentHost.stageMayDelegate(session);
+    return this.delegateSidebarMethod("stageMayDelegate", () => this.subagentHost.stageMayDelegate(session));
   }
 
   private async spawnCompanionsServer(session: Session, mode: "delegate" | "generator"): Promise<AcpMcpStdioServer | undefined> {
-    return this.subagentHost.spawnCompanionsServer(session, mode);
+    return this.delegateSidebarMethod("spawnCompanionsServer", () => this.subagentHost.spawnCompanionsServer(session, mode));
   }
 
   private subagentsCouldBeUsedIn(session: Session): boolean {
-    return this.subagentHost.subagentsCouldBeUsedIn(session);
+    return this.delegateSidebarMethod("subagentsCouldBeUsedIn", () => this.subagentHost.subagentsCouldBeUsedIn(session));
   }
 
   private subagentsEnabledGlobally(): boolean {
-    return this.subagentHost.subagentsEnabledGlobally();
+    return this.delegateSidebarMethod("subagentsEnabledGlobally", () => this.subagentHost.subagentsEnabledGlobally());
   }
 
   private subagentRoster(): Partial<Record<AcpProvider, RosterEntry>> {
-    return this.subagentHost.subagentRoster();
+    return this.delegateSidebarMethod("subagentRoster", () => this.subagentHost.subagentRoster());
   }
 
   private subagentLimits(session: Session, turnId: string): SpawnLimits {
-    return this.subagentHost.subagentLimits(session, turnId);
+    return this.delegateSidebarMethod("subagentLimits", () => this.subagentHost.subagentLimits(session, turnId));
   }
 
   private parentSessionOf(session: Session): Session | undefined {
-    return this.subagentHost.parentSessionOf(session);
+    return this.delegateSidebarMethod("parentSessionOf", () => this.subagentHost.parentSessionOf(session));
   }
 
   private chainLabelFor(session: Session): string | undefined {
-    return this.subagentHost.chainLabelFor(session);
+    return this.delegateSidebarMethod("chainLabelFor", () => this.subagentHost.chainLabelFor(session));
   }
 
   public get childRelayTable(): ChildRelayTable<Session> | undefined {
@@ -4321,259 +4313,259 @@ ${detail}`,
   }
 
   public relayTable(): ChildRelayTable<Session> {
-    return this.subagentHost.relayTable();
+    return this.delegateSidebarMethod("relayTable", () => this.subagentHost.relayTable());
   }
 
   private hiddenReasonOf(session: Session): HiddenReason | undefined {
-    return this.subagentHost.hiddenReasonOf(session);
+    return this.delegateSidebarMethod("hiddenReasonOf", () => this.subagentHost.hiddenReasonOf(session));
   }
 
   private relayOriginFor(child: Session, route: string): RelayOrigin {
-    return this.subagentHost.relayOriginFor(child, route);
+    return this.delegateSidebarMethod("relayOriginFor", () => this.subagentHost.relayOriginFor(child, route));
   }
 
   public relayFromChild(child: Session, message: HostMsg): void {
-    this.subagentHost.relayFromChild(child, message);
+    this.delegateSidebarMethod("relayFromChild", () => this.subagentHost.relayFromChild(child, message));
   }
 
   private activityOwnerOf(child: Session): import("./child-activity").ActivityOwner | undefined {
-    return this.subagentHost.activityOwnerOf(child);
+    return this.delegateSidebarMethod("activityOwnerOf", () => this.subagentHost.activityOwnerOf(child));
   }
 
   private tapChildActivity(child: Session, message: HostMsg): void {
-    this.subagentHost.tapChildActivity(child, message);
+    this.delegateSidebarMethod("tapChildActivity", () => this.subagentHost.tapChildActivity(child, message));
   }
 
   private flushChildActivity(child: Session): void {
-    this.subagentHost.flushChildActivity(child);
+    this.delegateSidebarMethod("flushChildActivity", () => this.subagentHost.flushChildActivity(child));
   }
 
   private noteChildStarted(caller: Session, child: Session, subagentId?: string): void {
-    this.subagentHost.noteChildStarted(caller, child, subagentId);
+    this.delegateSidebarMethod("noteChildStarted", () => this.subagentHost.noteChildStarted(caller, child, subagentId));
   }
 
   private ensureStallWatch(): void {
-    this.subagentHost.ensureStallWatch();
+    this.delegateSidebarMethod("ensureStallWatch", () => this.subagentHost.ensureStallWatch());
   }
 
   public checkStalls(now = Date.now()): void {
-    this.subagentHost.checkStalls(now);
+    this.delegateSidebarMethod("checkStalls", () => this.subagentHost.checkStalls(now));
   }
 
   private noteNativeChild(session: Session, update: unknown): void {
-    this.subagentHost.noteNativeChild(session, update);
+    this.delegateSidebarMethod("noteNativeChild", () => this.subagentHost.noteNativeChild(session, update));
   }
 
   public postRunningChildren(): void {
-    this.subagentHost.postRunningChildren();
+    this.delegateSidebarMethod("postRunningChildren", () => this.subagentHost.postRunningChildren());
   }
 
   public runningChildrenSnapshot(now = Date.now()): Omit<Extract<HostMsg, { type: "runningChildren" }>, "type"> {
-    return this.subagentHost.runningChildrenSnapshot(now);
+    return this.delegateSidebarMethod("runningChildrenSnapshot", () => this.subagentHost.runningChildrenSnapshot(now));
   }
 
   public jumpToWaitingApproval(): boolean {
-    return this.subagentHost.jumpToWaitingApproval();
+    return this.delegateSidebarMethod("jumpToWaitingApproval", () => this.subagentHost.jumpToWaitingApproval());
   }
 
   private async childOverviewAction(msg: { action: string; kind?: string; id?: string; parentSessionId?: string; sessionId?: string }): Promise<void> {
-    return this.subagentHost.childOverviewAction(msg);
+    return this.delegateSidebarMethod("childOverviewAction", () => this.subagentHost.childOverviewAction(msg));
   }
 
   private runningStageSession(parent: Session): Session | undefined {
-    return this.subagentHost.runningStageSession(parent);
+    return this.delegateSidebarMethod("runningStageSession", () => this.subagentHost.runningStageSession(parent));
   }
 
   private async sendToRunningStage(parent: Session, text: string, mode: "steer" | "note"): Promise<void> {
-    return this.subagentHost.sendToRunningStage(parent, text, mode);
+    return this.delegateSidebarMethod("sendToRunningStage", () => this.subagentHost.sendToRunningStage(parent, text, mode));
   }
 
   private postChildContext(session: Session): void {
-    this.subagentHost.postChildContext(session);
+    this.delegateSidebarMethod("postChildContext", () => this.subagentHost.postChildContext(session));
   }
 
   private outsideStageScope(child: Session, req: PermissionRequest): boolean {
-    return this.subagentHost.outsideStageScope(child, req);
+    return this.delegateSidebarMethod("outsideStageScope", () => this.subagentHost.outsideStageScope(child, req));
   }
 
   private afterRelayClosed(ancestor: Session, child: Session): void {
-    this.subagentHost.afterRelayClosed(ancestor, child);
+    this.delegateSidebarMethod("afterRelayClosed", () => this.subagentHost.afterRelayClosed(ancestor, child));
   }
 
   public closeChildRelays(child: Session): void {
-    this.subagentHost.closeChildRelays(child);
+    this.delegateSidebarMethod("closeChildRelays", () => this.subagentHost.closeChildRelays(child));
   }
 
   private childNeedsYouChanged(child: Session, needsYou: boolean): void {
-    this.subagentHost.childNeedsYouChanged(child, needsYou);
+    this.delegateSidebarMethod("childNeedsYouChanged", () => this.subagentHost.childNeedsYouChanged(child, needsYou));
   }
 
   public childWaitsForYou(child: Session | undefined): boolean {
-    return this.subagentHost.childWaitsForYou(child);
+    return this.delegateSidebarMethod("childWaitsForYou", () => this.subagentHost.childWaitsForYou(child));
   }
 
   private notifyChildNeedsYou(ancestor: Session, origin: RelayOrigin, kind: RelayKind): void {
-    this.subagentHost.notifyChildNeedsYou(ancestor, origin, kind);
+    this.delegateSidebarMethod("notifyChildNeedsYou", () => this.subagentHost.notifyChildNeedsYou(ancestor, origin, kind));
   }
 
   public resolveRelayedAnswer(msg: WebviewMsg): { session: Session; msg: WebviewMsg } | undefined {
-    return this.subagentHost.resolveRelayedAnswer(msg);
+    return this.delegateSidebarMethod("resolveRelayedAnswer", () => this.subagentHost.resolveRelayedAnswer(msg));
   }
 
   private visibleAncestorOf(session: Session): Session {
-    return this.subagentHost.visibleAncestorOf(session);
+    return this.delegateSidebarMethod("visibleAncestorOf", () => this.subagentHost.visibleAncestorOf(session));
   }
 
   private eligibilityInput(session: Session, turnId: string): EligibilityInput {
-    return this.subagentHost.eligibilityInput(session, turnId);
+    return this.delegateSidebarMethod("eligibilityInput", () => this.subagentHost.eligibilityInput(session, turnId));
   }
 
   public currentTurnId(session: Session): string {
-    return this.subagentHost.currentTurnId(session);
+    return this.delegateSidebarMethod("currentTurnId", () => this.subagentHost.currentTurnId(session));
   }
 
   private async handleCompanionsCall(session: Session, call: CompanionsCall): Promise<void> {
-    return this.subagentHost.handleCompanionsCall(session, call);
+    return this.delegateSidebarMethod("handleCompanionsCall", () => this.subagentHost.handleCompanionsCall(session, call));
   }
 
   private companionsList(session: Session, args: ListArguments): unknown {
-    return this.subagentHost.companionsList(session, args);
+    return this.delegateSidebarMethod("companionsList", () => this.subagentHost.companionsList(session, args));
   }
 
   private async companionsSpawn(session: Session, args: SpawnArguments, call: CompanionsCall): Promise<void> {
-    return this.subagentHost.companionsSpawn(session, args, call);
+    return this.delegateSidebarMethod("companionsSpawn", () => this.subagentHost.companionsSpawn(session, args, call));
   }
 
   private async companionsAwait(session: Session, args: AwaitArguments, call: CompanionsCall): Promise<void> {
-    return this.subagentHost.companionsAwait(session, args, call);
+    return this.delegateSidebarMethod("companionsAwait", () => this.subagentHost.companionsAwait(session, args, call));
   }
 
   private async runCompanionSubagent(session: Session, subagentId: string, args: SpawnArguments, verdict: Extract<EligibilityResult, { ok: true }>, roleTemplate: AgentRole | undefined): Promise<void> {
-    return this.subagentHost.runCompanionSubagent(session, subagentId, args, verdict, roleTemplate);
+    return this.delegateSidebarMethod("runCompanionSubagent", () => this.subagentHost.runCompanionSubagent(session, subagentId, args, verdict, roleTemplate));
   }
 
   private preClaimSubagentFiles(runId: string, label: string, entries: readonly string[]): string | undefined {
-    return this.subagentHost.preClaimSubagentFiles(runId, label, entries);
+    return this.delegateSidebarMethod("preClaimSubagentFiles", () => this.subagentHost.preClaimSubagentFiles(runId, label, entries));
   }
 
   private childWriteClaimWarning(session: Session, req: PermissionRequest): string | undefined {
-    return this.subagentHost.childWriteClaimWarning(session, req);
+    return this.delegateSidebarMethod("childWriteClaimWarning", () => this.subagentHost.childWriteClaimWarning(session, req));
   }
 
   private sessionSpawnPolicy(session: Session): string {
-    return this.subagentHost.sessionSpawnPolicy(session);
+    return this.delegateSidebarMethod("sessionSpawnPolicy", () => this.subagentHost.sessionSpawnPolicy(session));
   }
 
   private askSubagentApproval(session: Session, args: SpawnArguments, verdict: Extract<EligibilityResult, { ok: true }>): Promise<{ approved: boolean; adjusted?: Record<string, unknown> }> {
-    return this.subagentHost.askSubagentApproval(session, args, verdict);
+    return this.delegateSidebarMethod("askSubagentApproval", () => this.subagentHost.askSubagentApproval(session, args, verdict));
   }
 
   private answerSubagentApproval(session: Session, msg: { id: string; approved: boolean; task?: string; provider?: string; model?: string; effort?: string; profile?: string }): void {
-    this.subagentHost.answerSubagentApproval(session, msg);
+    this.delegateSidebarMethod("answerSubagentApproval", () => this.subagentHost.answerSubagentApproval(session, msg));
   }
 
   private async continueSubagent(parent: Session, subagentId: string, message: string): Promise<{ ok: true } | { ok: false; code: RefusalCode; message: string }> {
-    return this.subagentHost.continueSubagent(parent, subagentId, message);
+    return this.delegateSidebarMethod("continueSubagent", () => this.subagentHost.continueSubagent(parent, subagentId, message));
   }
 
   private writeSubagentRaw(runId: string, step: number, raw: string): void {
-    this.subagentHost.writeSubagentRaw(runId, step, raw);
+    this.delegateSidebarMethod("writeSubagentRaw", () => this.subagentHost.writeSubagentRaw(runId, step, raw));
   }
 
   private readSubagentReport(subagentId: string): string | undefined {
-    return this.subagentHost.readSubagentReport(subagentId);
+    return this.delegateSidebarMethod("readSubagentReport", () => this.subagentHost.readSubagentReport(subagentId));
   }
 
   private rememberSubagentRun(parent: Session, runId: string): void {
-    this.subagentHost.rememberSubagentRun(parent, runId);
+    this.delegateSidebarMethod("rememberSubagentRun", () => this.subagentHost.rememberSubagentRun(parent, runId));
   }
 
   private persistSubagentRecord(subagentId: string): void {
-    this.subagentHost.persistSubagentRecord(subagentId);
+    this.delegateSidebarMethod("persistSubagentRecord", () => this.subagentHost.persistSubagentRecord(subagentId));
   }
 
   private restoreSubagentCards(parent: Session): void {
-    this.subagentHost.restoreSubagentCards(parent);
+    this.delegateSidebarMethod("restoreSubagentCards", () => this.subagentHost.restoreSubagentCards(parent));
   }
 
   private async settleSubagentWorktree(session: Session, subagentId: string, apply: boolean): Promise<void> {
-    return this.subagentHost.settleSubagentWorktree(session, subagentId, apply);
+    return this.delegateSidebarMethod("settleSubagentWorktree", () => this.subagentHost.settleSubagentWorktree(session, subagentId, apply));
   }
 
   private rearmSubagentTimer(subagentId: string): void {
-    this.subagentHost.rearmSubagentTimer(subagentId);
+    this.delegateSidebarMethod("rearmSubagentTimer", () => this.subagentHost.rearmSubagentTimer(subagentId));
   }
 
   private clearSubagentDeadline(subagentId: string): void {
-    this.subagentHost.clearSubagentDeadline(subagentId);
+    this.delegateSidebarMethod("clearSubagentDeadline", () => this.subagentHost.clearSubagentDeadline(subagentId));
   }
 
   private async claimSubagentFiles(session: Session, record: { runId: string; step: number; label: string }, files: readonly string[]): Promise<void> {
-    return this.subagentHost.claimSubagentFiles(session, record, files);
+    return this.delegateSidebarMethod("claimSubagentFiles", () => this.subagentHost.claimSubagentFiles(session, record, files));
   }
 
   public holdTurnForSubagents(session: Session, meta?: unknown): boolean {
-    return this.subagentHost.holdTurnForSubagents(session, meta);
+    return this.delegateSidebarMethod("holdTurnForSubagents", () => this.subagentHost.holdTurnForSubagents(session, meta));
   }
 
   public postSubagentTray(session: Session): void {
-    this.subagentHost.postSubagentTray(session);
+    this.delegateSidebarMethod("postSubagentTray", () => this.subagentHost.postSubagentTray(session));
   }
 
   public releaseTurnHold(session: Session): void {
-    this.subagentHost.releaseTurnHold(session);
+    this.delegateSidebarMethod("releaseTurnHold", () => this.subagentHost.releaseTurnHold(session));
   }
 
   public applyTurnDirectives(session: Session, text: string): { text: string; block: string } {
-    return this.subagentHost.applyTurnDirectives(session, text);
+    return this.delegateSidebarMethod("applyTurnDirectives", () => this.subagentHost.applyTurnDirectives(session, text));
   }
 
   private directiveForSpawn(session: Session, args: SpawnArguments): SubagentDirective | undefined {
-    return this.subagentHost.directiveForSpawn(session, args);
+    return this.delegateSidebarMethod("directiveForSpawn", () => this.subagentHost.directiveForSpawn(session, args));
   }
 
   public reportUnfollowedDirectives(session: Session, turnId: string): void {
-    this.subagentHost.reportUnfollowedDirectives(session, turnId);
+    this.delegateSidebarMethod("reportUnfollowedDirectives", () => this.subagentHost.reportUnfollowedDirectives(session, turnId));
   }
 
   private markHiddenChildSession(child: Session, parent: Session, subagentId: string, hiddenReason: HiddenReason = "companion-subagent"): void {
-    this.subagentHost.markHiddenChildSession(child, parent, subagentId, hiddenReason);
+    this.delegateSidebarMethod("markHiddenChildSession", () => this.subagentHost.markHiddenChildSession(child, parent, subagentId, hiddenReason));
   }
 
   private async promoteSubagentSession(session: Session, subagentId: string): Promise<void> {
-    return this.subagentHost.promoteSubagentSession(session, subagentId);
+    return this.delegateSidebarMethod("promoteSubagentSession", () => this.subagentHost.promoteSubagentSession(session, subagentId));
   }
 
   private flushHiddenChildMeta(session: Session): void {
-    this.subagentHost.flushHiddenChildMeta(session);
+    this.delegateSidebarMethod("flushHiddenChildMeta", () => this.subagentHost.flushHiddenChildMeta(session));
   }
 
   public postSubagentCard(session: Session, subagentId: string): void {
-    this.subagentHost.postSubagentCard(session, subagentId);
+    this.delegateSidebarMethod("postSubagentCard", () => this.subagentHost.postSubagentCard(session, subagentId));
   }
 
   private raceSubagent(subagentId: string, ms: number): Promise<boolean> {
-    return this.subagentHost.raceSubagent(subagentId, ms);
+    return this.delegateSidebarMethod("raceSubagent", () => this.subagentHost.raceSubagent(subagentId, ms));
   }
 
   private async raceSubagents(ids: readonly string[], ms: number, mode: "all" | "any"): Promise<void> {
-    return this.subagentHost.raceSubagents(ids, ms, mode);
+    return this.delegateSidebarMethod("raceSubagents", () => this.subagentHost.raceSubagents(ids, ms, mode));
   }
 
   private releaseSubagentWaiters(subagentId: string): void {
-    this.subagentHost.releaseSubagentWaiters(subagentId);
+    this.delegateSidebarMethod("releaseSubagentWaiters", () => this.subagentHost.releaseSubagentWaiters(subagentId));
   }
 
   public cancelSubagent(subagentId: string, reason: string, code?: RefusalCode): void {
-    this.subagentHost.cancelSubagent(subagentId, reason, code);
+    this.delegateSidebarMethod("cancelSubagent", () => this.subagentHost.cancelSubagent(subagentId, reason, code));
   }
 
   public cancelSubagentsOf(session: Session, reason: string): void {
-    this.subagentHost.cancelSubagentsOf(session, reason);
+    this.delegateSidebarMethod("cancelSubagentsOf", () => this.subagentHost.cancelSubagentsOf(session, reason));
   }
 
   public maybeFinishSubagentTurn(session: Session): void {
-    this.subagentHost.maybeFinishSubagentTurn(session);
+    this.delegateSidebarMethod("maybeFinishSubagentTurn", () => this.subagentHost.maybeFinishSubagentTurn(session));
   }
 
 
@@ -4586,11 +4578,11 @@ ${detail}`,
   /** Retire choices superseded by transcript activity, including worktrees.
    *  Store maintenance only, performed when publishing the catalog. */
   private normalizeArchiveChoices(): void {
-    return this.sessionCatalog.normalizeArchiveChoices();
+    return this.delegateSidebarMethod("normalizeArchiveChoices", () => this.sessionCatalog.normalizeArchiveChoices());
   }
 
   private postRepoCatalog(): void {
-    this.sessionCatalog.postRepoCatalog();
+    this.delegateSidebarMethod("postRepoCatalog", () => this.sessionCatalog.postRepoCatalog());
   }
 
   /**
@@ -4602,7 +4594,7 @@ ${detail}`,
    * full-catalog-or-fallback probe.
    */
   private resolveLocalRepoTarget(cwd: string): RepoListEntry | undefined {
-    return this.sessionCatalog.resolveLocalRepoTarget(cwd);
+    return this.delegateSidebarMethod("resolveLocalRepoTarget", () => this.sessionCatalog.resolveLocalRepoTarget(cwd));
   }
 
   /** Answer `listRepoSessions`: the newest few sessions for ONE repo, without
@@ -4617,29 +4609,29 @@ ${detail}`,
     limit: number | undefined,
     activeId: string | null | undefined,
   ): HostMsg {
-    return this.sessionCatalog.buildRepoSessionsPreview(cwd, limit, activeId);
+    return this.delegateSidebarMethod("buildRepoSessionsPreview", () => this.sessionCatalog.buildRepoSessionsPreview(cwd, limit, activeId));
   }
 
   private sendLocalRepoSessionsPreview(cwd: string, limit?: number): void {
-    return this.sessionCatalog.sendLocalRepoSessionsPreview(cwd, limit);
+    return this.delegateSidebarMethod("sendLocalRepoSessionsPreview", () => this.sessionCatalog.sendLocalRepoSessionsPreview(cwd, limit));
   }
   /** * Local repo selection. VS Code: history-scope only (workspace does not move). Desktop multi-folder: re-homes the active folder and conversation — same "newest real session or new" rule as {@link selectRemoteRepo}. Desktop only accepts open folders; a closed historical catalog path is refused. */
   private async selectRepo(cwd: string): Promise<void> {
-    return this.projectFolders.selectRepo(cwd);
+    return this.delegateSidebarMethod("selectRepo", () => this.projectFolders.selectRepo(cwd));
   }
 
   private async switchLocalWorkspaceFolder(
     cwd: string,
     options: { warnOnRefusal?: boolean } = {},
   ): Promise<void> {
-    return this.projectFolders.switchLocalWorkspaceFolder(cwd, options);
+    return this.delegateSidebarMethod("switchLocalWorkspaceFolder", () => this.projectFolders.switchLocalWorkspaceFolder(cwd, options));
   }
 
   private async switchLocalWorkspaceFolderExclusive(
     target: string,
     options: { warnOnRefusal?: boolean } = {},
   ): Promise<void> {
-    return this.projectFolders.switchLocalWorkspaceFolderExclusive(target, options);
+    return this.delegateSidebarMethod("switchLocalWorkspaceFolderExclusive", () => this.projectFolders.switchLocalWorkspaceFolderExclusive(target, options));
   }
 
   /**
@@ -4724,101 +4716,101 @@ ${detail}`,
   }
 
   async addProjectFolder(cwd?: string): Promise<void> {
-    return this.projectFolders.addProjectFolder(cwd);
+    return this.delegateSidebarMethod("addProjectFolder", () => this.projectFolders.addProjectFolder(cwd));
   }
 
   /* ----------------------------------------------- making a project */
 
   private projectHomeDir(): string {
-    return this.projectFolders.projectHomeDir();
+    return this.delegateSidebarMethod("projectHomeDir", () => this.projectFolders.projectHomeDir());
   }
 
   private projectRootPath(): string {
-    return this.projectFolders.projectRootPath();
+    return this.delegateSidebarMethod("projectRootPath", () => this.projectFolders.projectRootPath());
   }
 
   private projectSetupMessage(
     extra: Omit<Extract<HostMsg, { type: "projectSetup" }>, "type" | "root"> = {},
   ): Extract<HostMsg, { type: "projectSetup" }> {
-    return this.projectFolders.projectSetupMessage(extra);
+    return this.delegateSidebarMethod("projectSetupMessage", () => this.projectFolders.projectSetupMessage(extra));
   }
 
   private githubStatePayload(): GithubState {
-    return this.projectFolders.githubStatePayload();
+    return this.delegateSidebarMethod("githubStatePayload", () => this.projectFolders.githubStatePayload());
   }
 
   private githubStateMessage(): Extract<HostMsg, { type: "githubState" }> {
-    return this.projectFolders.githubStateMessage();
+    return this.delegateSidebarMethod("githubStateMessage", () => this.projectFolders.githubStateMessage());
   }
 
   private postGithubState(): void {
-    this.projectFolders.postGithubState();
+    this.delegateSidebarMethod("postGithubState", () => this.projectFolders.postGithubState());
   }
 
   private async refreshGithubState(): Promise<void> {
-    return this.projectFolders.refreshGithubState();
+    return this.delegateSidebarMethod("refreshGithubState", () => this.projectFolders.refreshGithubState());
   }
 
   private postProjectSetup(
     extra: Omit<Extract<HostMsg, { type: "projectSetup" }>, "type" | "root"> = {},
   ): void {
-    this.projectFolders.postProjectSetup(extra);
+    this.delegateSidebarMethod("postProjectSetup", () => this.projectFolders.postProjectSetup(extra));
   }
 
   async createProject(name: string): Promise<void> {
-    return this.projectFolders.createProject(name);
+    return this.delegateSidebarMethod("createProject", () => this.projectFolders.createProject(name));
   }
 
   async cloneProject(url: string, name?: string): Promise<void> {
-    return this.projectFolders.cloneProject(url, name);
+    return this.delegateSidebarMethod("cloneProject", () => this.projectFolders.cloneProject(url, name));
   }
 
   async setupGithubCli(action: "install" | "auth"): Promise<void> {
-    return this.projectFolders.setupGithubCli(action);
+    return this.delegateSidebarMethod("setupGithubCli", () => this.projectFolders.setupGithubCli(action));
   }
 
   private async listGithubRepos(): Promise<void> {
-    return this.projectFolders.listGithubRepos();
+    return this.delegateSidebarMethod("listGithubRepos", () => this.projectFolders.listGithubRepos());
   }
 
   private async githubSignOut(): Promise<void> {
-    return this.projectFolders.githubSignOut();
+    return this.delegateSidebarMethod("githubSignOut", () => this.projectFolders.githubSignOut());
   }
 
   private async githubLoginWithToken(token: string): Promise<void> {
-    return this.projectFolders.githubLoginWithToken(token);
+    return this.delegateSidebarMethod("githubLoginWithToken", () => this.projectFolders.githubLoginWithToken(token));
   }
 
   private async rememberExtraProjectFolder(resolved: string): Promise<void> {
-    return this.projectFolders.rememberExtraProjectFolder(resolved);
+    return this.delegateSidebarMethod("rememberExtraProjectFolder", () => this.projectFolders.rememberExtraProjectFolder(resolved));
   }
 
   private async forgetExtraProjectFolder(cwd?: string): Promise<void> {
-    return this.projectFolders.forgetExtraProjectFolder(cwd);
+    return this.delegateSidebarMethod("forgetExtraProjectFolder", () => this.projectFolders.forgetExtraProjectFolder(cwd));
   }
 
   async removeProjectFolder(cwd?: string): Promise<void> {
-    return this.projectFolders.removeProjectFolder(cwd);
+    return this.delegateSidebarMethod("removeProjectFolder", () => this.projectFolders.removeProjectFolder(cwd));
   }
 
   private presentEmptyProjectState(session: Session): void {
-    this.projectFolders.presentEmptyProjectState(session);
+    this.delegateSidebarMethod("presentEmptyProjectState", () => this.projectFolders.presentEmptyProjectState(session));
   }
 
   private sessionsBoundToFolder(closedCwd: string): Session[] {
-    return this.projectFolders.sessionsBoundToFolder(closedCwd);
+    return this.delegateSidebarMethod("sessionsBoundToFolder", () => this.projectFolders.sessionsBoundToFolder(closedCwd));
   }
 
   private revokeClosedProjectFolder(closedCwd: string): void {
-    this.projectFolders.revokeClosedProjectFolder(closedCwd);
+    this.delegateSidebarMethod("revokeClosedProjectFolder", () => this.projectFolders.revokeClosedProjectFolder(closedCwd));
   }
 
   private invalidateImageHandlesUnder(closedCwd: string): void {
-    this.projectFolders.invalidateImageHandlesUnder(closedCwd);
+    this.delegateSidebarMethod("invalidateImageHandlesUnder", () => this.projectFolders.invalidateImageHandlesUnder(closedCwd));
   }
 
   private revokeVoiceForClosedFolder(closedCwd: string): void {
-    this.projectFolders.revokeVoiceForClosedFolder(closedCwd);
+    this.delegateSidebarMethod("revokeVoiceForClosedFolder", () => this.projectFolders.revokeVoiceForClosedFolder(closedCwd));
   }
 
   private async toggleRepoPin(cwd: string, pinned: boolean): Promise<void> {
@@ -4871,12 +4863,12 @@ ${detail}`,
    *  alongside because the Pinned group spans repos and has to know where to
    *  read each session from without scanning every checkout. */
   private async toggleSessionPin(id: string, cwd: string | undefined, pinned: boolean): Promise<void> {
-    return this.sessionCatalog.toggleSessionPin(id, cwd, pinned);
+    return this.delegateSidebarMethod("toggleSessionPin", () => this.sessionCatalog.toggleSessionPin(id, cwd, pinned));
   }
   private updateSessionMeta(
     mutate: (current: SessionMetaOverrides) => SessionMetaOverrides | null,
   ): Promise<void> {
-    return this.sessionCatalog.updateSessionMeta(mutate);
+    return this.delegateSidebarMethod("updateSessionMeta", () => this.sessionCatalog.updateSessionMeta(mutate));
   }
 
   /** Park a composer draft on the conversation it was typed into, because that
@@ -4933,11 +4925,11 @@ ${detail}`,
    *  grouped by the stored home cwd so this costs one index scan per repo that
    *  actually holds a pin — not one per repo in the catalog. */
   private buildPinnedSessions(): { entries: SessionListEntry[]; dots: Record<string, Dot> } {
-    return this.sessionCatalog.buildPinnedSessions();
+    return this.delegateSidebarMethod("buildPinnedSessions", () => this.sessionCatalog.buildPinnedSessions());
   }
 
   private postPinnedSessions(): void {
-    this.sessionCatalog.postPinnedSessions();
+    this.delegateSidebarMethod("postPinnedSessions", () => this.sessionCatalog.postPinnedSessions());
   }
 
   private annotateWorktreeLabels(
@@ -4945,19 +4937,19 @@ ${detail}`,
     overrides: SessionMetaOverrides,
     workspaceCwd: string,
   ): void {
-    return this.sessionCatalog.annotateWorktreeLabels(entries, overrides, workspaceCwd);
+    return this.delegateSidebarMethod("annotateWorktreeLabels", () => this.sessionCatalog.annotateWorktreeLabels(entries, overrides, workspaceCwd));
   }
   /** * Forward generated media (grok's `/imagine` image or `/imagine-video` video) to the webview. Remote URLs pass through as a link. File paths — how grok writes media into its session dir — are served via `asWebviewUri` when they are **trusted** generated media under the Grok home (canonical containment + sessions/…/images|videos/ shape), so big videos stream from disk. */
   private async postGeneratedMedia(m: MediaRef, session: Session, gen: number): Promise<void> {
-    return this.voiceAndMcp.postGeneratedMedia(m, session, gen);
+    return this.delegateSidebarMethod("postGeneratedMedia", () => this.voiceAndMcp.postGeneratedMedia(m, session, gen));
   }
 
   private isServableFromDisk(p: string, provider: AcpProvider = "grok"): boolean {
-    return this.voiceAndMcp.isServableFromDisk(p, provider);
+    return this.delegateSidebarMethod("isServableFromDisk", () => this.voiceAndMcp.isServableFromDisk(p, provider));
   }
 
   private async exportExpr(msg: Parameters<VoiceAndMcp["exportExpr"]>[0], session: Session): Promise<void> {
-    return this.voiceAndMcp.exportExpr(msg, session);
+    return this.delegateSidebarMethod("exportExpr", () => this.voiceAndMcp.exportExpr(msg, session));
   }
 
   /**
@@ -4969,18 +4961,18 @@ ${detail}`,
     provider: AcpProvider = "grok",
     opts: { report?: (text: string) => void } = {},
   ): Promise<void> {
-    return this.providerSession.logout(provider, opts);
+    return this.delegateSidebarMethod("logout", () => this.providerSession.logout(provider, opts));
   }
 
   private async finishProviderLogout(
     provider: AcpProvider,
     report?: (text: string) => void,
   ): Promise<void> {
-    return this.providerSession.finishProviderLogout(provider, report);
+    return this.delegateSidebarMethod("finishProviderLogout", () => this.providerSession.finishProviderLogout(provider, report));
   }
 
   private async resetProviderSessionsAfterLogout(provider: AcpProvider): Promise<void> {
-    return this.providerSession.resetProviderSessionsAfterLogout(provider);
+    return this.delegateSidebarMethod("resetProviderSessionsAfterLogout", () => this.providerSession.resetProviderSessionsAfterLogout(provider));
   }
 
   /**
@@ -4991,11 +4983,11 @@ ${detail}`,
     provider: AcpProvider,
     session: Session,
   ): Promise<void> {
-    return this.providerSession.adoptSessionsForConnectedProvider(provider, session);
+    return this.delegateSidebarMethod("adoptSessionsForConnectedProvider", () => this.providerSession.adoptSessionsForConnectedProvider(provider, session));
   }
 
   private async retargetNeedsProviderSessions(provider: AcpProvider): Promise<Set<Session>> {
-    return this.providerSession.retargetNeedsProviderSessions(provider);
+    return this.delegateSidebarMethod("retargetNeedsProviderSessions", () => this.providerSession.retargetNeedsProviderSessions(provider));
   }
 
   dispose(): void {
@@ -5024,10 +5016,8 @@ ${detail}`,
       this.dropPendingQuestions(session);
     }
     void this.disposePool();
-    this.editorWatcher?.dispose();
     this.terminalManager.disposeAll();
-    this.stopVoiceInput();
-    try { if (this.voiceTempPath) fs.unlinkSync(this.voiceTempPath); } catch { /* best effort */ }
+    this._voiceAndMcp?.stopVoiceInput();
   }
 
   moveComposerCaret(direction: "forward" | "previousLine"): void {
@@ -5037,7 +5027,7 @@ ${detail}`,
   // ---------- internals ----------
 
   private async ensureClient(session: Session = this.focused): Promise<AcpClient | undefined> {
-    return this.sessionStart.ensureClient(session);
+    return this.delegateSidebarMethod("ensureClient", () => this.sessionStart.ensureClient(session));
   }
 
   /** Read `grok --version` for policy checks. Returns "" on failure (logged). */
@@ -5055,7 +5045,7 @@ ${detail}`,
   }
 
   private probeProviderVersion(provider: AcpProvider): Promise<string> {
-    return this.cliUpdateHost.probeProviderVersion(provider);
+    return this.delegateSidebarMethod("probeProviderVersion", () => this.cliUpdateHost.probeProviderVersion(provider));
   }
 
   /** Read `codex --version` once per activation. The adapter handshake reports
@@ -5069,27 +5059,27 @@ ${detail}`,
    * global installs, so nothing happens silently. Refresh re-reads the version.
    */
   private async updateProviderCli(provider: unknown): Promise<void> {
-    return this.cliUpdateHost.updateProviderCli(provider);
+    return this.delegateSidebarMethod("updateProviderCli", () => this.cliUpdateHost.updateProviderCli(provider));
   }
 
   private async refreshModelsIfCliChanged(provider: AcpProvider, version: string): Promise<void> {
-    return this.cliUpdateHost.refreshModelsIfCliChanged(provider, version);
+    return this.delegateSidebarMethod("refreshModelsIfCliChanged", () => this.cliUpdateHost.refreshModelsIfCliChanged(provider, version));
   }
 
   private probeCodexVersion(): Promise<string> {
-    return this.cliUpdateHost.probeCodexVersion();
+    return this.delegateSidebarMethod("probeCodexVersion", () => this.cliUpdateHost.probeCodexVersion());
   }
 
   private probeClaudeVersion(): Promise<string> {
-    return this.cliUpdateHost.probeClaudeVersion();
+    return this.delegateSidebarMethod("probeClaudeVersion", () => this.cliUpdateHost.probeClaudeVersion());
   }
 
   private probeMuseVersion(): Promise<string> {
-    return this.cliUpdateHost.probeMuseVersion();
+    return this.delegateSidebarMethod("probeMuseVersion", () => this.cliUpdateHost.probeMuseVersion());
   }
 
   private probeGeminiVersion(): Promise<string> {
-    return this.cliUpdateHost.probeGeminiVersion();
+    return this.delegateSidebarMethod("probeGeminiVersion", () => this.cliUpdateHost.probeGeminiVersion());
   }
 
   /** Once per extension upgrade, from session start, with a fresh install only
@@ -5098,22 +5088,22 @@ ${detail}`,
    * that cannot reach x.ai would otherwise re-charge that wait on every
    * window. */
   private async maybeUpdateCliOnUpgrade(cliPath: string): Promise<void> {
-    return this.providerSession.maybeUpdateCliOnUpgrade(cliPath);
+    return this.delegateSidebarMethod("maybeUpdateCliOnUpgrade", () => this.providerSession.maybeUpdateCliOnUpgrade(cliPath));
   }
 
   private async planModeCompatibility(
     cliPath: string,
     opts: { notify?: boolean } = {},
   ): Promise<CliCompatibilityResult> {
-    return this.providerSession.planModeCompatibility(cliPath, opts);
+    return this.delegateSidebarMethod("planModeCompatibility", () => this.providerSession.planModeCompatibility(cliPath, opts));
   }
 
   private applyPlanModeCompatibility(session: Session, compatibility: CliCompatibilityResult): void {
-    return this.providerSession.applyPlanModeCompatibility(session, compatibility);
+    return this.delegateSidebarMethod("applyPlanModeCompatibility", () => this.providerSession.applyPlanModeCompatibility(session, compatibility));
   }
 
   private async recheckPlanModeAvailability(session: Session): Promise<boolean> {
-    return this.providerSession.recheckPlanModeAvailability(session);
+    return this.delegateSidebarMethod("recheckPlanModeAvailability", () => this.providerSession.recheckPlanModeAvailability(session));
   }
 
   /** Pin the bounded Windows stdio-hang range before spawning ACP. */
@@ -5170,11 +5160,11 @@ ${detail}`,
    * safe while a session is live. Posts a grokUpdateStatus back to the webview.
    */
   private async checkGrokUpdate(): Promise<void> {
-    return this.cliUpdateHost.checkGrokUpdate();
+    return this.delegateSidebarMethod("checkGrokUpdate", () => this.cliUpdateHost.checkGrokUpdate());
   }
 
   private async updateGrokCliOnDemand(): Promise<void> {
-    return this.cliUpdateHost.updateGrokCliOnDemand();
+    return this.delegateSidebarMethod("updateGrokCliOnDemand", () => this.cliUpdateHost.updateGrokCliOnDemand());
   }
 
   private async runGrokUpdate(
@@ -5182,7 +5172,7 @@ ${detail}`,
     updateArgs: string[],
     notifyFailure = true,
   ): Promise<boolean> {
-    return this.cliUpdateHost.runGrokUpdate(cliPath, updateArgs, notifyFailure);
+    return this.delegateSidebarMethod("runGrokUpdate", () => this.cliUpdateHost.runGrokUpdate(cliPath, updateArgs, notifyFailure));
   }
 
   /** Persist a picker choice where the next read will actually find it: every
@@ -5197,7 +5187,7 @@ ${detail}`,
    *  legacy single `grok.defaultEffort` is kept in step for grok so an existing
    *  setting keeps working and older hosts still read something sensible. */
   private async persistEffort(provider: AcpProvider, level: string): Promise<void> {
-    return this.providerSession.persistEffort(provider, level);
+    return this.delegateSidebarMethod("persistEffort", () => this.providerSession.persistEffort(provider, level));
   }
 
   /** Confirm a restart for a setting that only applies on a fresh session
@@ -5220,7 +5210,7 @@ ${detail}`,
    *  captures a one-paragraph summary of the conversation and re-injects it as
    *  hidden context after the restart so the new session keeps the thread. */
   private async restartSession(mode: "clear" | "summarize", session: Session = this.focused): Promise<void> {
-    return this.sessionStart.restartSession(mode, session);
+    return this.delegateSidebarMethod("restartSession", () => this.sessionStart.restartSession(mode, session));
   }
 
   /** A model/effort switch on an empty session (no real conversation) restarts it with a new
@@ -5262,11 +5252,11 @@ ${detail}`,
   }
 
   private runExclusiveSessionStart<R>(session: Session, action: () => Promise<R>): Promise<R> {
-    return this.sessionStart.runExclusiveSessionStart(session, action);
+    return this.delegateSidebarMethod("runExclusiveSessionStart", () => this.sessionStart.runExclusiveSessionStart(session, action));
   }
 
   private async waitForSessionStart(session: Session): Promise<void> {
-    return this.sessionStart.waitForSessionStart(session);
+    return this.delegateSidebarMethod("waitForSessionStart", () => this.sessionStart.waitForSessionStart(session));
   }
 
   private emitAbandonedSend(session: Session): void {
@@ -5291,7 +5281,7 @@ ${detail}`,
     intent: SessionStartIntent = "replace",
     clock?: OpenClock,
   ): Promise<AcpClient | undefined> {
-    return this.sessionStart.startSession(resumeId, target, intent, clock);
+    return this.delegateSidebarMethod("startSession", () => this.sessionStart.startSession(resumeId, target, intent, clock));
   }
 
   private async startSessionBody(
@@ -5300,7 +5290,7 @@ ${detail}`,
     intent: SessionStartIntent,
     startedClock?: OpenClock,
   ): Promise<AcpClient | undefined> {
-    return this.sessionStart.startSessionBody(resumeId, target, intent, startedClock);
+    return this.delegateSidebarMethod("startSessionBody", () => this.sessionStart.startSessionBody(resumeId, target, intent, startedClock));
   }
 
   private async onMessage(msg: WebviewMsg): Promise<void> {
@@ -5313,89 +5303,89 @@ ${detail}`,
    *  like `workspace.fs` does; rules-files.ts is the layer that turns that
    *  into `exists:false` / `undefined`, so there is no double-catch here. */
   private ruleFileFs(): RuleFileFs {
-    return this.permissionHost.ruleFileFs();
+    return this.delegateSidebarMethod("ruleFileFs", () => this.permissionHost.ruleFileFs());
   }
 
   private resolvedUserHome(): string {
-    return this.permissionHost.resolvedUserHome();
+    return this.delegateSidebarMethod("resolvedUserHome", () => this.permissionHost.resolvedUserHome());
   }
 
   private async currentRuleFiles(session: Session): Promise<RuleFile[]> {
-    return this.permissionHost.currentRuleFiles(session);
+    return this.delegateSidebarMethod("currentRuleFiles", () => this.permissionHost.currentRuleFiles(session));
   }
 
   private postRuleFiles(files: RuleFile[]): void {
-    this.permissionHost.postRuleFiles(files);
+    this.delegateSidebarMethod("postRuleFiles", () => this.permissionHost.postRuleFiles(files));
   }
 
   private async refreshRuleFiles(session: Session): Promise<void> {
-    return this.permissionHost.refreshRuleFiles(session);
+    return this.delegateSidebarMethod("refreshRuleFiles", () => this.permissionHost.refreshRuleFiles(session));
   }
 
   private async openRuleFile(session: Session, requestedPath: string): Promise<void> {
-    return this.permissionHost.openRuleFile(session, requestedPath);
+    return this.delegateSidebarMethod("openRuleFile", () => this.permissionHost.openRuleFile(session, requestedPath));
   }
 
   private async appendRuleFile(session: Session, text: string): Promise<void> {
-    return this.permissionHost.appendRuleFile(session, text);
+    return this.delegateSidebarMethod("appendRuleFile", () => this.permissionHost.appendRuleFile(session, text));
   }
 
   private applyMcpNotification(session: Session, method: string, params: unknown): void {
-    this.voiceAndMcp.applyMcpNotification(session, method, params);
+    this.delegateSidebarMethod("applyMcpNotification", () => this.voiceAndMcp.applyMcpNotification(session, method, params));
   }
 
   private postMcpServers(message: Extract<HostMsg, { type: "mcpServers" }>): void {
-    this.voiceAndMcp.postMcpServers(message);
+    this.delegateSidebarMethod("postMcpServers", () => this.voiceAndMcp.postMcpServers(message));
   }
 
   private connectedConnectorStore(): ConnectedConnectorStore {
-    return this.voiceAndMcp.connectedConnectorStore();
+    return this.delegateSidebarMethod("connectedConnectorStore", () => this.voiceAndMcp.connectedConnectorStore());
   }
 
   private mcpConnectorsMessage(): Extract<HostMsg, { type: "mcpConnectors" }> {
-    return this.voiceAndMcp.mcpConnectorsMessage();
+    return this.delegateSidebarMethod("mcpConnectorsMessage", () => this.voiceAndMcp.mcpConnectorsMessage());
   }
 
   private postMcpConnectors(): void {
-    this.voiceAndMcp.postMcpConnectors();
+    this.delegateSidebarMethod("postMcpConnectors", () => this.voiceAndMcp.postMcpConnectors());
   }
 
   private mcpNameCatalogFor(cwd: string): {
     nameLayer: Map<string, "project" | "user">;
     nameFile: Map<string, string>;
   } {
-    return this.voiceAndMcp.mcpNameCatalogFor(cwd);
+    return this.delegateSidebarMethod("mcpNameCatalogFor", () => this.voiceAndMcp.mcpNameCatalogFor(cwd));
   }
 
   private filterMcpServers(servers: readonly McpServerView[] = this.mcpServers): McpServerView[] {
-    return this.voiceAndMcp.filterMcpServers(servers);
+    return this.delegateSidebarMethod("filterMcpServers", () => this.voiceAndMcp.filterMcpServers(servers));
   }
 
   private reservedMcpIdentityFor(session: Session = this.focused): ReservedMcpIdentity {
-    return this.voiceAndMcp.reservedMcpIdentityFor(session);
+    return this.delegateSidebarMethod("reservedMcpIdentityFor", () => this.voiceAndMcp.reservedMcpIdentityFor(session));
   }
 
   private async hostMcpServersFor(session: Session): Promise<any[]> {
-    return this.voiceAndMcp.hostMcpServersFor(session);
+    return this.delegateSidebarMethod("hostMcpServersFor", () => this.voiceAndMcp.hostMcpServersFor(session));
   }
 
   private lapsedOAuthConnectors(store = this.connectedConnectorStore()): ReadonlySet<string> {
-    return this.voiceAndMcp.lapsedOAuthConnectors(store);
+    return this.delegateSidebarMethod("lapsedOAuthConnectors", () => this.voiceAndMcp.lapsedOAuthConnectors(store));
   }
 
   private async loadMcpConnectorKeys(): Promise<void> {
-    return this.voiceAndMcp.loadMcpConnectorKeys();
+    return this.delegateSidebarMethod("loadMcpConnectorKeys", () => this.voiceAndMcp.loadMcpConnectorKeys());
   }
 
   private async forgetConnectorKey(id: ConnectorId): Promise<void> {
-    return this.voiceAndMcp.forgetConnectorKey(id);
+    return this.delegateSidebarMethod("forgetConnectorKey", () => this.voiceAndMcp.forgetConnectorKey(id));
   }
 
   private async connectMcpConnector(
     id: string,
     opts: { key?: string; readOnly?: boolean } = {},
   ): Promise<void> {
-    return this.voiceAndMcp.connectMcpConnector(id, opts);
+    return this.delegateSidebarMethod("connectMcpConnector", () => this.voiceAndMcp.connectMcpConnector(id, opts));
   }
 
   private async connectKeyMcpConnector(
@@ -5403,23 +5393,23 @@ ${detail}`,
     endpoint: string,
     opts: { key?: string; readOnly?: boolean },
   ): Promise<void> {
-    return this.voiceAndMcp.connectKeyMcpConnector(connector, endpoint, opts);
+    return this.delegateSidebarMethod("connectKeyMcpConnector", () => this.voiceAndMcp.connectKeyMcpConnector(connector, endpoint, opts));
   }
 
   private async disconnectMcpConnector(id: string): Promise<void> {
-    return this.voiceAndMcp.disconnectMcpConnector(id);
+    return this.delegateSidebarMethod("disconnectMcpConnector", () => this.voiceAndMcp.disconnectMcpConnector(id));
   }
 
   private findLiveGrokSession(): Session | undefined {
-    return this.voiceAndMcp.findLiveGrokSession();
+    return this.delegateSidebarMethod("findLiveGrokSession", () => this.voiceAndMcp.findLiveGrokSession());
   }
 
   private async grokSessionForMcpList(requester: Session): Promise<Session | undefined> {
-    return this.voiceAndMcp.grokSessionForMcpList(requester);
+    return this.delegateSidebarMethod("grokSessionForMcpList", () => this.voiceAndMcp.grokSessionForMcpList(requester));
   }
 
   private async refreshMcpServers(session: Session = this.focused): Promise<void> {
-    return this.voiceAndMcp.refreshMcpServers(session);
+    return this.delegateSidebarMethod("refreshMcpServers", () => this.voiceAndMcp.refreshMcpServers(session));
   }
 
   /**
@@ -5520,19 +5510,19 @@ ${detail}`,
     opts?: SessionsListOptions,
     activeId: string | null | undefined = this.focused.activeSessionId,
   ): Extract<HostMsg, { type: "sessions" }> {
-    return this.sessionCatalog.buildSessionsList(cwd, opts, activeId);
+    return this.delegateSidebarMethod("buildSessionsList", () => this.sessionCatalog.buildSessionsList(cwd, opts, activeId));
   }
 
   private scheduleAdapterHistoryRefresh(provider: AcpProvider, cwd: string): void {
-    this.sessionCatalog.scheduleAdapterHistoryRefresh(provider, cwd);
+    this.delegateSidebarMethod("scheduleAdapterHistoryRefresh", () => this.sessionCatalog.scheduleAdapterHistoryRefresh(provider, cwd));
   }
 
   private async refreshCodexHistory(cwd: string, key = projectProviderKey(cwd)): Promise<void> {
-    return this.sessionCatalog.refreshCodexHistory(cwd, key);
+    return this.delegateSidebarMethod("refreshCodexHistory", () => this.sessionCatalog.refreshCodexHistory(cwd, key));
   }
 
   private async refreshAdapterHistory(provider: AcpProvider, cwd: string, key = projectProviderKey(cwd)): Promise<void> {
-    return this.sessionCatalog.refreshAdapterHistory(provider, cwd, key);
+    return this.delegateSidebarMethod("refreshAdapterHistory", () => this.sessionCatalog.refreshAdapterHistory(provider, cwd, key));
   }
 
   private buildGrokSessionsList(
@@ -5540,18 +5530,18 @@ ${detail}`,
     opts?: GrokSessionsListOptions,
     activeId: string | null | undefined = this.focused.activeSessionId,
   ): GrokSessionsListMessage {
-    return this.sessionCatalog.buildGrokSessionsList(cwd, opts, activeId);
+    return this.delegateSidebarMethod("buildGrokSessionsList", () => this.sessionCatalog.buildGrokSessionsList(cwd, opts, activeId));
   }
   /** The name this session shows in the history list — what the user actually  reads, which is what a fork should be named after (#48). */
   private sessionDisplayName(session: Session): string {
-    return this.sessionCatalog.sessionDisplayName(session);
+    return this.delegateSidebarMethod("sessionDisplayName", () => this.sessionCatalog.sessionDisplayName(session));
   }
 
   /** Push the focused conversation's title independently of history pagination.
    *  The VS Code webview must not depend on the history popover having been
    *  opened. */
   private postSessionName(session: Session, name = this.sessionDisplayName(session)): void {
-    return this.sessionCatalog.postSessionName(session, name);
+    return this.delegateSidebarMethod("postSessionName", () => this.sessionCatalog.postSessionName(session, name));
   }
 
   private postSessionRemoved(id: string | undefined, cwd: string): void {
@@ -5566,7 +5556,7 @@ ${detail}`,
     cwd: string,
     overrides: SessionMetaOverrides,
   ): SessionListEntry {
-    return this.sessionCatalog.liveSessionEntry(session, id, cwd, overrides);
+    return this.delegateSidebarMethod("liveSessionEntry", () => this.sessionCatalog.liveSessionEntry(session, id, cwd, overrides));
   }
 
   /**
@@ -5582,7 +5572,7 @@ ${detail}`,
     grokHome: string,
     log: (m: string) => void,
   ): SessionListEntry[] {
-    return this.sessionCatalog.readEntriesCachedMulti(ids, mtimeById, cwdById, overrides, grokHome, log);
+    return this.delegateSidebarMethod("readEntriesCachedMulti", () => this.sessionCatalog.readEntriesCachedMulti(ids, mtimeById, cwdById, overrides, grokHome, log));
   }
 
   private renameSession(
@@ -5590,16 +5580,16 @@ ${detail}`,
     name: string,
     requestedCwd?: string,
   ): void {
-    this.sessionCatalog.renameSession(id, name, requestedCwd);
+    this.delegateSidebarMethod("renameSession", () => this.sessionCatalog.renameSession(id, name, requestedCwd));
   }
 
   /** Is this conversation on screen? Only the focused session is. */
   private sessionHasLiveOwner(session: Session): boolean {
-    return this.sessionCatalog.sessionHasLiveOwner(session);
+    return this.delegateSidebarMethod("sessionHasLiveOwner", () => this.sessionCatalog.sessionHasLiveOwner(session));
   }
 
   private reportProtectedSession(action: "delete" | "clear"): void {
-    this.sessionCatalog.reportProtectedSession(action);
+    this.delegateSidebarMethod("reportProtectedSession", () => this.sessionCatalog.reportProtectedSession(action));
   }
 
   /**
@@ -5623,7 +5613,7 @@ ${detail}`,
     level: "info" | "warning" | "error",
     text: string,
   ): void {
-    this.sessionCatalog.notifyUser(level, text);
+    this.delegateSidebarMethod("notifyUser", () => this.sessionCatalog.notifyUser(level, text));
   }
 
   private async deleteSession(
@@ -5631,7 +5621,7 @@ ${detail}`,
     _name: string | undefined,
     requestedCwd?: string,
   ): Promise<void> {
-    return this.sessionCatalog.deleteSession(id, _name, requestedCwd);
+    return this.delegateSidebarMethod("deleteSession", () => this.sessionCatalog.deleteSession(id, _name, requestedCwd));
   }
 
   /** Delete every inactive session in the requested repo's history. The
@@ -5639,7 +5629,7 @@ ${detail}`,
    *  transcript over a blank replacement process. The webview confirms first
    *  (custom dialog). */
   private async clearAllSessions(requestedCwd: string): Promise<void> {
-    return this.sessionCatalog.clearAllSessions(requestedCwd);
+    return this.delegateSidebarMethod("clearAllSessions", () => this.sessionCatalog.clearAllSessions(requestedCwd));
   }
 
   private async pickFileFromComputer(): Promise<void> {
@@ -5778,7 +5768,7 @@ ${detail}`,
    *  account or the grok login; it's sent only as an event property so distinct
    *  installs can be counted without identifying anyone. */
   private installId(): string {
-    return this.sidebarTelemetryHost.installId();
+    return this.delegateSidebarMethod("installId", () => this.sidebarTelemetryHost.installId());
   }
 
   /** Fire the single `session_start` telemetry event for the first real user
@@ -5788,11 +5778,11 @@ ${detail}`,
    *  providers or resolve credentials — those flags come from the last
    *  providerState / voiceConfigured refresh. */
   private reportSessionStart(session: Session): void {
-    return this.sidebarTelemetryHost.reportSessionStart(session);
+    return this.delegateSidebarMethod("reportSessionStart", () => this.sidebarTelemetryHost.reportSessionStart(session));
   }
 
   private rememberVoiceConfigured(cwd: string, value: boolean): void {
-    this.voiceAndMcp.rememberVoiceConfigured(cwd, value);
+    this.delegateSidebarMethod("rememberVoiceConfigured", () => this.voiceAndMcp.rememberVoiceConfigured(cwd, value));
   }
 
   private voiceConfiguredMsg(
@@ -5800,18 +5790,18 @@ ${detail}`,
     value: boolean,
     provider: AcpProvider = this.focused.provider,
   ): Extract<HostMsg, { type: "voiceConfigured" }> {
-    return this.voiceAndMcp.voiceConfiguredMsg(cwd, value, provider);
+    return this.delegateSidebarMethod("voiceConfiguredMsg", () => this.voiceAndMcp.voiceConfiguredMsg(cwd, value, provider));
   }
 
   private seedPostedVoiceConfigured(
     destKey: string,
     payload: Extract<HostMsg, { type: "voiceConfigured" }>,
   ): void {
-    this.voiceAndMcp.seedPostedVoiceConfigured(destKey, payload);
+    this.delegateSidebarMethod("seedPostedVoiceConfigured", () => this.voiceAndMcp.seedPostedVoiceConfigured(destKey, payload));
   }
 
   private forgetPostedVoiceConfigured(destKey: string): void {
-    this.voiceAndMcp.forgetPostedVoiceConfigured(destKey);
+    this.delegateSidebarMethod("forgetPostedVoiceConfigured", () => this.voiceAndMcp.forgetPostedVoiceConfigured(destKey));
   }
 
   private deliverVoiceConfigured(
@@ -5819,15 +5809,15 @@ ${detail}`,
     payload: Extract<HostMsg, { type: "voiceConfigured" }>,
     send: () => void,
   ): boolean {
-    return this.voiceAndMcp.deliverVoiceConfigured(destKey, payload, send);
+    return this.delegateSidebarMethod("deliverVoiceConfigured", () => this.voiceAndMcp.deliverVoiceConfigured(destKey, payload, send));
   }
 
   private postVoiceConfigured(): void {
-    this.voiceAndMcp.postVoiceConfigured();
+    this.delegateSidebarMethod("postVoiceConfigured", () => this.voiceAndMcp.postVoiceConfigured());
   }
 
   private voiceSetting<T>(cwd: string, key: string, fallback: T): T {
-    return this.voiceAndMcp.voiceSetting(cwd, key, fallback);
+    return this.delegateSidebarMethod("voiceSetting", () => this.voiceAndMcp.voiceSetting(cwd, key, fallback));
   }
 
   private async mentionFileIndexForCwd(cwd: string): Promise<{ rels: string[]; absByRel: Map<string, string> }> {
@@ -5837,27 +5827,27 @@ ${detail}`,
   }
 
   private async promptVoiceKeySetup(): Promise<void> {
-    return this.voiceAndMcp.promptVoiceKeySetup();
+    return this.delegateSidebarMethod("promptVoiceKeySetup", () => this.voiceAndMcp.promptVoiceKeySetup());
   }
 
   private rejectVoiceStart(): void {
-    this.voiceAndMcp.rejectVoiceStart();
+    this.delegateSidebarMethod("rejectVoiceStart", () => this.voiceAndMcp.rejectVoiceStart());
   }
 
   private claimVoice(cwd: string): boolean {
-    return this.voiceAndMcp.claimVoice(cwd);
+    return this.delegateSidebarMethod("claimVoice", () => this.voiceAndMcp.claimVoice(cwd));
   }
 
   private releaseVoice(cwd?: string): void {
-    this.voiceAndMcp.releaseVoice(cwd);
+    this.delegateSidebarMethod("releaseVoice", () => this.voiceAndMcp.releaseVoice(cwd));
   }
 
   private async reportFfmpegProblem(problem: Extract<FfmpegResolution, { ok: false }>): Promise<void> {
-    return this.voiceAndMcp.reportFfmpegProblem(problem);
+    return this.delegateSidebarMethod("reportFfmpegProblem", () => this.voiceAndMcp.reportFfmpegProblem(problem));
   }
 
   private async handleVoiceStart(session: Session = this.focused): Promise<void> {
-    return this.voiceAndMcp.handleVoiceStart(session);
+    return this.delegateSidebarMethod("handleVoiceStart", () => this.voiceAndMcp.handleVoiceStart(session));
   }
 
   private async startVoiceStream(
@@ -5868,27 +5858,27 @@ ${detail}`,
     generation: number,
     backend: SttBackend,
   ): Promise<void> {
-    return this.voiceAndMcp.startVoiceStream(key, ffmpegPath, device, cwd, generation, backend);
+    return this.delegateSidebarMethod("startVoiceStream", () => this.voiceAndMcp.startVoiceStream(key, ffmpegPath, device, cwd, generation, backend));
   }
 
   private async openVoiceStream(): Promise<void> {
-    return this.voiceAndMcp.openVoiceStream();
+    return this.delegateSidebarMethod("openVoiceStream", () => this.voiceAndMcp.openVoiceStream());
   }
 
   private commitVoiceStream(text: string): void {
-    this.voiceAndMcp.commitVoiceStream(text);
+    this.delegateSidebarMethod("commitVoiceStream", () => this.voiceAndMcp.commitVoiceStream(text));
   }
 
   private async finalizeVoiceStream(): Promise<void> {
-    return this.voiceAndMcp.finalizeVoiceStream();
+    return this.delegateSidebarMethod("finalizeVoiceStream", () => this.voiceAndMcp.finalizeVoiceStream());
   }
 
   private stopVoiceInput(session?: Session): void {
-    this.voiceAndMcp.stopVoiceInput(session);
+    this.delegateSidebarMethod("stopVoiceInput", () => this.voiceAndMcp.stopVoiceInput(session));
   }
 
   private async handleVoiceStop(): Promise<void> {
-    return this.voiceAndMcp.handleVoiceStop();
+    return this.delegateSidebarMethod("handleVoiceStop", () => this.voiceAndMcp.handleVoiceStop());
   }
 
   private async openDiffEditor(
@@ -5900,13 +5890,13 @@ ${detail}`,
     replaceAll?: boolean,
     sites?: { oldText: string; newText: string; oldLine?: number; newLine?: number }[],
   ): Promise<void> {
-    return this.reviewHost.openDiffEditor(session, filePath, oldText, newText, requestId, replaceAll, sites);
+    return this.delegateSidebarMethod("openDiffEditor", () => this.reviewHost.openDiffEditor(session, filePath, oldText, newText, requestId, replaceAll, sites));
   }
   private resolveDiffFilePath(session: Session, filePath: string): string | undefined {
-    return this.reviewHost.resolveDiffFilePath(session, filePath);
+    return this.delegateSidebarMethod("resolveDiffFilePath", () => this.reviewHost.resolveDiffFilePath(session, filePath));
   }
   private readFileForDiff(session: Session, filePath: string): string | undefined {
-    return this.reviewHost.readFileForDiff(session, filePath);
+    return this.delegateSidebarMethod("readFileForDiff", () => this.reviewHost.readFileForDiff(session, filePath));
   }
   private async revertToolEdit(
     session: Session,
@@ -5919,89 +5909,89 @@ ${detail}`,
       sites?: { oldText: string; newText: string; oldLine?: number; newLine?: number }[];
     },
   ): Promise<void> {
-    return this.reviewHost.revertToolEdit(session, msg);
+    return this.delegateSidebarMethod("revertToolEdit", () => this.reviewHost.revertToolEdit(session, msg));
   }
   private noteReviewToolCall(session: Session, call: unknown): void {
-    return this.reviewHost.noteReviewToolCall(session, call);
+    return this.delegateSidebarMethod("noteReviewToolCall", () => this.reviewHost.noteReviewToolCall(session, call));
   }
   private emitReviewCenter(session: Session): void {
-    return this.reviewHost.emitReviewCenter(session);
+    return this.delegateSidebarMethod("emitReviewCenter", () => this.reviewHost.emitReviewCenter(session));
   }
   private forgetReviewPath(session: Session, filePath: string, opts?: { turnId?: string; toolCallId?: string }): void {
-    return this.reviewHost.forgetReviewPath(session, filePath, opts);
+    return this.delegateSidebarMethod("forgetReviewPath", () => this.reviewHost.forgetReviewPath(session, filePath, opts));
   }
   private ackReviewReverted(session: Session, blocks: { toolCallId: string; path: string }[]): void {
-    return this.reviewHost.ackReviewReverted(session, blocks);
+    return this.delegateSidebarMethod("ackReviewReverted", () => this.reviewHost.ackReviewReverted(session, blocks));
   }
   private async reviewRevertFile(session: Session, filePath: string, scope: ReviewScope): Promise<void> {
-    return this.reviewHost.reviewRevertFile(session, filePath, scope);
+    return this.delegateSidebarMethod("reviewRevertFile", () => this.reviewHost.reviewRevertFile(session, filePath, scope));
   }
   private async reviewRevertAll(session: Session, scope: ReviewScope): Promise<void> {
-    return this.reviewHost.reviewRevertAll(session, scope);
+    return this.delegateSidebarMethod("reviewRevertAll", () => this.reviewHost.reviewRevertAll(session, scope));
   }
   private closeDiffForRequest(session: Session, requestId: number | string): void {
-    return this.reviewHost.closeDiffForRequest(session, requestId);
+    return this.delegateSidebarMethod("closeDiffForRequest", () => this.reviewHost.closeDiffForRequest(session, requestId));
   }
   private closeDiffUris(uris: { left: Uri; right: Uri }): void {
-    return this.reviewHost.closeDiffUris(uris);
+    return this.delegateSidebarMethod("closeDiffUris", () => this.reviewHost.closeDiffUris(uris));
   }
   private applyPlanUpdate(session: Session, u: any): void {
-    return this.reviewHost.applyPlanUpdate(session, u);
+    return this.delegateSidebarMethod("applyPlanUpdate", () => this.reviewHost.applyPlanUpdate(session, u));
   }
   private clearPlanEntries(session: Session): void {
-    return this.reviewHost.clearPlanEntries(session);
+    return this.delegateSidebarMethod("clearPlanEntries", () => this.reviewHost.clearPlanEntries(session));
   }
   private async postExitPlanRequest(req: ExitPlanRequest, session: Session, gen: number): Promise<void> {
-    return this.reviewHost.postExitPlanRequest(req, session, gen);
+    return this.delegateSidebarMethod("postExitPlanRequest", () => this.reviewHost.postExitPlanRequest(req, session, gen));
   }
   private async withPlanReviewPaths<T extends { text: string }>(
     plans: T[],
     sessionId?: string,
   ): Promise<Array<T & { planPath?: string; planName?: string }>> {
-    return this.reviewHost.withPlanReviewPaths<T>(plans, sessionId);
+    return this.delegateSidebarMethod("withPlanReviewPaths", () => this.reviewHost.withPlanReviewPaths<T>(plans, sessionId));
   }
   private removeCheckpoints(sessionId: string): void {
-    return this.reviewHost.removeCheckpoints(sessionId);
+    return this.delegateSidebarMethod("removeCheckpoints", () => this.reviewHost.removeCheckpoints(sessionId));
   }
   private startTurnGitBaseline(session: Session, turn: object): void {
-    return this.reviewHost.startTurnGitBaseline(session, turn);
+    return this.delegateSidebarMethod("startTurnGitBaseline", () => this.reviewHost.startTurnGitBaseline(session, turn));
   }
   private async openTurnGitDiff(session: Session, relPath: string): Promise<boolean> {
-    return this.reviewHost.openTurnGitDiff(session, relPath);
+    return this.delegateSidebarMethod("openTurnGitDiff", () => this.reviewHost.openTurnGitDiff(session, relPath));
   }
   private beginCheckpointTurn(session: Session, text: string): void {
-    return this.reviewHost.beginCheckpointTurn(session, text);
+    return this.delegateSidebarMethod("beginCheckpointTurn", () => this.reviewHost.beginCheckpointTurn(session, text));
   }
   private ensureCheckpointTurn(session: Session): Session["checkpointTurn"] | undefined {
-    return this.reviewHost.ensureCheckpointTurn(session);
+    return this.delegateSidebarMethod("ensureCheckpointTurn", () => this.reviewHost.ensureCheckpointTurn(session));
   }
   private snapshotToolCallWrites(
     session: Session,
     toolCall: { kind?: string; rawInput?: unknown; content?: unknown } | undefined,
     cwd: string,
   ): void {
-    return this.reviewHost.snapshotToolCallWrites(session, toolCall, cwd);
+    return this.delegateSidebarMethod("snapshotToolCallWrites", () => this.reviewHost.snapshotToolCallWrites(session, toolCall, cwd));
   }
   private snapshotPendingEditToolCall(session: Session, call: { kind?: string; status?: string; rawInput?: unknown; content?: unknown }): void {
-    return this.reviewHost.snapshotPendingEditToolCall(session, call);
+    return this.delegateSidebarMethod("snapshotPendingEditToolCall", () => this.reviewHost.snapshotPendingEditToolCall(session, call));
   }
   private snapshotRelOrAbsPaths(session: Session, paths: readonly string[], cwd: string): void {
-    return this.reviewHost.snapshotRelOrAbsPaths(session, paths, cwd);
+    return this.delegateSidebarMethod("snapshotRelOrAbsPaths", () => this.reviewHost.snapshotRelOrAbsPaths(session, paths, cwd));
   }
   private snapshotAbsPaths(session: Session, absPaths: readonly string[]): void {
-    return this.reviewHost.snapshotAbsPaths(session, absPaths);
+    return this.delegateSidebarMethod("snapshotAbsPaths", () => this.reviewHost.snapshotAbsPaths(session, absPaths));
   }
   private noteCheckpointAfterContent(session: Session, absPath: string, content: string): void {
-    return this.reviewHost.noteCheckpointAfterContent(session, absPath, content);
+    return this.delegateSidebarMethod("noteCheckpointAfterContent", () => this.reviewHost.noteCheckpointAfterContent(session, absPath, content));
   }
   private persistCheckpointTurn(session: Session): void {
-    return this.reviewHost.persistCheckpointTurn(session);
+    return this.delegateSidebarMethod("persistCheckpointTurn", () => this.reviewHost.persistCheckpointTurn(session));
   }
   private disableCheckpointTurn(session: Session, reason: string): void {
-    return this.reviewHost.disableCheckpointTurn(session, reason);
+    return this.delegateSidebarMethod("disableCheckpointTurn", () => this.reviewHost.disableCheckpointTurn(session, reason));
   }
   private finishCheckpointTurn(session: Session): void {
-    return this.reviewHost.finishCheckpointTurn(session);
+    return this.delegateSidebarMethod("finishCheckpointTurn", () => this.reviewHost.finishCheckpointTurn(session));
   }
   private async rewindFromClientCheckpoints(
     session: Session,
@@ -6012,7 +6002,7 @@ ${detail}`,
       edit: boolean;
     },
   ): Promise<void> {
-    return this.reviewHost.rewindFromClientCheckpoints(session, opts);
+    return this.delegateSidebarMethod("rewindFromClientCheckpoints", () => this.reviewHost.rewindFromClientCheckpoints(session, opts));
   }
 
   /** Delete a session's plan-review snapshots. They live under globalStorage,
@@ -6137,7 +6127,7 @@ ${detail}`,
   }
   /** Track an in-flight attachment-staging op (paste / drop / pick). Message  ordering only guarantees an op posted before send has STARTED handling —  its fs awaits can still be mid-flight when handleSend runs (VS Code does  not serialize async onDidReceiveMessage handlers), so handleSend settles  this set before snapshotting chips: the chip must make THIS send, not the  next one. */
   private trackAttach(op: Promise<unknown>): Promise<void> {
-    return this.fileUploadHost.trackAttach(op);
+    return this.delegateSidebarMethod("trackAttach", () => this.fileUploadHost.trackAttach(op));
   }
 
   /**
@@ -6149,11 +6139,11 @@ ${detail}`,
    * with no live session at all (paste during startup/onboarding just works).
    */
   private imageStagingDir(): string {
-    return this.fileUploadHost.imageStagingDir();
+    return this.delegateSidebarMethod("imageStagingDir", () => this.fileUploadHost.imageStagingDir());
   }
 
   private fileStagingDir(): string {
-    return this.fileUploadHost.fileStagingDir();
+    return this.delegateSidebarMethod("fileStagingDir", () => this.fileUploadHost.fileStagingDir());
   }
 
   /** Delete staged images older than 7 days. A pending attachment lives for
@@ -6161,17 +6151,17 @@ ${detail}`,
    *  closed). The age gate keeps a second VS Code window's fresh staging
    *  files safe — globalStorage is shared across windows. */
   private async sweepImageStaging(): Promise<void> {
-    return this.fileUploadHost.sweepImageStaging();
+    return this.delegateSidebarMethod("sweepImageStaging", () => this.fileUploadHost.sweepImageStaging());
   }
 
   /** Keep sent documents for their session's lifetime; only abandoned staging
    * directories use the seven-day orphan policy shared with images. */
   private async sweepFileStaging(): Promise<void> {
-    return this.fileUploadHost.sweepFileStaging();
+    return this.delegateSidebarMethod("sweepFileStaging", () => this.fileUploadHost.sweepFileStaging());
   }
 
   private async retainUploadedFilesForSession(session: Session, chips: ContextChip[]): Promise<void> {
-    return this.fileUploadHost.retainUploadedFilesForSession(session, chips);
+    return this.delegateSidebarMethod("retainUploadedFilesForSession", () => this.fileUploadHost.retainUploadedFilesForSession(session, chips));
   }
 
   /** Remove UUID upload directories owned only by the sessions being deleted.
@@ -6180,7 +6170,7 @@ ${detail}`,
     ids: Iterable<string>,
     overrides: SessionMetaOverrides,
   ): Promise<void> {
-    return this.fileUploadHost.removeUploadsForSessions(ids, overrides);
+    return this.delegateSidebarMethod("removeUploadsForSessions", () => this.fileUploadHost.removeUploadsForSessions(ids, overrides));
   }
 
   /** Write image bytes into staging and attach the chip. The `[Image #N]`
@@ -6192,7 +6182,7 @@ ${detail}`,
     owner: AttachmentOwner = () => this.focused,
     previewId?: string,
   ): Promise<Session | undefined> {
-    return this.fileUploadHost.stageImageAttachment(bytes, mimeType, originPath, owner, previewId);
+    return this.delegateSidebarMethod("stageImageAttachment", () => this.fileUploadHost.stageImageAttachment(bytes, mimeType, originPath, owner, previewId));
   }
 
   /** Clipboard paste from the webview (base64 + mime, already prefiltered to
@@ -6204,7 +6194,7 @@ ${detail}`,
     owner: AttachmentOwner = () => this.focused,
     previewId?: string,
   ): Promise<void> {
-    return this.fileUploadHost.addPastedImage(base64, mimeType, owner, previewId);
+    return this.delegateSidebarMethod("addPastedImage", () => this.fileUploadHost.addPastedImage(base64, mimeType, owner, previewId));
   }
 
   /** Copy an on-disk raster image into staging as a vision attachment, keeping
@@ -6218,7 +6208,7 @@ ${detail}`,
     srcPath: string,
     owner: AttachmentOwner = () => this.focused,
   ): Promise<Session | false | undefined> {
-    return this.fileUploadHost.importImageFromDisk(srcPath, owner);
+    return this.delegateSidebarMethod("importImageFromDisk", () => this.fileUploadHost.importImageFromDisk(srcPath, owner));
   }
 
   private async addDroppedFile(
@@ -6226,7 +6216,7 @@ ${detail}`,
     shiftHeld: boolean,
     owner: AttachmentOwner = () => this.focused,
   ): Promise<Session | undefined> {
-    return this.voiceAndMcp.addDroppedFile(dropped, shiftHeld, owner);
+    return this.delegateSidebarMethod("addDroppedFile", () => this.voiceAndMcp.addDroppedFile(dropped, shiftHeld, owner));
   }
 
   // ── Context chips: diagnostics and terminal (AP-03) ──────────────────────
@@ -6292,7 +6282,7 @@ ${detail}`,
   }
 
   private async recoverUnansweredCancel(session: Session, token: object): Promise<void> {
-    return this.turnEdit.recoverUnansweredCancel(session, token);
+    return this.delegateSidebarMethod("recoverUnansweredCancel", () => this.turnEdit.recoverUnansweredCancel(session, token));
   }
 
   /** A send that raced into a running turn (desk↔remote co-attach: the other
@@ -6315,7 +6305,7 @@ ${detail}`,
     bare: boolean,
     chips: ContextChip[] = explicitVisibleChips(session.chips),
   ): void {
-    return this.turnEdit.divertRacingSend(session, text, bare, chips);
+    return this.delegateSidebarMethod("divertRacingSend", () => this.turnEdit.divertRacingSend(session, text, bare, chips));
   }
 
   private async handleSend(
@@ -6325,7 +6315,7 @@ ${detail}`,
     queuedSendCommit?: { text: string; items: QueuedSendEntry[] },
     submissionId?: string,
   ): Promise<void> {
-    return this.sessionStart.handleSend(text, bare, target, queuedSendCommit, submissionId);
+    return this.delegateSidebarMethod("handleSend", () => this.sessionStart.handleSend(text, bare, target, queuedSendCommit, submissionId));
   }
 
   /**
@@ -6339,26 +6329,26 @@ ${detail}`,
     displayText: string,
     chips: ContextChip[],
   ): boolean {
-    return this.turnEdit.surfaceLimitError(session, err, displayText, chips);
+    return this.delegateSidebarMethod("surfaceLimitError", () => this.turnEdit.surfaceLimitError(session, err, displayText, chips));
   }
 
   /** K-05: a context overflow gets its own card instead of a raw error. */
   private surfaceContextOverflow(session: Session, err: unknown, displayText: string, chips: ContextChip[]): boolean {
-    return this.turnEdit.surfaceContextOverflow(session, err, displayText, chips);
+    return this.delegateSidebarMethod("surfaceContextOverflow", () => this.turnEdit.surfaceContextOverflow(session, err, displayText, chips));
   }
 
   private async answerContextOverflow(
     session: Session,
     msg: { id: string; action: "compact-retry" | "fresh" | "dismiss" },
   ): Promise<void> {
-    return this.turnEdit.answerContextOverflow(session, msg);
+    return this.delegateSidebarMethod("answerContextOverflow", () => this.turnEdit.answerContextOverflow(session, msg));
   }
   /** * User picked an action on the limit card. Continue rebinds this session to a *different* provider (same-account models are not targets) and resends the failed prompt there. Wait resends to the current provider only because the person asked — never automatically. Every switch is a transcript line. */
   private async answerLimitOffer(
     session: Session,
     msg: { id: string; action: "continue" | "retry" | "dismiss"; target?: AcpProvider },
   ): Promise<void> {
-    return this.turnEdit.answerLimitOffer(session, msg);
+    return this.delegateSidebarMethod("answerLimitOffer", () => this.turnEdit.answerLimitOffer(session, msg));
   }
 
   /**
@@ -6386,7 +6376,7 @@ ${detail}`,
     chips: ContextChip[],
     promptBlocks: Parameters<AcpClient["prompt"]>[0],
   ): Promise<boolean> {
-    return this.turnEdit.recoverAuthAndResend(session, err, displayText, chips, promptBlocks);
+    return this.delegateSidebarMethod("recoverAuthAndResend", () => this.turnEdit.recoverAuthAndResend(session, err, displayText, chips, promptBlocks));
   }
 
   /** Give a session a readable name from its opening prompt, as `autoName` — never
@@ -6420,16 +6410,16 @@ ${detail}`,
   }
   /** * The user has opened the host's move-view picker — from the gear, the palette command, or the empty-state hint's own link. Retires that hint for good. */
   async retireMoveViewHint(): Promise<void> {
-    return this.sidebarStateHost.retireMoveViewHint();
+    return this.delegateSidebarMethod("retireMoveViewHint", () => this.sidebarStateHost.retireMoveViewHint());
   }
 
   /** Global "Use this app for" from ~/.grok/client-state (absent → Knowledge work). */
   private appPurpose(): AppPurpose {
-    return this.sidebarStateHost.appPurpose();
+    return this.delegateSidebarMethod("appPurpose", () => this.sidebarStateHost.appPurpose());
   }
 
   private buildInitialStateMsg(session: Session = this.focused): Extract<HostMsg, { type: "initialState" }> {
-    return this.sidebarStateHost.buildInitialStateMsg(session);
+    return this.delegateSidebarMethod("buildInitialStateMsg", () => this.sidebarStateHost.buildInitialStateMsg(session));
   }
 
   private postInitialState(): void {
@@ -6503,7 +6493,7 @@ ${detail}`,
    */
   private rehydrateWebviewFromFocused(): void {
     // Rehydrates busy chrome via rehydrateBusyChrome
-    return this.sidebarStateHost.rehydrateWebviewFromFocused();
+    return this.delegateSidebarMethod("rehydrateWebviewFromFocused", () => this.sidebarStateHost.rehydrateWebviewFromFocused());
   }
 
   private async readImageChip(
@@ -6511,19 +6501,19 @@ ${detail}`,
     session: Session,
     gen: number,
   ): Promise<PromptImageInput | "failed" | "gone"> {
-    return this.sidebarStateHost.readImageChip(chip, session, gen);
+    return this.delegateSidebarMethod("readImageChip", () => this.sidebarStateHost.readImageChip(chip, session, gen));
   }
 
   private postChips(session: Session = this.focused): void {
-    return this.sidebarStateHost.postChips(session);
+    return this.delegateSidebarMethod("postChips", () => this.sidebarStateHost.postChips(session));
   }
 
   private localPreviewChips(session: Session, webview: HostWebview): ContextChip[] {
-    return this.sidebarStateHost.localPreviewChips(session, webview);
+    return this.delegateSidebarMethod("localPreviewChips", () => this.sidebarStateHost.localPreviewChips(session, webview));
   }
 
   private localizeHistoryMessage(message: HostMsg, webview: HostWebview): HostMsg {
-    return this.sidebarStateHost.localizeHistoryMessage(message, webview);
+    return this.delegateSidebarMethod("localizeHistoryMessage", () => this.sidebarStateHost.localizeHistoryMessage(message, webview));
   }
 
   // grok's output for hidden summary/context-injection turns, dropped from both
@@ -6662,7 +6652,7 @@ ${detail}`,
   }
 
   private workflowCompletion(session: Session, update: RunProgressUpdate) {
-    if (session.provider !== "grok" || update.kind !== "workflow" || update.done) return;
+    if (providerCapability(session.provider, "subagents").state !== "yes" || update.kind !== "workflow" || update.done) return;
     const sid = session.activeSessionId || session.client?.sessionId;
     if (!sid) return;
     const dir = sessionDirFor(resolveGrokHome(process.env), this.sessionCwd(session), sid, { fs: defaultFs });
@@ -6670,7 +6660,7 @@ ${detail}`,
   }
 
   private refreshWorkflowCompletions(session: Session): void {
-    if (session?.provider !== "grok" || !session.buffer) return;
+    if (!session || providerCapability(session.provider, "subagents").state !== "yes" || !session.buffer) return;
     const runs = new Map<string, Extract<HostMsg, { type: "runProgress" }>[]>();
     for (const message of session.buffer) {
       if (message.type !== "runProgress" || message.update.kind !== "workflow") continue;
@@ -6894,7 +6884,7 @@ ${detail}`,
   }
 
   private focusSession(session: Session): void {
-    this.sessionCatalog.focusSession(session);
+    this.delegateSidebarMethod("focusSession", () => this.sessionCatalog.focusSession(session));
   }
 
   /**
@@ -6903,7 +6893,7 @@ ${detail}`,
    * so we tear it down. Called before switching focus to a new/other session.
    */
   private parkFocused(): void {
-    this.sessionCatalog.parkFocused();
+    this.delegateSidebarMethod("parkFocused", () => this.sessionCatalog.parkFocused());
   }
 
   /**
@@ -6917,23 +6907,15 @@ ${detail}`,
    * only removes it.
    */
   private teardownEmptySession(session: Session): void {
-    this.sessionCatalog.teardownEmptySession(session);
+    this.delegateSidebarMethod("teardownEmptySession", () => this.sessionCatalog.teardownEmptySession(session));
   }
 
   /** Delete a session's on-disk dir + drop its meta override and read-cache entry.
    *  Used when an empty session is abandoned or a legacy primer-only session is swept. Best-effort —
    *  a locked/already-gone dir is logged, not thrown. */
   private removeSessionFromDisk(id: string | undefined, sessionCwd?: string): boolean {
-    return this.sessionCatalog.removeSessionFromDisk(id, sessionCwd);
+    return this.delegateSidebarMethod("removeSessionFromDisk", () => this.sessionCatalog.removeSessionFromDisk(id, sessionCwd));
   }
-
-  /** Every session id in a repo that has been PROVEN to hold real work, for this
-   *  activation. The sweep runs on every new/opened session, and without this each
-   *  run would re-read every `summary.json` under the repo; with it, a repeat run
-   *  reads only directories it has never classified. Safe to keep forever: a
-   *  session that has a real user turn never becomes empty again. Keyed by
-   *  {@link normalizeRepoPath}. */
-  private readonly provenNonEmpty = new Map<string, Set<string>>();
 
   /** Delete every empty session directory in `cwd` — one that grok registered but
    *  no conversation ever reached. `parkFocused` handles the session you walk away
@@ -6956,7 +6938,7 @@ ${detail}`,
     cwd: string = this.workspaceRoot(),
     opts: { force?: boolean } = {},
   ): void {
-    this.sessionCatalog.sweepEmptySessions(cwd, opts);
+    this.delegateSidebarMethod("sweepEmptySessions", () => this.sessionCatalog.sweepEmptySessions(cwd, opts));
   }
 
   /** Detach a session from its live client: bump the generation so every handler
@@ -7057,11 +7039,11 @@ ${detail}`,
   }
   /** * Re-push the project preview a finished turn just reordered. */
   private refreshSessionOrderAfterTurn(session: Session): void {
-    return this.sessionCatalog.refreshSessionOrderAfterTurn(session);
+    return this.delegateSidebarMethod("refreshSessionOrderAfterTurn", () => this.sessionCatalog.refreshSessionOrderAfterTurn(session));
   }
   /** * Raise a question card and take ownership of its lifetime. */
   showQuestion(session: Session, req: QuestionRequest, responder: QuestionResponder): void {
-    return this.questionHost.showQuestion(session, req, responder);
+    return this.delegateSidebarMethod("showQuestion", () => this.questionHost.showQuestion(session, req, responder));
   }
 
   private answerQuestion(
@@ -7071,58 +7053,58 @@ ${detail}`,
     annotations: Record<string, { notes?: string; preview?: string }>,
     auto = false,
   ): boolean {
-    return this.questionHost.answerQuestion(session, requestId, answers, annotations, auto);
+    return this.delegateSidebarMethod("answerQuestion", () => this.questionHost.answerQuestion(session, requestId, answers, annotations, auto));
   }
 
   private cancelQuestion(session: Session, requestId: number | string, auto = false): boolean {
-    return this.questionHost.cancelQuestion(session, requestId, auto);
+    return this.delegateSidebarMethod("cancelQuestion", () => this.questionHost.cancelQuestion(session, requestId, auto));
   }
 
   private forgetQuestion(session: Session, requestId: number | string): void {
-    return this.questionHost.forgetQuestion(session, requestId);
+    return this.delegateSidebarMethod("forgetQuestion", () => this.questionHost.forgetQuestion(session, requestId));
   }
 
   private autoContinueQuestion(session: Session, requestId: number | string): void {
-    return this.questionHost.autoContinueQuestion(session, requestId);
+    return this.delegateSidebarMethod("autoContinueQuestion", () => this.questionHost.autoContinueQuestion(session, requestId));
   }
 
   private dropPendingQuestions(session: Session): void {
-    return this.questionHost.dropPendingQuestions(session);
+    return this.delegateSidebarMethod("dropPendingQuestions", () => this.questionHost.dropPendingQuestions(session));
   }
 
   private hostPipe(): HostPipeMux {
-    return this.questionHost.hostPipe();
+    return this.delegateSidebarMethod("hostPipe", () => this.questionHost.hostPipe());
   }
 
   private askUser(): AskUserServer {
-    return this.questionHost.askUser();
+    return this.delegateSidebarMethod("askUser", () => this.questionHost.askUser());
   }
 
   private sessionForAskUserToken(token: string): Session | undefined {
-    return this.questionHost.sessionForAskUserToken(token);
+    return this.delegateSidebarMethod("sessionForAskUserToken", () => this.questionHost.sessionForAskUserToken(token));
   }
 
   private revokeAskUserToken(session: Session): void {
-    return this.questionHost.revokeAskUserToken(session);
+    return this.delegateSidebarMethod("revokeAskUserToken", () => this.questionHost.revokeAskUserToken(session));
   }
 
   private async askUserMcpServer(session: Session): Promise<AcpMcpStdioServer | undefined> {
-    return this.questionHost.askUserMcpServer(session);
+    return this.delegateSidebarMethod("askUserMcpServer", () => this.questionHost.askUserMcpServer(session));
   }
 
   private syncHumanWait(session: Session): void {
-    return this.questionHost.syncHumanWait(session);
+    return this.delegateSidebarMethod("syncHumanWait", () => this.questionHost.syncHumanWait(session));
   }
 
   private closeQuestionsForToolCall(
     session: Session,
     call: { toolCallId?: unknown; status?: unknown } | null | undefined,
   ): void {
-    return this.questionHost.closeQuestionsForToolCall(session, call);
+    return this.delegateSidebarMethod("closeQuestionsForToolCall", () => this.questionHost.closeQuestionsForToolCall(session, call));
   }
 
   noteAnswered(session: Session): void {
-    return this.questionHost.noteAnswered(session);
+    return this.delegateSidebarMethod("noteAnswered", () => this.questionHost.noteAnswered(session));
   }
 
   /** Push just this session's recomputed dot to the webview (cheap — no disk read
@@ -7139,12 +7121,12 @@ ${detail}`,
   /** The dashboard dot for a grok-session id, from live status (if it's a live pool
    *  member) plus the persisted unread badge (which outlives the live process). */
   private dotForId(id: string): Dot {
-    return this.sessionCatalog.dotForId(id);
+    return this.delegateSidebarMethod("dotForId", () => this.sessionCatalog.dotForId(id));
   }
 
   /** Persist (or clear) a session's unread badge in globalState session-meta. */
   private setMetaUnread(id: string | undefined, unread: boolean, error: boolean): void {
-    return this.sessionCatalog.setMetaUnread(id, unread, error);
+    return this.delegateSidebarMethod("setMetaUnread", () => this.sessionCatalog.setMetaUnread(id, unread, error));
   }
 
   /** Adapter catalogs own their persistence, so abandoning an empty conversation
@@ -7155,73 +7137,73 @@ ${detail}`,
     cwd: string,
     liveClient?: AcpClient,
   ): Promise<boolean> {
-    return this.sessionCatalog.discardAdapterEmptySession(provider, id, cwd, liveClient);
+    return this.delegateSidebarMethod("discardAdapterEmptySession", () => this.sessionCatalog.discardAdapterEmptySession(provider, id, cwd, liveClient));
   }
   /** * Fold a finished turn's billing into the session total and push both to the webview (#53). Skips turns whose usage isn't a real measurement — a `/compact` replays the previous turn's numbers verbatim, so counting them would double-bill that turn into the total on every compact. */
   private accumulateUsage(session: Session, meta: PromptResultMeta): PromiseLike<void> | undefined {
-    return this.usageHost.accumulateUsage(session, meta);
+    return this.delegateSidebarMethod("accumulateUsage", () => this.usageHost.accumulateUsage(session, meta));
   }
 
   private persistedUsageLedger(sessionId: string, userMessageCount: number): {
     usageLog: NonNullable<SessionMetaOverrides[string]["usageLog"]>;
     usage: PromptUsage | undefined;
   } {
-    return this.usageHost.persistedUsageLedger(sessionId, userMessageCount);
+    return this.delegateSidebarMethod("persistedUsageLedger", () => this.usageHost.persistedUsageLedger(sessionId, userMessageCount));
   }
 
   private restoreUsage(session: Session): void {
-    return this.usageHost.restoreUsage(session);
+    return this.delegateSidebarMethod("restoreUsage", () => this.usageHost.restoreUsage(session));
   }
 
   private noteAdapterCompactSignal(session: Session, update: unknown): void {
-    return this.usageHost.noteAdapterCompactSignal(session, update);
+    return this.delegateSidebarMethod("noteAdapterCompactSignal", () => this.usageHost.noteAdapterCompactSignal(session, update));
   }
 
   private adapterTurnOccupancy(session: Session, meta: PromptResultMeta): number | undefined {
-    return this.usageHost.adapterTurnOccupancy(session, meta);
+    return this.delegateSidebarMethod("adapterTurnOccupancy", () => this.usageHost.adapterTurnOccupancy(session, meta));
   }
 
   private rememberAdapterContext(
     session: Session,
     event: Parameters<typeof persistSessionContext>[1],
   ): { used?: number; window?: number } | undefined {
-    return this.usageHost.rememberAdapterContext(session, event);
+    return this.delegateSidebarMethod("rememberAdapterContext", () => this.usageHost.rememberAdapterContext(session, event));
   }
 
   private emitContextUsage(session: Session): void {
-    return this.usageHost.emitContextUsage(session);
+    return this.delegateSidebarMethod("emitContextUsage", () => this.usageHost.emitContextUsage(session));
   }
 
   private bindSubscriptionUsage(session: Session, env: NodeJS.ProcessEnv): void {
-    return this.usageHost.bindSubscriptionUsage(session, env);
+    return this.delegateSidebarMethod("bindSubscriptionUsage", () => this.usageHost.bindSubscriptionUsage(session, env));
   }
 
   private measuredFreePercent(provider: AcpProvider): number | undefined {
-    return this.usageHost.measuredFreePercent(provider);
+    return this.delegateSidebarMethod("measuredFreePercent", () => this.usageHost.measuredFreePercent(provider));
   }
 
   private invalidateSubscriptionUsage(provider: AcpProvider): void {
-    return this.usageHost.invalidateSubscriptionUsage(provider);
+    return this.delegateSidebarMethod("invalidateSubscriptionUsage", () => this.usageHost.invalidateSubscriptionUsage(provider));
   }
 
   private publishSubscriptionUsage(session: Session): void {
-    return this.usageHost.publishSubscriptionUsage(session);
+    return this.delegateSidebarMethod("publishSubscriptionUsage", () => this.usageHost.publishSubscriptionUsage(session));
   }
 
   private async refreshSubscriptionUsage(session: Session): Promise<void> {
-    return this.usageHost.refreshSubscriptionUsage(session);
+    return this.delegateSidebarMethod("refreshSubscriptionUsage", () => this.usageHost.refreshSubscriptionUsage(session));
   }
 
   private emitSessionInfoContext(session: Session, info: SessionInfoContext): void {
-    return this.usageHost.emitSessionInfoContext(session, info);
+    return this.delegateSidebarMethod("emitSessionInfoContext", () => this.usageHost.emitSessionInfoContext(session, info));
   }
 
   private checkCompactThreshold(session: Session, reported: number | undefined): void {
-    return this.usageHost.checkCompactThreshold(session, reported);
+    return this.delegateSidebarMethod("checkCompactThreshold", () => this.usageHost.checkCompactThreshold(session, reported));
   }
 
   private maybeOfferNearFull(session: Session, used: number | undefined, window: number | undefined, threshold: number | undefined): void {
-    return this.usageHost.maybeOfferNearFull(session, used, window, threshold);
+    return this.delegateSidebarMethod("maybeOfferNearFull", () => this.usageHost.maybeOfferNearFull(session, used, window, threshold));
   }
 
   private async refreshContextFromSessionInfo(
@@ -7229,16 +7211,16 @@ ${detail}`,
     gen: number,
     opts: { force?: boolean } = {},
   ): Promise<boolean> {
-    return this.usageHost.refreshContextFromSessionInfo(session, gen, opts);
+    return this.delegateSidebarMethod("refreshContextFromSessionInfo", () => this.usageHost.refreshContextFromSessionInfo(session, gen, opts));
   }
 
   private async refreshContextAfterCompact(client: AcpClient, session: Session, gen: number): Promise<void> {
-    return this.usageHost.refreshContextAfterCompact(client, session, gen);
+    return this.delegateSidebarMethod("refreshContextAfterCompact", () => this.usageHost.refreshContextAfterCompact(client, session, gen));
   }
 
   /** Clear a session's unread badge (it's being opened/viewed) and refresh its dot. */
   private markRead(session: Session): void {
-    return this.sessionCatalog.markRead(session);
+    return this.delegateSidebarMethod("markRead", () => this.sessionCatalog.markRead(session));
   }
 
   /** Tear down every live session (logout, CLI update, extension teardown).
@@ -7257,7 +7239,7 @@ ${detail}`,
 
   /** Start a brand-new session, keeping the current one alive in the background. */
   private async newFocusedSession(requestedCwd?: string): Promise<void> {
-    return this.sessionCatalog.newFocusedSession(requestedCwd);
+    return this.delegateSidebarMethod("newFocusedSession", () => this.sessionCatalog.newFocusedSession(requestedCwd));
   }
 
   /**
@@ -7290,19 +7272,19 @@ ${detail}`,
    * session and load this one cold from grok's on-disk history into a fresh member.
    */
   private async openSession(id: string, sessionCwd?: string): Promise<void> {
-    return this.sessionCatalog.openSession(id, sessionCwd);
+    return this.delegateSidebarMethod("openSession", () => this.sessionCatalog.openSession(id, sessionCwd));
   }
   /** * Host-trusted directories that may hold a session catalog for local resume, list, select, and desktop file authorization. */
   private localTrustedSessionCwds(overrides: SessionMetaOverrides): string[] {
-    return this.sessionCatalog.localTrustedSessionCwds(overrides);
+    return this.delegateSidebarMethod("localTrustedSessionCwds", () => this.sessionCatalog.localTrustedSessionCwds(overrides));
   }
   /** * Move only the desktop view to the project represented by a resumed session. A worktree cwd is authorized for the session but is not itself an open workspace folder, so the file tree deliberately follows the worktree's owning project root instead. */
   private async followSessionWorkspace(session: Session): Promise<void> {
-    return this.sessionCatalog.followSessionWorkspace(session);
+    return this.delegateSidebarMethod("followSessionWorkspace", () => this.sessionCatalog.followSessionWorkspace(session));
   }
 
   private async openSessionReserved(id: string, sessionCwd?: string, clock?: OpenClock): Promise<void> {
-    return this.sessionCatalog.openSessionReserved(id, sessionCwd, clock);
+    return this.delegateSidebarMethod("openSessionReserved", () => this.sessionCatalog.openSessionReserved(id, sessionCwd, clock));
   }
 
   /** Reveal the panel AND move keyboard focus into the composer, so every flow
@@ -7344,7 +7326,7 @@ ${detail}`,
   /** Parse the workspace `.env` into a plain map (no process.env merge). Used by
    *  both the CLI env builder and the voice key resolver. */
   private readDotEnv(cwd: string): Record<string, string> {
-    return this.providerSetup.readDotEnv(cwd);
+    return this.delegateSidebarMethod("readDotEnv", () => this.providerSetup.readDotEnv(cwd));
   }
 
   private warnOAuthShadowOnce(defaultAuthMethodId: unknown, env: NodeJS.ProcessEnv): void {
@@ -7389,27 +7371,27 @@ ${detail}`,
   }
 
   private buildEnv(cwd: string): NodeJS.ProcessEnv {
-    return this.providerSetup.buildEnv(cwd);
+    return this.delegateSidebarMethod("buildEnv", () => this.providerSetup.buildEnv(cwd));
   }
 
   /** Mint (or reuse) the handle for a path we are about to show a remote. */
   private registerFullImage(imagePath: string): string {
-    return this.fileUploadHost.registerFullImage(imagePath);
+    return this.delegateSidebarMethod("registerFullImage", () => this.fileUploadHost.registerFullImage(imagePath));
   }
 
   /** Fetch-time revalidation for remote image handles (open-set + session media). */
   private isImagePathAuthorizedNow(imagePath: string, session?: Session): boolean {
-    return this.fileUploadHost.isImagePathAuthorizedNow(imagePath, session);
+    return this.delegateSidebarMethod("isImagePathAuthorizedNow", () => this.fileUploadHost.isImagePathAuthorizedNow(imagePath, session));
   }
 
   /** Whole original image as a data URI, for the clipboard. Undefined when
    *  unsupported or over the budget: never resized to fit. */
   private async readOriginalImage(imagePath: string): Promise<string | undefined> {
-    return this.fileUploadHost.readOriginalImage(imagePath);
+    return this.delegateSidebarMethod("readOriginalImage", () => this.fileUploadHost.readOriginalImage(imagePath));
   }
 
   private isImagePathInOpenSet(imagePath: string): boolean {
-    return this.fileUploadHost.isImagePathInOpenSet(imagePath);
+    return this.delegateSidebarMethod("isImagePathInOpenSet", () => this.fileUploadHost.isImagePathInOpenSet(imagePath));
   }
 
   /**
@@ -7417,28 +7399,28 @@ ${detail}`,
    * chat.js (that would create a second chat client).
    */
   private getProjectsRailHtml(webview: HostWebview): string {
-    return this.webviewHtml.getProjectsRailHtml(webview);
+    return this.delegateSidebarMethod("getProjectsRailHtml", () => this.webviewHtml.getProjectsRailHtml(webview));
   }
 
   /**
    */
   async openSettingsEditor(category?: string): Promise<void> {
-    return this.sidebarViewHost.openSettingsEditor(category);
+    return this.delegateSidebarMethod("openSettingsEditor", () => this.sidebarViewHost.openSettingsEditor(category));
   }
 
   private async onSettingsPanelMessage(msg: WebviewMsg): Promise<void> {
-    return this.sidebarViewHost.onSettingsPanelMessage(msg);
+    return this.delegateSidebarMethod("onSettingsPanelMessage", () => this.sidebarViewHost.onSettingsPanelMessage(msg));
   }
 
   private getSettingsHtml(
     webview: HostWebview,
     opts: { category?: string } = {},
   ): string {
-    return this.webviewHtml.getSettingsHtml(webview, opts);
+    return this.delegateSidebarMethod("getSettingsHtml", () => this.webviewHtml.getSettingsHtml(webview, opts));
   }
 
   private getHtml(webview: HostWebview): string {
-    return this.webviewHtml.getHtml(webview);
+    return this.delegateSidebarMethod("getHtml", () => this.webviewHtml.getHtml(webview));
   }
 
 
@@ -7528,19 +7510,19 @@ get host() { return self.host; },
     });
   }
 
-  get view(): HostWebviewView | undefined { return this.sidebarViewHost.view; }
+  get view(): HostWebviewView | undefined { return this._sidebarViewHost?.view; }
   set view(value: HostWebviewView | undefined) { this.sidebarViewHost.view = value; }
 
-  get projectsRail(): HostWebviewView | undefined { return this.sidebarViewHost.projectsRail; }
+  get projectsRail(): HostWebviewView | undefined { return this._sidebarViewHost?.projectsRail; }
   set projectsRail(value: HostWebviewView | undefined) { this.sidebarViewHost.projectsRail = value; }
 
-  get settingsEditor(): HostEditorWebview | undefined { return this.sidebarViewHost.settingsEditor; }
+  get settingsEditor(): HostEditorWebview | undefined { return this._sidebarViewHost?.settingsEditor; }
   set settingsEditor(value: HostEditorWebview | undefined) { this.sidebarViewHost.settingsEditor = value; }
 
-  get configWatcher(): HostDisposable | undefined { return this.sidebarViewHost.configWatcher; }
+  get configWatcher(): HostDisposable | undefined { return this._sidebarViewHost?.configWatcher; }
   set configWatcher(value: HostDisposable | undefined) { this.sidebarViewHost.configWatcher = value; }
 
-  get reaper(): NodeJS.Timeout | undefined { return this.sidebarViewHost.reaper; }
+  get reaper(): NodeJS.Timeout | undefined { return this._sidebarViewHost?.reaper; }
   set reaper(value: NodeJS.Timeout | undefined) { this.sidebarViewHost.reaper = value; }
 
   private _sidebarViewHost?: SidebarViewHost;
@@ -7596,6 +7578,22 @@ forgetPostedVoiceConfigured: (...args) => self.forgetPostedVoiceConfigured(...ar
       }
     });
   }
+
+  private activeSidebarDelegations?: Set<string>;
+  /** A call-through override may enter its original wrapper exactly once. */
+  private delegateSidebarMethod<T>(name: string, invoke: () => T): T {
+    const active = this.activeSidebarDelegations ??= new Set();
+    const nested = active.has(name);
+    active.add(name);
+    try { return invoke(); }
+    finally { if (!nested) active.delete(name); }
+  }
+
+  get lastSweepAt(): Map<string, number> { return this.sessionCatalog.lastSweepAt; }
+  set lastSweepAt(value: Map<string, number>) { this.sessionCatalog.lastSweepAt = value; }
+
+  get provenNonEmpty(): Map<string, Set<string>> { return this.sessionCatalog.provenNonEmpty; }
+  set provenNonEmpty(value: Map<string, Set<string>>) { this.sessionCatalog.provenNonEmpty = value; }
 }
 
 /**

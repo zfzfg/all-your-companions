@@ -1,3 +1,4 @@
+import { hostModeSequence, type HostMode } from "./provider-modes";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -523,6 +524,7 @@ export class ClaudeBackend implements AcpBackend {
       : { method: "session/set_config_option", params: { sessionId, configId: "effort", value: "default" } };
   }
 
+  hostModeSequence(mode: HostMode): readonly string[] { return hostModeSequence("claude", mode); }
   setMode(sessionId: string, modeId: string): { method: string; params: any } {
     return { method: "session/set_mode", params: { sessionId, modeId: claudeModeId(modeId) } };
   }

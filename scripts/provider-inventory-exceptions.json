@@ -1,0 +1,210 @@
+[
+  {
+    "file": "sidebar.ts",
+    "method": "offerGrokRestartForCompactThreshold",
+    "expr": "s?.provider === \"grok\"",
+    "category": "CLI-/Storage-Integration",
+    "reason": "Only idle Grok processes restart after its environment compaction threshold changes.",
+    "test": "grok-compaction.test.ts"
+  },
+  {
+    "file": "cli-update-host.ts",
+    "method": "updateProviderCli",
+    "expr": "update.provider === \"codex\"",
+    "category": "CLI-/Storage-Integration",
+    "reason": "Invalidate the selected CLI version probe after its existing update workflow.",
+    "test": "cli-update-host.test.ts"
+  },
+  {
+    "file": "provider-session.ts",
+    "method": "switchModel",
+    "expr": "oldProvider === \"grok\"",
+    "category": "CLI-/Storage-Integration",
+    "reason": "Grok stores defaults in its CLI configuration and empty conversations on disk; adapters own their history.",
+    "test": "provider-review-fixes.test.ts"
+  },
+  {
+    "file": "provider-session.ts",
+    "method": "switchModel",
+    "expr": "provider === \"grok\"",
+    "category": "CLI-/Storage-Integration",
+    "reason": "Grok stores defaults in its CLI configuration and empty conversations on disk; adapters own their history.",
+    "test": "provider-review-fixes.test.ts"
+  },
+  {
+    "file": "provider-session.ts",
+    "method": "switchModel",
+    "expr": "provider === \"grok\"",
+    "category": "CLI-/Storage-Integration",
+    "reason": "Grok stores defaults in its CLI configuration and empty conversations on disk; adapters own their history.",
+    "test": "provider-review-fixes.test.ts"
+  },
+  {
+    "file": "provider-session.ts",
+    "method": "switchModel",
+    "expr": "provider === \"grok\"",
+    "category": "CLI-/Storage-Integration",
+    "reason": "Grok stores defaults in its CLI configuration and empty conversations on disk; adapters own their history.",
+    "test": "provider-review-fixes.test.ts"
+  },
+  {
+    "file": "provider-session.ts",
+    "method": "persistEffort",
+    "expr": "provider === \"grok\"",
+    "category": "CLI-/Storage-Integration",
+    "reason": "Grok stores defaults in its CLI configuration and empty conversations on disk; adapters own their history.",
+    "test": "provider-review-fixes.test.ts"
+  },
+  {
+    "file": "provider-setup.ts",
+    "method": "createProviderBackend",
+    "expr": "provider === \"codex\"",
+    "category": "Backend-Protokoll",
+    "reason": "Construct the actual adapter with provider-specific options; Grok remains the AcpClient default.",
+    "test": "provider-setup.test.ts"
+  },
+  {
+    "file": "provider-setup.ts",
+    "method": "createProviderBackend",
+    "expr": "provider === \"claude\"",
+    "category": "Backend-Protokoll",
+    "reason": "Construct the actual adapter with provider-specific options; Grok remains the AcpClient default.",
+    "test": "provider-setup.test.ts"
+  },
+  {
+    "file": "provider-setup.ts",
+    "method": "createProviderBackend",
+    "expr": "provider === \"gemini\"",
+    "category": "Backend-Protokoll",
+    "reason": "Construct the actual adapter with provider-specific options; Grok remains the AcpClient default.",
+    "test": "provider-setup.test.ts"
+  },
+  {
+    "file": "provider-setup.ts",
+    "method": "createProviderBackend",
+    "expr": "provider === \"muse\"",
+    "category": "Backend-Protokoll",
+    "reason": "Construct the actual adapter with provider-specific options; Grok remains the AcpClient default.",
+    "test": "provider-setup.test.ts"
+  },
+  {
+    "file": "provider-setup.ts",
+    "method": "providerDefaultForProject",
+    "expr": "provider === \"grok\"",
+    "category": "CLI-/Storage-Integration",
+    "reason": "Read legacy Grok defaultModel only if no per-project selection exists.",
+    "test": "provider-ui.test.ts"
+  },
+  {
+    "file": "session-catalog.ts",
+    "method": "scheduleAdapterHistoryRefresh",
+    "expr": "provider === \"codex\"",
+    "category": "CLI-/Storage-Integration",
+    "reason": "Keep the Codex refresh entry point and its dynamic override seam.",
+    "test": "provider-review-fixes.test.ts"
+  },
+  {
+    "file": "session-start.ts",
+    "method": "startSessionBody",
+    "expr": "session.provider === \"grok\"",
+    "category": "CLI-/Storage-Integration",
+    "reason": "Preserve Grok configuration/defaults, ignores and Windows stdio retry/auth classification; these are integration contracts.",
+    "test": "session-start-retry.test.ts"
+  },
+  {
+    "file": "session-start.ts",
+    "method": "startSessionBody",
+    "expr": "session.provider === \"grok\"",
+    "category": "CLI-/Storage-Integration",
+    "reason": "Preserve Grok configuration/defaults, ignores and Windows stdio retry/auth classification; these are integration contracts.",
+    "test": "session-start-retry.test.ts"
+  },
+  {
+    "file": "session-start.ts",
+    "method": "startSessionBody",
+    "expr": "client.provider !== \"grok\"",
+    "category": "CLI-/Storage-Integration",
+    "reason": "Preserve Grok configuration/defaults, ignores and Windows stdio retry/auth classification; these are integration contracts.",
+    "test": "session-start-retry.test.ts"
+  },
+  {
+    "file": "session-start.ts",
+    "method": "startSessionBody",
+    "expr": "session.provider === \"grok\"",
+    "category": "CLI-/Storage-Integration",
+    "reason": "Preserve Grok configuration/defaults, ignores and Windows stdio retry/auth classification; these are integration contracts.",
+    "test": "session-start-retry.test.ts"
+  },
+  {
+    "file": "session-start.ts",
+    "method": "configureSessionEnvironment",
+    "expr": "session.provider === \"grok\"",
+    "category": "CLI-/Storage-Integration",
+    "reason": "Preserve Grok configuration/defaults, ignores and Windows stdio retry/auth classification; these are integration contracts.",
+    "test": "grok-compaction.test.ts"
+  },
+  {
+    "file": "session-start.ts",
+    "method": "spawnSessionProcess",
+    "expr": "session.provider === \"grok\"",
+    "category": "Backend-Protokoll",
+    "reason": "Grok handshake/version, native notifications and retry classification have a distinct wire/storage contract.",
+    "test": "session-start-retry.test.ts"
+  },
+  {
+    "file": "session-start.ts",
+    "method": "wireSessionListeners",
+    "expr": "session.provider === \"grok\"",
+    "category": "Backend-Protokoll",
+    "reason": "Grok handshake/version, native notifications and retry classification have a distinct wire/storage contract.",
+    "test": "session-start-retry.test.ts"
+  },
+  {
+    "file": "session-start.ts",
+    "method": "handleSend",
+    "expr": "session.provider === \"grok\"",
+    "category": "Backend-Protokoll",
+    "reason": "Grok handshake/version, native notifications and retry classification have a distinct wire/storage contract.",
+    "test": "session-start-retry.test.ts"
+  },
+  {
+    "file": "sidebar-inbound.ts",
+    "method": "tryHandle",
+    "expr": "session.provider === \"grok\"",
+    "category": "CLI-/Storage-Integration",
+    "reason": "Remove discarded empty Grok directories; adapter deletion belongs to its RPC lifecycle.",
+    "test": "session-removal.test.ts"
+  },
+  {
+    "file": "voice-and-mcp.ts",
+    "method": "reservedMcpIdentityFor",
+    "expr": "session.provider === \"grok\"",
+    "category": "CLI-/Storage-Integration",
+    "reason": "Read native Grok MCP configuration or provider-owned media; Grok-only catalog helpers select that specific identity.",
+    "test": "voice-and-mcp.test.ts"
+  },
+  {
+    "file": "voice-and-mcp.ts",
+    "method": "findLiveGrokSession",
+    "expr": "candidate.provider === \"grok\"",
+    "category": "CLI-/Storage-Integration",
+    "reason": "Read native Grok MCP configuration or provider-owned media; Grok-only catalog helpers select that specific identity.",
+    "test": "voice-and-mcp.test.ts"
+  },
+  {
+    "file": "voice-and-mcp.ts",
+    "method": "grokSessionForMcpList",
+    "expr": "candidate.provider === \"grok\"",
+    "category": "CLI-/Storage-Integration",
+    "reason": "Read native Grok MCP configuration or provider-owned media; Grok-only catalog helpers select that specific identity.",
+    "test": "voice-and-mcp.test.ts"
+  },
+  {
+    "file": "voice-and-mcp.ts",
+    "method": "isServableFromDisk",
+    "expr": "provider === \"codex\"",
+    "category": "CLI-/Storage-Integration",
+    "reason": "Read native Grok MCP configuration or provider-owned media; Grok-only catalog helpers select that specific identity.",
+    "test": "voice-and-mcp.test.ts"
+  }
+]
