@@ -1,5 +1,8 @@
+import { SidebarViewHost } from "./sidebar-view-host";
+import { SidebarTelemetryHost } from "./sidebar-telemetry-host";
+import { SessionMetadataHost } from "./session-metadata-host";
 import { FileUploadHost, createFileUploadHost } from "./file-upload-host";
-import  {
+import {
   SessionCatalog,
   createSessionCatalog,
   type SessionsListOptions,
@@ -22,14 +25,14 @@ import { ReviewHost } from "./review-host";
 import { WorkflowStageRunner } from "./workflow-stage-runner";
 import { RoutineScheduler } from "./routine-scheduler";
 import { createSidebarTestHooks, type SidebarTestHooks } from "./sidebar-test-hooks";
-import  {
+import {
   SubagentHost,
   createSubagentHost,
   type SubagentHostDeps,
   type SubagentState,
   SUBAGENT_INDEX_KEY
 } from "./subagent-host";
-import type  {
+import type {
   Host,
   HostContext,
   HostDisposable,
@@ -37,11 +40,11 @@ import type  {
   HostWebviewView,
   HostEditorWebview
 } from "./host";
-import { Uri, disposeAll, shouldRehydrateOnWebviewReady } from "./host";
+import { Uri, shouldRehydrateOnWebviewReady } from "./host";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import  {
+import {
   AcpClient,
   ExitPlanRequest,
   PermissionRequest,
@@ -50,13 +53,13 @@ import  {
 import type { AcpProvider } from "./acp-backend";
 
 import { providerCapability } from "./provider-capabilities";
-import  {
+import {
   dropReviewTurnsAfter,
   filesForScope,
   reviewCenterSnapshot,
   type ReviewScope
 } from "./review-center";
-import  {
+import {
   PermissionHost,
   createPermissionHost,
   GrokDiffContentProvider,
@@ -68,8 +71,8 @@ import  {
   type PermissionRulesFs
 } from "./permission-host";
 import { ImplicitContext, createImplicitContext } from "./implicit-context";
-import { resolveCodexHome } from "./codex-cli-locator";
-import  {
+
+import {
   modelsForConnectedProviders,
   projectProviderKey,
   providerDisplayName,
@@ -77,7 +80,7 @@ import  {
   type ProviderModelCache,
   type ProviderModelInfo
 } from "./provider-ui";
-import  {
+import {
   toRoutineView,
   type Routine,
   type RoutineModelOption,
@@ -86,13 +89,12 @@ import  {
 import { RoutineRunStore } from "./routine-store";
 import { CheckpointStore, nodeCheckpointFs } from "./checkpoint-store";
 import { PersistedState } from "./persisted-state";
-import  {
+import {
   Session,
   SessionStartIntent,
   SessionStatus,
   INTERRUPTED_SEND_TEXT,
   beginQueuedSendCommit,
-  endTurn,
   finishQueuedSendCommit,
   runExclusiveHistoryLoad,
   pendingPermissionOptions,
@@ -103,7 +105,7 @@ import  {
   type QuestionResponder
 } from "./session";
 import { buildReapCandidates, selectReapable, Dot } from "./session-pool";
-import  {
+import {
   resolveVoiceKey,
   extractGrokAuthKey,
   pickSttBackend,
@@ -121,27 +123,17 @@ import { ChildRelayTable, type RelayKind, type RelayOrigin } from "./child-relay
 import { normalizeStallWarningSec, type PausableDeadline } from "./child-watch";
 import { subagentTurnSummary } from "./companion-subagents";
 import { bothDelegationsHint } from "./grok-subagent-env";
-import  {
+import {
   MediaRef,
   enforceCompleteSessionCost,
-  errorDetail,
   permissionOutcomeFor,
-  rateLimitNoticeText,
   sumUsage,
   type TurnEndStatus
 } from "./acp-dispatch";
-import { configWriteTarget, rememberedEffort, type EffortPrefs } from "./mode-prefs";
+import { configWriteTarget } from "./mode-prefs";
 import { oauthShadowsXaiApiKey } from "./auth-recovery";
-import  {
-  classifyLimitError,
-  CONTEXT_OVERFLOW_TEXT,
-  isContextOverflowError,
-  limitOfferHint,
-  limitOfferTargets,
-  limitOfferTitle,
-  recommendedLimitAction
-} from "./limit-errors";
-import  {
+
+import {
   WELCOME_TIPS_KEY,
   WELCOME_TIPS_SHOWN_KEY,
   localDayKey,
@@ -156,27 +148,17 @@ import { SidebarStateHost, createSidebarStateHost } from "./sidebar-state-host";
 import { readWorkflowCompletion } from "./workflow-state";
 import { CliUpdateHost, createCliUpdateHost } from "./cli-update-host";
 import { GitRunGate, type GitTurnBaseline } from "./git-run";
-import  {
-  APTABASE_APP_KEY_PROD,
-  buildSessionStartEvent,
-  osNameFromPlatform,
-  postEvent,
-  sessionStartHostKind,
-  sessionStartSurface,
-  shouldSendTelemetry,
-  OFFICIAL_EXTENSION_ID
-} from "./telemetry";
-import { randomUUID } from "node:crypto";
+
+
 import { execGrokCli } from "./cli-process";
 import type { LocalGitWorktrees } from "./worktree-local";
 import { isStdioBrokenGrokVersion, parseGrokVersion, GROK_STDIO_DOWNGRADE_TARGET } from "./cli-locator";
 import { OpenClock } from "./open-timing";
 import { TerminalManager, setTerminalShellPreference, type ShellPreference } from "./terminal-manager";
-import { FileChip, consumeChips } from "./chips";
+import { FileChip } from "./chips";
 import { type ContextChip, type ContextChipPayload } from "./context-chips";
 import { type PromptImageInput } from "./prompt-builder";
-import  {
-  enqueueQueuedSend,
+import {
   explicitVisibleChips,
   queuedFlushText,
   queuedSendsMessage,
@@ -189,7 +171,7 @@ import { type WorkflowDefinition } from "./workflow";
 import { type ValidateWorkflowContext } from "./workflow-validate";
 import { type WorkflowDraft } from "./workflow-write";
 
-import  {
+import {
   applyGateAction,
   isTerminalRunStatus,
   WorkflowRunStore,
@@ -200,7 +182,7 @@ import  {
 import { type HandoffPacket, type HandoffPlanStep } from "./workflow-handoff";
 import { type AgentRoleDraft, type CrewFlowDraft, type RoleScope } from "./agent-role-write";
 import { FileClaimStore } from "./file-claims";
-import  {
+import {
   AGENT_ROLES_DIR,
   loadAgentRoles,
   type AgentRole,
@@ -217,7 +199,7 @@ import { isPlanReviewPermission } from "./plan-gate";
 import { appendPlanEntry, truncateResolvedAfter } from "./plan-restore";
 import { planReviewFileName, planReviewSessionDirectoryName } from "./plan-review";
 import { AsyncSerialQueue } from "./async-serial";
-import  {
+import {
   HostMsg,
   INTERRUPTED_SEND_CODE,
   WebviewMsg,
@@ -226,7 +208,7 @@ import  {
 } from "./protocol";
 import { withoutArchiveFields } from "./project-discovery";
 import { SessionRequestState } from "./session-request-state";
-import  {
+import {
   SessionListEntry,
   SessionMetaOverrides,
   RepoArchives,
@@ -244,12 +226,8 @@ import  {
   sessionCatalogDirs,
   sessionDirFor
 } from "./sessions";
-import  {
-  applySessionTypeSwitch,
-  defaultSessionTypeFromSetting,
-  effectiveSessionType,
+import {
   isSessionTypeLocked,
-  lockSessionType,
   type HiddenReason,
   type SessionType,
   type SessionTypeMeta
@@ -259,8 +237,7 @@ import { CompanionsHostServer, type CompanionsCall } from "./companions-server";
 import { HostPipeMux } from "./host-pipe-mux";
 import { type SubagentDirective } from "./subagent-directives";
 import { SubagentRegistry, formatSubagentDiagnosis, type CompanionsSkipReason } from "./companion-subagents";
-import  {
-  listEligibleTargets,
+import {
   resolveTarget,
   type EligibilityInput,
   type EligibilityResult,
@@ -277,7 +254,7 @@ import { decideFeedbackAvailability } from "./feedback";
 import { type RunProgressUpdate, workflowControlCommand } from "./run-progress";
 import { type AppPurpose } from "./app-purpose";
 import { type McpServerView } from "./mcp";
-import type  {
+import type {
   ConnectedConnectorStore,
   ConnectorDef,
   ConnectorId,
@@ -348,7 +325,6 @@ export function findWorkspaceSensitiveFiles(workspaceRoot?: string): string[] {
   }
 }
 
-const INSTALL_ID_KEY = "grok.installId";
 
 export class GrokSidebar {
   private warnedSensitiveFiles = false;
@@ -370,9 +346,6 @@ export class GrokSidebar {
   /** Primary side bar projects rail — separate webview, not a second chat client. */
   public static readonly projectsViewId = "companions.projects";
   public static readonly legacyProjectsViewId = "grok.projects";
-  private view?: HostWebviewView;
-  /** Second local consumer of catalog-shaped host messages. Absent until resolved. */
-  private projectsRail?: HostWebviewView;
   /** The session currently shown in the chat — one member of {@link pool}. */
   private focused = this.newLocalSession();
   /**
@@ -427,8 +400,7 @@ export class GrokSidebar {
    * are never reaped.
    */
   private static readonly MAX_LIVE_SESSIONS = 8;
-  private static readonly IDLE_TTL_MS = 60 * 60 * 1000; // 1h
-  private static readonly REAP_INTERVAL_MS = 5 * 60 * 1000;
+  private static readonly IDLE_TTL_MS = 60 * 60 * 1000;
   // The empty-session sweep only scans the newest N by mtime, keeping it bounded
   // on a large store.
   public static readonly SWEEP_SCAN_LIMIT = 300;
@@ -450,7 +422,6 @@ export class GrokSidebar {
   private readonly lastSweepAt = new Map<string, number>();
   /** A whole-list refresh is already queued for this tick. See postSessionsList. */
   private sessionsListScheduled = false;
-  private reaper?: ReturnType<typeof setInterval>;
   private oauthShadowWarningShown = false;
   /** K-02: the threshold-mismatch notice shows once per window. */
   get compactMismatchNoticeShown(): boolean { return this.usageHost.compactMismatchNoticeShown; }
@@ -507,7 +478,6 @@ export class GrokSidebar {
   set lastVoiceConfiguredByCwd(v: Map<string, boolean>) { this.voiceAndMcp.lastVoiceConfiguredByCwd = v; }
   get lastPostedVoiceConfigured(): Map<string, string> { return this.voiceAndMcp.lastPostedVoiceConfigured; }
   set lastPostedVoiceConfigured(v: Map<string, string>) { this.voiceAndMcp.lastPostedVoiceConfigured = v; }
-  private configWatcher?: HostDisposable;
   /** Cold session/load claims the persisted id before ACP has emitted `session`. */
   private readonly sessionLoadReservations = new Map<string, SessionLoadReservation>();
   private static readonly SESSION_LOAD_RESERVATION_TTL_MS = 10 * 60_000;
@@ -545,84 +515,6 @@ export class GrokSidebar {
   set providerRefreshInFlight(v: boolean) { this.providerSetup.providerRefreshInFlight = v; }
   get loginReprobeTimers(): Map<AcpProvider, NodeJS.Timeout> { return this.providerSetup.loginReprobeTimers; }
   set loginReprobeTimers(v: Map<AcpProvider, NodeJS.Timeout>) { this.providerSetup.loginReprobeTimers = v; }
-  /** VS Code settings tab. Desktop/remote keep the in-page overlay. */
-  private settingsEditor?: HostEditorWebview;
-  private static readonly SETTINGS_PANEL_TYPES = new Set<WebviewMsg["type"]>([
-    "openSettingsSurface",
-    "closeSettingsSurface",
-    // The standalone VS Code Settings tab is a first-class surface for this
-    // page — it loads settings.js and nothing else. Without these five it
-    // posts `listRoutines`, gets "[settings] ignored", and shows an empty
-    // Routines page with no projects, no models and no way to create one.
-    "listRoutines",
-    "saveRoutine",
-    "deleteRoutine",
-    "setRoutinePaused",
-    "runRoutineNow",
-    // Agents & Crew is a settings-tab page in exactly the same way, and
-    // without these five it posts `listAgentRoles`, gets "[settings] ignored",
-    // and shows an empty page with no way to create anything.
-    "listAgentRoles",
-    "saveAgentRole",
-    "deleteAgentRole",
-    "saveCrewFlow",
-    "deleteCrewFlow",
-    "saveWorkflow",
-    "validateWorkflow",
-    "generateWorkflow",
-    "cancelWorkflowGenerate",
-    "setDefaultWorkflow",
-    "addWorkflowStagesBlock",
-    "runWorkflow",
-    // The rest of Agents & Crew and Advanced: roster, routing, the two
-    // toggles, rule files, permission rules, and workflow Export.
-    "subagentRosterSave",
-    "subagentRoutingSave",
-    "setSubagentsEnabled",
-    "setCrewStageSubagents",
-    "setCompanionsSetting",
-    "listRuleFiles",
-    "openRuleFile",
-    "listPermissionRules",
-    "deletePermissionRule",
-    "adoptPermissionRules",
-    "openText",
-    "setShowThinking",
-    "setAppPurpose",
-    "setExpandCommandOutputs",
-    "setSteerByDefault",
-    "setSoundNotifications",
-    "setProcessingSound",
-    "setReadRepliesAloud",
-    "setSummarizeRepliesAloud",
-    "setVoiceSendPhrase",
-    "setVoiceKeyterms",
-    "setVoiceBackend",
-    "configureOpenAiVoice",
-    "setTelemetryEnabled",
-    "setThumbsFeedback",
-    "openGlobalConfig",
-    "openProjectConfig",
-    "listMcpServers",
-    "connectMcpConnector",
-    "disconnectMcpConnector",
-    "showLogs",
-    "toggleDevTools",
-    "openSettings",
-    "openUrl",
-    "moveView",
-    "logout",
-    "setupGithubCli",
-    "githubSignOut",
-    "githubLoginWithToken",
-    "runGrokLogin",
-    "refreshProviders",
-    // An agent row's "Re-check connection" after a terminal sign-in started
-    // FROM this page.
-    "recheckConnection",
-    "checkGrokUpdate",
-    "updateGrok",
-  ]);
   /** Project folders subsystem */
   private _projectFolders?: ProjectFolders;
   get projectFolders(): ProjectFolders {
@@ -863,9 +755,9 @@ export class GrokSidebar {
         return self.host ?? ({
           getConfiguration: () => ({ get: (_key: string, def: any) => def }),
           getActiveTextEditor: () => undefined,
-          onDidChangeActiveTextEditor: () => ({ dispose: () => {} }),
-          onDidChangeActiveTextEditorSelection: () => ({ dispose: () => {} }),
-          appendLine: () => {},
+          onDidChangeActiveTextEditor: () => ({ dispose: () => { } }),
+          onDidChangeActiveTextEditorSelection: () => ({ dispose: () => { } }),
+          appendLine: () => { },
           showInformationMessage: async () => undefined,
           showWarningMessage: async () => undefined,
           findFiles: async () => [],
@@ -873,13 +765,13 @@ export class GrokSidebar {
           getDiagnostics: () => [],
           getTerminalCapture: () => undefined,
           asRelativePath: (u: any) => u?.fsPath ?? String(u)
-  } as any);
+        } as any);
       },
       get state() {
         return self.state ?? ({
           get: (_k: string, def?: any) => def,
-          update: async () => {}
-  } as any);
+          update: async () => { }
+        } as any);
       },
       sessionCwd: (session: Session) => (self.sessionCwd ? self.sessionCwd(session) : (session?.cwd ?? "")),
       workspaceRoot: () => (self.workspaceRoot ? self.workspaceRoot() : ""),
@@ -896,7 +788,7 @@ export class GrokSidebar {
       trackAttach: (p: Promise<void>) => { void self.trackAttach?.(p); },
       pickFileFromComputer: () => (self.pickFileFromComputer ? self.pickFileFromComputer() : Promise.resolve()),
       getOverride: (name: string) => self.sidebarTestOverride(name)
-  });
+    });
   }
 
   private createPermissionHost(): PermissionHost {
@@ -904,27 +796,27 @@ export class GrokSidebar {
     return createPermissionHost({
       get host() {
         return self.host ?? ({
-          appendLine: () => {},
+          appendLine: () => { },
           showInformationMessage: async () => undefined,
           showWarningMessage: async () => undefined,
           showErrorMessage: async () => undefined,
           showQuickPick: async () => undefined,
-          showInFolder: async () => {},
-          openTextFile: async () => {},
-          openGlobalConfig: async () => {},
+          showInFolder: async () => { },
+          openTextFile: async () => { },
+          openGlobalConfig: async () => { },
           fs: {
             stat: async () => ({ type: 0, size: 0 }),
             readFile: async () => Buffer.from(""),
-            writeFile: async () => {},
-            createDirectory: async () => {}
-  }
-  } as any);
+            writeFile: async () => { },
+            createDirectory: async () => { }
+          }
+        } as any);
       },
       get state() {
         return self.state ?? {
           get: () => ({}),
-          update: async () => {}
-  };
+          update: async () => { }
+        };
       },
       emit: (session, msg) => self.emit(session, msg),
       post: (msg) => self.post(msg),
@@ -935,7 +827,7 @@ export class GrokSidebar {
       confirmInChat: (session, opts) => self.confirmInChat(session, opts),
       getPendingConfirms: () => self.pendingConfirms,
       getOverride: (name: string) => self.sidebarTestOverride(name)
-  });
+    });
   }
 
   private createVoiceAndMcp(): VoiceAndMcp {
@@ -947,11 +839,11 @@ export class GrokSidebar {
         return {
           secrets: self.context?.secrets ?? {
             get: async () => undefined,
-            store: async () => {},
-            delete: async () => {}
-  },
+            store: async () => { },
+            delete: async () => { }
+          },
           globalStorageUri: self.context?.globalStorageUri ?? { fsPath: "" }
-  };
+        };
       },
       getFocused: () => self.focused,
       getPool: () => self.pool,
@@ -965,7 +857,7 @@ export class GrokSidebar {
         openSettingsEditor: (tab) => self.openSettingsEditor(tab),
         postLocal: (msg) => self.postLocal(msg),
         post: (msg) => self.post(msg)
-  },
+      },
       mcpOps: {
         connectedProviders: () => self.connectedProviders(),
         newLocalSession: () => self.newLocalSession(),
@@ -976,7 +868,7 @@ export class GrokSidebar {
         noteCompanionsSkip: (session, reason) => self.noteCompanionsSkip(session, reason),
         postWelcomeTips: () => self.postWelcomeTips(),
         getSettingsWebview: () => self.settingsEditor?.webview
-  },
+      },
       mediaOps: {
         emit: (session, msg) => self.emit(session, msg),
         getViewWebview: () => self.view?.webview,
@@ -984,8 +876,8 @@ export class GrokSidebar {
         registerFullImage: (path) => self.registerFullImage(path),
         importImageFromDisk: (path, owner) => self.importImageFromDisk(path, owner),
         postChips: (session) => self.postChips(session)
-  }
-  });
+      }
+    });
   }
 
   private createRoutineScheduler(): RoutineScheduler {
@@ -995,7 +887,7 @@ export class GrokSidebar {
         get: <T>(key: string, defaultValue?: T) =>
           defaultValue !== undefined ? self.state.get<T>(key, defaultValue) : (self.state.get<T>(key) as T),
         update: (key: string, value: any) => self.state.update(key, value)
-  },
+      },
       getRoutineRuns: () => self.routineRuns,
       usableProviders: () => self.usableProviders(),
       resolveLocalRepoTarget: (cwd: string) => self.resolveLocalRepoTarget(cwd),
@@ -1012,7 +904,7 @@ export class GrokSidebar {
       postRoutines: () => self.postRoutines(),
       handleSend: (prompt: string, isSteer: boolean, session: Session) => self.handleSend(prompt, isSteer, session),
       getOverride: (name: string) => self.sidebarTestOverride(name)
-  });
+    });
   }
 
   private createSessionCatalog(): SessionCatalog {
@@ -1028,57 +920,57 @@ export class GrokSidebar {
       getWorktreeCache: () => self.worktreeCache,
 
       repoOps: {
-openWorkspaceFolders: (...args: any[]) => (self as any).openWorkspaceFolders(...args),
-extraProjectFolders: (...args: any[]) => (self as any).extraProjectFolders(...args),
-removedProjectFolderKeys: (...args: any[]) => (self as any).removedProjectFolderKeys(...args),
-defaultProviderForProject: (...args: any[]) => (self as any).defaultProviderForProject(...args),
-selectedHistoryCwd: (...args: any[]) => (self as any).selectedHistoryCwd(...args),
-getSelectedRepoCwd: () => self.selectedRepoCwd,
-setSelectedRepoCwd: (cwd) => { self.selectedRepoCwd = cwd; },
-workspaceRoot: (...args: any[]) => (self as any).workspaceRoot(...args),
-canAddProjectFolder: (...args: any[]) => (self as any).canAddProjectFolder(...args),
-refreshWorktreeCache: (...args: any[]) => (self as any).refreshWorktreeCache(...args)
-},
+        openWorkspaceFolders: (...args: any[]) => (self as any).openWorkspaceFolders(...args),
+        extraProjectFolders: (...args: any[]) => (self as any).extraProjectFolders(...args),
+        removedProjectFolderKeys: (...args: any[]) => (self as any).removedProjectFolderKeys(...args),
+        defaultProviderForProject: (...args: any[]) => (self as any).defaultProviderForProject(...args),
+        selectedHistoryCwd: (...args: any[]) => (self as any).selectedHistoryCwd(...args),
+        getSelectedRepoCwd: () => self.selectedRepoCwd,
+        setSelectedRepoCwd: (cwd) => { self.selectedRepoCwd = cwd; },
+        workspaceRoot: (...args: any[]) => (self as any).workspaceRoot(...args),
+        canAddProjectFolder: (...args: any[]) => (self as any).canAddProjectFolder(...args),
+        refreshWorktreeCache: (...args: any[]) => (self as any).refreshWorktreeCache(...args)
+      },
 
       adapterOps: {
-connectedProviders: (...args: any[]) => (self as any).connectedProviders(...args),
-locateProvider: (...args: any[]) => (self as any).locateProvider(...args),
-createProviderBackend: (...args: any[]) => (self as any).createProviderBackend(...args),
-hasProviderConsent: (...args: any[]) => (self as any).hasProviderConsent(...args),
-setProviderNeedsLogin: (...args: any[]) => (self as any).setProviderNeedsLogin(...args),
-adapterHistory: (...args: any[]) => (self as any).adapterHistory(...args),
-allAdapterCatalogs: (...args: any[]) => (self as any).allAdapterCatalogs(...args),
-getCodexSessionCache: () => self.codexSessionCache,
-getClaudeSessionCache: () => self.claudeSessionCache,
-getGeminiSessionCache: () => self.geminiSessionCache,
-getMuseSessionCache: () => self.museSessionCache,
-isProviderCredentialError: (provider, error) => self.providerSetup.isProviderCredentialError(provider, error)
-},
+        connectedProviders: (...args: any[]) => (self as any).connectedProviders(...args),
+        locateProvider: (...args: any[]) => (self as any).locateProvider(...args),
+        createProviderBackend: (...args: any[]) => (self as any).createProviderBackend(...args),
+        hasProviderConsent: (...args: any[]) => (self as any).hasProviderConsent(...args),
+        setProviderNeedsLogin: (...args: any[]) => (self as any).setProviderNeedsLogin(...args),
+        adapterHistory: (...args: any[]) => (self as any).adapterHistory(...args),
+        allAdapterCatalogs: (...args: any[]) => (self as any).allAdapterCatalogs(...args),
+        getCodexSessionCache: () => self.codexSessionCache,
+        getClaudeSessionCache: () => self.claudeSessionCache,
+        getGeminiSessionCache: () => self.geminiSessionCache,
+        getMuseSessionCache: () => self.museSessionCache,
+        isProviderCredentialError: (provider, error) => self.providerSetup.isProviderCredentialError(provider, error)
+      },
 
       sessionOps: {
-authorizedSessionCwds: (...args: any[]) => (self as any).authorizedSessionCwds(...args),
-historyCwdFor: (...args: any[]) => (self as any).historyCwdFor(...args),
-sessionCwd: (...args: any[]) => (self as any).sessionCwd(...args),
-setSessionCwd: (...args: any[]) => (self as any).setSessionCwd(...args),
-workflowStore: (...args: any[]) => (self as any).workflowStore(...args),
-workflowRuns: (...args: any[]) => (self as any).workflowRuns(...args),
-resolveWorkflow: (...args: any[]) => (self as any).resolveWorkflow(...args),
-touch: (...args: any[]) => (self as any).touch(...args),
-refreshWorkflowCompletions: (...args: any[]) => (self as any).refreshWorkflowCompletions(...args)
-},
+        authorizedSessionCwds: (...args: any[]) => (self as any).authorizedSessionCwds(...args),
+        historyCwdFor: (...args: any[]) => (self as any).historyCwdFor(...args),
+        sessionCwd: (...args: any[]) => (self as any).sessionCwd(...args),
+        setSessionCwd: (...args: any[]) => (self as any).setSessionCwd(...args),
+        workflowStore: (...args: any[]) => (self as any).workflowStore(...args),
+        workflowRuns: (...args: any[]) => (self as any).workflowRuns(...args),
+        resolveWorkflow: (...args: any[]) => (self as any).resolveWorkflow(...args),
+        touch: (...args: any[]) => (self as any).touch(...args),
+        refreshWorkflowCompletions: (...args: any[]) => (self as any).refreshWorkflowCompletions(...args)
+      },
 
       uiOps: {
-postLocal: (...args: any[]) => (self as any).postLocal(...args),
-postSessionsList: (...args: any[]) => (self as any).postSessionsList(...args),
-postMode: (...args: any[]) => (self as any).postMode(...args),
-postChildContext: (...args: any[]) => (self as any).postChildContext(...args),
-postSessionRemoved: (...args: any[]) => (self as any).postSessionRemoved(...args),
-localizeHistoryMessage: (...args: any[]) => (self as any).localizeHistoryMessage(...args),
-localPreviewChips: (...args: any[]) => (self as any).localPreviewChips(...args),
-displayMode: (...args: any[]) => (self as any).displayMode(...args),
-getWebview: () => self.view?.webview,
-hasProjectsRail: () => !!self.projectsRail
-},
+        postLocal: (...args: any[]) => (self as any).postLocal(...args),
+        postSessionsList: (...args: any[]) => (self as any).postSessionsList(...args),
+        postMode: (...args: any[]) => (self as any).postMode(...args),
+        postChildContext: (...args: any[]) => (self as any).postChildContext(...args),
+        postSessionRemoved: (...args: any[]) => (self as any).postSessionRemoved(...args),
+        localizeHistoryMessage: (...args: any[]) => (self as any).localizeHistoryMessage(...args),
+        localPreviewChips: (...args: any[]) => (self as any).localPreviewChips(...args),
+        displayMode: (...args: any[]) => (self as any).displayMode(...args),
+        getWebview: () => self.view?.webview,
+        hasProjectsRail: () => !!self.projectsRail
+      },
 
       lifecycleOps: {
         startSession: (...args: any[]) => (self as any).startSession(...args),
@@ -1099,30 +991,30 @@ hasProjectsRail: () => !!self.projectsRail
         getSwitchQueue: () => self.localWorkspaceSwitchQueue,
         getLastSweepAt: () => self.lastSweepAt,
         getProvenNonEmpty: () => self.provenNonEmpty
-  }
-  ,
-sidebarOps: {
-modelsForSession: (...args) => self.modelsForSession(...args),
-get state() { return self.state; },
-sessionCwd: (...args) => self.sessionCwd(...args),
-resolveLocalRepoTarget: (...args) => self.resolveLocalRepoTarget(...args),
-get focused() { return self.focused; },
-postLocal: (...args) => self.postLocal(...args),
-get sessionCache() { return self.sessionCache; },
-workspaceRoot: (...args) => self.workspaceRoot(...args),
-get worktreeCache() { return self.worktreeCache; },
-get host() { return self.host; },
-allAdapterCatalogs: (...args) => self.allAdapterCatalogs(...args),
-isAuthorizedCwd: (...args) => self.isAuthorizedCwd(...args),
-postSessionsList: (...args) => self.postSessionsList(...args),
-get pool() { return self.pool; },
-pushDot: (...args) => self.pushDot(...args),
-adapterHistory: (...args) => self.adapterHistory(...args),
-hasProviderConsent: (...args) => self.hasProviderConsent(...args),
-locateProvider: (...args) => self.locateProvider(...args),
-createProviderBackend: (...args) => self.createProviderBackend(...args)
-}
-});
+      }
+      ,
+      sidebarOps: {
+        modelsForSession: (...args) => self.modelsForSession(...args),
+        get state() { return self.state; },
+        sessionCwd: (...args) => self.sessionCwd(...args),
+        resolveLocalRepoTarget: (...args) => self.resolveLocalRepoTarget(...args),
+        get focused() { return self.focused; },
+        postLocal: (...args) => self.postLocal(...args),
+        get sessionCache() { return self.sessionCache; },
+        workspaceRoot: (...args) => self.workspaceRoot(...args),
+        get worktreeCache() { return self.worktreeCache; },
+        get host() { return self.host; },
+        allAdapterCatalogs: (...args) => self.allAdapterCatalogs(...args),
+        isAuthorizedCwd: (...args) => self.isAuthorizedCwd(...args),
+        postSessionsList: (...args) => self.postSessionsList(...args),
+        get pool() { return self.pool; },
+        pushDot: (...args) => self.pushDot(...args),
+        adapterHistory: (...args) => self.adapterHistory(...args),
+        hasProviderConsent: (...args) => self.hasProviderConsent(...args),
+        locateProvider: (...args) => self.locateProvider(...args),
+        createProviderBackend: (...args) => self.createProviderBackend(...args)
+      }
+    });
   }
 
   private createSessionStart(): SessionStart {
@@ -1153,7 +1045,7 @@ createProviderBackend: (...args) => self.createProviderBackend(...args)
         updateSessionMeta: (...args: any[]) => (self as any).updateSessionMeta(...args),
         sessionCacheDelete: (id) => { self.sessionCache.delete(id); },
         findWorkspaceSensitiveFiles: (root) => findWorkspaceSensitiveFiles(root)
-  },
+      },
 
       providerOps: {
         locateProvider: (...args: any[]) => (self as any).locateProvider(...args),
@@ -1177,7 +1069,7 @@ createProviderBackend: (...args) => self.createProviderBackend(...args)
         readGrokVersion: (...args: any[]) => (self as any).readGrokVersion(...args),
         downgradeBrokenCli: (...args: any[]) => (self as any).downgradeBrokenCli(...args),
         rememberGrokConfig: (...args: any[]) => (self as any).rememberGrokConfig(...args)
-  },
+      },
 
       reviewAndPlanOps: {
         planModeCompatibility: (...args: any[]) => (self as any).planModeCompatibility(...args),
@@ -1197,12 +1089,11 @@ createProviderBackend: (...args) => self.createProviderBackend(...args)
         noteReviewToolCall: (...args: any[]) => (self as any).noteReviewToolCall(...args),
         startTurnGitBaseline: (...args: any[]) => (self as any).startTurnGitBaseline(...args),
         settleUnavailablePlanTurn: (...args: any[]) => (self as any).settleUnavailablePlanTurn(...args)
-  },
+      },
 
       turnAndSendOps: {
         turnInFlight: (...args: any[]) => (self as any).turnInFlight(...args),
         divertRacingSend: (...args: any[]) => (self as any).divertRacingSend(...args),
-        ensureClient: (...args: any[]) => (self as any).ensureClient(...args),
         get pendingAttach() { return self.pendingAttach; },
         readImageChip: (...args: any[]) => (self as any).readImageChip(...args),
         contextChipPayloads: (...args: any[]) => (self as any).contextChipPayloads(...args),
@@ -1222,49 +1113,49 @@ createProviderBackend: (...args) => self.createProviderBackend(...args)
         recoverAuthAndResend: (...args: any[]) => (self as any).recoverAuthAndResend(...args),
         emitAbandonedSend: (...args: any[]) => (self as any).emitAbandonedSend(...args),
         turnEndFields: (...args: any[]) => (self as any).turnEndFields(...args)
-  },
+      },
 
       sessionLifecycleOps: {
-detachClient: (...args: any[]) => (self as any).detachClient(...args),
-replayLoadedHistory: (...args: any[]) => (self as any).replayLoadedHistory(...args),
-restoreSessionType: (...args: any[]) => (self as any).restoreSessionType(...args),
-persistSessionType: (...args: any[]) => (self as any).persistSessionType(...args),
-postSessionType: (...args: any[]) => (self as any).postSessionType(...args),
-flushHiddenChildMeta: (...args: any[]) => (self as any).flushHiddenChildMeta(...args),
-restorePersistedDraft: (...args: any[]) => (self as any).restorePersistedDraft(...args)
-},
-usageOps: {
-emitContextUsage: (...args: any[]) => (self as any).emitContextUsage(...args),
-refreshContextFromSessionInfo: (...args: any[]) => (self as any).refreshContextFromSessionInfo(...args),
-restoreUsage: (...args: any[]) => (self as any).restoreUsage(...args),
-bindSubscriptionUsage: (...args: any[]) => (self as any).bindSubscriptionUsage(...args),
-refreshSubscriptionUsage: (...args: any[]) => (self as any).refreshSubscriptionUsage(...args),
-publishSubscriptionUsage: (...args: any[]) => (self as any).publishSubscriptionUsage(...args),
-noteAdapterCompactSignal: (...args: any[]) => (self as any).noteAdapterCompactSignal(...args),
-adapterTurnOccupancy: (...args: any[]) => (self as any).adapterTurnOccupancy(...args),
-rememberAdapterContext: (...args: any[]) => (self as any).rememberAdapterContext(...args),
-accumulateUsage: (...args: any[]) => (self as any).accumulateUsage(...args)
-},
-eventOps: {
-confirmRepoForcedAutoApprove: (...args: any[]) => (self as any).confirmRepoForcedAutoApprove(...args),
-configForcesAutoApprove: (...args: any[]) => (self as any).configForcesAutoApprove(...args),
-noticeAlwaysApproveOnce: (...args: any[]) => (self as any).noticeAlwaysApproveOnce(...args),
-queueInFlightPlanCommentsOnExit: (...args: any[]) => (self as any).queueInFlightPlanCommentsOnExit(...args),
-stopVoiceInput: (...args: any[]) => (self as any).stopVoiceInput(...args),
-drainPendingConfirms: (...args: any[]) => (self as any).drainPendingConfirms(...args),
-dropPendingQuestions: (...args: any[]) => (self as any).dropPendingQuestions(...args),
-revokeAskUserToken: (...args: any[]) => (self as any).revokeAskUserToken(...args),
-warnOAuthShadowOnce: (...args: any[]) => (self as any).warnOAuthShadowOnce(...args),
-syncHumanWait: (...args: any[]) => (self as any).syncHumanWait(...args),
-showQuestion: (...args: any[]) => (self as any).showQuestion(...args),
-closeQuestionsForToolCall: (...args: any[]) => (self as any).closeQuestionsForToolCall(...args),
-handlePermissionRequest: (...args: any[]) => (self as any).handlePermissionRequest(...args),
-applyMcpNotification: (...args: any[]) => (self as any).applyMcpNotification(...args),
-noteNativeChild: (...args: any[]) => (self as any).noteNativeChild(...args),
-postGeneratedMedia: (...args: any[]) => (self as any).postGeneratedMedia(...args),
-hostMcpServersFor: (...args: any[]) => (self as any).hostMcpServersFor(...args),
-imageStagingDir: (...args: any[]) => (self as any).imageStagingDir(...args)
-},
+        detachClient: (...args: any[]) => (self as any).detachClient(...args),
+        replayLoadedHistory: (...args: any[]) => (self as any).replayLoadedHistory(...args),
+        restoreSessionType: (...args: any[]) => (self as any).restoreSessionType(...args),
+        persistSessionType: (...args: any[]) => (self as any).persistSessionType(...args),
+        postSessionType: (...args: any[]) => (self as any).postSessionType(...args),
+        flushHiddenChildMeta: (...args: any[]) => (self as any).flushHiddenChildMeta(...args),
+        restorePersistedDraft: (...args: any[]) => (self as any).restorePersistedDraft(...args)
+      },
+      usageOps: {
+        emitContextUsage: (...args: any[]) => (self as any).emitContextUsage(...args),
+        refreshContextFromSessionInfo: (...args: any[]) => (self as any).refreshContextFromSessionInfo(...args),
+        restoreUsage: (...args: any[]) => (self as any).restoreUsage(...args),
+        bindSubscriptionUsage: (...args: any[]) => (self as any).bindSubscriptionUsage(...args),
+        refreshSubscriptionUsage: (...args: any[]) => (self as any).refreshSubscriptionUsage(...args),
+        publishSubscriptionUsage: (...args: any[]) => (self as any).publishSubscriptionUsage(...args),
+        noteAdapterCompactSignal: (...args: any[]) => (self as any).noteAdapterCompactSignal(...args),
+        adapterTurnOccupancy: (...args: any[]) => (self as any).adapterTurnOccupancy(...args),
+        rememberAdapterContext: (...args: any[]) => (self as any).rememberAdapterContext(...args),
+        accumulateUsage: (...args: any[]) => (self as any).accumulateUsage(...args)
+      },
+      eventOps: {
+        confirmRepoForcedAutoApprove: (...args: any[]) => (self as any).confirmRepoForcedAutoApprove(...args),
+        configForcesAutoApprove: (...args: any[]) => (self as any).configForcesAutoApprove(...args),
+        noticeAlwaysApproveOnce: (...args: any[]) => (self as any).noticeAlwaysApproveOnce(...args),
+        queueInFlightPlanCommentsOnExit: (...args: any[]) => (self as any).queueInFlightPlanCommentsOnExit(...args),
+        stopVoiceInput: (...args: any[]) => (self as any).stopVoiceInput(...args),
+        drainPendingConfirms: (...args: any[]) => (self as any).drainPendingConfirms(...args),
+        dropPendingQuestions: (...args: any[]) => (self as any).dropPendingQuestions(...args),
+        revokeAskUserToken: (...args: any[]) => (self as any).revokeAskUserToken(...args),
+        warnOAuthShadowOnce: (...args: any[]) => (self as any).warnOAuthShadowOnce(...args),
+        syncHumanWait: (...args: any[]) => (self as any).syncHumanWait(...args),
+        showQuestion: (...args: any[]) => (self as any).showQuestion(...args),
+        closeQuestionsForToolCall: (...args: any[]) => (self as any).closeQuestionsForToolCall(...args),
+        handlePermissionRequest: (...args: any[]) => (self as any).handlePermissionRequest(...args),
+        applyMcpNotification: (...args: any[]) => (self as any).applyMcpNotification(...args),
+        noteNativeChild: (...args: any[]) => (self as any).noteNativeChild(...args),
+        postGeneratedMedia: (...args: any[]) => (self as any).postGeneratedMedia(...args),
+        hostMcpServersFor: (...args: any[]) => (self as any).hostMcpServersFor(...args),
+        imageStagingDir: (...args: any[]) => (self as any).imageStagingDir(...args)
+      },
 
       workflowCommandsOps: {
         handleAgentCommand: (...args: any[]) => (self as any).handleAgentCommand(...args),
@@ -1272,7 +1163,7 @@ imageStagingDir: (...args: any[]) => (self as any).imageStagingDir(...args)
         handleCrewCommand: (...args: any[]) => (self as any).handleCrewCommand(...args),
         handleSubagentsCommand: (...args: any[]) => (self as any).handleSubagentsCommand(...args),
         handleCrewSessionInput: (...args: any[]) => (self as any).handleCrewSessionInput(...args)
-  },
+      },
 
       flags: {
         getTestSessionStartDelay: () => self.testSessionStartDelay,
@@ -1283,10 +1174,17 @@ imageStagingDir: (...args: any[]) => (self as any).imageStagingDir(...args)
         getWarnedSensitiveFiles: () => self.warnedSensitiveFiles,
         setWarnedSensitiveFiles: (v) => { self.warnedSensitiveFiles = v; },
         postLocal: (...args: any[]) => (self as any).postLocal(...args)
-  },
+      },
 
       getOverride: (...args: any[]) => (self as any).sidebarTestOverride(...args)
-  });
+      ,
+      sidebarOps: {
+get focused() { return self.focused; },
+        waitForSessionStart: (...args) => self.waitForSessionStart(...args),
+        startSession: (...args) => self.startSession(...args),
+        emit: (...args) => self.emit(...args)
+}
+    });
   }
 
   private createSidebarInbound(): SidebarInbound {
@@ -1307,7 +1205,7 @@ imageStagingDir: (...args: any[]) => (self as any).imageStagingDir(...args)
         get agentRolesError() { return self.agentRolesError; },
         set agentRolesError(v) { self.agentRolesError = v; },
         get agentRuns() { return self.agentRuns; },
-        set agentRuns(_v) {},
+        set agentRuns(_v) { },
         get codexInstallAbort() { return self.codexInstallAbort; },
         set codexInstallAbort(v) { self.codexInstallAbort = v; },
         get firstBootScanCompleted() { return self.firstBootScanCompleted; },
@@ -1315,11 +1213,11 @@ imageStagingDir: (...args: any[]) => (self as any).imageStagingDir(...args)
         get firstBootScanStarted() { return self.firstBootScanStarted; },
         set firstBootScanStarted(v) { self.firstBootScanStarted = v; },
         get fullImagePaths() { return self.fullImagePaths; },
-        set fullImagePaths(_v) {},
+        set fullImagePaths(_v) { },
         get loginReprobeTimers() { return self.loginReprobeTimers; },
         set loginReprobeTimers(v) { self.loginReprobeTimers = v; },
         get pendingConfirms() { return self.pendingConfirms; },
-        set pendingConfirms(_v) {},
+        set pendingConfirms(_v) { },
         get projectsRail() { return self.projectsRail; },
         set projectsRail(v) { self.projectsRail = v; },
         get providerNeedsLogin() { return self.providerNeedsLogin; },
@@ -1327,14 +1225,14 @@ imageStagingDir: (...args: any[]) => (self as any).imageStagingDir(...args)
         get routineError() { return self.routineError; },
         set routineError(v) { self.routineError = v; },
         get routineRuns() { return self.routineRuns; },
-        set routineRuns(_v) {},
+        set routineRuns(_v) { },
         get routinesInFlight() { return self.routinesInFlight; },
-        set routinesInFlight(_v) {},
+        set routinesInFlight(_v) { },
         get settingsEditor() { return self.settingsEditor; },
         set settingsEditor(v) { self.settingsEditor = v; },
         get subagents() { return self.subagents; },
-        set subagents(_v) {}
-  },
+        set subagents(_v) { }
+      },
 
       boot: {
         completeFirstBootScan: (...args: any[]) => (self as any).completeFirstBootScan(...args),
@@ -1342,7 +1240,7 @@ imageStagingDir: (...args: any[]) => (self as any).imageStagingDir(...args)
         postRepoCatalog: (...args: any[]) => (self as any).postRepoCatalog(...args),
         postSessionsList: (...args: any[]) => (self as any).postSessionsList(...args),
         runFirstBootScan: (...args: any[]) => (self as any).runFirstBootScan(...args)
-  },
+      },
 
       composer: {
         addContextSourceChip: (...args: any[]) => (self as any).addContextSourceChip(...args),
@@ -1370,53 +1268,53 @@ imageStagingDir: (...args: any[]) => (self as any).imageStagingDir(...args)
         resolveChatOpenPath: (...args: any[]) => (self as any).resolveChatOpenPath(...args),
         steerSend: (...args: any[]) => (self as any).steerSend(...args),
         trackAttach: (...args: any[]) => (self as any).trackAttach(...args)
-  },
+      },
 
       sessions: {
-armCancelRecovery: (...args: any[]) => (self as any).armCancelRecovery(...args),
-cancelAgentRun: (...args: any[]) => (self as any).cancelAgentRun(...args),
-clearAllSessions: (...args: any[]) => (self as any).clearAllSessions(...args),
-deleteSession: (...args: any[]) => (self as any).deleteSession(...args),
-discardAdapterEmptySession: (...args: any[]) => (self as any).discardAdapterEmptySession(...args),
-discardRestartedEmptySession: (...args: any[]) => (self as any).discardRestartedEmptySession(...args),
-editLastMessage: (...args: any[]) => (self as any).editLastMessage(...args),
-focusSession: (...args: any[]) => (self as any).focusSession(...args),
-forkFocusedSession: (...args: any[]) => (self as any).forkFocusedSession(...args),
-handleVoiceStart: (...args: any[]) => (self as any).handleVoiceStart(...args),
-handleVoiceStop: (...args: any[]) => (self as any).handleVoiceStop(...args),
-newFocusedSession: (...args: any[]) => (self as any).newFocusedSession(...args),
-noteAnswered: (...args: any[]) => (self as any).noteAnswered(...args),
-openSession: (...args: any[]) => (self as any).openSession(...args),
-pickRestartMode: (...args: any[]) => (self as any).pickRestartMode(...args),
-refuseMismatchedSessionId: (...args: any[]) => (self as any).refuseMismatchedSessionId(...args),
-renameSession: (...args: any[]) => (self as any).renameSession(...args),
-restartSession: (...args: any[]) => (self as any).restartSession(...args),
-rewindFocusedSession: (...args: any[]) => (self as any).rewindFocusedSession(...args),
-startSession: (...args: any[]) => (self as any).startSession(...args),
-stopVoiceInput: (...args: any[]) => (self as any).stopVoiceInput(...args),
-syncHumanWait: (...args: any[]) => (self as any).syncHumanWait(...args)
-},
-sessionSettings: {
-persistEffort: (...args: any[]) => (self as any).persistEffort(...args),
-pickModel: (...args: any[]) => (self as any).pickModel(...args),
-refreshContextFromSessionInfo: (...args: any[]) => (self as any).refreshContextFromSessionInfo(...args),
-refreshSubscriptionUsage: (...args: any[]) => (self as any).refreshSubscriptionUsage(...args),
-setMode: (...args: any[]) => (self as any).setMode(...args),
-setProviderNeedsLogin: (...args: any[]) => (self as any).setProviderNeedsLogin(...args),
-setSessionType: (...args: any[]) => (self as any).setSessionType(...args),
-switchModel: (...args: any[]) => (self as any).switchModel(...args)
-},
-worktrees: {
-applyFocusedWorktree: (...args: any[]) => (self as any).applyFocusedWorktree(...args),
-newWorktreeSession: (...args: any[]) => (self as any).newWorktreeSession(...args),
-removeFocusedWorktree: (...args: any[]) => (self as any).removeFocusedWorktree(...args),
-selectRepo: (...args: any[]) => (self as any).selectRepo(...args),
-sendLocalRepoSessionsPreview: (...args: any[]) => (self as any).sendLocalRepoSessionsPreview(...args),
-setRepoArchived: (...args: any[]) => (self as any).setRepoArchived(...args),
-setRepoColor: (...args: any[]) => (self as any).setRepoColor(...args),
-toggleRepoPin: (...args: any[]) => (self as any).toggleRepoPin(...args),
-toggleSessionPin: (...args: any[]) => (self as any).toggleSessionPin(...args)
-},
+        armCancelRecovery: (...args: any[]) => (self as any).armCancelRecovery(...args),
+        cancelAgentRun: (...args: any[]) => (self as any).cancelAgentRun(...args),
+        clearAllSessions: (...args: any[]) => (self as any).clearAllSessions(...args),
+        deleteSession: (...args: any[]) => (self as any).deleteSession(...args),
+        discardAdapterEmptySession: (...args: any[]) => (self as any).discardAdapterEmptySession(...args),
+        discardRestartedEmptySession: (...args: any[]) => (self as any).discardRestartedEmptySession(...args),
+        editLastMessage: (...args: any[]) => (self as any).editLastMessage(...args),
+        focusSession: (...args: any[]) => (self as any).focusSession(...args),
+        forkFocusedSession: (...args: any[]) => (self as any).forkFocusedSession(...args),
+        handleVoiceStart: (...args: any[]) => (self as any).handleVoiceStart(...args),
+        handleVoiceStop: (...args: any[]) => (self as any).handleVoiceStop(...args),
+        newFocusedSession: (...args: any[]) => (self as any).newFocusedSession(...args),
+        noteAnswered: (...args: any[]) => (self as any).noteAnswered(...args),
+        openSession: (...args: any[]) => (self as any).openSession(...args),
+        pickRestartMode: (...args: any[]) => (self as any).pickRestartMode(...args),
+        refuseMismatchedSessionId: (...args: any[]) => (self as any).refuseMismatchedSessionId(...args),
+        renameSession: (...args: any[]) => (self as any).renameSession(...args),
+        restartSession: (...args: any[]) => (self as any).restartSession(...args),
+        rewindFocusedSession: (...args: any[]) => (self as any).rewindFocusedSession(...args),
+        startSession: (...args: any[]) => (self as any).startSession(...args),
+        stopVoiceInput: (...args: any[]) => (self as any).stopVoiceInput(...args),
+        syncHumanWait: (...args: any[]) => (self as any).syncHumanWait(...args)
+      },
+      sessionSettings: {
+        persistEffort: (...args: any[]) => (self as any).persistEffort(...args),
+        pickModel: (...args: any[]) => (self as any).pickModel(...args),
+        refreshContextFromSessionInfo: (...args: any[]) => (self as any).refreshContextFromSessionInfo(...args),
+        refreshSubscriptionUsage: (...args: any[]) => (self as any).refreshSubscriptionUsage(...args),
+        setMode: (...args: any[]) => (self as any).setMode(...args),
+        setProviderNeedsLogin: (...args: any[]) => (self as any).setProviderNeedsLogin(...args),
+        setSessionType: (...args: any[]) => (self as any).setSessionType(...args),
+        switchModel: (...args: any[]) => (self as any).switchModel(...args)
+      },
+      worktrees: {
+        applyFocusedWorktree: (...args: any[]) => (self as any).applyFocusedWorktree(...args),
+        newWorktreeSession: (...args: any[]) => (self as any).newWorktreeSession(...args),
+        removeFocusedWorktree: (...args: any[]) => (self as any).removeFocusedWorktree(...args),
+        selectRepo: (...args: any[]) => (self as any).selectRepo(...args),
+        sendLocalRepoSessionsPreview: (...args: any[]) => (self as any).sendLocalRepoSessionsPreview(...args),
+        setRepoArchived: (...args: any[]) => (self as any).setRepoArchived(...args),
+        setRepoColor: (...args: any[]) => (self as any).setRepoColor(...args),
+        toggleRepoPin: (...args: any[]) => (self as any).toggleRepoPin(...args),
+        toggleSessionPin: (...args: any[]) => (self as any).toggleSessionPin(...args)
+      },
 
       review: {
         addSessionAllowRule: (...args: any[]) => (self as any).addSessionAllowRule(...args),
@@ -1435,46 +1333,46 @@ toggleSessionPin: (...args: any[]) => (self as any).toggleSessionPin(...args)
         reviewRevertAll: (...args: any[]) => (self as any).reviewRevertAll(...args),
         reviewRevertFile: (...args: any[]) => (self as any).reviewRevertFile(...args),
         snapshotRelOrAbsPaths: (...args: any[]) => (self as any).snapshotRelOrAbsPaths(...args)
-  },
+      },
 
       workflow: {
-agentNotice: (...args: any[]) => (self as any).agentNotice(...args),
-applyWorkflowPlanEdit: (...args: any[]) => (self as any).applyWorkflowPlanEdit(...args),
-companionsSetting: (...args: any[]) => (self as any).companionsSetting(...args),
-controlWorkflow: (...args: any[]) => (self as any).controlWorkflow(...args),
-defaultWorkflowName: (...args: any[]) => (self as any).defaultWorkflowName(...args),
-gateActionFromMsg: (...args: any[]) => (self as any).gateActionFromMsg(...args),
-handleHostGateAction: (...args: any[]) => (self as any).handleHostGateAction(...args),
-handleWorkflowGateAction: (...args: any[]) => (self as any).handleWorkflowGateAction(...args),
-openNewCrewSession: (...args: any[]) => (self as any).openNewCrewSession(...args),
-poolSessionById: (...args: any[]) => (self as any).poolSessionById(...args),
-sendToRunningStage: (...args: any[]) => (self as any).sendToRunningStage(...args),
-startHandoff: (...args: any[]) => (self as any).startHandoff(...args),
-startWorkflowRun: (...args: any[]) => (self as any).startWorkflowRun(...args)
-},
-authoring: {
-cancelWorkflowGenerate: (...args: any[]) => (self as any).cancelWorkflowGenerate(...args),
-handleAddWorkflowStagesBlock: (...args: any[]) => (self as any).handleAddWorkflowStagesBlock(...args),
-handleDeleteCompanionFile: (...args: any[]) => (self as any).handleDeleteCompanionFile(...args),
-handleGenerateWorkflow: (...args: any[]) => (self as any).handleGenerateWorkflow(...args),
-handleSaveAgentRole: (...args: any[]) => (self as any).handleSaveAgentRole(...args),
-handleSaveCrewFlow: (...args: any[]) => (self as any).handleSaveCrewFlow(...args),
-handleSaveWorkflow: (...args: any[]) => (self as any).handleSaveWorkflow(...args),
-postAgentRoles: (...args: any[]) => (self as any).postAgentRoles(...args),
-postWorkflowValidation: (...args: any[]) => (self as any).postWorkflowValidation(...args),
-setCompanionsSetting: (...args: any[]) => (self as any).setCompanionsSetting(...args)
-},
-children: {
-answerSubagentApproval: (...args: any[]) => (self as any).answerSubagentApproval(...args),
-cancelSubagent: (...args: any[]) => (self as any).cancelSubagent(...args),
-childOverviewAction: (...args: any[]) => (self as any).childOverviewAction(...args),
-continueSubagent: (...args: any[]) => (self as any).continueSubagent(...args),
-postSubagentCard: (...args: any[]) => (self as any).postSubagentCard(...args),
-postSubagentTray: (...args: any[]) => (self as any).postSubagentTray(...args),
-promoteSubagentSession: (...args: any[]) => (self as any).promoteSubagentSession(...args),
-setSessionDelegation: (...args: any[]) => (self as any).setSessionDelegation(...args),
-settleSubagentWorktree: (...args: any[]) => (self as any).settleSubagentWorktree(...args)
-},
+        agentNotice: (...args: any[]) => (self as any).agentNotice(...args),
+        applyWorkflowPlanEdit: (...args: any[]) => (self as any).applyWorkflowPlanEdit(...args),
+        companionsSetting: (...args: any[]) => (self as any).companionsSetting(...args),
+        controlWorkflow: (...args: any[]) => (self as any).controlWorkflow(...args),
+        defaultWorkflowName: (...args: any[]) => (self as any).defaultWorkflowName(...args),
+        gateActionFromMsg: (...args: any[]) => (self as any).gateActionFromMsg(...args),
+        handleHostGateAction: (...args: any[]) => (self as any).handleHostGateAction(...args),
+        handleWorkflowGateAction: (...args: any[]) => (self as any).handleWorkflowGateAction(...args),
+        openNewCrewSession: (...args: any[]) => (self as any).openNewCrewSession(...args),
+        poolSessionById: (...args: any[]) => (self as any).poolSessionById(...args),
+        sendToRunningStage: (...args: any[]) => (self as any).sendToRunningStage(...args),
+        startHandoff: (...args: any[]) => (self as any).startHandoff(...args),
+        startWorkflowRun: (...args: any[]) => (self as any).startWorkflowRun(...args)
+      },
+      authoring: {
+        cancelWorkflowGenerate: (...args: any[]) => (self as any).cancelWorkflowGenerate(...args),
+        handleAddWorkflowStagesBlock: (...args: any[]) => (self as any).handleAddWorkflowStagesBlock(...args),
+        handleDeleteCompanionFile: (...args: any[]) => (self as any).handleDeleteCompanionFile(...args),
+        handleGenerateWorkflow: (...args: any[]) => (self as any).handleGenerateWorkflow(...args),
+        handleSaveAgentRole: (...args: any[]) => (self as any).handleSaveAgentRole(...args),
+        handleSaveCrewFlow: (...args: any[]) => (self as any).handleSaveCrewFlow(...args),
+        handleSaveWorkflow: (...args: any[]) => (self as any).handleSaveWorkflow(...args),
+        postAgentRoles: (...args: any[]) => (self as any).postAgentRoles(...args),
+        postWorkflowValidation: (...args: any[]) => (self as any).postWorkflowValidation(...args),
+        setCompanionsSetting: (...args: any[]) => (self as any).setCompanionsSetting(...args)
+      },
+      children: {
+        answerSubagentApproval: (...args: any[]) => (self as any).answerSubagentApproval(...args),
+        cancelSubagent: (...args: any[]) => (self as any).cancelSubagent(...args),
+        childOverviewAction: (...args: any[]) => (self as any).childOverviewAction(...args),
+        continueSubagent: (...args: any[]) => (self as any).continueSubagent(...args),
+        postSubagentCard: (...args: any[]) => (self as any).postSubagentCard(...args),
+        postSubagentTray: (...args: any[]) => (self as any).postSubagentTray(...args),
+        promoteSubagentSession: (...args: any[]) => (self as any).promoteSubagentSession(...args),
+        setSessionDelegation: (...args: any[]) => (self as any).setSessionDelegation(...args),
+        settleSubagentWorktree: (...args: any[]) => (self as any).settleSubagentWorktree(...args)
+      },
 
       routines: {
         loadRoutines: (...args: any[]) => (self as any).loadRoutines(...args),
@@ -1483,7 +1381,7 @@ settleSubagentWorktree: (...args: any[]) => (self as any).settleSubagentWorktree
         routineModelOptions: (...args: any[]) => (self as any).routineModelOptions(...args),
         runRoutine: (...args: any[]) => (self as any).runRoutine(...args),
         saveRoutines: (...args: any[]) => (self as any).saveRoutines(...args)
-  },
+      },
 
       providers: {
         adoptSessionsForConnectedProvider: (...args: any[]) => (self as any).adoptSessionsForConnectedProvider(...args),
@@ -1509,14 +1407,14 @@ settleSubagentWorktree: (...args: any[]) => (self as any).settleSubagentWorktree
         updateGrokCliOnDemand: (...args: any[]) => (self as any).updateGrokCliOnDemand(...args),
         updateProviderCli: (...args: any[]) => (self as any).updateProviderCli(...args),
         watchProviderLogin: (...args: any[]) => (self as any).watchProviderLogin(...args)
-  },
+      },
 
       projects: {
         addProjectFolder: (...args: any[]) => (self as any).addProjectFolder(...args),
         cloneProject: (...args: any[]) => (self as any).cloneProject(...args),
         createProject: (...args: any[]) => (self as any).createProject(...args),
         removeProjectFolder: (...args: any[]) => (self as any).removeProjectFolder(...args)
-  },
+      },
 
       settings: {
         adoptPermissionRules: (...args: any[]) => (self as any).adoptPermissionRules(...args),
@@ -1531,8 +1429,8 @@ settleSubagentWorktree: (...args: any[]) => (self as any).settleSubagentWorktree
         refreshMcpServers: (...args: any[]) => (self as any).refreshMcpServers(...args),
         refreshRuleFiles: (...args: any[]) => (self as any).refreshRuleFiles(...args),
         retireMoveViewHint: (...args: any[]) => (self as any).retireMoveViewHint(...args)
-  }
-  });
+      }
+    });
   }
 
   private createSidebarStateHost(): SidebarStateHost {
@@ -1601,17 +1499,19 @@ settleSubagentWorktree: (...args: any[]) => (self as any).settleSubagentWorktree
       disposePool: () => self.disposePool(),
       startSession: (resumeId) => self.startSession(resumeId),
       getOverride: (name: string) => self.sidebarTestOverride(name)
-    ,
-sidebarOps: {hasProviderConsent: (...args) => self.hasProviderConsent(...args),
-probeCodexVersion: (...args) => self.probeCodexVersion(...args),
-probeClaudeVersion: (...args) => self.probeClaudeVersion(...args),
-probeGeminiVersion: (...args) => self.probeGeminiVersion(...args),
-probeMuseVersion: (...args) => self.probeMuseVersion(...args),
-locateProvider: (...args) => self.locateProvider(...args),
-readGrokVersion: (...args) => self.readGrokVersion(...args),
-postProviderState: (...args) => self.postProviderState(...args),
-get providerCliVersions() { return self.providerCliVersions; }}
-});
+      ,
+      sidebarOps: {
+hasProviderConsent: (...args) => self.hasProviderConsent(...args),
+        probeCodexVersion: (...args) => self.probeCodexVersion(...args),
+        probeClaudeVersion: (...args) => self.probeClaudeVersion(...args),
+        probeGeminiVersion: (...args) => self.probeGeminiVersion(...args),
+        probeMuseVersion: (...args) => self.probeMuseVersion(...args),
+        locateProvider: (...args) => self.locateProvider(...args),
+        readGrokVersion: (...args) => self.readGrokVersion(...args),
+        postProviderState: (...args) => self.postProviderState(...args),
+        get providerCliVersions() { return self.providerCliVersions; }
+}
+    });
   }
 
   private createProjectFolders(): ProjectFolders {
@@ -1628,15 +1528,15 @@ get providerCliVersions() { return self.providerCliVersions; }}
         setActiveWorkspaceFolder: (target) => self.host.setActiveWorkspaceFolder(target),
         appendLine: (line) => self.host.appendLine(line),
         createTerminal: (opts) => self.host.createTerminal(opts)
-  },
+      },
       state: {
         get: <T>(key: string, def?: T) => (def !== undefined ? self.state.get<T>(key, def) : (self.state.get<T>(key) as T)),
         update: (key: string, val: any) => self.state.update(key, val)
-  },
+      },
       context: {
         get globalState() { return (self.context?.globalState ?? self.state) as any; },
         get globalStorageUri() { return self.context?.globalStorageUri ?? { fsPath: "" }; }
-  },
+      },
       sessionOps: {
         getFocused: () => self.focused,
         setFocused: (s) => { self.focused = s; },
@@ -1649,7 +1549,7 @@ get providerCliVersions() { return self.providerCliVersions; }}
         disposeSession: (s) => self.disposeSession(s),
         defaultProviderForProject: (cwd) => self.defaultProviderForProject(cwd),
         isAuthorizedCwd: (cwd) => self.isAuthorizedCwd(cwd)
-  },
+      },
       uiOps: {
         emit: (s, msg) => self.emit(s, msg),
         post: (msg) => self.post(msg),
@@ -1658,7 +1558,7 @@ get providerCliVersions() { return self.providerCliVersions; }}
         getSelectedRepoCwd: () => self.selectedRepoCwd,
         setSelectedRepoCwd: (cwd) => { self.selectedRepoCwd = cwd; },
         getSettingsEditorWebview: () => self.settingsEditor?.webview
-  },
+      },
       catalogOps: {
         resolveLocalRepoTarget: (cwd) => self.resolveLocalRepoTarget(cwd),
         workspaceRoot: () => self.workspaceRoot(),
@@ -1668,17 +1568,17 @@ get providerCliVersions() { return self.providerCliVersions; }}
         setWorktreeCache: (w) => { self.worktreeCache = w; },
         getAuthEpoch: () => self.authEpoch,
         bumpAuthEpoch: () => ++self.authEpoch
-  },
+      },
       mediaOps: {
         getFullImagePaths: () => self.fullImagePaths,
         getFullImageHandles: () => self.fullImageHandles,
         getLocalVoiceCwd: () => self.localVoiceCwd,
         getLocalVoiceCredentialCwd: () => self.localVoiceCredentialCwd,
         stopVoiceInput: () => self.stopVoiceInput()
-  },
+      },
       localWorkspaceSwitchQueue: self.localWorkspaceSwitchQueue,
       getOverride: (name: string) => self.sidebarTestOverride(name)
-  });
+    });
   }
 
   private createProviderSession(): ProviderSession {
@@ -1708,7 +1608,7 @@ get providerCliVersions() { return self.providerCliVersions; }}
         rememberGrokConfig: (...args) => self.rememberGrokConfig(...args),
         sessionDisplayName: (...args) => self.sessionDisplayName(...args),
         authorizedSessionCwds: () => self.authorizedSessionCwds()
-  },
+      },
       uiOps: {
         notifyUser: (...args) => self.notifyUser(...args),
         emit: (...args) => self.emit(...args),
@@ -1729,7 +1629,7 @@ get providerCliVersions() { return self.providerCliVersions; }}
         maybePromptWorkspaceRulesAdoption: (...args) => self.maybePromptWorkspaceRulesAdoption(...args),
         turnInFlight: (...args) => self.turnInFlight(...args),
         armCancelRecovery: (...args) => self.armCancelRecovery(...args)
-  },
+      },
       providerOps: {
         modelsForSession: (...args) => self.modelsForSession(...args),
         connectedProviders: () => self.connectedProviders(),
@@ -1737,30 +1637,32 @@ get providerCliVersions() { return self.providerCliVersions; }}
         locateProvider: (...args) => self.locateProvider(...args),
         readGrokVersion: (...args) => self.readGrokVersion(...args),
         getProviderCliVersions: () => self.providerCliVersions
-  }
-  ,
-sidebarOps: {get state() { return self.state; },
-get providerCliVersions() { return self.providerCliVersions; },
-get focused() { return self.focused; },
-get pool() { return self.pool; },
-emit: (...args) => self.emit(...args),
-usableProviders: (...args) => self.usableProviders(...args),
-get host() { return self.host; },
-locateProvider: (...args) => self.locateProvider(...args),
-postProviderState: (...args) => self.postProviderState(...args),
-post: (...args) => self.post(...args),
-setProviderConnectedInMemory: (...args) => self.setProviderConnectedInMemory(...args),
-resetProviderSessionsAfterLogout: (...args) => self.resetProviderSessionsAfterLogout(...args),
-persistProviderConnections: (...args) => self.persistProviderConnections(...args),
-postSessionsList: (...args) => self.postSessionsList(...args),
-openWorkspaceFolders: (...args) => self.openWorkspaceFolders(...args),
-rememberProjectProvider: (...args) => self.rememberProjectProvider(...args),
-sessionCwd: (...args) => self.sessionCwd(...args),
-startSession: (...args) => self.startSession(...args),
-scheduleAdapterHistoryRefresh: (...args) => self.scheduleAdapterHistoryRefresh(...args),
-restoreStrandedDraft: (...args) => self.restoreStrandedDraft(...args),
-rememberGrokConfig: (...args) => self.rememberGrokConfig(...args)}
-});
+      }
+      ,
+      sidebarOps: {
+get state() { return self.state; },
+        get providerCliVersions() { return self.providerCliVersions; },
+        get focused() { return self.focused; },
+        get pool() { return self.pool; },
+        emit: (...args) => self.emit(...args),
+        usableProviders: (...args) => self.usableProviders(...args),
+        get host() { return self.host; },
+        locateProvider: (...args) => self.locateProvider(...args),
+        postProviderState: (...args) => self.postProviderState(...args),
+        post: (...args) => self.post(...args),
+        setProviderConnectedInMemory: (...args) => self.setProviderConnectedInMemory(...args),
+        resetProviderSessionsAfterLogout: (...args) => self.resetProviderSessionsAfterLogout(...args),
+        persistProviderConnections: (...args) => self.persistProviderConnections(...args),
+        postSessionsList: (...args) => self.postSessionsList(...args),
+        openWorkspaceFolders: (...args) => self.openWorkspaceFolders(...args),
+        rememberProjectProvider: (...args) => self.rememberProjectProvider(...args),
+        sessionCwd: (...args) => self.sessionCwd(...args),
+        startSession: (...args) => self.startSession(...args),
+        scheduleAdapterHistoryRefresh: (...args) => self.scheduleAdapterHistoryRefresh(...args),
+        restoreStrandedDraft: (...args) => self.restoreStrandedDraft(...args),
+        rememberGrokConfig: (...args) => self.rememberGrokConfig(...args)
+}
+    });
   }
 
   private createAgentAuthoring(): AgentAuthoring {
@@ -1793,7 +1695,7 @@ rememberGrokConfig: (...args) => self.rememberGrokConfig(...args)}
         cancelSubagentsOf: (...args) => self.cancelSubagentsOf(...args),
         setStatus: (...args) => self.setStatus(...args),
         companionsList: (...args) => self.companionsList(...args)
-  },
+      },
       uiOps: {
         emit: (...args) => self.emit(...args),
         postLocal: (...args) => self.postLocal(...args),
@@ -1801,7 +1703,7 @@ rememberGrokConfig: (...args) => self.rememberGrokConfig(...args)}
         confirmInChat: (...args) => self.confirmInChat(...args),
         postSessionName: (...args) => self.postSessionName(...args),
         deleteSessionCache: (id) => { self.sessionCache.delete(id); }
-  },
+      },
       providerOps: {
         usableProviders: () => self.usableProviders(),
         connectedProviders: () => self.connectedProviders(),
@@ -1810,14 +1712,14 @@ rememberGrokConfig: (...args) => self.rememberGrokConfig(...args)}
         companionSettingsView: () => self.companionSettingsView(),
         defaultWorkflowName: () => self.defaultWorkflowName(),
         companionsSetting: (key, fallback) => self.companionsSetting(key, fallback)
-  },
+      },
       companionOps: {
         agentRoleSet: (...args) => self.agentRoleSet(...args),
         crewPresetSet: (...args) => self.crewPresetSet(...args),
         companionsRoot: (...args) => self.companionsRoot(...args),
         logAgentRun: (...args) => self.logAgentRun(...args)
-  }
-  });
+      }
+    });
   }
 
   private createTurnEdit(): TurnEdit {
@@ -1841,7 +1743,7 @@ rememberGrokConfig: (...args) => self.rememberGrokConfig(...args)}
         readImageChip: (...args) => self.readImageChip(...args),
         retainUploadedFilesForSession: (...args) => self.retainUploadedFilesForSession(...args),
         maybeFlushQueuedSends: (...args) => self.maybeFlushQueuedSends(...args)
-  },
+      },
       rewindOps: {
         notifyUser: (...args) => self.notifyUser(...args),
         rewindFromClientCheckpoints: (...args) => self.rewindFromClientCheckpoints(...args),
@@ -1855,7 +1757,7 @@ rememberGrokConfig: (...args) => self.rememberGrokConfig(...args)}
         sessionCwd: (...args) => self.sessionCwd(...args),
         openSession: (...args) => self.openSession(...args),
         rememberQueuedDraft: (...args) => self.rememberQueuedDraft(...args)
-  },
+      },
       authLimitOps: {
         usableProviders: () => self.usableProviders(),
         emit: (...args) => self.emit(...args),
@@ -1872,9 +1774,8 @@ rememberGrokConfig: (...args) => self.rememberGrokConfig(...args)}
         noteLiveTurnEnded: (...args) => self.noteLiveTurnEnded(...args),
         maybeGenerateTitle: (...args) => self.maybeGenerateTitle(...args),
         postSessionName: (...args) => self.postSessionName(...args),
-        surfaceLimitError: (...args) => self.surfaceLimitError(...args),
         onboardingForSession: (...args) => self.onboardingForSession(...args)
-  },
+      },
       feedbackOps: {
         ackTurnFeedback: (...args) => self.ackTurnFeedback(...args),
         latchFeedbackUnavailable: (...args) => self.latchFeedbackUnavailable(...args),
@@ -1882,8 +1783,26 @@ rememberGrokConfig: (...args) => self.rememberGrokConfig(...args)}
         notifyUser: (...args) => self.notifyUser(...args),
         contextExtensionVersion: () => self.context.extensionVersion,
         canSwitchWorkspaceFolder: () => self.host.canSwitchWorkspaceFolder
-  }
-  });
+      }
+      ,
+      sidebarOps: {
+get host() { return self.host; },
+        emit: (...args) => self.emit(...args),
+        turnEndFields: (...args) => self.turnEndFields(...args),
+        startSession: (...args) => self.startSession(...args),
+        setStatus: (...args) => self.setStatus(...args),
+        get focused() { return self.focused; },
+        refreshImplicitChip: (...args) => self.refreshImplicitChip(...args),
+        postChips: (...args) => self.postChips(...args),
+        emitQueuedSends: (...args) => self.emitQueuedSends(...args),
+        maybeFlushQueuedSends: (...args) => self.maybeFlushQueuedSends(...args),
+        usableProviders: (...args) => self.usableProviders(...args),
+        measuredFreePercent: (...args) => self.measuredFreePercent(...args),
+        noteLiveTurnEnded: (...args) => self.noteLiveTurnEnded(...args),
+        continueInFreshSession: (...args) => self.continueInFreshSession(...args),
+        handleSend: (...args) => self.handleSend(...args)
+}
+    });
   }
 
   private createReviewHost(): ReviewHost {
@@ -2010,11 +1929,13 @@ rememberGrokConfig: (...args) => self.rememberGrokConfig(...args)}
       buildEnv: (...args) => self.buildEnv(...args),
       removeSessionFromDisk: (...args) => self.removeSessionFromDisk(...args),
       getOverride: (name: string) => self.sidebarTestOverride(name)
-    ,
-sidebarOps: {grokCompactThresholdSetting: (...args) => self.grokCompactThresholdSetting(...args),
-companionsSetting: (...args) => self.companionsSetting(...args),
-get host() { return self.host; }}
-});
+      ,
+      sidebarOps: {
+grokCompactThresholdSetting: (...args) => self.grokCompactThresholdSetting(...args),
+        companionsSetting: (...args) => self.companionsSetting(...args),
+        get host() { return self.host; }
+}
+    });
   }
 
   private createWorkflowStageRunner(): WorkflowStageRunner {
@@ -2045,14 +1966,14 @@ get host() { return self.host; }}
       persistSessionType: (session: Session) => self.persistSessionType(session),
       childWaitsForYou: (child: Session | undefined) => self.childWaitsForYou(child),
       getOverride: (name: string) => self.sidebarTestOverride(name)
-    ,
-ui: {
-emit: (session: Session, msg: HostMsg) => self.emit(session, msg),
-agentNotice: (session: Session, level: "info" | "warning" | "error", text: string) => self.agentNotice(session, level === "error" ? "warning" : level, text),
-confirmInChat: (session: Session, opts: any) => self.confirmInChat(session, opts),
-showQuestion: (session: Session, question: any, handlers: any) => self.showQuestion(session, question, handlers)
-}
-});
+      ,
+      ui: {
+        emit: (session: Session, msg: HostMsg) => self.emit(session, msg),
+        agentNotice: (session: Session, level: "info" | "warning" | "error", text: string) => self.agentNotice(session, level === "error" ? "warning" : level, text),
+        confirmInChat: (session: Session, opts: any) => self.confirmInChat(session, opts),
+        showQuestion: (session: Session, question: any, handlers: any) => self.showQuestion(session, question, handlers)
+      }
+    });
   }
 
   constructor(
@@ -2123,19 +2044,7 @@ showQuestion: (session: Session, question: any, handlers: any) => self.showQuest
     this.startRoutineScheduler();
     this.startWorkflowCompletionPolling();
   }
-
-  /* ------------------------------------------------------------ routines */
-
-  /**
-   * A record map keyed by id, NOT an array — twice over.
-   *
-   * `PersistedState.validValue` accepts a string or a record map and nothing
-   * else, so an array is rejected on load AND on the globalState shadow read:
-   * every routine would vanish on the next restart. And the write path is a
-   * three-way `mergeRecord` against the disk snapshot, which is what lets two
-   * hosts each add a routine without clobbering each other. An array would have
-   * broken that too, silently, and only for people running two editors.
-   */
+  /** * A record map keyed by id, NOT an array — twice over. */
   private loadRoutines(): Routine[] {
     return this.routineScheduler.loadRoutines();
   }
@@ -2227,27 +2136,7 @@ showQuestion: (session: Session, question: any, handlers: any) => self.showQuest
     }
     return files;
   }
-
-  /**
-   * Which provider actually answers for this role.
-   *
-   * A role read from a FILE names its provider on purpose, and swapping that
-   * silently would defeat the point of a `reviewer` pinned to a second
-   * opinion. So a project role whose provider is not usable is an error the
-   * user is told about, not a substitution.
-   *
-   * A BUILT-IN role is the opposite case: its `provider` is a placeholder
-   * (agent-roles.ts says so), because a shipped default cannot know which
-   * accounts exist on this machine. It falls back to the calling session's
-   * provider so `/agent` works on the first run of a fresh install — except
-   * where the role declares `preferDifferentProvider`, which steers it AWAY
-   * from the caller. Without that, the shipped `reviewer` defaults to the same
-   * companion that just did the work: the weakest grade of review in §5.10,
-   * wearing the label of the strongest. With only one companion connected it
-   * still runs — a fresh session holding only the briefing IS a real review —
-   * and `runAgentRole` puts a caution on the card so nobody reads it as an
-   * outside opinion.
-   */
+  /** * Which provider actually answers for this role. */
   private resolveRoleProvider(role: AgentRole, caller: Session): { provider: AcpProvider } | { error: string } {
     return this.agentAuthoring.resolveRoleProvider(role, caller);
   }
@@ -2292,30 +2181,11 @@ showQuestion: (session: Session, question: any, handlers: any) => self.showQuest
     this.host.appendLine(`[companions] /subagents\n${report}`);
     this.emit(session, { type: "hostNotice", level: "info", text: report });
   }
-
-  /**
-   * `/agent <name> <task>` — commission one named role (AP-10, crew stage 1).
-   *
-   * Host-answered end to end; the text never reaches a CLI as a prompt (see
-   * `HOST_SLASH_COMMANDS`). The role runs in its OWN session — that is the
-   * mechanism, not an implementation detail: a fresh session holding nothing
-   * but a briefing is what stretches the context, and it is also what makes a
-   * second opinion worth having.
-   *
-   * Returns true when the message was consumed here, so the caller must not
-   * fall through to an ordinary send.
-   */
+  /** * `/agent <name> <task>` — commission one named role (AP-10, crew stage 1). */
   private async handleAgentCommand(text: string, session: Session): Promise<boolean> {
     return this.agentAuthoring.handleAgentCommand(text, session);
   }
-
-  /**
-   * Start the role session, brief it, and turn its reply into a card.
-   *
-   * Everything the role does — permission cards, diffs, checkpoints, usage —
-   * runs through the ordinary machinery of a session. Nothing here bypasses a
-   * grant; a role's edit is reviewed exactly like a hand-typed one.
-   */
+  /** * Start the role session, brief it, and turn its reply into a card. */
   private async runAgentRole(
     role: AgentRole,
     brief: BriefingInput,
@@ -2734,28 +2604,7 @@ showQuestion: (session: Session, question: any, handlers: any) => self.showQuest
       callerLabel: this.sessionRunLabel(session)
     };
   }
-
-  /**
-   * Commission a role from the thread (AP-11).
-   *
-   * `confirm` is true for the BUTTON path only. A button names neither the
-   * role nor the task — the host chose both — so it shows what it decided
-   * before spending anything. A typed `/handoff reviewer` named the role and
-   * asked for it, which is the same standing `/agent` has, and `/agent` does
-   * not ask either.
-   *
-   * Decision §18.3: the confirmation carries **no cost or token figure**. The
-   * only number about money in this whole path is the exact one on the result
-   * card afterwards.
-   */
-  /**
-   * The running role, re-read AFTER an await.
-   *
-   * Through a call rather than the property directly, because an earlier
-   * `if (session.agentRun) return` narrows it to `undefined` for the rest of
-   * the function — and that narrowing stops being true the moment control
-   * yields to a dialog the user can sit on for a minute.
-   */
+  /** * The running role, re-read AFTER an await. */
   private runningRoleName(session: Session): string | undefined {
     return this.agentAuthoring.runningRoleName(session);
   }
@@ -2777,13 +2626,7 @@ showQuestion: (session: Session, question: any, handlers: any) => self.showQuest
   private async continueInFreshSession(session: Session): Promise<void> {
     return this.agentAuthoring.continueInFreshSession(session);
   }
-
-  /**
-   * `/handoff [role]` and `/second-opinion [role]` — the typed form (AP-11).
-   *
-   * Returns true when the message was consumed here, so the caller must not
-   * fall through to an ordinary send.
-   */
+  /** * `/handoff [role]` and `/second-opinion [role]` — the typed form (AP-11). */
   private async handleHandoffCommand(text: string, session: Session): Promise<boolean> {
     return this.agentAuthoring.handleHandoffCommand(text, session);
   }
@@ -2859,28 +2702,11 @@ showQuestion: (session: Session, question: any, handlers: any) => self.showQuest
    *  the next successful write, exactly like `routineError`. */
   private get agentRolesError(): AgentAuthoring["agentRolesError"] { return this.agentAuthoring.agentRolesError; }
   private set agentRolesError(value: AgentAuthoring["agentRolesError"]) { this.agentAuthoring.agentRolesError = value; }
-
-  /**
-   * The whole Agents & Crew page: roles, flows, the companions a role may be
-   * pointed at, and the parser's complaints about both file sets.
-   *
-   * Read fresh rather than cached, for the same reason `/agent` re-reads its
-   * role files: they are edited in the window that runs them, and a cache
-   * would hand the user yesterday's definition of a role they just fixed.
-   */
+  /** * The whole Agents & Crew page: roles, flows, the companions a role may be pointed at, and the parser's complaints about both file sets. */
   private buildAgentRolesMessage(): Extract<HostMsg, { type: "agentRoles" }> {
     return this.agentAuthoring.buildAgentRolesMessage();
   }
-
-  /**
-   * Which companion a BUILT-IN role would actually run on right now.
-   *
-   * Mirrors `resolveRoleProvider`'s built-in branch — including the steer away
-   * from the calling companion for a role that wants a fresh pair of eyes —
-   * without needing a session to commission it from. Falls back to the
-   * placeholder when nothing is connected, because with no usable companion
-   * there is no truer answer to give.
-   */
+  /** * Which companion a BUILT-IN role would actually run on right now. */
   private effectiveRoleProvider(role: AgentRole): AcpProvider {
     return this.agentAuthoring.effectiveRoleProvider(role);
   }
@@ -2939,19 +2765,7 @@ showQuestion: (session: Session, question: any, handlers: any) => self.showQuest
   private postAgentRoles(): void {
     return this.agentAuthoring.postAgentRoles();
   }
-
-  /**
-   * The directory one scope's files are written into.
-   *
-   * Returns undefined when the scope has no root — the only real case being
-   * `project` with no folder open, where the honest answer is "there is
-   * nowhere to put this", not a guess at a directory.
-   *
-   * Does NOT create anything: a refused draft must leave no trace, and an
-   * empty `.companions/agents/` appearing in a repo after a validation error
-   * is a change the user did not ask for. {@link companionsEnsureDir} is the
-   * half that writes, called only once a draft is known to be good.
-   */
+  /** * The directory one scope's files are written into. */
   private companionsWriteDir(scope: RoleScope, kind: "agents" | "crews"): string | undefined {
     return this.agentAuthoring.companionsWriteDir(scope, kind);
   }
@@ -2967,15 +2781,7 @@ showQuestion: (session: Session, question: any, handlers: any) => self.showQuest
   private agentRoleNamesInScope(scope: RoleScope, kind: "agents" | "crews"): string[] {
     return this.agentAuthoring.agentRoleNamesInScope(scope, kind);
   }
-
-  /**
-   * Remove the file a save has just superseded.
-   *
-   * Two cases, and missing either one makes a save look like it did nothing:
-   * a RENAME (the old name would keep answering alongside the new one) and a
-   * SCOPE MOVE (writing the global copy while the project file stays put
-   * leaves the project file winning, so the edit appears discarded).
-   */
+  /** * Remove the file a save has just superseded. */
   private dropSupersededCompanionFile(opts: {
     kind: "agents" | "crews";
     savedName: string;
@@ -3045,14 +2851,7 @@ showQuestion: (session: Session, question: any, handlers: any) => self.showQuest
   private cancelWorkflowGenerate(): void {
     return this.agentAuthoring.cancelWorkflowGenerate();
   }
-
-  /**
-   * Delete one role or flow file.
-   *
-   * For a built-in NAME this is "reset to built-in": the file goes and the
-   * shipped role comes back, which is why a missing file is a success rather
-   * than an error — the end state the user asked for already holds.
-   */
+  /** * Delete one role or flow file. */
   private handleDeleteCompanionFile(scope: RoleScope, kind: "agents" | "crews", rawName: string): void {
     return this.agentAuthoring.handleDeleteCompanionFile(scope, kind, rawName);
   }
@@ -3240,37 +3039,7 @@ showQuestion: (session: Session, question: any, handlers: any) => self.showQuest
   private emptySessionsForModelRefresh(): Session[] {
     return this.providerSession.emptySessionsForModelRefresh();
   }
-
-  /**
-   * Re-post the model catalog for a session already on screen.
-   *
-   * Connecting a second agent used to leave the picker stale until the user
-   * clicked New session — on a session that was already new. An empty
-   * conversation has nothing to protect, so its catalog is refreshed in place;
-   * one with history is left alone, because changing the model list under a
-   * live thread is a different thing entirely.
-   */
-  /**
-   * The identity frame for a conversation that is already live.
-   *
-   * Re-focusing one replays its transcript and its UI snapshot and, until
-   * 2026-09-01, stopped there. `sessionUiSnapshot` carries `modelChanged`, so
-   * the model PICKER updated — but `session` is the only frame that sets the
-   * provider, and it was never sent on this path. Switching from a Grok
-   * conversation to a live Codex one therefore left the client believing it was
-   * still on Grok: the composer said "Ask Grok", the working indicator said
-   * "grokking", the model list stayed the old session's, and steering was
-   * attempted against a CLI that has no such method (owner, from a phone,
-   * 2026-09-01 — the model picker showing the right model while everything
-   * around it showed the wrong agent is exactly this frame's absence).
-   *
-   * The same omission the `sessionName` note in focusSession records, one field
-   * over: send the small identity frame the client needs, rather than rebuild a
-   * catalog to carry it.
-   *
-   * `newSession: false` — a re-focus is not a new conversation, matching what
-   * startSession passes for a resume.
-   */
+  /** * The identity frame for a conversation that is already live. */
   private sessionIdentityFrame(session: Session): HostMsg | undefined {
     return this.sessionCatalog.sessionIdentityFrame(session);
   }
@@ -3288,163 +3057,7 @@ showQuestion: (session: Session, question: any, handlers: any) => self.showQuest
   }
 
   resolveWebviewView(view: HostWebviewView): void {
-    this.view = view;
-    // Assigning html boots a new renderer. The `local` cache entry belonged
-    // to the previous JS state and must not suppress the next identical frame.
-    this.forgetPostedVoiceConfigured("local");
-    view.webview.options = {
-      enableScripts: true,
-      // Extension assets keep extensionUri identity (vscode-remote on remote hosts).
-      // Staging + grok home are genuinely local disk paths → Uri.file.
-      localResourceRoots: this.chatLocalResourceRoots()
-    };
-    view.webview.html = this.getHtml(view.webview);
-    // Message handlers run async; without this catch a throw (e.g. an fs error
-    // in an image-attach path) becomes a silent unhandled rejection and the
-    // user's action just... does nothing.
-    view.webview.onDidReceiveMessage((raw) => {
-      const m = raw as WebviewMsg;
-      void this.onMessage(m).catch((e) => {
-        const msg = (e as Error)?.message ?? String(e);
-        this.host.appendLine(`[webview] ${m.type} failed: ${msg}`);
-        void this.host.showErrorMessage(`Grok: ${m.type} failed — ${msg}`);
-      });
-    });
-    this.restorePersistedDraft(this.focused);
-    this.watchActiveEditor();
-    // Periodic idle-TTL sweep over the live-session pool (the LRU cap is enforced
-    // eagerly on each new start; this catches sessions that simply went stale).
-    if (!this.reaper) {
-      this.reaper = setInterval(() => {
-        this.reapPool();
-      }, GrokSidebar.REAP_INTERVAL_MS);
-    }
-    // Re-tell the webview whether voice is set up when the relevant settings
-    // change, so the mic button's "needs setup" hint updates without a reload.
-    this.configWatcher?.dispose();
-    const configChanges = this.host.onDidChangeConfiguration((e) => {
-      if (
-        e.affectsConfiguration("grok.voiceApiKey") ||
-        e.affectsConfiguration("grok.voiceOpenAiApiKey") ||
-        e.affectsConfiguration("grok.voiceBackend") ||
-        e.affectsConfiguration("grok.ffmpegPath") ||
-        e.affectsConfiguration("grok.voiceSendPhrase") ||
-        e.affectsConfiguration("grok.voiceKeyterms")
-      ) {
-        this.postVoiceConfigured();
-      }
-      if (e.affectsConfiguration("grok.chatFontScale")) {
-        this.postFontScale();
-      }
-      if (e.affectsConfiguration("grok.showThinking")) {
-        this.postShowThinking();
-      }
-      if (e.affectsConfiguration("grok.codexCliPath")) {
-        this.codexCliPath = undefined;
-        this.postProviderState();
-      }
-      if (e.affectsConfiguration("grok.claudeCliPath")) {
-        this.claudeCliPath = undefined;
-        this.postProviderState();
-      }
-      if (e.affectsConfiguration("grok.museCliPath")) {
-        this.museCliPath = undefined;
-        this.postProviderState();
-      }
-      if (e.affectsConfiguration("grok.geminiCliPath")) {
-        this.geminiCliPath = undefined;
-        this.postProviderState();
-      }
-      if (e.affectsConfiguration("grok.expandCommandOutputs")) {
-        this.post({
-          type: "expandCommandOutputs",
-          value: this.host.getConfiguration("grok").get<boolean>("expandCommandOutputs", false)
-        });
-      }
-      if (e.affectsConfiguration("grok.steerByDefault")) {
-        this.post({
-          type: "steerByDefault",
-          value: this.host.getConfiguration("grok").get<boolean>("steerByDefault", false)
-        });
-      }
-      if (e.affectsConfiguration("grok.promptNav")) {
-        const value = this.host.getConfiguration("grok").get<boolean>("promptNav", true) !== false;
-        this.post({ type: "promptNav", value });
-        void this.settingsEditor?.webview.postMessage({ type: "promptNav", value });
-      }
-      if (e.affectsConfiguration("grok.soundNotifications")) {
-        this.post({
-          type: "soundNotifications",
-          value: this.host.getConfiguration("grok").get<boolean>("soundNotifications", false)
-        });
-      }
-      if (e.affectsConfiguration("grok.processingSound")) {
-        this.post({
-          type: "processingSound",
-          value: this.host.getConfiguration("grok").get<boolean>("processingSound", false)
-        });
-      }
-      if (e.affectsConfiguration("grok.readRepliesAloud")) {
-        this.post({
-          type: "readRepliesAloud",
-          value: this.host.getConfiguration("grok").get<boolean>("readRepliesAloud", false)
-        });
-      }
-      if (e.affectsConfiguration("grok.summarizeRepliesAloud")) {
-        this.post({
-          type: "summarizeRepliesAloud",
-          value: this.host.getConfiguration("grok").get<boolean>("summarizeRepliesAloud", true)
-        });
-      }
-      if (e.affectsConfiguration("grok.includeActiveFileByDefault")) {
-        // Apply the toggle immediately: disabling removes a visible context
-        // chip right away (not on the next editor event), enabling shows it.
-        this.refreshImplicitChip(true);
-      }
-      if (e.affectsConfiguration("grok.mentionIndexLimit")) {
-        // Drop the TTL-cached findFiles snapshot so the next `@` rebuilds with
-        // the new cap (otherwise a raise would wait up to MENTION_INDEX_TTL_MS).
-        this.mentionIndex = null;
-        this.otherCwdMentionIndexes.clear();
-      }
-      if (e.affectsConfiguration("grok.terminalShell")) {
-        this.applyTerminalShellPref();
-      }
-      if (e.affectsConfiguration("grok.telemetry.enabled")) {
-        this.post({
-          type: "telemetryEnabled",
-          value: this.host.getConfiguration("grok").get<boolean>("telemetry.enabled", true)
-        });
-      }
-      if (e.affectsConfiguration("companions.grok.autoCompactThresholdPercent")) {
-        void this.offerGrokRestartForCompactThreshold();
-      }
-      if (e.affectsConfiguration("grok.thumbsFeedback")) {
-        this.postThumbsFeedback();
-        for (const session of [this.focused, ...this.pool]) {
-          this.refreshFeedbackAvailability(session);
-        }
-      }
-    });
-    const authWatcher = this.host.createFileSystemWatcher(
-      resolveGrokHome(process.env),
-      "auth.json",
-    );
-    const refreshVoiceConfigured = () => {
-      this.postVoiceConfigured();
-      // A running CLI may still hold the previous login, so nothing is asked
-      // here: publish cleared usage now; a new process binds the new account.
-      for (const session of new Set([this.focused, ...this.pool])) {
-        if (session.subscriptionUsage && !session.subscriptionUsage.current()) {
-          this.emit(session, { type: "subscriptionUsage", windows: [] });
-        }
-      }
-    };
-    authWatcher.onDidCreate(refreshVoiceConfigured);
-    authWatcher.onDidChange(refreshVoiceConfigured);
-    authWatcher.onDidDelete(refreshVoiceConfigured);
-    this.configWatcher = disposeAll(configChanges, authWatcher);
-    this.applyTerminalShellPref();
+    return this.sidebarViewHost.resolveWebviewView(view);
   }
 
   /**
@@ -3453,41 +3066,16 @@ showQuestion: (session: Session, question: any, handlers: any) => self.showQuest
    * never chat traffic — a second `chat.js` client would double-own sessions.
    */
   resolveProjectsRailView(view: HostWebviewView): void {
-    this.projectsRail = view;
-    view.webview.options = {
-      enableScripts: true,
-      localResourceRoots: [
-        Uri.joinPath(this.context.extensionUri, "media"),
-        Uri.joinPath(this.context.extensionUri, "resources"),
-      ]
-    };
-    view.webview.html = this.getProjectsRailHtml(view.webview);
-    view.webview.onDidReceiveMessage((raw) => {
-      const m = raw as WebviewMsg;
-      void this.onProjectsRailMessage(m).catch((e) => {
-        const msg = (e as Error)?.message ?? String(e);
-        this.host.appendLine(`[projects-rail] ${m.type} failed: ${msg}`);
-        void this.host.showErrorMessage(`Grok Projects: ${m.type} failed — ${msg}`);
-      });
-    });
+    return this.sidebarViewHost.resolveProjectsRailView(view);
   }
 
   /** Drop the rail handle when the view is disposed (or re-created). */
   disposeProjectsRailView(): void {
-    this.projectsRail = undefined;
+    return this.sidebarViewHost.disposeProjectsRailView();
   }
 
   private chatLocalResourceRoots(): Uri[] {
-    return [
-      Uri.joinPath(this.context.extensionUri, "media"),
-      Uri.joinPath(this.context.extensionUri, "resources"),
-      Uri.file(this.imageStagingDir()),
-      // grok writes generated media under ~/.grok/sessions/<cwd>/<id>/{images,videos};
-      // serving it via asWebviewUri (instead of a base64 data: URI) lets the
-      // webview stream a multi-MB video from disk — see postGeneratedMedia.
-      Uri.file(resolveGrokHome()),
-      Uri.file(resolveCodexHome()),
-    ];
+    return this.sidebarViewHost.chatLocalResourceRoots();
   }
 
   /**
@@ -3496,35 +3084,12 @@ showQuestion: (session: Session, question: any, handlers: any) => self.showQuest
    * one host path for resume/pin/rename/delete.
    */
   private async onProjectsRailMessage(msg: WebviewMsg): Promise<void> {
-    if (msg.type === "ready") {
-      this.pushProjectsRailCatalog();
-      return;
-    }
-    if (!GrokSidebar.PROJECTS_RAIL_WEBVIEW_TYPES.has(msg.type)) {
-      this.host.appendLine(`[projects-rail] ignored ${msg.type}`);
-      return;
-    }
-    await this.onMessage(msg);
-    // Opening a conversation from the rail is someone saying which conversation
-    // they want to be in, so put them in it. The rail lives in its own activity
-    // bar container, so without this the chat can stay behind another view and
-    // the click looks like it did nothing.
-    //
-    // Only these two, and only from the RAIL: renaming, pinning or deleting a
-    // row is housekeeping done while looking at the list, and yanking the view
-    // out from under that would be the opposite of helpful. This handler is
-    // rail-only, so the chat asking for its own session never lands here.
-    if (msg.type === "resumeSession" || msg.type === "newSession") {
-      await this.host.revealChatView();
-    }
+    return this.sidebarViewHost.onProjectsRailMessage(msg);
   }
 
   /** Catalog snapshot for a freshly-resolved rail (or its ready handshake). */
   private pushProjectsRailCatalog(): void {
-    if (!this.projectsRail) return;
-    this.mirrorToProjectsRail(this.providerStateMessage());
-    this.postRepoCatalog();
-    this.postSessionsList();
+    return this.sidebarViewHost.pushProjectsRailCatalog();
   }
 
   /** Push the `grok.terminalShell` preference (#46) into the shared shell
@@ -3826,21 +3391,7 @@ ${detail}`,
     };
     void this.state.update(SESSION_META_KEY, next);
   }
-
-  /**
-   * Mark a conversation as used NOW, and re-push the lists that order by it.
-   *
-   * Called when a message is sent and when a session is created — the two
-   * moments a person would expect their conversation to jump to the top. The
-   * lists order by the recency clock (`updates.jsonl` mtime for grok; host
-   * `activeAt` for adapters), and grok writes that file about 2.1 seconds
-   * after a send (measured), so without this the row sits still through
-   * the whole wait and a brand-new conversation is missing entirely.
-   *
-   * Every project and every session is treated the same; there is no special
-   * case for archived, which is a client presentation concept and has no
-   * business in the activity path.
-   */
+  /** * Mark a conversation as used NOW, and re-push the lists that order by it. */
   private noteSessionActivity(session: Session): void {
     return this.sessionCatalog.noteSessionActivity(session);
   }
@@ -3873,14 +3424,7 @@ ${detail}`,
       [sid]: { ...cur, permissions }
     });
   }
-
-  /**
-   * Decide a live `session/request_permission`. The Plan bit comes from
-   * `effectivePlanActive` so a same-chunk request cannot still see Auto
-   * accept after a successful Plan RPC. Grok also refuses mutating tools
-   * through the client gate; Codex/Claude do not — their Plan is
-   * adapter-enforced, but the permission card still has to reach a human.
-   */
+  /** * Decide a live `session/request_permission`. The Plan bit comes from `effectivePlanActive` so a same-chunk request cannot still see Auto accept after a successful Plan RPC. Grok also refuses mutating tools through the client gate; Codex/Claude do not — their Plan is adapter-enforced, but the permission card still has to reach a human. */
   private handlePermissionRequest(
     session: Session,
     client: AcpClient,
@@ -4021,23 +3565,7 @@ ${detail}`,
       finishQueuedSendCommit(session, claim, false);
     }
   }
-
-  /**
-   * Steer (#52) — inject text (and attachments) into the RUNNING turn instead
-   * of waiting. Unlike a second `session/prompt` (which kills the in-flight
-   * turn), grok's `_x.ai/interject` queues into a buffer the agent drains at
-   * its next safe point, so no tool work is lost and the turn still ends
-   * normally.
-   *
-   * Images ride additive `content` blocks built by `buildPromptWithImages` —
-   * the same encoder as `session/prompt`. A CLI old enough to ignore `content`
-   * never sees a silent drop: the whole item is queued instead. File chips
-   * stay in the text block and work on that legacy wire.
-   *
-   * The queue / composer snapshot is synchronous (VS Code does not serialize
-   * async webview handlers; a following `clearQueuedSends` can race). A
-   * failure restores that snapshot rather than losing the message.
-   */
+  /** * Steer (#52) — inject text (and attachments) into the RUNNING turn instead of waiting. Unlike a second `session/prompt` (which kills the in-flight turn), grok's `_x.ai/interject` queues into a buffer the agent drains at its next safe point, so no tool work is lost and the turn still ends normally. */
   private async steerSend(
     text: string,
     session: Session = this.focused,
@@ -4305,7 +3833,7 @@ ${detail}`,
           }
         }
       }
-    } catch {}
+    } catch { }
 
     // 2. Check active editor project and open workspace folders
     try {
@@ -4326,7 +3854,7 @@ ${detail}`,
           cur = parent;
         }
       }
-    } catch {}
+    } catch { }
 
     for (const folder of this.openWorkspaceFolders()) {
       if (!pathsEqual(folder, root)) {
@@ -4335,7 +3863,7 @@ ${detail}`,
           if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
             return candidate;
           }
-        } catch {}
+        } catch { }
       }
     }
 
@@ -4538,14 +4066,7 @@ ${detail}`,
   private repoCatalog(): RepoListEntry[] {
     return this.sessionCatalog.repoCatalog();
   }
-
-  /**
-   * Project rows for the local rail (and, on desktop, for remotes attached to
-   * this host). Desktop multi-folder: only open project folders. VS Code: the
-   * full discoverRepos catalog. Archive fields are stripped when the host
-   * cannot archive ({@link Host.canArchiveRepos}) so the client hides Project
-   * Archive without an `IS_DESKTOP` flag.
-   */
+  /** * Project rows for the local rail (and, on desktop, for remotes attached to this host). Desktop multi-folder: only open project folders. VS Code: the full discoverRepos catalog. Archive fields are stripped when the host cannot archive ({@link Host.canArchiveRepos}) so the client hides Project Archive without an `IS_DESKTOP` flag. */
   private localRepoCatalogEntries(): RepoListEntry[] {
     return this.sessionCatalog.localRepoCatalogEntries();
   }
@@ -4590,35 +4111,14 @@ ${detail}`,
     const overrides = this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
     return cwdIsAuthorized(cwd, this.localTrustedSessionCwds(overrides), pathsEqual);
   }
-
-  // ---------------------------------------------------------------- AP-15 --
-  // Session type (Agent | Crew). The pure decisions live in `session-type.ts`;
-  // everything here is the plumbing that pure module deliberately refuses to
-  // own — the setting, the metadata record, the webview message.
-
-  /**
-   * What a brand-new session starts as (`companions.sessionType.default`).
-   *
-   * Guarded, and the guard is the same claim the pure fallback makes: a
-   * setting must never be able to stop a session from being created. A host
-   * that cannot answer (a harness, a configuration provider that throws) gets
-   * the default rather than an exception on the `+` button.
-   */
+  /** * What a brand-new session starts as (`companions.sessionType.default`). */
   private configuredDefaultSessionType(): SessionType {
-    try {
-      return defaultSessionTypeFromSetting(
-        this.host.getConfiguration("companions").get<string>("sessionType.default", "agent"),
-      );
-    } catch {
-      return "agent";
-    }
+    return this.sessionMetadataHost.configuredDefaultSessionType();
   }
 
   /** The stored AP-15 metadata for a session, or undefined before it has an id. */
   private sessionTypeMetaFor(session: Session): SessionTypeMeta | undefined {
-    const id = session.activeSessionId;
-    if (!id) return undefined;
-    return this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {})[id];
+    return this.sessionMetadataHost.sessionTypeMetaFor(session);
   }
 
   /**
@@ -4641,180 +4141,33 @@ ${detail}`,
 
   /** Tell the webview which control to draw. */
   private postSessionType(session: Session): void {
-    this.emit(session, {
-      type: "sessionType",
-      sessionId: session.activeSessionId ?? "",
-      sessionType: session.sessionType,
-      locked: this.sessionTypeIsLocked(session)
-    });
-    this.postSessionDelegation(session);
+    return this.sessionMetadataHost.postSessionType(session);
   }
 
   /** S-03: the composer's delegation switch, and the targets `@subagent:` offers. */
   private postSessionDelegation(session: Session): void {
-    if (session.sessionType !== "agent" || this.hiddenReasonOf(session)) {
-      this.emit(session, { type: "sessionDelegation", value: null });
-      return;
-    }
-    const meta = this.sessionTypeMetaFor(session);
-    const enabled = session.delegationOverride?.enabled ?? meta?.subagentsEnabled ?? this.subagentsEnabledGlobally();
-    const policy = session.delegationOverride?.spawnPolicy ?? meta?.spawnPolicy ?? this.companionsSetting<string>("subagents.spawnPolicy", "auto");
-    const value = !enabled ? "off" : policy === "ask" ? "ask" : policy === "auto-read-only" ? "read-only-auto" : "auto";
-    let targets: Array<{ provider: AcpProvider; name: string; eligible: boolean; reason?: string; models?: Array<{ id: string; efforts?: string[] }> }> = [];
-    let roles: Array<{ name: string; whenToUse: string }> = [];
-    try {
-      const listing = listEligibleTargets(this.eligibilityInput(session, this.currentTurnId(session)), { includeIneligible: true, expand: "all" });
-      targets = [
-        ...listing.targets.map((t) => ({
-          provider: t.provider,
-          name: t.displayName,
-          eligible: true,
-          ...(t.models ? { models: t.models.map((m) => ({ id: m.id, ...(m.efforts ? { efforts: m.efforts } : {}) })) } : {})
-        })),
-        ...listing.ineligible.map((row) => ({ provider: row.provider, name: providerDisplayName(row.provider), eligible: false, reason: row.message })),
-      ];
-      roles = this.agentRoleSet(this.sessionCwd(session)).roles.map((r) => ({ name: r.name, whenToUse: r.whenToUse }));
-    } catch { /* the switch still works without suggestions */ }
-    this.emit(session, {
-      type: "sessionDelegation",
-      value,
-      ...(enabled && session.client && session.companionsMcpInjected === false ? { needsRestart: true } : {}),
-      targets,
-      roles
-    });
+    return this.sessionMetadataHost.postSessionDelegation(session);
   }
 
   /** S-03: set this session's delegation from the composer. */
   private setSessionDelegation(session: Session, value: string): void {
-    const enabled = value !== "off";
-    const spawnPolicy = value === "ask" ? "ask" as const : value === "read-only-auto" ? "auto-read-only" as const : "auto" as const;
-    session.delegationOverride = { enabled, spawnPolicy };
-    const id = session.activeSessionId;
-    if (id) {
-      const overrides = this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
-      void this.state.update(SESSION_META_KEY, {
-        ...overrides,
-        [id]: { ...(overrides[id] ?? {}), subagentsEnabled: enabled, spawnPolicy }
-      });
-      this.sessionCache.delete(id);
-    }
-    this.postSessionDelegation(session);
+    return this.sessionMetadataHost.setSessionDelegation(session, value);
   }
-
-  /**
-   * Write the type into `grok.sessionMeta`.
-   *
-   * A no-op before the CLI has named the session: the record is keyed by the
-   * provider's session id, so there is nothing to key against yet. The runtime
-   * field on `Session` is the store until then, and this runs again the moment
-   * an id exists (ST-1).
-   */
+  /** * Write the type into `grok.sessionMeta`. */
   private persistSessionType(session: Session): void {
-    const id = session.activeSessionId;
-    if (!id) return;
-    const overrides = this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
-    const current = overrides[id] ?? {};
-    const crewRunId = session.workflowRun?.runId;
-    const workflowName = session.workflowRun?.workflowName;
-    if (
-      current.sessionType === session.sessionType
-      && current.sessionTypeLockedAt === session.sessionTypeLockedAt
-      && current.crewRunId === crewRunId
-      && current.workflowName === workflowName
-    ) {
-      return;
-    }
-    void this.state.update(SESSION_META_KEY, {
-      ...overrides,
-      [id]: {
-        ...current,
-        sessionType: session.sessionType,
-        ...(session.sessionTypeLockedAt !== undefined
-          ? { sessionTypeLockedAt: session.sessionTypeLockedAt }
-          : {}),
-        ...(crewRunId ? { crewRunId } : {}),
-        ...(workflowName ? { workflowName } : {})
-      }
-    });
-    this.sessionCache.delete(id);
+    return this.sessionMetadataHost.persistSessionType(session);
   }
-
-  /**
-   * Read the type back for a session restored from history (ST-3).
-   *
-   * A record with no `sessionType` is a session created before AP-15: it reads
-   * as a locked Agent session, and nothing is written to make that true.
-   */
+  /** * Read the type back for a session restored from history (ST-3). */
   private restoreSessionType(session: Session): void {
-    const meta = this.sessionTypeMetaFor(session);
-    session.sessionType = effectiveSessionType(meta);
-    if (typeof meta?.sessionTypeLockedAt === "number") {
-      session.sessionTypeLockedAt = meta.sessionTypeLockedAt;
-    }
-    this.postSessionType(session);
-    if (session.sessionType === "crew") this.postWorkflowList(session);
-    // S-05: this session's subagent cards come back from their run folders.
-    this.restoreSubagentCards(session);
-    if (meta?.crewRunId && !session.workflowRun) {
-      const runId = meta.crewRunId;
-      void this.restoreWorkflowRun(session, runId).catch((error) => {
-        this.host.appendLine?.(`[workflow] could not restore run ${runId}: ${(error as Error).message}`);
-      });
-    }
+    return this.sessionMetadataHost.restoreSessionType(session);
   }
-
-  /**
-   * ST-2 — the lock, at the first submitted content.
-   *
-   * Idempotent, because more than one trigger can fire for a single send
-   * (text plus chips, a voice utterance that also carries an image).
-   */
+  /** * ST-2 — the lock, at the first submitted content. */
   private lockSessionTypeNow(session: Session): void {
-    if (session.sessionTypeLockedAt !== undefined) {
-      this.persistSessionType(session);
-      return;
-    }
-    const locked = lockSessionType(
-      { sessionType: session.sessionType, sessionTypeLockedAt: session.sessionTypeLockedAt },
-      Date.now(),
-    );
-    session.sessionType = locked.sessionType ?? "agent";
-    session.sessionTypeLockedAt = locked.sessionTypeLockedAt;
-    this.persistSessionType(session);
-    this.postSessionType(session);
+    return this.sessionMetadataHost.lockSessionTypeNow(session);
   }
-
-  /**
-   * ST-1 — a pre-lock switch, or the host's refusal.
-   *
-   * The refusal is the point: §5.6 requires a forged `setSessionType` to be
-   * rejected HERE, not merely hidden in the webview, so a remote or a tampered
-   * frame cannot re-type a conversation that has already started.
-   */
+  /** * ST-1 — a pre-lock switch, or the host's refusal. */
   private setSessionType(session: Session, next: unknown): void {
-    const result = applySessionTypeSwitch(
-      { sessionType: session.sessionType, sessionTypeLockedAt: session.sessionTypeLockedAt },
-      next,
-      this.sessionHasStarted(session),
-    );
-    if (!result.ok) {
-      this.emit(session, {
-        type: "hostNotice",
-        level: "warning",
-        text: result.reason === "locked"
-          ? session.sessionType === "crew"
-            ? "This session is locked to Crew mode. Start a new session to use Agent."
-            : "This session is locked to Agent mode. Start a new session to use Crew."
-          : "Unknown session type."
-      });
-      // Re-assert the truth so a webview that drew the wrong control corrects.
-      this.postSessionType(session);
-      return;
-    }
-    session.sessionType = result.meta.sessionType ?? "agent";
-    this.persistSessionType(session);
-    this.postSessionType(session);
-    if (session.sessionType === "crew") this.postWorkflowList(session);
+    return this.sessionMetadataHost.setSessionType(session, next);
   }
 
   // ---------------------------------------------------------------- AP-16 --
@@ -5270,13 +4623,7 @@ ${detail}`,
   private sendLocalRepoSessionsPreview(cwd: string, limit?: number): void {
     return this.sessionCatalog.sendLocalRepoSessionsPreview(cwd, limit);
   }
-
-  /**
-   * Local repo selection. VS Code: history-scope only (workspace does not move).
-   * Desktop multi-folder: re-homes the active folder and conversation — same
-   * "newest real session or new" rule as {@link selectRemoteRepo}.
-   * Desktop only accepts open folders; a closed historical catalog path is refused.
-   */
+  /** * Local repo selection. VS Code: history-scope only (workspace does not move). Desktop multi-folder: re-homes the active folder and conversation — same "newest real session or new" rule as {@link selectRemoteRepo}. Desktop only accepts open folders; a closed historical catalog path is refused. */
   private async selectRepo(cwd: string): Promise<void> {
     return this.projectFolders.selectRepo(cwd);
   }
@@ -5600,22 +4947,7 @@ ${detail}`,
   ): void {
     return this.sessionCatalog.annotateWorktreeLabels(entries, overrides, workspaceCwd);
   }
-
-  /**
-   * Forward generated media (grok's `/imagine` image or `/imagine-video` video)
-   * to the webview. Remote URLs pass through as a link. File paths — how grok
-   * writes media into its session dir — are served via `asWebviewUri` when they
-   * are **trusted** generated media under the Grok home (canonical containment
-   * + sessions/…/images|videos/ shape), so big videos stream from disk.
-   *
-   * Paths outside that provenance still render via a size-capped base64 data:
-   * URI (v3.1.0 behaviour restored). Reachable only from ACP `mediaContent`
-   * (agent over stdio); the agent already has full filesystem access, so
-   * showing the picture to the same authenticated user adds no capability.
-   * Still refuse `auth.json` by name, and never weaken renderer-facing
-   * `app-resource://` registry containment.
-   * Best-effort: a failure just drops the media rather than breaking the turn.
-   */
+  /** * Forward generated media (grok's `/imagine` image or `/imagine-video` video) to the webview. Remote URLs pass through as a link. File paths — how grok writes media into its session dir — are served via `asWebviewUri` when they are **trusted** generated media under the Grok home (canonical containment + sessions/…/images|videos/ shape), so big videos stream from disk. */
   private async postGeneratedMedia(m: MediaRef, session: Session, gen: number): Promise<void> {
     return this.voiceAndMcp.postGeneratedMedia(m, session, gen);
   }
@@ -5668,7 +5000,7 @@ ${detail}`,
 
   dispose(): void {
     void this.host.setContext("grok.composerFocus", false);
-    if (this.reaper) { clearInterval(this.reaper); this.reaper = undefined; }
+    this._sidebarViewHost?.dispose();
     this._implicitContext?.dispose();
     this._routineScheduler?.dispose();
     if (this.workflowTimer) { clearInterval(this.workflowTimer); this.workflowTimer = undefined; }
@@ -5691,11 +5023,8 @@ ${detail}`,
       session.askUserToken = undefined;
       this.dropPendingQuestions(session);
     }
-    try { this.settingsEditor?.dispose(); } catch { /* tab already gone */ }
-    this.settingsEditor = undefined;
     void this.disposePool();
     this.editorWatcher?.dispose();
-    this.configWatcher?.dispose();
     this.terminalManager.disposeAll();
     this.stopVoiceInput();
     try { if (this.voiceTempPath) fs.unlinkSync(this.voiceTempPath); } catch { /* best effort */ }
@@ -5708,15 +5037,7 @@ ${detail}`,
   // ---------- internals ----------
 
   private async ensureClient(session: Session = this.focused): Promise<AcpClient | undefined> {
-    if (session.client) return session.client;
-    // After a CLI crash the focused session keeps its grok id but loses its
-    // client — respawn by RESUMING that id, so the next send continues the same
-    // conversation (a bare startSession would open a blank-context session
-    // under the old transcript). Fresh/unstarted sessions have no id and start
-    // clean as before.
-    await this.waitForSessionStart(session);
-    if (session.client) return session.client;
-    return this.startSession(session.activeSessionId, session, "ensure");
+    return this.sessionStart.ensureClient(session);
   }
 
   /** Read `grok --version` for policy checks. Returns "" on failure (logged). */
@@ -5821,7 +5142,7 @@ ${detail}`,
   ): Promise<boolean> {
     this.host.appendLine(
       `grok CLI ${fromVersion} has the stdio regression (issue #22, ${reason}); ` +
-        `pinning to ${GROK_STDIO_DOWNGRADE_TARGET}.`,
+      `pinning to ${GROK_STDIO_DOWNGRADE_TARGET}.`,
     );
     this.post({ type: "cliUpdating" });
     try {
@@ -5899,38 +5220,7 @@ ${detail}`,
    *  captures a one-paragraph summary of the conversation and re-injects it as
    *  hidden context after the restart so the new session keeps the thread. */
   private async restartSession(mode: "clear" | "summarize", session: Session = this.focused): Promise<void> {
-    if (mode === "clear") {
-      this.emit(session, { type: "clearMessages" });
-      await this.startSession(undefined, session);
-      return;
-    }
-    const currentClient = session.client;
-    this.emit(session, { type: "summarizing" });
-    const chunks: string[] = [];
-    const captureChunk = (t: string) => chunks.push(t);
-    currentClient?.on("messageChunk", captureChunk);
-    session.suppressContent = true;
-    try {
-      await currentClient?.prompt(
-        "Summarize our conversation so far in a concise paragraph. Be brief.",
-      );
-    } catch { /* best effort */ } finally {
-      currentClient?.off("messageChunk", captureChunk);
-      session.suppressContent = false;
-    }
-    const summary = chunks.join("").trim();
-
-    await this.startSession(undefined, session); // resets suppressContent
-
-    if (summary && session.client) {
-      this.emit(session, { type: "sessionContext" });
-      session.suppressContent = true;
-      try {
-        await session.client.prompt(`[Context from previous session]\n${summary}`);
-      } catch { /* best effort */ } finally {
-        session.suppressContent = false;
-      }
-    }
+    return this.sessionStart.restartSession(mode, session);
   }
 
   /** A model/effort switch on an empty session (no real conversation) restarts it with a new
@@ -6252,23 +5542,7 @@ ${detail}`,
   ): GrokSessionsListMessage {
     return this.sessionCatalog.buildGrokSessionsList(cwd, opts, activeId);
   }
-
-  /** Synthesize a list entry for a live session grok hasn't written a `summary.json` for yet (a
-   *  brand-new one). The disk-scan index can't see it, so without this the active row would vanish
-   *  from history when the popover is opened the instant a session goes live. Uses the best name we
-   *  have in memory: a generated/renamed `customName`, else the first user message, else a
-   *  placeholder — all of which the next refresh replaces with grok's own summary once it lands. */
-  /** The name this session shows in the history list — what the user actually
-   *  reads, which is what a fork should be named after (#48).
-   *
-   *  Precedence mirrors the list itself: the user's `customName` first (that IS
-   *  the row's label for any session that has one), then grok's own title, then
-   *  the first user message.
-   *
-   *  The one deliberate departure: a **legacy primer-derived** title is skipped.
-   *  Older builds sent the primer as message #1, so inheriting that invisible
-   *  internal title into a fork would propagate it forever. `cliSessionTitle`
-   *  rejects it and we fall through to something real. */
+  /** The name this session shows in the history list — what the user actually  reads, which is what a fork should be named after (#48). */
   private sessionDisplayName(session: Session): string {
     return this.sessionCatalog.sessionDisplayName(session);
   }
@@ -6438,13 +5712,15 @@ ${detail}`,
     const raw = this.voiceSetting<string>(cwd, "voiceBackend", "auto");
     const preference: SttPreference = raw === "xai" || raw === "openai" ? raw : "auto";
     const state = { provider, preference, hasXai: !!this.resolveSttApiKey(cwd, "xai"), hasOpenAi: !!this.resolveSttApiKey(cwd, "openai") };
-    return { ...state, backend: pickSttBackend(state), backends: {
-      grok: pickSttBackend({ ...state, provider: "grok" }) ?? null,
-      codex: pickSttBackend({ ...state, provider: "codex" }) ?? null,
-      claude: pickSttBackend({ ...state, provider: "claude" }) ?? null,
-      gemini: pickSttBackend({ ...state, provider: "gemini" }) ?? null,
-      muse: pickSttBackend({ ...state, provider: "muse" }) ?? null
-    } };
+    return {
+      ...state, backend: pickSttBackend(state), backends: {
+        grok: pickSttBackend({ ...state, provider: "grok" }) ?? null,
+        codex: pickSttBackend({ ...state, provider: "codex" }) ?? null,
+        claude: pickSttBackend({ ...state, provider: "claude" }) ?? null,
+        gemini: pickSttBackend({ ...state, provider: "gemini" }) ?? null,
+        muse: pickSttBackend({ ...state, provider: "muse" }) ?? null
+      }
+    };
   }
 
   /** Tell the webview whether a voice API key is resolvable, so the mic button
@@ -6502,7 +5778,7 @@ ${detail}`,
    *  account or the grok login; it's sent only as an event property so distinct
    *  installs can be counted without identifying anyone. */
   private installId(): string {
-    return this.state.getOrCreate(INSTALL_ID_KEY, randomUUID);
+    return this.sidebarTelemetryHost.installId();
   }
 
   /** Fire the single `session_start` telemetry event for the first real user
@@ -6512,81 +5788,7 @@ ${detail}`,
    *  providers or resolve credentials — those flags come from the last
    *  providerState / voiceConfigured refresh. */
   private reportSessionStart(session: Session): void {
-    // Telemetry must NEVER affect the user's turn. Build the event synchronously
-    // from already-cached session + settings + the last connection/voice snapshot
-    // (so it captures THIS session's mode/model/effort — focus could move during
-    // the turn's awaits), then fire it asynchronously off the send path and
-    // swallow any error silently. The PROD project always (dev host / local
-    // installs included — only the probe script uses DEV).
-    try {
-      const enabled = shouldSendTelemetry(
-        this.host.isTelemetryEnabled,
-        this.host.getConfiguration("grok").get<boolean>("telemetry.enabled", true),
-        this.context.extensionId === OFFICIAL_EXTENSION_ID,
-      );
-      if (!enabled) return;
-      const cfg = this.host.getConfiguration("grok");
-      const appVersion = this.context.extensionVersion;
-      const cwd = this.sessionCwd(session);
-      // Read before installId(): getOrCreate would create the id first and make
-      // every send look like a returning install. Reuse the value rather than
-      // asking twice — PersistedState.get() is a disk-backed read (refreshSync
-      // stats the file), so a second call would be a second probe on the send
-      // path for an answer we already hold. Only a genuine first run falls
-      // through to installId(), and only once ever.
-      const existingInstallId = this.state.get<string>(INSTALL_ID_KEY);
-      const returningInstall = existingInstallId !== undefined;
-      const event = buildSessionStartEvent(
-        {
-          installId: existingInstallId ?? this.installId(),
-          mode: this.displayMode(session),
-          model: session.client?.currentModelId || cfg.get<string>("defaultModel", "") || "",
-          effort: session.client?.currentReasoningEffort
-            || rememberedEffort(
-              cfg.get<EffortPrefs>("defaultEffortByProvider", {}),
-              session.provider,
-              cfg.get<string>("defaultEffort", ""),
-            ),
-          // Feature flags + host kind + connection snapshot. Config/enum values
-          // only — the same class of anonymous property as mode/model/effort,
-          // never content, paths, or free text. The builder allowlists every key.
-          showThinking: cfg.get<boolean>("showThinking", false),
-          expandToolDetails: cfg.get<boolean>("expandCommandOutputs", false),
-          steerByDefault: cfg.get<boolean>("steerByDefault", false),
-          chatFontScale: Math.round(this.chatFontScale() * 100),
-          readRepliesAloud: cfg.get<boolean>("readRepliesAloud", false),
-          soundNotifications: cfg.get<boolean>("soundNotifications", false),
-          ...sessionStartSurface(),
-          host: this.host.appName || undefined,
-          hostKind: sessionStartHostKind(this.host.canSwitchWorkspaceFolder),
-          appPurpose: this.appPurpose(),
-          voiceConfigured: this.lastVoiceConfiguredByCwd.get(normalizeRepoPath(cwd)),
-          voiceStreaming: cfg.get<boolean>("voiceStreaming", true),
-          voiceLanguageSet: !!String(this.voiceSetting(cwd, "voiceLanguage", "") || "").trim(),
-          grokConnected: this.lastProviderConnected?.grok,
-          codexConnected: this.lastProviderConnected?.codex,
-          claudeConnected: this.lastProviderConnected?.claude,
-          geminiConnected: this.lastProviderConnected?.gemini,
-          provider: session.provider,
-          connectorCount: Object.keys(this.connectedConnectorStore()).length,
-          worktree: !!session.worktree,
-          returningInstall: returningInstall
-        },
-        {
-          appVersion,
-          osName: osNameFromPlatform(process.platform),
-          osVersion: os.release(),
-          locale: this.host.language || "",
-          isDebug: !this.context.isProduction
-        },
-        randomUUID(),
-        new Date().toISOString(),
-      );
-      // Off the send path entirely; postEvent is itself non-blocking + self-guarding.
-      setImmediate(() => postEvent(APTABASE_APP_KEY_PROD, event));
-    } catch {
-      // Silent — a telemetry failure must never surface to or affect the user.
-    }
+    return this.sidebarTelemetryHost.reportSessionStart(session);
   }
 
   private rememberVoiceConfigured(cwd: string, value: boolean): void {
@@ -6933,13 +6135,7 @@ ${detail}`,
     }
     return Uri.joinPath(dir, `${stem}-${Date.now()}${ext}`);
   }
-
-  /** Track an in-flight attachment-staging op (paste / drop / pick). Message
-   *  ordering only guarantees an op posted before send has STARTED handling —
-   *  its fs awaits can still be mid-flight when handleSend runs (VS Code does
-   *  not serialize async onDidReceiveMessage handlers), so handleSend settles
-   *  this set before snapshotting chips: the chip must make THIS send, not the
-   *  next one. */
+  /** Track an in-flight attachment-staging op (paste / drop / pick). Message  ordering only guarantees an op posted before send has STARTED handling —  its fs awaits can still be mid-flight when handleSend runs (VS Code does  not serialize async onDidReceiveMessage handlers), so handleSend settles  this set before snapshotting chips: the chip must make THIS send, not the  next one. */
   private trackAttach(op: Promise<unknown>): Promise<void> {
     return this.fileUploadHost.trackAttach(op);
   }
@@ -7096,45 +6292,7 @@ ${detail}`,
   }
 
   private async recoverUnansweredCancel(session: Session, token: object): Promise<void> {
-    // Nothing to recover if the client is already gone — something else tore it
-    // down (a crash, a removed worktree), and respawning here would resurrect a
-    // session that was deliberately ended, possibly against a cwd that no longer
-    // exists. Belt to the generation check: whoever disposes a client is
-    // expected to invalidate the turn, and this survives one that forgets.
-    if (!session.client) {
-      endTurn(session, token);
-      return;
-    }
-    this.host.appendLine("[turn] cancel went unanswered; restarting this session's CLI");
-    // Said BEFORE the restart, deliberately. startSession unlocks the composer
-    // and flushes any queued sends itself, so a notice emitted afterwards could
-    // land behind that queued turn's userMessage/agentStart — reading as if the
-    // new turn had failed, and clearing the busy state of a turn that had only
-    // just begun. Live-only as a consequence (the restart clears the buffer);
-    // the conversation itself is reloaded from disk intact.
-    session.staleSendReported = true;
-    this.emit(session, {
-      type: "agentError",
-      text: "Stopped. The agent didn't answer the stop request, so its process is being restarted. This conversation is intact.",
-      ...this.turnEndFields(session, "cancelled")
-    });
-    const client = await this.startSession(session.activeSessionId, session);
-    // Another restart can overtake this one while it is starting. Then the
-    // session belongs to that one, and nothing here has anything to say about
-    // it — least of all an error.
-    if (session.client && session.client !== client) return;
-    if (!session.client) {
-      // startSession clears the token on its way through, but it can fail before
-      // reaching that; either way this session must not be left pinned mid-turn.
-      endTurn(session, token);
-      this.emit(session, {
-        type: "agentError",
-        text: "The agent's process couldn't be restarted. Send again to start it."
-      });
-      this.setStatus(session, "error");
-    }
-    // A successful restart has already cleared the token, unlocked the composer
-    // and flushed anything queued. There is nothing left to do here.
+    return this.turnEdit.recoverUnansweredCancel(session, token);
   }
 
   /** A send that raced into a running turn (desk↔remote co-attach: the other
@@ -7157,22 +6315,7 @@ ${detail}`,
     bare: boolean,
     chips: ContextChip[] = explicitVisibleChips(session.chips),
   ): void {
-    if (bare) {
-      this.emit(session, {
-        type: "error",
-        text: "Grok is mid-turn — that command was not run. Try again when the turn finishes."
-      });
-      return;
-    }
-    if (!text.trim() && !chips.length) return;
-    session.queuedSends = enqueueQueuedSend(session.queuedSends, text, chips);
-    if (chips.length) {
-      session.chips = consumeChips(session.chips, chips);
-      if (session === this.focused) this.refreshImplicitChip(true);
-      else this.postChips(session);
-    }
-    this.emitQueuedSends(session);
-    void this.maybeFlushQueuedSends(session);
+    return this.turnEdit.divertRacingSend(session, text, bare, chips);
   }
 
   private async handleSend(
@@ -7196,74 +6339,21 @@ ${detail}`,
     displayText: string,
     chips: ContextChip[],
   ): boolean {
-    const code = typeof (err as { code?: unknown })?.code === "number" ? (err as { code: number }).code : undefined;
-    const kind = classifyLimitError(session.provider, errorDetail(err), code);
-    if (kind !== "rate" && kind !== "quota") return false;
-    const id = randomUUID();
-    const source = session.provider;
-    const targets = limitOfferTargets(source, this.usableProviders(), (provider) => this.measuredFreePercent(provider));
-    const recommended = recommendedLimitAction(kind, targets);
-    session.pendingLimitOffer = { id, kind, source, text: displayText, chips: chips.slice() };
-    this.emit(session, {
-      type: "limitOffer",
-      id,
-      kind,
-      source,
-      targets,
-      title: limitOfferTitle(kind, source),
-      text: `${rateLimitNoticeText(err)} ${limitOfferHint(kind, targets.length > 0)}`,
-      recommended,
-      ...this.turnEndFields(session, "failed")
-    });
-    this.noteLiveTurnEnded(session);
-    this.setStatus(session, "error");
-    return true;
+    return this.turnEdit.surfaceLimitError(session, err, displayText, chips);
   }
 
   /** K-05: a context overflow gets its own card instead of a raw error. */
   private surfaceContextOverflow(session: Session, err: unknown, displayText: string, chips: ContextChip[]): boolean {
-    if (!isContextOverflowError(errorDetail(err))) return false;
-    const id = randomUUID();
-    session.pendingOverflow = { id, text: displayText, chips: chips.slice() };
-    this.host.appendLine(`[context] overflow: ${errorDetail(err)}`);
-    this.emit(session, {
-      type: "contextOverflow",
-      id,
-      text: CONTEXT_OVERFLOW_TEXT,
-      canCompact: providerCapability(session.provider, "manualCompact").state !== "no",
-      ...this.turnEndFields(session, "failed")
-    });
-    this.noteLiveTurnEnded(session);
-    this.setStatus(session, "error");
-    return true;
+    return this.turnEdit.surfaceContextOverflow(session, err, displayText, chips);
   }
 
   private async answerContextOverflow(
     session: Session,
     msg: { id: string; action: "compact-retry" | "fresh" | "dismiss" },
   ): Promise<void> {
-    const pending = session.pendingOverflow;
-    if (!pending || pending.id !== msg.id) return;
-    session.pendingOverflow = undefined;
-    if (msg.action === "fresh") {
-      await this.continueInFreshSession(session);
-      return;
-    }
-    if (msg.action !== "compact-retry") return;
-    // One attempt: compact, then the lost message once more. A second
-    // overflow shows the card again; nothing loops on its own.
-    await this.handleSend("/compact", true, session);
-    if (session.status === "error") return;
-    session.chips = [...pending.chips, ...session.chips];
-    await this.handleSend(pending.text, false, session);
+    return this.turnEdit.answerContextOverflow(session, msg);
   }
-
-  /**
-   * User picked an action on the limit card. Continue rebinds this session to
-   * a *different* provider (same-account models are not targets) and resends
-   * the failed prompt there. Wait resends to the current provider only because
-   * the person asked — never automatically. Every switch is a transcript line.
-   */
+  /** * User picked an action on the limit card. Continue rebinds this session to a *different* provider (same-account models are not targets) and resends the failed prompt there. Wait resends to the current provider only because the person asked — never automatically. Every switch is a transcript line. */
   private async answerLimitOffer(
     session: Session,
     msg: { id: string; action: "continue" | "retry" | "dismiss"; target?: AcpProvider },
@@ -7328,25 +6418,7 @@ ${detail}`,
     // and pin invalidate here).
     this.sessionCache.delete(sid);
   }
-
-  /**
-   * The user has opened the host's move-view picker — from the gear, the palette
-   * command, or the empty-state hint's own link. Retires that hint for good.
-   *
-   * The single place both routes record it, and it does two things because one
-   * is not enough: persist, for future windows, and tell the LIVE webview, for
-   * this one. `initialState` is not re-sent on a session swap, so a webview
-   * holding a stale true would rebuild the hint the user had already acted on —
-   * and if they open the picker and cancel, no rebuild happens to refresh it.
-   *
-   * Called BEFORE the move, never after: relocating a view makes the host tear
-   * the webview down and rebuild it, and the rebuilt one asks for capabilities
-   * immediately, so a write afterwards loses that race.
-   *
-   * Recorded for ANY destination, including one the user then cancels out of:
-   * they have found the control, which is all the hint was for. It never affects
-   * where the view goes — that decision takes no account of it.
-   */
+  /** * The user has opened the host's move-view picker — from the gear, the palette command, or the empty-state hint's own link. Retires that hint for good. */
   async retireMoveViewHint(): Promise<void> {
     return this.sidebarStateHost.retireMoveViewHint();
   }
@@ -7521,34 +6593,6 @@ ${detail}`,
     "githubState",
     "githubRepos",
     "appPurpose",
-  ]);
-  /** Webview→host actions the rail may post. Closed set — never send/cancel/etc. */
-  private static readonly PROJECTS_RAIL_WEBVIEW_TYPES = new Set<WebviewMsg["type"]>([
-    "createProject",
-    "cloneProject",
-    "setupGithubCli",
-    "listGithubRepos",
-    // The rail renders the same clone form as the chat, so it can reach the
-    // token paste too.
-    "githubLoginWithToken",
-    "listSessions",
-    "listRepoSessions",
-    "selectRepo",
-    "resumeSession",
-    "newSession",
-    "toggleSessionPin",
-    "renameSession",
-    "deleteSession",
-    "clearAllSessions",
-    "setRepoArchived",
-    "setRepoColor",
-    // Host-local by construction: it opens a native folder dialog. Reachable
-    // from the rail because that is where the project list lives; a remote
-    // cannot send it (remote-policy classifies it `host-local`).
-    "addProjectFolder",
-    // The way back out. Same host-local classification — on VS Code it forgets
-    // a hand-added folder, which is the only revocation that surface has.
-    "removeProjectFolder",
   ]);
   private post(message: HostMsg): void {
     if (this.focused.suppressContent && GrokSidebar.SUPPRESS_TYPES.has(message.type)) return;
@@ -8011,42 +7055,11 @@ ${detail}`,
     this.pushDot(session);
     if (status === "done" || status === "error") this.refreshSessionOrderAfterTurn(session);
   }
-
-  /**
-   * Re-push the project preview a finished turn just reordered.
-   *
-   * The rail's Recent group ranks by `updatedAt`, which is the session FILE's
-   * mtime — and the extension is not what writes that file, the agent process
-   * is. So rename and delete refresh (we do those) while sending a message did
-   * not: nothing in here knew the row had moved. Recent stayed on whatever
-   * order it was built with until something unrelated happened to redraw it.
-   *
-   * The turn ending is the closest signal we own. The agent writes the
-   * transcript around the same moment, not necessarily before, so this reads a
-   * beat later — and once more after that, because a single delay is a guess
-   * about someone else's disk write. Two cheap directory scans, only when a
-   * turn actually ended.
-   */
+  /** * Re-push the project preview a finished turn just reordered. */
   private refreshSessionOrderAfterTurn(session: Session): void {
     return this.sessionCatalog.refreshSessionOrderAfterTurn(session);
   }
-
-  // ---------- question cards (AP-05) ----------
-  //
-  // One card, two transports. `showQuestion` is the only place a card is
-  // raised, `answerQuestion` / `cancelQuestion` the only places one is settled,
-  // and none of them knows whether the answer will travel back over grok's ACP
-  // pipe or over the local socket to a CLI-spawned MCP server. Adding a third
-  // transport means adding a QuestionResponder, nothing here.
-
-  /**
-   * Raise a question card and take ownership of its lifetime.
-   *
-   * Arms the auto-continue timer here rather than in the webview: a webview
-   * that is closed, backgrounded or never opened must not be able to swallow a
-   * question, and a person who closes the tab must not thereby extend the
-   * deadline on a run they left behind.
-   */
+  /** * Raise a question card and take ownership of its lifetime. */
   showQuestion(session: Session, req: QuestionRequest, responder: QuestionResponder): void {
     return this.questionHost.showQuestion(session, req, responder);
   }
@@ -8144,16 +7157,7 @@ ${detail}`,
   ): Promise<boolean> {
     return this.sessionCatalog.discardAdapterEmptySession(provider, id, cwd, liveClient);
   }
-
-  /**
-   * Fold a finished turn's billing into the session total and push both to the
-   * webview (#53). Skips turns whose usage isn't a real measurement — a
-   * `/compact` replays the previous turn's numbers verbatim, so counting them
-   * would double-bill that turn into the total on every compact.
-   *
-   * The total is persisted per session id because nothing on disk can rebuild
-   * it: grok reports usage per prompt and `signals.json` keeps only context size.
-   */
+  /** * Fold a finished turn's billing into the session total and push both to the webview (#53). Skips turns whose usage isn't a real measurement — a `/compact` replays the previous turn's numbers verbatim, so counting them would double-bill that turn into the total on every compact. */
   private accumulateUsage(session: Session, meta: PromptResultMeta): PromiseLike<void> | undefined {
     return this.usageHost.accumulateUsage(session, meta);
   }
@@ -8288,33 +7292,11 @@ ${detail}`,
   private async openSession(id: string, sessionCwd?: string): Promise<void> {
     return this.sessionCatalog.openSession(id, sessionCwd);
   }
-
-  /**
-   * Host-trusted directories that may hold a session catalog for local resume,
-   * list, select, and desktop file authorization.
-   *
-   * **Desktop** (`canSwitchWorkspaceFolder`): exactly the configured open
-   * folders plus worktrees authorized for sessions within them. The full
-   * historical `discoverRepos` catalog is deliberately excluded — a closed
-   * repo must not become a process cwd or widen {@link desktopAuthRoots}.
-   *
-   * **VS Code**: the full historical catalog (history can span any discovered
-   * checkout under grok home). That is the v3.1.0 behaviour and must not regress.
-   */
+  /** * Host-trusted directories that may hold a session catalog for local resume, list, select, and desktop file authorization. */
   private localTrustedSessionCwds(overrides: SessionMetaOverrides): string[] {
     return this.sessionCatalog.localTrustedSessionCwds(overrides);
   }
-
-  /**
-   * Move only the desktop view to the project represented by a resumed
-   * session. A worktree cwd is authorized for the session but is not itself an
-   * open workspace folder, so the file tree deliberately follows the
-   * worktree's owning project root instead.
-   *
-   * `openSession` already owns localWorkspaceSwitchQueue while this runs. Keep
-   * this on the exclusive path: taking the public queue wrapper here would
-   * deadlock the resume transition.
-   */
+  /** * Move only the desktop view to the project represented by a resumed session. A worktree cwd is authorized for the session but is not itself an open workspace folder, so the file tree deliberately follows the worktree's owning project root instead. */
   private async followSessionWorkspace(session: Session): Promise<void> {
     return this.sessionCatalog.followSessionWorkspace(session);
   }
@@ -8441,45 +7423,11 @@ ${detail}`,
   /**
    */
   async openSettingsEditor(category?: string): Promise<void> {
-    const targetCategory = category === "rules" ? "advanced" : category;
-    if (this.settingsEditor) {
-      this.settingsEditor.reveal();
-      if (targetCategory) {
-        void this.settingsEditor.webview.postMessage({ type: "settingsCategory", category: targetCategory });
-      }
-      return;
-    }
-    const panel = this.host.openEditorWebview({
-      viewType: "grok.settings",
-      title: "All your Companions Settings",
-      localResourceRoots: [
-        Uri.joinPath(this.context.extensionUri, "media"),
-        Uri.joinPath(this.context.extensionUri, "resources"),
-      ]
-    });
-    if (!panel) return;
-    this.settingsEditor = panel;
-    panel.onDidDispose(() => {
-      if (this.settingsEditor === panel) this.settingsEditor = undefined;
-    });
-    panel.webview.html = this.getSettingsHtml(panel.webview, {
-      category: targetCategory
-    });
-    panel.webview.onDidReceiveMessage((raw) => {
-      const msg = raw as WebviewMsg;
-      void this.onSettingsPanelMessage(msg).catch((e) => {
-        const text = (e as Error)?.message ?? String(e);
-        this.host.appendLine(`[settings] ${msg.type} failed: ${text}`);
-      });
-    });
+    return this.sidebarViewHost.openSettingsEditor(category);
   }
 
   private async onSettingsPanelMessage(msg: WebviewMsg): Promise<void> {
-    if (!GrokSidebar.SETTINGS_PANEL_TYPES.has(msg.type)) {
-      this.host.appendLine(`[settings] ignored ${msg.type}`);
-      return;
-    }
-    await this.onMessage(msg);
+    return this.sidebarViewHost.onSettingsPanelMessage(msg);
   }
 
   private getSettingsHtml(
@@ -8528,6 +7476,126 @@ ${detail}`,
 
   get turnOrderTimers(): Set<NodeJS.Timeout> { return this.sessionCatalog.turnOrderTimers; }
   set turnOrderTimers(value: Set<NodeJS.Timeout>) { this.sessionCatalog.turnOrderTimers = value; }
+
+  private _sessionMetadataHost?: SessionMetadataHost;
+  get sessionMetadataHost(): SessionMetadataHost { return this._sessionMetadataHost ??= this.createSessionMetadataHost(); }
+  set sessionMetadataHost(value: SessionMetadataHost) { this._sessionMetadataHost = value; }
+  private createSessionMetadataHost(): SessionMetadataHost {
+    const self = this;
+    return new SessionMetadataHost({
+getOverride: (name) => self.sidebarTestOverride(name),
+      sidebarOps: {
+get host() { return self.host; },
+        get state() { return self.state; },
+        emit: (...args) => self.emit(...args),
+        sessionTypeIsLocked: (...args) => self.sessionTypeIsLocked(...args),
+        get sessionCache() { return self.sessionCache; },
+        postWorkflowList: (...args) => self.postWorkflowList(...args),
+        restoreSubagentCards: (...args) => self.restoreSubagentCards(...args),
+        restoreWorkflowRun: (...args) => self.restoreWorkflowRun(...args),
+        sessionHasStarted: (...args) => self.sessionHasStarted(...args),
+        hiddenReasonOf: (...args) => self.hiddenReasonOf(...args),
+        subagentsEnabledGlobally: (...args) => self.subagentsEnabledGlobally(...args),
+        companionsSetting: (...args) => self.companionsSetting(...args),
+        eligibilityInput: (...args) => self.eligibilityInput(...args),
+        currentTurnId: (...args) => self.currentTurnId(...args),
+        agentRoleSet: (...args) => self.agentRoleSet(...args),
+        sessionCwd: (...args) => self.sessionCwd(...args)
+}
+    });
+  }
+
+  private _sidebarTelemetryHost?: SidebarTelemetryHost;
+  get sidebarTelemetryHost(): SidebarTelemetryHost { return this._sidebarTelemetryHost ??= this.createSidebarTelemetryHost(); }
+  set sidebarTelemetryHost(value: SidebarTelemetryHost) { this._sidebarTelemetryHost = value; }
+  private createSidebarTelemetryHost(): SidebarTelemetryHost {
+    const self = this;
+    return new SidebarTelemetryHost({
+getOverride: (name) => self.sidebarTestOverride(name),
+      sidebarOps: {
+get host() { return self.host; },
+        get context() { return self.context; },
+        sessionCwd: (...args) => self.sessionCwd(...args),
+        get state() { return self.state; },
+        displayMode: (...args) => self.displayMode(...args),
+        chatFontScale: (...args) => self.chatFontScale(...args),
+        appPurpose: (...args) => self.appPurpose(...args),
+        get lastVoiceConfiguredByCwd() { return self.lastVoiceConfiguredByCwd; },
+        voiceSetting: (...args) => self.voiceSetting(...args),
+        get lastProviderConnected() { return self.lastProviderConnected; },
+        connectedConnectorStore: (...args) => self.connectedConnectorStore(...args)
+}
+    });
+  }
+
+  get view(): HostWebviewView | undefined { return this.sidebarViewHost.view; }
+  set view(value: HostWebviewView | undefined) { this.sidebarViewHost.view = value; }
+
+  get projectsRail(): HostWebviewView | undefined { return this.sidebarViewHost.projectsRail; }
+  set projectsRail(value: HostWebviewView | undefined) { this.sidebarViewHost.projectsRail = value; }
+
+  get settingsEditor(): HostEditorWebview | undefined { return this.sidebarViewHost.settingsEditor; }
+  set settingsEditor(value: HostEditorWebview | undefined) { this.sidebarViewHost.settingsEditor = value; }
+
+  get configWatcher(): HostDisposable | undefined { return this.sidebarViewHost.configWatcher; }
+  set configWatcher(value: HostDisposable | undefined) { this.sidebarViewHost.configWatcher = value; }
+
+  get reaper(): NodeJS.Timeout | undefined { return this.sidebarViewHost.reaper; }
+  set reaper(value: NodeJS.Timeout | undefined) { this.sidebarViewHost.reaper = value; }
+
+  private _sidebarViewHost?: SidebarViewHost;
+  get sidebarViewHost(): SidebarViewHost { return this._sidebarViewHost ??= this.createSidebarViewHost(); }
+  set sidebarViewHost(value: SidebarViewHost) { this._sidebarViewHost = value; }
+  private createSidebarViewHost(): SidebarViewHost {
+    const self = this;
+    return new SidebarViewHost({
+getOverride: (name) => self.sidebarTestOverride(name),
+      sidebarOps: {
+        state: {
+get host() { return self.host; },
+          get focused() { return self.focused; },
+          get codexCliPath() { return self.codexCliPath; },
+          set codexCliPath(value) { self.codexCliPath = value; },
+          get claudeCliPath() { return self.claudeCliPath; },
+          set claudeCliPath(value) { self.claudeCliPath = value; },
+          get museCliPath() { return self.museCliPath; },
+          set museCliPath(value) { self.museCliPath = value; },
+          get geminiCliPath() { return self.geminiCliPath; },
+          set geminiCliPath(value) { self.geminiCliPath = value; },
+          get mentionIndex() { return self.mentionIndex; },
+          set mentionIndex(value) { self.mentionIndex = value; },
+          get otherCwdMentionIndexes() { return self.otherCwdMentionIndexes; },
+          get pool() { return self.pool; },
+          get context() { return self.context; }
+}, actions: {
+forgetPostedVoiceConfigured: (...args) => self.forgetPostedVoiceConfigured(...args),
+          getHtml: (...args) => self.getHtml(...args),
+          onMessage: (...args) => self.onMessage(...args),
+          restorePersistedDraft: (...args) => self.restorePersistedDraft(...args),
+          watchActiveEditor: (...args) => self.watchActiveEditor(...args),
+          reapPool: (...args) => self.reapPool(...args),
+          postVoiceConfigured: (...args) => self.postVoiceConfigured(...args),
+          postFontScale: (...args) => self.postFontScale(...args),
+          postShowThinking: (...args) => self.postShowThinking(...args),
+          postProviderState: (...args) => self.postProviderState(...args),
+          post: (...args) => self.post(...args),
+          refreshImplicitChip: (...args) => self.refreshImplicitChip(...args),
+          applyTerminalShellPref: (...args) => self.applyTerminalShellPref(...args),
+          offerGrokRestartForCompactThreshold: (...args) => self.offerGrokRestartForCompactThreshold(...args),
+          postThumbsFeedback: (...args) => self.postThumbsFeedback(...args),
+          refreshFeedbackAvailability: (...args) => self.refreshFeedbackAvailability(...args),
+          emit: (...args) => self.emit(...args),
+          getProjectsRailHtml: (...args) => self.getProjectsRailHtml(...args),
+          imageStagingDir: (...args) => self.imageStagingDir(...args),
+          mirrorToProjectsRail: (...args) => self.mirrorToProjectsRail(...args),
+          providerStateMessage: (...args) => self.providerStateMessage(...args),
+          postRepoCatalog: (...args) => self.postRepoCatalog(...args),
+          postSessionsList: (...args) => self.postSessionsList(...args),
+          getSettingsHtml: (...args) => self.getSettingsHtml(...args)
+}
+      }
+    });
+  }
 }
 
 /**

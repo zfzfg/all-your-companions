@@ -1,3 +1,35 @@
+import { explicitVisibleChips } from "./queued-send";
+import { OpenClock } from "./open-timing";
+import { randomUUID } from "node:crypto";
+import {
+  classifyLimitError,
+  CONTEXT_OVERFLOW_TEXT,
+  isContextOverflowError,
+  limitOfferHint,
+  limitOfferTitle,
+  recommendedLimitAction
+} from "./limit-errors";
+import { rateLimitNoticeText, type TurnEndStatus } from "./acp-dispatch";
+import { SessionStartIntent, SessionStatus } from "./session";
+import { providerCapability } from "./provider-capabilities";
+export interface TurnEditSidebarOps {
+  readonly host: Host;
+  emit: (session: Session, message: HostMsg) => void;
+  turnEndFields: (session: Session, status: TurnEndStatus) => { status: TurnEndStatus; durationMs?: number; children?: string; };
+  startSession: (resumeId?: string, target?: Session, intent?: SessionStartIntent, clock?: OpenClock) => Promise<AcpClient | undefined>;
+  setStatus: (session: Session, status: SessionStatus) => void;
+  readonly focused: Session;
+  refreshImplicitChip: (forcePost?: boolean) => void;
+  postChips: (session?: Session) => void;
+  emitQueuedSends: (session: Session) => void;
+  maybeFlushQueuedSends: (session: Session) => Promise<void>;
+  usableProviders: () => AcpProvider[];
+  measuredFreePercent: (provider: AcpProvider) => number | undefined;
+  noteLiveTurnEnded: (session: Session) => void;
+  continueInFreshSession: (session: Session) => Promise<void>;
+  handleSend: (text: string, bare?: boolean, target?: Session, queuedSendCommit?: { text: string; items: QueuedSendEntry[]; }, submissionId?: string) => Promise<void>;
+}
+
 /**
  * Turn editing, steering, rewinding, forking, turn feedback, and auth recovery.
  * Extracted from GrokSidebar (W-15 Schritt S2).
@@ -15,20 +47,17 @@ import {
   Session,
   beginTurn,
   endTurn,
-  turnIsInFlight,
+  turnIsInFlight
 } from "./session";
 import { SESSION_META_KEY } from "./worktree-host";
-import {
-  forkDisplayName,
-  type SessionMetaOverrides,
-} from "./sessions";
+import { forkDisplayName, type SessionMetaOverrides } from "./sessions";
 import { forkedSessionTypeMeta } from "./session-type";
 import { matchSlashCommand } from "./slash-filter";
 import {
   buildPromptWithImages,
   buildQueuedPromptWithImages,
   type PromptImageInput,
-  type QueuedPromptContribution,
+  type QueuedPromptContribution
 } from "./prompt-builder";
 import {
   cloneChipForQueue,
@@ -38,12 +67,9 @@ import {
   queuedSendsText,
   restoreQueuedChips,
   chipsForQueueSend,
-  type QueuedSendEntry,
+  type QueuedSendEntry
 } from "./queued-send";
-import {
-  isThumbsRating,
-  feedbackClientType,
-} from "./feedback";
+import { isThumbsRating, feedbackClientType } from "./feedback";
 import {
   formatRewindPointDetail,
   formatRewindPointLabel,
@@ -55,19 +81,16 @@ import {
   survivingUserMessagesAfterRewind,
   rewindConfirmMessage,
   selectableRewindPoints,
-  userFacingRewindPoints,
+  userFacingRewindPoints
 } from "./rewind";
-import {
-  limitOfferTargets,
-  switchTranscriptLine,
-} from "./limit-errors";
+import { limitOfferTargets, switchTranscriptLine } from "./limit-errors";
 import { beginAuthRecovery } from "./auth-recovery";
 import {
   errorDetail,
   isCredentialError,
   isAuthErrorText,
   turnStatusFromPromptResult,
-  promptErrorText,
+  promptErrorText
 } from "./acp-dispatch";
 
 export interface TurnEditSteerOps {
@@ -113,7 +136,6 @@ export interface TurnEditAuthLimitOps {
   noteLiveTurnEnded(session: Session): void;
   maybeGenerateTitle(session: Session): void;
   postSessionName(session: Session): void;
-  surfaceLimitError(session: Session, err: any, text: string, chips: ContextChip[]): boolean;
   onboardingForSession(session: Session): any;
 }
 
@@ -140,10 +162,12 @@ export interface TurnEditDeps {
   rewindOps: TurnEditRewindOps;
   authLimitOps: TurnEditAuthLimitOps;
   feedbackOps: TurnEditFeedbackOps;
+
+  readonly sidebarOps: TurnEditSidebarOps;
 }
 
 export class TurnEdit {
-  constructor(private readonly deps: TurnEditDeps) {}
+  constructor(private readonly deps: TurnEditDeps) { }
 
   private get host(): Host | undefined {
     return this.deps.host;
@@ -211,10 +235,6 @@ export class TurnEdit {
 
   private onboardingForSession(session: Session): any {
     return this.deps.authLimitOps.onboardingForSession(session);
-  }
-
-  private surfaceLimitError(session: Session, err: any, text: string, chips: ContextChip[]): boolean {
-    return this.deps.authLimitOps.surfaceLimitError(session, err, text, chips);
   }
 
   /**
@@ -522,8 +542,8 @@ export class TurnEdit {
       await this.openSession(r.newSessionId, cwd);
       this.notifyUser("info",
         `Forked into "${forkName}". The original conversation is unchanged and is in your session history` +
-          (parentName ? ` as "${parentName}"` : "") +
-          ". Files on disk were not touched.",
+        (parentName ? ` as "${parentName}"` : "") +
+        ". Files on disk were not touched.",
       );
     } catch (e: any) {
       this.notifyUser("error", `Fork failed: ${e?.message ?? e}`);
@@ -763,8 +783,8 @@ export class TurnEdit {
       const reportedFiles = result.revertedFiles.length;
       this.host?.appendLine(
         `[rewind] → prompt #${result.targetPromptIndex} (mode=${result.mode}, reported_files=${reportedFiles}` +
-          (typeof userBubbleIndex === "number" ? `, bubble=${userBubbleIndex}` : "") +
-          `)`,
+        (typeof userBubbleIndex === "number" ? `, bubble=${userBubbleIndex}` : "") +
+        `)`,
       );
       const resumeId = session.activeSessionId;
       const surviving = survivingUserMessagesAfterRewind(points, target);
@@ -919,6 +939,175 @@ export class TurnEdit {
       endTurn(session, turn);
     }
     return true;
+  }
+
+
+  public async recoverUnansweredCancel(session: Session, token: object): Promise<void> {
+    const testOverride = this.deps.getOverride?.<typeof this.recoverUnansweredCancel>("recoverUnansweredCancel");
+    if (testOverride) return testOverride(session, token);
+
+    // Nothing to recover if the client is already gone — something else tore it
+    // down (a crash, a removed worktree), and respawning here would resurrect a
+    // session that was deliberately ended, possibly against a cwd that no longer
+    // exists. Belt to the generation check: whoever disposes a client is
+    // expected to invalidate the turn, and this survives one that forgets.
+    if (!session.client) {
+      endTurn(session, token);
+      return;
+    }
+    this.deps.sidebarOps.host.appendLine("[turn] cancel went unanswered; restarting this session's CLI");
+    // Said BEFORE the restart, deliberately. startSession unlocks the composer
+    // and flushes any queued sends itself, so a notice emitted afterwards could
+    // land behind that queued turn's userMessage/agentStart — reading as if the
+    // new turn had failed, and clearing the busy state of a turn that had only
+    // just begun. Live-only as a consequence (the restart clears the buffer);
+    // the conversation itself is reloaded from disk intact.
+    session.staleSendReported = true;
+    this.deps.sidebarOps.emit(session, {
+      type: "agentError",
+      text: "Stopped. The agent didn't answer the stop request, so its process is being restarted. This conversation is intact.",
+      ...this.deps.sidebarOps.turnEndFields(session, "cancelled")
+    });
+    const client = await this.deps.sidebarOps.startSession(session.activeSessionId, session);
+    // Another restart can overtake this one while it is starting. Then the
+    // session belongs to that one, and nothing here has anything to say about
+    // it — least of all an error.
+    if (session.client && session.client !== client) return;
+    if (!session.client) {
+      // startSession clears the token on its way through, but it can fail before
+      // reaching that; either way this session must not be left pinned mid-turn.
+      endTurn(session, token);
+      this.deps.sidebarOps.emit(session, {
+        type: "agentError",
+        text: "The agent's process couldn't be restarted. Send again to start it."
+      });
+      this.deps.sidebarOps.setStatus(session, "error");
+    }
+    // A successful restart has already cleared the token, unlocked the composer
+    // and flushed anything queued. There is nothing left to do here.
+  }
+
+  /** A send that raced into a running turn (desk↔remote co-attach: the other
+     *  view learns `busy` only after agentStart crosses the relay). Ordinary
+     *  sends join the host-owned queue — what the sender's own chat.js does
+     *  when it knows in time. Bare slash turns (/compact, /workflow …) can't be
+     *  queued (their text would corrupt the combined queued prompt) and must
+     *  not cancel the running turn either, so they are rejected visibly.
+     *
+     *  Known limitation: a raced remote send's `submissionId` is lost here.
+     *  The queue intentionally collapses contributions into one string, so
+     *  retaining one id would falsely acknowledge the others when several
+     *  views race. This can leave a refresh-correctable duplicate, not lose
+     *  delivery. Revisit when queued state can track every contribution id and
+     *  one committed message can acknowledge all of them without changing the
+     *  relay dequeue handshake. */
+  public divertRacingSend(
+    session: Session,
+    text: string,
+    bare: boolean,
+    chips: ContextChip[] = explicitVisibleChips(session.chips),
+  ): void {
+    const testOverride = this.deps.getOverride?.<typeof this.divertRacingSend>("divertRacingSend");
+    if (testOverride) return testOverride(session, text, bare, chips);
+
+    if (bare) {
+      this.deps.sidebarOps.emit(session, {
+        type: "error",
+        text: "Grok is mid-turn — that command was not run. Try again when the turn finishes."
+      });
+      return;
+    }
+    if (!text.trim() && !chips.length) return;
+    session.queuedSends = enqueueQueuedSend(session.queuedSends, text, chips);
+    if (chips.length) {
+      session.chips = consumeChips(session.chips, chips);
+      if (session === this.deps.sidebarOps.focused) this.deps.sidebarOps.refreshImplicitChip(true);
+      else this.deps.sidebarOps.postChips(session);
+    }
+    this.deps.sidebarOps.emitQueuedSends(session);
+    void this.deps.sidebarOps.maybeFlushQueuedSends(session);
+  }
+
+  /**
+     * If this turn failure is a rate or quota limit, post the failover card and
+     * stash the prompt so Continue / Wait can resend it. Returns true when it
+     * handled the error (caller must not also show it, and must not resend).
+     */
+  public surfaceLimitError(
+    session: Session,
+    err: unknown,
+    displayText: string,
+    chips: ContextChip[],
+  ): boolean {
+    const testOverride = this.deps.getOverride?.<typeof this.surfaceLimitError>("surfaceLimitError");
+    if (testOverride) return testOverride(session, err, displayText, chips);
+
+    const code = typeof (err as { code?: unknown })?.code === "number" ? (err as { code: number }).code : undefined;
+    const kind = classifyLimitError(session.provider, errorDetail(err), code);
+    if (kind !== "rate" && kind !== "quota") return false;
+    const id = randomUUID();
+    const source = session.provider;
+    const targets = limitOfferTargets(source, this.deps.sidebarOps.usableProviders(), (provider) => this.deps.sidebarOps.measuredFreePercent(provider));
+    const recommended = recommendedLimitAction(kind, targets);
+    session.pendingLimitOffer = { id, kind, source, text: displayText, chips: chips.slice() };
+    this.deps.sidebarOps.emit(session, {
+      type: "limitOffer",
+      id,
+      kind,
+      source,
+      targets,
+      title: limitOfferTitle(kind, source),
+      text: `${rateLimitNoticeText(err)} ${limitOfferHint(kind, targets.length > 0)}`,
+      recommended,
+      ...this.deps.sidebarOps.turnEndFields(session, "failed")
+    });
+    this.deps.sidebarOps.noteLiveTurnEnded(session);
+    this.deps.sidebarOps.setStatus(session, "error");
+    return true;
+  }
+
+  /** K-05: a context overflow gets its own card instead of a raw error. */
+  public surfaceContextOverflow(session: Session, err: unknown, displayText: string, chips: ContextChip[]): boolean {
+    const testOverride = this.deps.getOverride?.<typeof this.surfaceContextOverflow>("surfaceContextOverflow");
+    if (testOverride) return testOverride(session, err, displayText, chips);
+
+    if (!isContextOverflowError(errorDetail(err))) return false;
+    const id = randomUUID();
+    session.pendingOverflow = { id, text: displayText, chips: chips.slice() };
+    this.deps.sidebarOps.host.appendLine(`[context] overflow: ${errorDetail(err)}`);
+    this.deps.sidebarOps.emit(session, {
+      type: "contextOverflow",
+      id,
+      text: CONTEXT_OVERFLOW_TEXT,
+      canCompact: providerCapability(session.provider, "manualCompact").state !== "no",
+      ...this.deps.sidebarOps.turnEndFields(session, "failed")
+    });
+    this.deps.sidebarOps.noteLiveTurnEnded(session);
+    this.deps.sidebarOps.setStatus(session, "error");
+    return true;
+  }
+
+  public async answerContextOverflow(
+    session: Session,
+    msg: { id: string; action: "compact-retry" | "fresh" | "dismiss" },
+  ): Promise<void> {
+    const testOverride = this.deps.getOverride?.<typeof this.answerContextOverflow>("answerContextOverflow");
+    if (testOverride) return testOverride(session, msg);
+
+    const pending = session.pendingOverflow;
+    if (!pending || pending.id !== msg.id) return;
+    session.pendingOverflow = undefined;
+    if (msg.action === "fresh") {
+      await this.deps.sidebarOps.continueInFreshSession(session);
+      return;
+    }
+    if (msg.action !== "compact-retry") return;
+    // One attempt: compact, then the lost message once more. A second
+    // overflow shows the card again; nothing loops on its own.
+    await this.deps.sidebarOps.handleSend("/compact", true, session);
+    if (session.status === "error") return;
+    session.chips = [...pending.chips, ...session.chips];
+    await this.deps.sidebarOps.handleSend(pending.text, false, session);
   }
 }
 

@@ -1,3 +1,9 @@
+export interface SessionStartSidebarOps {
+  readonly focused: Session;
+  waitForSessionStart: (session: Session) => Promise<void>;
+  startSession: (resumeId?: string, target?: Session, intent?: SessionStartIntent, clock?: OpenClock) => Promise<AcpClient | undefined>;
+  emit: (session: Session, message: HostMsg) => void;
+}
 /**
  * Session lifecycle management: exclusive startup, process spawning,
  * ACP handshake, resume/load replay, and outbound send dispatch.
@@ -11,7 +17,7 @@ import {
   EffortLevel,
   ExitPlanRequest,
   PermissionRequest,
-  QuestionRequest,
+  QuestionRequest
 } from "./acp";
 import type { AcpProvider } from "./acp-backend";
 import { isAdapterProvider, supportsClientMcpServers } from "./acp-backend";
@@ -29,7 +35,7 @@ import {
   finishQueuedSendCommit,
   sessionReadyForPrompt,
   turnIsInFlight,
-  type QuestionResponder,
+  type QuestionResponder
 } from "./session";
 import type { HostMsg } from "./protocol";
 import { OpenClock } from "./open-timing";
@@ -37,7 +43,7 @@ import {
   GROK_COMPACT_ENV,
   compactEventKind,
   compactSummaryPreview,
-  normalizeCompactThreshold,
+  normalizeCompactThreshold
 } from "./grok-compaction";
 import {
   EXTENSION_HOST_SLASH_COMMANDS,
@@ -45,21 +51,21 @@ import {
   parseAgentCommand,
   parseCrewCommand,
   parseHandoffCommand,
-  parseSubagentsCommand,
+  parseSubagentsCommand
 } from "./slash-filter";
 import { applyAgentModeToHostPlan } from "./plan-gate";
 import {
   countsAsUserBubble,
   decideRestoreState,
   isInterjectionText,
-  planRestoreSource,
+  planRestoreSource
 } from "./plan-restore";
 import {
   SessionMetaOverrides,
   capAutoName,
   defaultFs,
   resolveGrokHome,
-  sessionDirFor,
+  sessionDirFor
 } from "./sessions";
 import { SESSION_META_KEY } from "./worktree-host";
 import type { TerminalManager } from "./terminal-manager";
@@ -81,17 +87,14 @@ import {
   summarizeBackgroundCommand,
   turnStatusFromPromptResult,
   type MediaRef,
-  type UpdateRoute,
+  type UpdateRoute
 } from "./acp-dispatch";
-import {
-  createMcpPrepareState,
-  prepareMcpToolCall,
-} from "./mcp-tool";
+import { createMcpPrepareState, prepareMcpToolCall } from "./mcp-tool";
 import {
   consumeChips,
   isImageChip,
   isImplicitChip,
-  type FileChip,
+  type FileChip
 } from "./chips";
 import { isFileChip, type ContextChip } from "./context-chips";
 import { explicitVisibleChips, type QueuedSendEntry } from "./queued-send";
@@ -99,20 +102,13 @@ import {
   buildPromptWithImages,
   buildQueuedPromptWithImages,
   type PromptImageInput,
-  type QueuedPromptContribution,
+  type QueuedPromptContribution
 } from "./prompt-builder";
 import { historyImagePreviews } from "./image-history";
 import { isPrimerText } from "./grok-primer";
 import { rememberedEffort, startsInYolo, type EffortPrefs } from "./mode-prefs";
-import {
-  commandsAdvertiseFeedback,
-  parseFeedbackEnabledMeta,
-} from "./feedback";
-import {
-  GROK_STDIO_DOWNGRADE_TARGET,
-  parseGrokVersion,
-  shouldReactivelyDowngrade,
-} from "./cli-locator";
+import { commandsAdvertiseFeedback, parseFeedbackEnabledMeta } from "./feedback";
+import { GROK_STDIO_DOWNGRADE_TARGET, parseGrokVersion, shouldReactivelyDowngrade } from "./cli-locator";
 import { parseRunProgressUpdate } from "./run-progress";
 import type { SubscriptionWindow } from "./subscription-usage";
 
@@ -190,7 +186,6 @@ export interface SessionStartReviewAndPlanOps {
 export interface SessionStartTurnAndSendOps {
   turnInFlight(session: Session): boolean;
   divertRacingSend(session: Session, text: string, bare: boolean, chips?: ContextChip[]): void;
-  ensureClient(session: Session): Promise<AcpClient | undefined>;
   readonly pendingAttach: Set<Promise<unknown>>;
   readImageChip(chip: FileChip, session: Session, gen: number): Promise<PromptImageInput | "gone" | "failed">;
   contextChipPayloads(chips: ContextChip[]): any;
@@ -303,12 +298,14 @@ export interface SessionStartDeps {
 
   readonly usageOps: SessionStartUsageOps;
   readonly eventOps: SessionStartEventOps;
+
+  readonly sidebarOps: SessionStartSidebarOps;
 }
 
 export class SessionStart {
   private sessionStartTails = new WeakMap<Session, Promise<void>>();
 
-  constructor(public readonly deps: SessionStartDeps) {}
+  constructor(public readonly deps: SessionStartDeps) { }
 
   private sessionStartTailMap(): WeakMap<Session, Promise<void>> {
     return this.sessionStartTails;
@@ -374,7 +371,7 @@ export class SessionStart {
     ) {
       this.deps.host.appendLine(
         `[sessions] refused startSession (cwd not authorized): ${target.cwd}` +
-          (resumeId ? ` resumeId=${resumeId}` : ""),
+        (resumeId ? ` resumeId=${resumeId}` : ""),
       );
       if (!this.deps.workspaceOps.openWorkspaceFolders().length) {
         this.deps.workspaceOps.presentEmptyProjectState(target);
@@ -1327,7 +1324,7 @@ export class SessionStart {
         toolCallId: req.toolCallId,
         answer: (answers, annotations) => client.respondQuestion(req.id, answers, annotations),
         cancel: () => client.respondQuestionCancelled(req.id),
-        abandon: () => {},
+        abandon: () => { },
       });
     });
 
@@ -1501,7 +1498,7 @@ export class SessionStart {
       return;
     }
 
-    const client = session.client ?? await this.deps.turnAndSendOps.ensureClient(session);
+    const client = session.client ?? await this.ensureClient(session);
     if (!client) return;
 
     if (!sessionReadyForPrompt(session)) {
@@ -1736,6 +1733,65 @@ export class SessionStart {
     const override = this.deps.getOverride?.<(s: Session, m: HostMsg) => void>("emit");
     if (override) return override(session, msg);
     return this.deps.emit(session, msg);
+  }
+
+
+  // ---------- internals ----------
+
+  public async ensureClient(session: Session = this.deps.sidebarOps.focused): Promise<AcpClient | undefined> {
+    const testOverride = this.deps.getOverride?.<typeof this.ensureClient>("ensureClient");
+    if (testOverride) return testOverride(session);
+
+    if (session.client) return session.client;
+    // After a CLI crash the focused session keeps its grok id but loses its
+    // client — respawn by RESUMING that id, so the next send continues the same
+    // conversation (a bare startSession would open a blank-context session
+    // under the old transcript). Fresh/unstarted sessions have no id and start
+    // clean as before.
+    await this.deps.sidebarOps.waitForSessionStart(session);
+    if (session.client) return session.client;
+    return this.deps.sidebarOps.startSession(session.activeSessionId, session, "ensure");
+  }
+
+  /** Restart the session. "clear" drops the visible history; "summarize" first
+     *  captures a one-paragraph summary of the conversation and re-injects it as
+     *  hidden context after the restart so the new session keeps the thread. */
+  public async restartSession(mode: "clear" | "summarize", session: Session = this.deps.sidebarOps.focused): Promise<void> {
+    const testOverride = this.deps.getOverride?.<typeof this.restartSession>("restartSession");
+    if (testOverride) return testOverride(mode, session);
+
+    if (mode === "clear") {
+      this.deps.sidebarOps.emit(session, { type: "clearMessages" });
+      await this.deps.sidebarOps.startSession(undefined, session);
+      return;
+    }
+    const currentClient = session.client;
+    this.deps.sidebarOps.emit(session, { type: "summarizing" });
+    const chunks: string[] = [];
+    const captureChunk = (t: string) => chunks.push(t);
+    currentClient?.on("messageChunk", captureChunk);
+    session.suppressContent = true;
+    try {
+      await currentClient?.prompt(
+        "Summarize our conversation so far in a concise paragraph. Be brief.",
+      );
+    } catch { /* best effort */ } finally {
+      currentClient?.off("messageChunk", captureChunk);
+      session.suppressContent = false;
+    }
+    const summary = chunks.join("").trim();
+
+    await this.deps.sidebarOps.startSession(undefined, session); // resets suppressContent
+
+    if (summary && session.client) {
+      this.deps.sidebarOps.emit(session, { type: "sessionContext" });
+      session.suppressContent = true;
+      try {
+        await session.client.prompt(`[Context from previous session]\n${summary}`);
+      } catch { /* best effort */ } finally {
+        session.suppressContent = false;
+      }
+    }
   }
 }
 

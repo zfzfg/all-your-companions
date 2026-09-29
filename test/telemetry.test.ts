@@ -537,14 +537,7 @@ describe("sanitizeSessionStartProps — allowlist, no paths, no free text", () =
   });
 });
 
-const SIDEBAR_SRC = readFileSync(new URL("../src/sidebar.ts", import.meta.url), "utf8").replace(/\r\n/g, "\n");
 
-function sidebarMethodBody(signature: string): string {
-  const start = SIDEBAR_SRC.indexOf(signature);
-  expect(start, `${signature} must exist`).toBeGreaterThan(-1);
-  const next = SIDEBAR_SRC.indexOf("\n  private ", start + signature.length);
-  return SIDEBAR_SRC.slice(start, next < 0 ? SIDEBAR_SRC.length : next);
-}
 
 function makeTelemetrySidebar(cwd = "/repo"): any {
   const instance = Object.create(GrokSidebar.prototype) as any;
@@ -609,7 +602,9 @@ describe("docs/privacy.md discloses every session_start prop", () => {
 
 describe("sidebar session_start wiring", () => {
   it("passes every allowed key into the payload builder from the call site", () => {
-    const body = sidebarMethodBody("private reportSessionStart(");
+    const owner = readFileSync(new URL("../src/sidebar-telemetry-host.ts", import.meta.url), "utf8");
+    const start = owner.indexOf("public reportSessionStart(");
+    const body = owner.slice(start, owner.indexOf("public installId(", start));
     for (const key of SESSION_START_ALLOWED_KEYS) {
       // Origin/device ride the sessionStartSurface spread, not a bare key.
       if (key === "sessionOrigin" || key === "clientDevice") continue;
@@ -618,12 +613,12 @@ describe("sidebar session_start wiring", () => {
     expect(body).toContain("sessionStartSurface(");
     expect(body).not.toContain("locatedProviders(");
     expect(body).not.toContain("resolveVoiceApiKey(");
-    expect(body).toContain("this.lastProviderConnected?.grok");
-    expect(body).toContain("this.lastProviderConnected?.codex");
-    expect(body).toContain("this.lastProviderConnected?.claude");
-    expect(body).toContain("this.lastVoiceConfiguredByCwd.get(");
+    expect(body).toContain("this.deps.sidebarOps.lastProviderConnected?.grok");
+    expect(body).toContain("this.deps.sidebarOps.lastProviderConnected?.codex");
+    expect(body).toContain("this.deps.sidebarOps.lastProviderConnected?.claude");
+    expect(body).toContain("this.deps.sidebarOps.lastVoiceConfiguredByCwd.get(");
     expect(body).toContain("session.provider");
-    expect(body).toContain("this.connectedConnectorStore()");
+    expect(body).toContain("this.deps.sidebarOps.connectedConnectorStore()");
     expect(body).toContain("session.worktree");
     expect(body).not.toContain("repoCatalog(");
     expect(body).not.toContain("discoverRepos(");

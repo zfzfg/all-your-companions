@@ -1,6 +1,6 @@
 const REPO_PREVIEW_SIZE = 3;
 import { gitRootForPath, type WorktreeParentRef, worktreeCwdsForRepo } from "./worktree";
-import  {
+import {
   capSessionMetaAutoNames,
   cliSessionTitle,
   fallbackName,
@@ -51,7 +51,7 @@ import { type Dot } from "./session-pool";
 import type { HostMsg } from "./protocol";
 import { OpenClock } from "./open-timing";
 import { SESSION_META_KEY } from "./worktree-host";
-import  {
+import {
   SessionListEntry,
   SessionMetaOverrides,
   RepoArchives,
@@ -75,7 +75,7 @@ import  {
   sessionDirFor
 } from "./sessions";
 import { withoutArchiveFields } from "./project-discovery";
-import  {
+import {
   adapterEntriesEligibleForClear,
   adapterListEntry,
   findCachedAdapterSession,
@@ -86,7 +86,7 @@ import  {
 } from "./provider-ui";
 import { effectiveSessionType } from "./session-type";
 import { authorizedListCwd, filterEntriesByAuthorizedCwd } from "./workspace-auth";
-import  {
+import {
   matchWorktreeForCwd,
   mergeSessionIndexes,
   normalizeFsPath,
@@ -222,7 +222,7 @@ export interface SessionCatalogDeps {
 }
 
 export class SessionCatalog {
-  constructor(private readonly deps: SessionCatalogDeps) {}
+  constructor(private readonly deps: SessionCatalogDeps) { }
 
   private allAdapterCatalogs(): Iterable<readonly SessionListEntry[]> {
     return this.deps.adapterOps.allAdapterCatalogs();
@@ -758,13 +758,13 @@ export class SessionCatalog {
     let nextOffset: number;
     if (query) {
       const all = this.readEntriesCachedMulti(
-          index.map((e: { id: string }) => e.id),
-          mtimeById,
-          cwdById,
-          overrides,
-          grokHome,
-          log,
-        )
+        index.map((e: { id: string }) => e.id),
+        mtimeById,
+        cwdById,
+        overrides,
+        grokHome,
+        log,
+      )
         .filter((e) => e.kind !== "subagent");
       all.sort((a: SessionListEntry, b: SessionListEntry) => b.updatedAt - a.updatedAt);
       const matched = all.filter(
@@ -953,9 +953,9 @@ export class SessionCatalog {
     const live = [...this.deps.getPool()].find((s) => s.activeSessionId === id);
     const localNamedCwd = requestedCwd
       ? this.resolveLocalRepoTarget(requestedCwd)?.cwd ??
-        (this.localTrustedSessionCwds(overridesNow).some((c) => pathsEqual(c, requestedCwd))
-          ? requestedCwd
-          : undefined)
+      (this.localTrustedSessionCwds(overridesNow).some((c) => pathsEqual(c, requestedCwd))
+        ? requestedCwd
+        : undefined)
       : undefined;
     const cachedAdapter = [...this.allAdapterCatalogs()]
       .flat()
@@ -1621,11 +1621,11 @@ export class SessionCatalog {
     const cwd = isAdapterProvider(fresh.provider)
       ? candidates.find((candidate) => trustedCwds.some((trusted) => pathsEqual(candidate, trusted)))
       : findSessionCatalogCwd({
-          fs: defaultFs,
-          grokHome: resolveGrokHome(process.env),
-          id,
-          candidates,
-        });
+        fs: defaultFs,
+        grokHome: resolveGrokHome(process.env),
+        id,
+        candidates,
+      });
     if (!cwd) {
       this.deps.host.appendLine(
         `[sessions] refused resumeSession (session ${id} not found under any trusted catalog cwd)`,
@@ -1668,15 +1668,15 @@ export class SessionCatalog {
   }
 
 
-/**
-   * Re-post the model catalog for a session already on screen.
-   *
-   * Connecting a second agent used to leave the picker stale until the user
-   * clicked New session — on a session that was already new. An empty
-   * conversation has nothing to protect, so its catalog is refreshed in place;
-   * one with history is left alone, because changing the model list under a
-   * live thread is a different thing entirely.
-   */
+  /**
+     * Re-post the model catalog for a session already on screen.
+     *
+     * Connecting a second agent used to leave the picker stale until the user
+     * clicked New session — on a session that was already new. An empty
+     * conversation has nothing to protect, so its catalog is refreshed in place;
+     * one with history is left alone, because changing the model list under a
+     * live thread is a different thing entirely.
+     */
   /**
    * The identity frame for a conversation that is already live.
    *
@@ -1721,11 +1721,11 @@ export class SessionCatalog {
     };
   }
 
-/** Synthesize a list entry for a live session grok hasn't written a `summary.json` for yet (a
-   *  brand-new one). The disk-scan index can't see it, so without this the active row would vanish
-   *  from history when the popover is opened the instant a session goes live. Uses the best name we
-   *  have in memory: a generated/renamed `customName`, else the first user message, else a
-   *  placeholder — all of which the next refresh replaces with grok's own summary once it lands. */
+  /** Synthesize a list entry for a live session grok hasn't written a `summary.json` for yet (a
+     *  brand-new one). The disk-scan index can't see it, so without this the active row would vanish
+     *  from history when the popover is opened the instant a session goes live. Uses the best name we
+     *  have in memory: a generated/renamed `customName`, else the first user message, else a
+     *  placeholder — all of which the next refresh replaces with grok's own summary once it lands. */
   /** The name this session shows in the history list — what the user actually
    *  reads, which is what a fork should be named after (#48).
    *
@@ -1768,9 +1768,9 @@ export class SessionCatalog {
     return fallbackName(first, Date.now());
   }
 
-/** Push the focused conversation's title independently of history pagination.
-   *  The VS Code webview must not depend on the history popover having been
-   *  opened. */
+  /** Push the focused conversation's title independently of history pagination.
+     *  The VS Code webview must not depend on the history popover having been
+     *  opened. */
   public postSessionName(session: Session, name = this.sessionDisplayName(session)): void {
     const testOverride = this.deps.getOverride?.<typeof this.postSessionName>("postSessionName");
     if (testOverride) return testOverride(session, name);
@@ -1792,7 +1792,7 @@ export class SessionCatalog {
     if (session === this.deps.sidebarOps.focused) this.deps.sidebarOps.postLocal(message);
   }
 
-public liveSessionEntry(
+  public liveSessionEntry(
     session: Session,
     id: string,
     cwd: string,
@@ -1823,11 +1823,11 @@ public liveSessionEntry(
     };
   }
 
-/**
-   * Like {@link readEntriesCached} but each id may live under a different cwd
-   * (workspace vs worktree). Groups stale ids by cwd so we still batch the
-   * disk reads per catalog.
-   */
+  /**
+     * Like {@link readEntriesCached} but each id may live under a different cwd
+     * (workspace vs worktree). Groups stale ids by cwd so we still batch the
+     * disk reads per catalog.
+     */
   public readEntriesCachedMulti(
     ids: string[],
     mtimeById: Map<string, number>,
@@ -1857,7 +1857,7 @@ public liveSessionEntry(
     return ids.map((id) => this.deps.sidebarOps.sessionCache.get(id)?.entry).filter((e): e is SessionListEntry => !!e);
   }
 
-public annotateWorktreeLabels(
+  public annotateWorktreeLabels(
     entries: SessionListEntry[],
     overrides: SessionMetaOverrides,
     workspaceCwd: string,
@@ -1882,13 +1882,13 @@ public annotateWorktreeLabels(
     }
   }
 
-/** Answer `listRepoSessions`: the newest few sessions for ONE repo, without
-   *  making it the client's selection. `cwd` is matched against the catalog the
-   *  client was already sent. Unknown and unavailable paths receive the same
-   *  coarse empty refusal, so a remote cannot use the answer to probe whether
-   *  an arbitrary path exists on the host. Both local and remote use
-   *  {@link localRepoCatalogEntries} (open folders on desktop, full catalog on
-   *  VS Code) so the preview scope cannot exceed the trust set. */
+  /** Answer `listRepoSessions`: the newest few sessions for ONE repo, without
+     *  making it the client's selection. `cwd` is matched against the catalog the
+     *  client was already sent. Unknown and unavailable paths receive the same
+     *  coarse empty refusal, so a remote cannot use the answer to probe whether
+     *  an arbitrary path exists on the host. Both local and remote use
+     *  {@link localRepoCatalogEntries} (open folders on desktop, full catalog on
+     *  VS Code) so the preview scope cannot exceed the trust set. */
   public buildRepoSessionsPreview(
     cwd: string,
     limit: number | undefined,
@@ -1926,17 +1926,17 @@ public annotateWorktreeLabels(
     };
   }
 
-public sendLocalRepoSessionsPreview(cwd: string, limit?: number): void {
+  public sendLocalRepoSessionsPreview(cwd: string, limit?: number): void {
     const testOverride = this.deps.getOverride?.<typeof this.sendLocalRepoSessionsPreview>("sendLocalRepoSessionsPreview");
     if (testOverride) return testOverride(cwd, limit);
 
     this.deps.sidebarOps.postLocal(this.buildRepoSessionsPreview(cwd, limit, this.deps.sidebarOps.focused.activeSessionId));
   }
 
-/** Pin/unpin one conversation. Stored on the session's own override entry, so
-   *  it survives a rename and travels with nothing else — `pinnedCwd` is kept
-   *  alongside because the Pinned group spans repos and has to know where to
-   *  read each session from without scanning every checkout. */
+  /** Pin/unpin one conversation. Stored on the session's own override entry, so
+     *  it survives a rename and travels with nothing else — `pinnedCwd` is kept
+     *  alongside because the Pinned group spans repos and has to know where to
+     *  read each session from without scanning every checkout. */
   public async toggleSessionPin(id: string, cwd: string | undefined, pinned: boolean): Promise<void> {
     const testOverride = this.deps.getOverride?.<typeof this.toggleSessionPin>("toggleSessionPin");
     if (testOverride) return testOverride(id, cwd, pinned);
@@ -1979,7 +1979,7 @@ public sendLocalRepoSessionsPreview(cwd: string, limit?: number): void {
     this.deps.sidebarOps.postSessionsList(); // fans out the pinned refresh too
   }
 
-public updateSessionMeta(
+  public updateSessionMeta(
     mutate: (current: SessionMetaOverrides) => SessionMetaOverrides | null,
   ): Promise<void> {
     const testOverride = this.deps.getOverride?.<typeof this.updateSessionMeta>("updateSessionMeta");
@@ -1991,15 +1991,15 @@ public updateSessionMeta(
       if (next) await this.deps.sidebarOps.state.update(SESSION_META_KEY, capSessionMetaAutoNames(next).value);
     });
     // Keep the chain alive even if one link throws, or every later write dies.
-    this.sessionMetaWrites = run.catch(() => {});
+    this.sessionMetaWrites = run.catch(() => { });
     return run;
   }
 
-/** Session catalogs to index for a repo row: the checkout itself plus the
-   *  isolated worktrees that belong to it. Worktrees are deliberately NOT repo
-   *  rows (a worktree is not a checkout you choose between, and `discoverRepos`
-   *  excludes `<grokHome>/worktrees` by path), so their sessions have to surface
-   *  under the parent — otherwise leaving a worktree session strands it. */
+  /** Session catalogs to index for a repo row: the checkout itself plus the
+     *  isolated worktrees that belong to it. Worktrees are deliberately NOT repo
+     *  rows (a worktree is not a checkout you choose between, and `discoverRepos`
+     *  excludes `<grokHome>/worktrees` by path), so their sessions have to surface
+     *  under the parent — otherwise leaving a worktree session strands it. */
   public sessionCwdsForRepo(repoCwd: string, overrides: SessionMetaOverrides): string[] {
     const testOverride = this.deps.getOverride?.<typeof this.sessionCwdsForRepo>("sessionCwdsForRepo");
     if (testOverride) return testOverride(repoCwd, overrides);
@@ -2033,8 +2033,8 @@ public updateSessionMeta(
     return cwds;
   }
 
-/** The dashboard dot for a grok-session id, from live status (if it's a live pool
-   *  member) plus the persisted unread badge (which outlives the live process). */
+  /** The dashboard dot for a grok-session id, from live status (if it's a live pool
+     *  member) plus the persisted unread badge (which outlives the live process). */
   public dotForId(id: string): Dot {
     const testOverride = this.deps.getOverride?.<typeof this.dotForId>("dotForId");
     if (testOverride) return testOverride(id);
@@ -2044,7 +2044,7 @@ public updateSessionMeta(
     return computeDot({ liveStatus: live?.status, unread: meta?.unread, unreadError: meta?.unreadError });
   }
 
-/** Persist (or clear) a session's unread badge in globalState session-meta. */
+  /** Persist (or clear) a session's unread badge in globalState session-meta. */
   public setMetaUnread(id: string | undefined, unread: boolean, error: boolean): void {
     const testOverride = this.deps.getOverride?.<typeof this.setMetaUnread>("setMetaUnread");
     if (testOverride) return testOverride(id, unread, error);
@@ -2065,7 +2065,7 @@ public updateSessionMeta(
     void this.deps.sidebarOps.state.update(SESSION_META_KEY, next);
   }
 
-/** Clear a session's unread badge (it's being opened/viewed) and refresh its dot. */
+  /** Clear a session's unread badge (it's being opened/viewed) and refresh its dot. */
   public markRead(session: Session): void {
     const testOverride = this.deps.getOverride?.<typeof this.markRead>("markRead");
     if (testOverride) return testOverride(session);
@@ -2078,20 +2078,20 @@ public updateSessionMeta(
     this.deps.sidebarOps.pushDot(session);
   }
 
-/**
-   * Mark a conversation as used NOW, and re-push the lists that order by it.
-   *
-   * Called when a message is sent and when a session is created — the two
-   * moments a person would expect their conversation to jump to the top. The
-   * lists order by the recency clock (`updates.jsonl` mtime for grok; host
-   * `activeAt` for adapters), and grok writes that file about 2.1 seconds
-   * after a send (measured), so without this the row sits still through
-   * the whole wait and a brand-new conversation is missing entirely.
-   *
-   * Every project and every session is treated the same; there is no special
-   * case for archived, which is a client presentation concept and has no
-   * business in the activity path.
-   */
+  /**
+     * Mark a conversation as used NOW, and re-push the lists that order by it.
+     *
+     * Called when a message is sent and when a session is created — the two
+     * moments a person would expect their conversation to jump to the top. The
+     * lists order by the recency clock (`updates.jsonl` mtime for grok; host
+     * `activeAt` for adapters), and grok writes that file about 2.1 seconds
+     * after a send (measured), so without this the row sits still through
+     * the whole wait and a brand-new conversation is missing entirely.
+     *
+     * Every project and every session is treated the same; there is no special
+     * case for archived, which is a client presentation concept and has no
+     * business in the activity path.
+     */
   public noteSessionActivity(session: Session): void {
     const testOverride = this.deps.getOverride?.<typeof this.noteSessionActivity>("noteSessionActivity");
     if (testOverride) return testOverride(session);
@@ -2117,21 +2117,21 @@ public updateSessionMeta(
     if (cwd) this.sendLocalRepoSessionsPreview(cwd);
   }
 
-/**
-   * Re-push the project preview a finished turn just reordered.
-   *
-   * The rail's Recent group ranks by `updatedAt`, which is the session FILE's
-   * mtime — and the extension is not what writes that file, the agent process
-   * is. So rename and delete refresh (we do those) while sending a message did
-   * not: nothing in here knew the row had moved. Recent stayed on whatever
-   * order it was built with until something unrelated happened to redraw it.
-   *
-   * The turn ending is the closest signal we own. The agent writes the
-   * transcript around the same moment, not necessarily before, so this reads a
-   * beat later — and once more after that, because a single delay is a guess
-   * about someone else's disk write. Two cheap directory scans, only when a
-   * turn actually ended.
-   */
+  /**
+     * Re-push the project preview a finished turn just reordered.
+     *
+     * The rail's Recent group ranks by `updatedAt`, which is the session FILE's
+     * mtime — and the extension is not what writes that file, the agent process
+     * is. So rename and delete refresh (we do those) while sending a message did
+     * not: nothing in here knew the row had moved. Recent stayed on whatever
+     * order it was built with until something unrelated happened to redraw it.
+     *
+     * The turn ending is the closest signal we own. The agent writes the
+     * transcript around the same moment, not necessarily before, so this reads a
+     * beat later — and once more after that, because a single delay is a guess
+     * about someone else's disk write. Two cheap directory scans, only when a
+     * turn actually ended.
+     */
   public refreshSessionOrderAfterTurn(session: Session): void {
     const testOverride = this.deps.getOverride?.<typeof this.refreshSessionOrderAfterTurn>("refreshSessionOrderAfterTurn");
     if (testOverride) return testOverride(session);
@@ -2151,8 +2151,8 @@ public updateSessionMeta(
     }
   }
 
-/** Adapter catalogs own their persistence, so abandoning an empty conversation
-   *  must use the advertised ACP delete rather than touching Grok's store. */
+  /** Adapter catalogs own their persistence, so abandoning an empty conversation
+     *  must use the advertised ACP delete rather than touching Grok's store. */
   public async discardAdapterEmptySession(
     provider: AcpProvider,
     id: string | undefined,
@@ -2204,8 +2204,8 @@ public updateSessionMeta(
     }
   }
 
-/** Retire choices superseded by transcript activity, including worktrees.
-   *  Store maintenance only, performed when publishing the catalog. */
+  /** Retire choices superseded by transcript activity, including worktrees.
+     *  Store maintenance only, performed when publishing the catalog. */
   public normalizeArchiveChoices(): void {
     const testOverride = this.deps.getOverride?.<typeof this.normalizeArchiveChoices>("normalizeArchiveChoices");
     if (testOverride) return testOverride();
@@ -2235,9 +2235,9 @@ public updateSessionMeta(
     void this.deps.sidebarOps.state.update(REPO_ARCHIVES_KEY, next);
   }
 
-public sessionMetaWrites: Promise<void> = Promise.resolve();
+  public sessionMetaWrites: Promise<void> = Promise.resolve();
 
-public turnOrderTimers = new Set<ReturnType<typeof setTimeout>>();
+  public turnOrderTimers = new Set<ReturnType<typeof setTimeout>>();
 
   dispose(): void {
     for (const timer of this.turnOrderTimers) clearTimeout(timer);
