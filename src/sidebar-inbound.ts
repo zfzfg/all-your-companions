@@ -1664,3 +1664,7 @@ export class SidebarInbound {
     await this.projectRouter.tryHandle(msg, session, attachmentOwner, messageCwd);
   }
 }
+
+export function createSidebarInbound(deps: SidebarInboundDeps): SidebarInbound {
+  return new SidebarInbound(deps);
+}

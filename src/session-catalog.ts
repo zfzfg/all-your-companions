@@ -933,10 +933,14 @@ export class SessionCatalog {
   }
 
   sessionHasLiveOwner(session: Session): boolean {
+    const override = this.deps.getOverride?.<typeof this.sessionHasLiveOwner>("sessionHasLiveOwner");
+    if (override) return override(session);
     return session === this.deps.getFocused();
   }
 
   reportProtectedSession(action: "delete" | "clear"): void {
+    const override = this.deps.getOverride?.<typeof this.reportProtectedSession>("reportProtectedSession");
+    if (override) return override(action);
     const text =
       action === "delete"
         ? "This conversation is open. Close it before deleting it."
@@ -945,6 +949,8 @@ export class SessionCatalog {
   }
 
   notifyUser(level: "info" | "warning" | "error", text: string): void {
+    const override = this.deps.getOverride?.<typeof this.notifyUser>("notifyUser");
+    if (override) return override(level, text);
     if (level === "error") void this.deps.host.showErrorMessage(text);
     else if (level === "warning") void this.deps.host.showWarningMessage(text);
     else void this.deps.host.showInformationMessage(text);
