@@ -1,7 +1,7 @@
 import { providerCapability } from "./provider-capabilities";
 import { customModelItem } from "./provider-ui";
 import { PROVIDER_CLI } from "./provider-cli";
-import { applyHostMode } from "./provider-modes";
+import { applyHostMode, autoApproveNativePlanTools } from "./provider-modes";
 import { HostMsg } from "./protocol";
 import { OpenClock } from "./open-timing";
 import { configWriteTarget, withRememberedEffort, type EffortPrefs } from "./mode-prefs";
@@ -497,7 +497,7 @@ export class ProviderSession {
       type: "planNotice",
       text:
         `${session.planModeUnavailableReason ?? "Plan mode is unavailable for this Grok CLI version."} ` +
-        "Returning to Agent mode; write and terminal actions remain blocked until the planning turn stops and Agent mode is confirmed.",
+        "Returning to Agent mode; waiting for the planning turn to stop and Agent mode to be confirmed.",
     });
 
     recovery.warningTimer = setTimeout(() => {
@@ -510,7 +510,7 @@ export class ProviderSession {
         type: "error",
         text:
           "Could not finish leaving unavailable Plan mode promptly. " +
-          "Write and terminal actions remain blocked for safety; start a new session if recovery does not complete.",
+          "Start a new session if mode recovery does not complete.",
       });
     }, 10_000);
 
@@ -534,7 +534,7 @@ export class ProviderSession {
         type: "error",
         text:
           `Could not leave unavailable Plan mode: ${e?.message ?? e}. ` +
-          "Write and terminal actions remain blocked for safety. Update Grok Build or start a new session.",
+          "Update Grok Build or start a new session.",
       });
     });
   }
@@ -574,7 +574,8 @@ export class ProviderSession {
     const override = this.deps.getOverride?.<typeof this.handlePermissionRequest>("handlePermissionRequest");
     if (override) return override(session, client, req, cwd);
 
-    const planActive = effectivePlanActive(
+    const nativePlanTools = autoApproveNativePlanTools(session.provider);
+    const planActive = !nativePlanTools && effectivePlanActive(
       client.usesClientPlanGate,
       client.planActive,
       session.planActive,
@@ -607,7 +608,7 @@ export class ProviderSession {
       return;
     }
 
-    if (!claimWarning && session.autoApprove && !planActive && !isPlanReviewPermission(req.toolCall?.kind)) {
+    if (!claimWarning && (session.autoApprove || (nativePlanTools && (client.planActive || session.planActive))) && !planActive && !isPlanReviewPermission(req.toolCall?.kind)) {
       const opt = req.options.find((o: any) => o.kind === "allow_always") ??
                   req.options.find((o: any) => o.kind === "allow_once");
       if (opt) {

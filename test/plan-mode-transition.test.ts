@@ -192,7 +192,7 @@ describe("Plan transition outcome", () => {
 });
 
 describe("Plan permission same-chunk raise", () => {
-  it("does not auto-grant a same-chunk request_permission when leaving Auto accept for Plan", async () => {
+  it("auto-grants Grok tools in native Plan even in the mode-response chunk", async () => {
     const { client, written } = clientWithFakeProc();
     const session = liveSession({ autoApprove: true, client });
     const sidebar = makeSidebar(session);
@@ -200,12 +200,7 @@ describe("Plan permission same-chunk raise", () => {
     const reply = await dispatchSetModeThenPermission(sidebar, session, client, written);
 
     expect(reply).toBeDefined();
-    expect(reply.result.outcome.optionId).not.toBe("allow-always");
-    expect(reply.result.outcome.optionId).not.toBe("allow-once");
-    expect(reply.result.outcome).toEqual({
-      outcome: "selected",
-      optionId: "reject-once",
-    });
+    expect(reply.result.outcome).toEqual({ outcome: "selected", optionId: "allow-always" });
     expect(client.planActive).toBe(true);
   });
 

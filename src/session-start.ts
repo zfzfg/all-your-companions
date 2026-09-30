@@ -2,7 +2,7 @@ import { compactNotice } from "./provider-ui";
 import { effectiveContextWindow, type ContextObservation } from "./context-budget";
 import { PROVIDER_CLI } from "./provider-cli";
 import { providerCapability } from "./provider-capabilities";
-import { applyHostMode } from "./provider-modes";
+import { applyHostMode, autoApproveNativePlanTools } from "./provider-modes";
 export interface SessionStartSidebarOps {
   readonly focused: Session;
 }
@@ -417,7 +417,7 @@ export class SessionStart {
     }
 
     const consentAt = clock.now();
-    if (providerCapability(target.provider, "clientPlanGate").state === "yes" && !(await this.deps.eventOps.confirmRepoForcedAutoApprove(this.deps.sessionCwd(target)))) {
+    if (autoApproveNativePlanTools(target.provider) && !(await this.deps.eventOps.confirmRepoForcedAutoApprove(this.deps.sessionCwd(target)))) {
       return undefined;
     }
     approveGateMs = clock.elapsed(consentAt);
@@ -480,7 +480,7 @@ export class SessionStart {
       this.deps.host.getConfiguration("grok").get<string>("defaultMode", ""),
       !!resumeId,
     );
-    const configAutoApprove = providerCapability(session.provider, "clientPlanGate").state === "yes" && this.deps.eventOps.configForcesAutoApprove(this.deps.sessionCwd(session));
+    const configAutoApprove = autoApproveNativePlanTools(session.provider) && this.deps.eventOps.configForcesAutoApprove(this.deps.sessionCwd(session));
     session.autoApprove = rememberedYolo || configAutoApprove;
     session.planActive = false;
     session.sessionPermissionRules = [];

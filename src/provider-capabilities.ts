@@ -91,8 +91,8 @@ export const PROVIDER_CAPABILITIES: Record<
     worktree: { state: "yes" },
     // Plan mode for Grok is CLI version-dependent (>= 0.2.101 required)
     planMode: { state: "probe", reason: "Checking Plan mode availability…" },
-    // Grok requires client-side fs and terminal execution gating (grok-backend.ts:13, plan-gate.ts:813)
-    clientPlanGate: { state: "yes" },
+    // Native Grok Plan instructions own tool behavior; no extension gate.
+    clientPlanGate: { state: "no", reason: "Grok Plan uses native CLI instructions and YOLO tool approval." },
     // Multimodal image input supported over ACP (prompt-builder.ts:151, chips.ts:29)
     vision: { state: "yes" },
     // Manual /compact via xAI session notifications (sidebar.ts:15589, slash-filter.ts:121)

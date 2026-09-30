@@ -1,3 +1,7 @@
+# Plan mode: native CLI instructions
+
+> **Current fork policy (2026-09-30):** Grok Plan uses the CLI’s native planning instructions and automatically approves ordinary tools like YOLO. `clientPlanGate` is disabled: delegated file writes, terminal commands, and terminal environments receive no extra Plan-only restrictions. Permission rules and child scope checks apply as in YOLO. Native plan verdicts and question cards remain interactive. The enforcement research below describes the historical policy.
+
 # Plan mode — historical failure and current enforcement
 
 > **Current status (grok 0.2.117):** the extension uses native JSON-RPC success

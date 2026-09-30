@@ -1,3 +1,4 @@
+import { autoApproveNativePlanTools } from "./provider-modes";
 import { PROVIDER_CLI } from "./provider-cli";
 import { providerCapability } from "./provider-capabilities";
 /**
@@ -991,9 +992,9 @@ export class ToolingInboundRouter {
         {
           const pending = session.pendingPermissions.get(msg.requestId);
           if (!pending || !permissionAnswerAllowed(
-            pendingPermissionOptions(pending, session.planActive),
+            pendingPermissionOptions(pending, session.planActive && !autoApproveNativePlanTools(session.provider)),
             msg.optionId,
-            session.planActive,
+            session.planActive && !autoApproveNativePlanTools(session.provider),
             pending.toolKind,
           )) break;
           const chosenKind = pending.options.find((option) => option.optionId === msg.optionId)?.kind;

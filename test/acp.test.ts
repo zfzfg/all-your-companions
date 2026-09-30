@@ -440,7 +440,7 @@ describe("AcpClient permission responses", () => {
 });
 
 describe("AcpClient Plan terminal environment", () => {
-  it("strips agent-supplied environment overrides from allowed Plan commands", async () => {
+  it("preserves native Plan terminal environment just like YOLO", async () => {
     const { client, written } = clientWithFakeProc();
     const create = vi.fn(() => ({ terminalId: "t-1" }));
     client.planActive = true;
@@ -462,6 +462,7 @@ describe("AcpClient Plan terminal environment", () => {
     expect(create).toHaveBeenCalledWith({
       command: "node --version",
       cwd: "/workspace",
+      env: [{ name: "NODE_OPTIONS", value: "--require ./evil.js" }, { name: "PATH", value: "/attacker/bin" }],
     });
     expect(JSON.parse(written[0])).toEqual({
       jsonrpc: "2.0",
@@ -486,7 +487,7 @@ describe("AcpClient Plan terminal environment", () => {
     expect(create).toHaveBeenCalledWith({ command: "custom-command", env });
   });
 
-  it("raises the Plan gate before a same-chunk terminal/create is dispatched", async () => {
+  it("allows Grok terminal execution immediately after entering native Plan", async () => {
     const { client, written } = clientWithFakeProc();
     const create = vi.fn(() => ({ terminalId: "t-1" }));
     const blocked: Array<{ kind: string; target: string }> = [];
@@ -515,8 +516,8 @@ describe("AcpClient Plan terminal environment", () => {
 
       await pending;
       expect(client.planActive).toBe(true);
-      expect(create).not.toHaveBeenCalled();
-      expect(blocked).toEqual([{ kind: "terminal", target: "rm -rf /tmp/x" }]);
+      expect(create).toHaveBeenCalledWith({ command: "rm -rf /tmp/x" });
+      expect(blocked).toEqual([]);
     } finally {
       rl.close();
       stdout.destroy();

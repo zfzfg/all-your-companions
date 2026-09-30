@@ -265,9 +265,9 @@ describe("unavailable Plan recovery", () => {
     expect(handleSend).toContain("this.deps.reviewAndPlanOps.settleUnavailablePlanTurn(session, client, gen)");
   });
 
-  it("tells the user the gate stays raised when returning to Agent fails", () => {
-    expect(recoverUnavailablePlanMode).toContain("write and terminal actions remain blocked until the planning turn stops and Agent mode is confirmed");
-    expect(recoverUnavailablePlanMode).toContain("Write and terminal actions remain blocked for safety");
+  it("reports mode recovery failure without claiming a client tool gate", () => {
+    expect(recoverUnavailablePlanMode).toContain("waiting for the planning turn to stop and Agent mode to be confirmed");
+    expect(recoverUnavailablePlanMode).toContain("Update Grok Build or start a new session");
     expect(recoverUnavailablePlanMode).toContain("Update Grok Build or start a new session");
     expect(recoverUnavailablePlanMode).toContain("Could not finish leaving unavailable Plan mode promptly");
   });

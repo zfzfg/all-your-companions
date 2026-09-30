@@ -24,3 +24,8 @@ export async function applyHostMode(
   if (client.setHostMode) return client.setHostMode(mode);
   for (const step of hostModeSequence(provider, mode)) await client.setMode(step);
 }
+
+/** Grok native Plan instructions own planning; tools use YOLO approval. */
+export function autoApproveNativePlanTools(provider: AcpProvider): boolean {
+  return provider === "grok";
+}

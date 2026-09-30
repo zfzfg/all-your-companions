@@ -220,3 +220,18 @@ describe("session grants (upstream 0a528c5)", () => {
     expect(h.replies).toEqual([]);
   });
 });
+
+describe("Grok native Plan tools", () => {
+  it.each(["edit", "execute"])("auto-approves %s without a Plan-only restriction", (kind) => {
+    const h = harness();
+    h.session.planActive = true;
+    h.client.planActive = true;
+    h.session.autoApprove = false;
+    const req = { ...EDIT, toolCall: { ...EDIT.toolCall, kind,
+      rawInput: kind === "execute" ? { command: "git remote -v; git status -sb; git log --oneline -30; git branch -vv" } : { path: "src/a.ts" },
+    } };
+    h.sidebar.handlePermissionRequest(h.session, h.client, req, "/workspace");
+    expect(h.replies).toEqual([{ id: 7, optionId: "always" }]);
+    expect(h.posted.some((m: any) => m.type === "planNotice" || m.type === "permissionRequest")).toBe(false);
+  });
+});

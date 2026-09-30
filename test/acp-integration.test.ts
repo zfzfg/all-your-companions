@@ -8,12 +8,8 @@
 //   - Plan-snoop: when grok writes plan.md (outside workspace), the host's
 //     fs/write_text_file handler must (a) allow the write and (b) emit a
 //     `planFileContent` event so the review card has content.
-//   - Workspace-write gate: when planActive is true, fs/write_text_file for a
-//     path *inside* the workspace must be refused with PLAN_BLOCKED, and the
-//     client must emit a `mutationBlocked` event so the UI can show a notice.
-//   - Terminal-create gate: when planActive is true, mutating commands (rm,
-//     npm install, etc.) must be refused at terminal/create; read-only ones
-//     (ls, grep, head, etc.) must be allowed and reach the terminal handler.
+//   - Native Plan tools: delegated workspace writes and terminal commands
+//     reach their handlers without an extra client Plan restriction.
 //   - exit_plan_mode round-trip: the host receives an `exitPlanRequest` event
 //     whose `plan` field is populated from the snooped plan.md content.
 //
@@ -364,35 +360,15 @@ describe("ACP integration (real subprocess, fake CLI)", () => {
     expect(fs.readFileSync(planPathFromEnv, "utf8")).toContain("TEST PLAN");
   });
 
-  it("gate: planActive=true blocks fs/write_text_file inside the workspace", async () => {
+  it.each([
+    ["SCENARIO_WORKSPACE_WRITE", "file.ts", "// new file"],
+    ["SCENARIO_RELATIVE_WORKSPACE_WRITE", "relative-file.ts", "// relative file"],
+  ])("native Plan permits delegated file writes: %s", async (scenario, file, content) => {
     client.planActive = true;
-    const blocked = collect<{ kind: string; target: string }>(client, "mutationBlocked");
-
-    await client.prompt("SCENARIO_WORKSPACE_WRITE");
-
-    expect(blocked).toHaveLength(1);
-    expect(blocked[0].kind).toBe("write");
-    // Normalize slashes — the fake CLI uses `+ "/"` on its end, so the path
-    // arrives as forward-slash; the host's gate works either way.
-    expect(blocked[0].target.replace(/\\/g, "/")).toBe(workspace.replace(/\\/g, "/") + "/file.ts");
-    // The fake CLI got an error reply (visible on its stderr).
-    await waitForStderr(stderr, /WRITE_RESPONSE.*"error"/);
-    expect(stderr.join("")).toMatch(/WRITE_RESPONSE.*"error"/);
-    // And no file landed on disk.
-    expect(fs.existsSync(path.join(workspace, "file.ts"))).toBe(false);
-  });
-
-  it("gate: planActive=true blocks relative fs/write_text_file paths inside the workspace", async () => {
-    client.planActive = true;
-    const blocked = collect<{ kind: string; target: string }>(client, "mutationBlocked");
-
-    await client.prompt("SCENARIO_RELATIVE_WORKSPACE_WRITE");
-
-    expect(blocked).toHaveLength(1);
-    expect(blocked[0].kind).toBe("write");
-    expect(blocked[0].target).toBe("relative-file.ts");
-    expect(stderr.join("")).toMatch(/WRITE_RESPONSE.*"error"/);
-    expect(fs.existsSync(path.join(workspace, "relative-file.ts"))).toBe(false);
+    const blocked = collect<unknown>(client, "mutationBlocked");
+    await client.prompt(scenario);
+    expect(blocked).toHaveLength(0);
+    expect(fs.readFileSync(path.join(workspace, file), "utf8")).toBe(content);
   });
 
   it("gate: planActive=false allows fs/write_text_file inside the workspace", async () => {
@@ -405,29 +381,15 @@ describe("ACP integration (real subprocess, fake CLI)", () => {
     expect(fs.readFileSync(path.join(workspace, "file.ts"), "utf8")).toBe("// new file");
   });
 
-  it("gate: planActive=true blocks terminal/create with a mutating command", async () => {
-    client.planActive = true;
-    const blocked = collect<{ kind: string; target: string }>(client, "mutationBlocked");
-
-    await client.prompt("SCENARIO_MUTATING_TERMINAL");
-
-    expect(blocked).toHaveLength(1);
-    expect(blocked[0].kind).toBe("terminal");
-    expect(blocked[0].target).toContain("rm");
-    expect((client as any).__terminalCalls()).toBe(0); // handler was never reached
-  });
-
-  it("gate: planActive=true blocks terminal/create with mutating args on an otherwise read-only head", async () => {
-    client.planActive = true;
-    const blocked = collect<{ kind: string; target: string }>(client, "mutationBlocked");
-
-    await client.prompt("SCENARIO_MUTATING_READONLY_HEAD_TERMINAL");
-
-    expect(blocked).toHaveLength(1);
-    expect(blocked[0].kind).toBe("terminal");
-    expect(blocked[0].target).toContain("sed");
-    expect((client as any).__terminalCalls()).toBe(0);
-  });
+  it.each(["SCENARIO_MUTATING_TERMINAL", "SCENARIO_MUTATING_READONLY_HEAD_TERMINAL"])(
+    "native Plan permits delegated terminal commands: %s", async (scenario) => {
+      client.planActive = true;
+      const blocked = collect<unknown>(client, "mutationBlocked");
+      await client.prompt(scenario);
+      expect(blocked).toHaveLength(0);
+      expect((client as any).__terminalCalls()).toBe(1);
+    },
+  );
 
   it("gate: planActive=true allows terminal/create with a read-only command (ls)", async () => {
     client.planActive = true;
