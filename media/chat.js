@@ -312,6 +312,7 @@
     cwd: "",
     contextWindow: undefined,
     contextObservation: undefined,
+    thresholdSource: undefined,
     usedTokens: 0,
     useCtrlEnter: false,
     // The host appends its own slash commands to every commandsUpdate.
@@ -2076,17 +2077,6 @@
       state.contextWindow > 0 ? `${approximate ? "≈ " : ""}${tok(used)} / ${tok(state.contextWindow)} (${pct}%)`
         : `${tok(used)} tokens — limit unknown`,
     );
-    if (observation) {
-      info("Source", `${observation.source || "unknown"}${observation.stale ? " (stale)" : ""}`);
-      if (observation.observedAt > 0) info("Measured", new Date(observation.observedAt).toLocaleString());
-      if (observation.documentedLimits) {
-        const apiLimit = observation.documentedLimits.inputTokenLimit || observation.documentedLimits.contextWindow;
-        if (apiLimit) info("Public API maximum", tok(apiLimit));
-      }
-      if (observation.limits && observation.limits.contextWindow && observation.limits.contextWindow !== state.contextWindow) {
-        info("Model window", tok(observation.limits.contextWindow));
-      }
-    }
 
     // Compact sits directly under the context line — it is the action ON that
     // number, so it belongs to it, not stranded below the billing sections.
@@ -2114,29 +2104,35 @@
     }
     contextPopover.appendChild(act);
 
+    info("Actual context limit", state.contextWindow > 0 ? `${tok(state.contextWindow)} tokens` : "Unknown");
+    if (observation) {
+      info("Limit source", `${observation.source || "unknown"}${observation.stale ? " (stale)" : ""}`);
+      if (observation.observedAt > 0) {
+        const timeLabel = observation.source === "catalog" ? "Catalog updated" : "Observed";
+        info(timeLabel, new Date(observation.observedAt).toLocaleString());
+      }
+      if (observation.documentedLimits) {
+        const apiLimit = observation.documentedLimits.inputTokenLimit || observation.documentedLimits.contextWindow;
+        if (apiLimit) info("Public API maximum", `${tok(apiLimit)} tokens`);
+      }
+      if (observation.limits && observation.limits.contextWindow && observation.limits.contextWindow !== state.contextWindow) {
+        info("Model window", tok(observation.limits.contextWindow));
+      }
+    } else {
+      info("Limit source", "Unknown");
+    }
+
     // Where compaction happens and how often it did (K-03, K-06).
     if (state.compactThresholdPct) {
       const t = state.compactThresholdPct;
       const approx = state.contextWindow > 0 ? ` (≈ ${toK(Math.round(state.contextWindow * t / 100))} tokens)` : "";
+      const isEnv = state.thresholdSource === "env";
+      const sourceNote = isEnv ? " (via GROK_AUTO_COMPACT_THRESHOLD_PERCENT)" : " (native CLI threshold)";
       const line = document.createElement("div");
       line.className = "popover-info context-compact-threshold";
       const label = document.createElement("span");
-      label.textContent = `Auto-compacts at ${t}%${approx}`;
+      label.textContent = `Auto-compacts at ${t}%${approx}${sourceNote}`;
       line.appendChild(label);
-      if (state.activeProvider === "grok") {
-        const link = document.createElement("a");
-        link.href = "#";
-        link.className = "context-threshold-setting";
-        link.textContent = "Change";
-        link.title = "companions.grok.autoCompactThresholdPercent";
-        link.onclick = (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          vscode.postMessage({ type: "openSettings", section: "companions.grok.autoCompactThresholdPercent" });
-          closePopovers();
-        };
-        line.appendChild(link);
-      }
       contextPopover.appendChild(line);
     }
     if (state.compactionCount) {
@@ -15824,6 +15820,13 @@
 
   // ---------- donut ----------
 
+  function modelsMatch(a, b) {
+    if (!a || !b) return false;
+    if (a === b) return true;
+    const norm = (id) => String(id).toLowerCase().replace(/[\._]/g, "-").replace(/^(?:xai\/|anthropic\/|openai\/|google\/)/, "");
+    return norm(a) === norm(b);
+  }
+
   function defaultContextWindowForProvider(_provider) {
     return undefined;
   }
@@ -18047,8 +18050,8 @@
         state.isWorktree = !!msg.worktree; // gates the gear Apply/Remove worktree items
         state.availableModels = msg.models || [];
         renderProviderSignInCard();
-        const m = state.availableModels.find((x) => x.modelId === msg.currentModelId && (!x.provider || x.provider === state.activeProvider));
-        if (msg.preserveContext && state.contextObservation && state.contextObservation.modelId === msg.currentModelId) {
+        const m = state.availableModels.find((x) => modelsMatch(x.modelId, msg.currentModelId) && (!x.provider || x.provider === state.activeProvider));
+        if (msg.preserveContext && state.contextObservation && modelsMatch(state.contextObservation.modelId, msg.currentModelId)) {
           const limits = state.contextObservation.limits || {};
           state.contextWindow = limits.effectiveContextTokens || limits.inputTokenLimit || limits.contextWindow;
         } else if (m?.totalContextTokens) {
@@ -18105,7 +18108,7 @@
       }
       case "modelChanged": {
         state.currentModelId = msg.modelId;
-        if (state.contextObservation && state.contextObservation.modelId !== msg.modelId) {
+        if (state.contextObservation && !modelsMatch(state.contextObservation.modelId, msg.modelId)) {
           state.contextObservation = undefined;
           state.usedTokens = 0;
           state.contextBreakdown = undefined;
@@ -18115,8 +18118,8 @@
         // The initial `session` event carries grok's *default* model, so when we
         // switch (e.g. to the configured default) recompute the max — otherwise the
         // donut keeps showing the wrong ceiling and an inflated percentage.
-        const m = state.availableModels.find((x) => x.modelId === msg.modelId && (!x.provider || x.provider === state.activeProvider));
-        if (state.contextObservation && state.contextObservation.modelId === msg.modelId) {
+        const m = state.availableModels.find((x) => modelsMatch(x.modelId, msg.modelId) && (!x.provider || x.provider === state.activeProvider));
+        if (state.contextObservation && modelsMatch(state.contextObservation.modelId, msg.modelId)) {
           const limits = state.contextObservation.limits || {};
           state.contextWindow = limits.effectiveContextTokens || limits.inputTokenLimit || limits.contextWindow;
         } else if (m && m.totalContextTokens) {
@@ -18788,6 +18791,10 @@
           state.contextBreakdown = undefined;
           state.contextObservation = undefined;
           state.compactThresholdPct = undefined;
+          state.thresholdSource = undefined;
+        }
+        if (msg.thresholdSource) {
+          state.thresholdSource = msg.thresholdSource;
         }
         if (msg.context) {
           state.contextObservation = msg.context;
@@ -18806,7 +18813,13 @@
         if (typeof msg.compactionCount === "number" && msg.compactionCount >= 0) {
           state.compactionCount = msg.compactionCount;
         }
-        if (msg.window) state.contextWindow = msg.window;
+        if (msg.window) {
+          const obsLimit = state.contextObservation?.limits?.contextWindow;
+          const obsQuality = state.contextObservation?.limitQuality;
+          if (!obsLimit || obsQuality !== "verified" || msg.window <= obsLimit) {
+            state.contextWindow = msg.window;
+          }
+        }
         if (msg.used != null) updateDonut(msg.used);
         else updateDonut();
         break;

@@ -19,11 +19,11 @@ import { bootWebview, dispatch, click } from "./webview-harness";
 
 describe("grokCompactThresholdEnv (K-01)", () => {
   it.each([
-    [95, "95"], [1, "1"], [99, "99"], ["97", "97"],
-    [0, undefined], [100, undefined], [150, undefined], [-5, undefined],
-    [NaN, undefined], [95.5, undefined], ["", undefined], ["abc", undefined], [null, undefined], [undefined, undefined],
-  ])("setting %p → %p", (setting, expected) => {
-    expect(grokCompactThresholdEnv(setting, {})).toBe(expected);
+    [95], [1], [99], ["97"],
+    [0], [100], [150], [-5],
+    [NaN], [95.5], [""], ["abc"], [null], [undefined],
+  ])("setting %p → undefined (extension leaves auto-compaction to native CLI)", (setting) => {
+    expect(grokCompactThresholdEnv(setting, {})).toBeUndefined();
   });
 
   it("never overwrites a variable the user set (shell or .env), even an empty one", () => {
@@ -134,23 +134,23 @@ function hostHarness(provider: Session["provider"] = "grok", settings: Record<st
 }
 
 describe("host wiring (K-01, K-02, K-04)", () => {
-  it("sets the env on the Grok spawn env from the setting, and leaves 0 alone", () => {
+  it("never sets GROK_AUTO_COMPACT_THRESHOLD_PERCENT override automatically", () => {
     const saved = process.env[GROK_COMPACT_ENV];
     delete process.env[GROK_COMPACT_ENV];
     try {
       const { sidebar } = hostHarness("grok", { "grok.autoCompactThresholdPercent": 97 });
-      expect(sidebar.buildEnv("/proj")[GROK_COMPACT_ENV]).toBe("97");
+      expect(sidebar.buildEnv("/proj")[GROK_COMPACT_ENV]).toBeUndefined();
       const zero = hostHarness("grok", { "grok.autoCompactThresholdPercent": 0 });
       expect(zero.sidebar.buildEnv("/proj")[GROK_COMPACT_ENV]).toBeUndefined();
       const dflt = hostHarness("grok");
-      expect(dflt.sidebar.buildEnv("/proj")[GROK_COMPACT_ENV]).toBe("95");
+      expect(dflt.sidebar.buildEnv("/proj")[GROK_COMPACT_ENV]).toBeUndefined();
     } finally {
       if (saved !== undefined) process.env[GROK_COMPACT_ENV] = saved;
     }
   });
 
-  it("a workspace .env wins over the setting", () => {
-    const { sidebar } = hostHarness("grok", { "grok.autoCompactThresholdPercent": 97 });
+  it("preserves GROK_AUTO_COMPACT_THRESHOLD_PERCENT when user sets it via workspace .env", () => {
+    const { sidebar } = hostHarness("grok");
     sidebar.readDotEnv = () => ({ [GROK_COMPACT_ENV]: "85" });
     expect(sidebar.buildEnv("/proj")[GROK_COMPACT_ENV]).toBe("85");
   });

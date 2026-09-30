@@ -200,9 +200,6 @@ export class SidebarViewHost {
           value: this.deps.sidebarOps.state.host.getConfiguration("grok").get<boolean>("telemetry.enabled", true)
         });
       }
-      if (e.affectsConfiguration("companions.grok.autoCompactThresholdPercent")) {
-        void this.deps.sidebarOps.actions.offerGrokRestartForCompactThreshold();
-      }
       if (e.affectsConfiguration("grok.thumbsFeedback")) {
         this.deps.sidebarOps.actions.postThumbsFeedback();
         for (const session of [this.deps.sidebarOps.state.focused, ...this.deps.sidebarOps.state.pool]) {

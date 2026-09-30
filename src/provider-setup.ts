@@ -1,9 +1,8 @@
 import { PROVIDER_CLI } from "./provider-cli";
 import { grokShellEnvValue, resolvedTerminalShell } from "./terminal-manager";
 import { grokSubagentEnv } from "./grok-subagent-env";
-import { GROK_COMPACT_ENV, grokCompactThresholdEnv } from "./grok-compaction";
 export interface ProviderSetupSidebarOps {
-  grokCompactThresholdSetting: () => number;
+  grokCompactThresholdSetting?: () => number;
   companionsSetting: <T>(key: string, fallback: T) => T;
   readonly host: Host;
 }
@@ -789,10 +788,6 @@ public buildEnv(cwd: string): NodeJS.ProcessEnv {
       if (grokShell) env["GROK_SHELL"] = grokShell;
     }
 
-    // Compact only when the context is really full (K-01). The catalog pins
-    // 80%; the env outranks it. A user-set variable (shell or .env) wins.
-    const compactThreshold = grokCompactThresholdEnv(this.deps.sidebarOps.grokCompactThresholdSetting(), env);
-    if (compactThreshold !== undefined) env[GROK_COMPACT_ENV] = compactThreshold;
     // S-07: Grok's own subagents — on/off and parallelism, by env, like K-01.
     const grokSub = this.deps.sidebarOps.companionsSetting<string>("grok.subagents.enabled", "default");
     Object.assign(env, grokSubagentEnv({

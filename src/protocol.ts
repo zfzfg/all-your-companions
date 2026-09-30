@@ -1034,6 +1034,7 @@ export type HostMsg =
       messageTokens?: number;
       freeTokens?: number;
       autoCompactThresholdPercent?: number;
+      thresholdSource?: "native" | "env";
       /** Compactions so far in this session (K-06), when known. */
       compactionCount?: number;
     }

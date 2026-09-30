@@ -245,6 +245,8 @@ export class Session {
    * success next to the failure note.
    */
   sawCompactFailed = false;
+  /** True while a manual /compact slash turn is being executed by the client. */
+  manualCompactInFlight = false;
 
   /**
    * Guards the one-shot expired-token auto-recovery: set when a turn's auth-like

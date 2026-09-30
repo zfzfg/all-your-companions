@@ -1922,7 +1922,6 @@ get host() { return self.host; },
       getOverride: (name: string) => self.sidebarTestOverride(name)
       ,
       sidebarOps: {
-grokCompactThresholdSetting: (...args) => self.grokCompactThresholdSetting(...args),
         companionsSetting: (...args) => self.companionsSetting(...args),
         get host() { return self.host; }
 }
@@ -2716,7 +2715,6 @@ grokCompactThresholdSetting: (...args) => self.grokCompactThresholdSetting(...ar
   private companionSettingsView(): Record<string, string | number | boolean> {
     const grokSubagents = this.companionsSetting<string>("grok.subagents.enabled", "default");
     return {
-      "grok.autoCompactThresholdPercent": this.grokCompactThresholdSetting(),
       "context.nearFullPrompt": this.companionsSetting<string>("context.nearFullPrompt", "ask"),
       "notifications.childNeedsYou": this.companionsSetting<boolean>("notifications.childNeedsYou", true) !== false,
       "crew.stallWarningSec": normalizeStallWarningSec(this.companionsSetting<number>("crew.stallWarningSec", 300)),
@@ -2731,7 +2729,6 @@ grokCompactThresholdSetting: (...args) => self.grokCompactThresholdSetting(...ar
 
   /** The keys `setCompanionsSetting` may write, with their accepted values. */
   private static readonly COMPANION_SETTING_KEYS: Record<string, (v: unknown) => boolean> = {
-    "grok.autoCompactThresholdPercent": (v) => typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= 99,
     "context.nearFullPrompt": (v) => v === "ask" || v === "off",
     "notifications.childNeedsYou": (v) => typeof v === "boolean",
     "crew.stallWarningSec": (v) => typeof v === "number" && Number.isInteger(v) && v >= 60,

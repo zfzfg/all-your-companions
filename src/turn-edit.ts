@@ -1110,13 +1110,18 @@ export class TurnEdit {
       return;
     }
     if (msg.action !== "compact-retry") { if (pending.notSent) restore(); return; }
-    // One attempt: compact, then the lost message once more. A second
-    // overflow shows the card again; nothing loops on its own.
+    // One attempt: compact, then the lost message once more ONLY if it was not already sent.
+    // If the turn was already sent to the CLI, tool calls or partial work may have
+    // executed, so never auto-repeat the agent turn. Restore draft and chips instead.
     try { await this.deps.sidebarOps.handleSend("/compact", true, session); }
     catch { restore(); return; }
     if (session.status === "error") { restore(); return; }
-    session.chips = [...pending.chips, ...session.chips].filter((chip, index, all) => all.findIndex(other => other.id === chip.id) === index);
-    await this.deps.sidebarOps.handleSend(pending.text, false, session);
+    if (pending.notSent) {
+      session.chips = [...pending.chips, ...session.chips].filter((chip, index, all) => all.findIndex(other => other.id === chip.id) === index);
+      await this.deps.sidebarOps.handleSend(pending.text, false, session);
+    } else {
+      restore();
+    }
   }
 }
 

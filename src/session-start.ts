@@ -1259,8 +1259,9 @@ export class SessionStart {
       this.deps.eventOps.applyMcpNotification(session, method, params);
     });
 
-    client.on("xaiNotification", (u) => {
+    client.on("xaiNotification", (u, notificationSessionId?: string) => {
       if (gen !== session.gen) return;
+      if (notificationSessionId && session.activeSessionId && notificationSessionId !== session.activeSessionId) return;
       const kind = (u as { sessionUpdate?: string })?.sessionUpdate;
       const compactUsed = contextUsedFromCompactNotification(u);
       if (compactUsed !== null) {
@@ -1284,7 +1285,12 @@ export class SessionStart {
         session.nearFullArmed = true;
         session.compactionCount += 1;
         const summary = compactSummaryPreview(u);
-        if (summary) this.deps.emit(session, { type: "compactSummary", summary });
+        if (summary) {
+          this.deps.emit(session, { type: "compactSummary", summary });
+        } else if (!session.manualCompactInFlight) {
+          const tokenStr = compactUsed !== null ? ` to ${compactUsed.toLocaleString("en-US")} tokens` : "";
+          this.deps.emit(session, { type: "autoCompactNotice", text: `Context compacted${tokenStr}.` });
+        }
       }
       if (isSubagentLifecycleUpdate(u)) {
         this.deps.emit(session, { type: "subagentUpdate", update: u });
@@ -1681,13 +1687,21 @@ export class SessionStart {
       if (slashCommand === "compact") {
         session.sawCompactFailed = false;
         session.sawCompactNotification = false;
+        session.manualCompactInFlight = true;
         if (isAdapterProvider(session.provider)) {
           session.adapterCompactThisTurn = true;
           this.deps.usageOps.rememberAdapterContext(session, { compacted: true });
         }
       }
 
-      const meta = await client.prompt(promptBlocks);
+      let meta;
+      try {
+        meta = await client.prompt(promptBlocks);
+      } finally {
+        if (slashCommand === "compact") {
+          session.manualCompactInFlight = false;
+        }
+      }
       if (gen !== session.gen) {
         this.deps.turnAndSendOps.emitAbandonedSend(session);
         return;

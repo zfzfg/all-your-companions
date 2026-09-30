@@ -18,8 +18,20 @@ export interface ContextCatalogSnapshot {
   stale: boolean;
   access: string;
 }
+export function modelsMatch(a?: string, b?: string): boolean {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  const normA = a.replace(/-/g, ".");
+  const normB = b.replace(/-/g, ".");
+  if (normA === normB) return true;
+  const dashA = a.replace(/\./g, "-");
+  const dashB = b.replace(/\./g, "-");
+  if (dashA === dashB) return true;
+  return a.startsWith(b) || b.startsWith(a);
+}
+
 type CatalogParser = (raw: any) => ContextCatalogModel[];
-const CATALOG_PARSERS: Partial<Record<AcpProvider, CatalogParser>> = {
+export const CATALOG_PARSERS: Partial<Record<AcpProvider, CatalogParser>> = {
   grok: raw => Object.entries(raw?.models ?? {}).flatMap(([id, entry]: [string, any]) => {
     const info = entry?.info;
     if (!info || info.hidden === true) return [];

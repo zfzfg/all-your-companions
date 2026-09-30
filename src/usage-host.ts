@@ -46,6 +46,7 @@ import {
   SubscriptionUsageCache,
 } from "./subscription-usage";
 import {
+  GROK_COMPACT_ENV,
   compactThresholdMismatch,
   compactThresholdMismatchNotice,
   shouldOfferNearFull,
@@ -229,9 +230,21 @@ export class UsageHost {
     }
     const cwd = this.deps.sessionCwd(session);
     const usage = readContextUsage({ fs: defaultFs, grokHome: resolveGrokHome(process.env), cwd, id });
-    if (usage) session.client?.observeContext?.({ source: "persisted", limitQuality: "estimated", usageQuality: "estimated",
-      stale: true, used: usage.used, limits: { contextWindow: usage.window } });
-    if (usage) this.deps.emit(session, { type: "contextUsage", used: usage.used, window: usage.window });
+    if (usage) {
+      const verifiedLimit = session.client?.contextBudget?.limitQuality === "verified"
+        ? session.client.contextBudget.limits.contextWindow
+        : undefined;
+      const effectiveWindow = verifiedLimit ?? usage.window;
+      session.client?.observeContext?.({
+        source: "persisted",
+        limitQuality: verifiedLimit ? "verified" : "estimated",
+        usageQuality: "estimated",
+        stale: true,
+        used: usage.used,
+        limits: { contextWindow: effectiveWindow },
+      });
+      this.deps.emit(session, { type: "contextUsage", used: usage.used, window: effectiveWindow });
+    }
   }
 
   public bindSubscriptionUsage(session: Session, env: NodeJS.ProcessEnv): void {
@@ -295,10 +308,17 @@ export class UsageHost {
     session.lastSessionInfoAt = Date.now();
     session.lastSessionInfoUsed = info.used;
     session.sessionInfoStale = false;
+    const clientWindow = session.client?.contextBudget?.limits.contextWindow;
+    const isClientVerified = session.client?.contextBudget?.limitQuality === "verified";
+    const window = (isClientVerified && clientWindow) ? clientWindow : (clientWindow ?? info.window);
+    const cwd = this.deps.sessionCwd(session);
+    const dotEnv = this.deps.readDotEnv(cwd);
+    const env = { ...process.env, ...dotEnv };
+    const userSetEnv = typeof env[GROK_COMPACT_ENV] === "string" && env[GROK_COMPACT_ENV].trim() !== "";
     this.deps.emit(session, {
       type: "contextUsage",
       used: info.used,
-      window: info.window,
+      window,
       categories: info.categories,
       systemPromptTokens: info.systemPromptTokens,
       toolDefinitionsTokens: info.toolDefinitionsTokens,
@@ -307,18 +327,20 @@ export class UsageHost {
       freeTokens: info.freeTokens,
       autoCompactThresholdPercent: info.autoCompactThresholdPercent,
       compactionCount: info.compactionCount,
+      thresholdSource: userSetEnv ? "env" : "native",
     });
     if (info.autoCompactThresholdPercent !== undefined) session.compactThresholdReported = info.autoCompactThresholdPercent;
     if (info.compactionCount !== undefined) session.compactionCount = info.compactionCount;
-    this.checkCompactThreshold(session, info.autoCompactThresholdPercent);
+    if (userSetEnv) this.checkCompactThreshold(session, info.autoCompactThresholdPercent);
   }
 
   public checkCompactThreshold(session: Session, reported: number | undefined): void {
     if (PROVIDER_CLI[session.provider].environment !== "grok" || session.compactThresholdChecked || reported === undefined) return;
-    session.compactThresholdChecked = true;
     const desired = session.compactThresholdRequested;
+    if (desired === undefined) return;
+    session.compactThresholdChecked = true;
     if (!compactThresholdMismatch(desired, reported)) return;
-    const text = compactThresholdMismatchNotice(desired!, reported);
+    const text = compactThresholdMismatchNotice(desired, reported);
     this.deps.host.appendLine(`[context] ${text}`);
     if (this.compactMismatchNoticeShown) return;
     this.compactMismatchNoticeShown = true;

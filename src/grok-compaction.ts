@@ -13,8 +13,8 @@
 
 export const GROK_COMPACT_ENV = "GROK_AUTO_COMPACT_THRESHOLD_PERCENT";
 
-/** Setting default: compact at 95% (25k tokens of headroom in a 500k window). */
-export const DEFAULT_COMPACT_THRESHOLD = 95;
+/** Native CLI default threshold is 80% (from xAI's model metadata). */
+export const DEFAULT_COMPACT_THRESHOLD = 80;
 /** Highest value the setting accepts; 100 leaves no room for the compaction call itself. */
 export const MAX_COMPACT_THRESHOLD = 99;
 
@@ -27,14 +27,12 @@ export function normalizeCompactThreshold(setting: unknown): number | undefined 
 }
 
 /**
- * The value to put in a Grok spawn's env, or undefined to leave it alone.
- * A variable the user set themselves (shell or workspace `.env`, already
- * merged into `env`) is never overwritten — presence check, like `GROK_SHELL`.
+ * The extension leaves auto-compaction entirely to the CLI and never injects
+ * an override threshold. Always returns undefined so old settings do not
+ * secretly override the CLI.
  */
-export function grokCompactThresholdEnv(setting: unknown, env: NodeJS.ProcessEnv): string | undefined {
-  if (GROK_COMPACT_ENV in env) return undefined;
-  const n = normalizeCompactThreshold(setting);
-  return n === undefined ? undefined : String(n);
+export function grokCompactThresholdEnv(_setting: unknown, _env: NodeJS.ProcessEnv): string | undefined {
+  return undefined;
 }
 
 /**
@@ -60,11 +58,16 @@ export function formatTokensShort(tokens: number): string {
   return String(Math.round(tokens));
 }
 
-/** "Auto-compacts at 95% (≈ 475k tokens)". */
-export function compactThresholdLine(thresholdPercent: number, window: number | undefined): string {
+/** "Auto-compacts at 80% (≈ 205k tokens) (native CLI threshold)". */
+export function compactThresholdLine(
+  thresholdPercent: number,
+  window: number | undefined,
+  source?: "native" | "env",
+): string {
+  const note = source === "env" ? " (via GROK_AUTO_COMPACT_THRESHOLD_PERCENT)" : source === "native" ? " (native CLI threshold)" : "";
   const base = `Auto-compacts at ${thresholdPercent}%`;
-  if (!window || !Number.isFinite(window) || window <= 0) return base;
-  return `${base} (≈ ${formatTokensShort((window * thresholdPercent) / 100)} tokens)`;
+  if (!window || !Number.isFinite(window) || window <= 0) return `${base}${note}`;
+  return `${base} (≈ ${formatTokensShort((window * thresholdPercent) / 100)} tokens)${note}`;
 }
 
 export type ContextTone = "normal" | "warn" | "danger";

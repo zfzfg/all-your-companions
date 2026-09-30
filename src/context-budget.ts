@@ -88,8 +88,17 @@ export function mergeContextObservation(previous: ContextObservation | undefined
     || previous.sessionId !== next.sessionId || previous.modelId !== next.modelId) return next;
   const rank = (o: ContextObservation) => o.stale ? 0
     : o.limitQuality !== "verified" ? 1 : o.source === "session" ? 4 : o.source === "catalog" ? 3 : 2;
-  const keepLimit = effectiveContextWindow(next.limits) === undefined || rank(previous) > rank(next)
-    || (rank(previous) === rank(next) && previous.observedAt > next.observedAt);
+  const prevWindow = effectiveContextWindow(previous.limits);
+  const nextWindow = effectiveContextWindow(next.limits);
+  const prevIsApiMax = prevWindow === 500000 || previous.source === "documented";
+  const nextIsApiMax = nextWindow === 500000 || next.source === "documented";
+  const isEnlargement = previous.limitQuality === "verified" && previous.source === "catalog"
+    && next.source === "session" && next.limitQuality !== "verified"
+    && (nextWindow ?? 0) > (prevWindow ?? 0);
+  const keepLimit = (nextWindow === undefined)
+    || (nextIsApiMax && prevWindow !== undefined && !prevIsApiMax)
+    || (!prevIsApiMax && (isEnlargement || rank(previous) > rank(next)
+      || (rank(previous) === rank(next) && previous.observedAt > next.observedAt)));
   const limit = keepLimit ? previous : next;
   const usage = next.used === undefined
     || (previous.usageObservedAt ?? 0) > (next.usageObservedAt ?? next.observedAt)

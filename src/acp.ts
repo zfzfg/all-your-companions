@@ -1,5 +1,5 @@
 import { supportsSessionDeletion } from "./acp-backend";
-import { ContextCatalogReader, type ContextCatalogSnapshot } from "./context-catalog";
+import { ContextCatalogReader, modelsMatch, type ContextCatalogSnapshot } from "./context-catalog";
 import {
   ContextBudgetExceededError, DOCUMENTED_CONTEXT, checkContextBudget, contextTokens, contextUsed,
   effectiveContextWindow, estimateContextPrompt, mergeContextObservation, validContextLimits,
@@ -341,30 +341,40 @@ export class AcpClient extends EventEmitter {
   }
 
   private seedContextBudget(): void {
-    const model = this.availableModels.find(entry => entry.modelId === this.currentModelId);
+    const model = this.availableModels.find(entry => modelsMatch(entry.modelId, this.currentModelId));
     if (model?.totalContextTokens) {
       this.observeContext({ limits: model.contextLimits ?? { contextWindow: model.totalContextTokens },
         source: "adapter", limitQuality: model.contextQuality ?? "estimated", stale: model.contextStale });
     }
     this.applyContextCatalog();
     const documented = DOCUMENTED_CONTEXT[this.provider]?.[this.currentModelId ?? ""];
-    if (!this.contextObservation && documented) this.observeContext({ limits: documented, source: "documented", limitQuality: "estimated" });
+    if (!this.contextObservation && documented) {
+      this.observeContext({ limits: {}, source: "documented", limitQuality: "unknown", documentedLimits: documented });
+    }
   }
 
   private applyContextCatalog(): void {
     const snapshot = this.catalogSnapshot;
     if (snapshot && this.sessionId) {
       for (const row of snapshot.models) {
-        if (!this.availableModels.some(model => model.modelId === row.modelId)) {
+        const existing = this.availableModels.find(model => modelsMatch(model.modelId, row.modelId));
+        if (!existing) {
           this.availableModels.push({ modelId: row.modelId, name: row.name, contextLimits: row.limits,
             totalContextTokens: effectiveContextWindow(row.limits), contextQuality: snapshot.stale ? "estimated" : "verified" });
           this.catalogAddedModels.add(row.modelId);
+        } else {
+          existing.contextLimits = row.limits;
+          existing.totalContextTokens = effectiveContextWindow(row.limits);
+          existing.contextQuality = snapshot.stale ? "estimated" : "verified";
         }
       }
     }
-    const row = snapshot?.models.find(entry => entry.modelId === this.currentModelId || entry.resolvedModelId === this.currentModelId);
+    const row = snapshot?.models.find(entry =>
+      modelsMatch(entry.modelId, this.currentModelId) ||
+      modelsMatch(entry.resolvedModelId, this.currentModelId)
+    );
     if (!snapshot || !row) return;
-    const model = this.availableModels.find(entry => entry.modelId === this.currentModelId);
+    const model = this.availableModels.find(entry => modelsMatch(entry.modelId, this.currentModelId));
     this.observeContext({ limits: row.limits, source: "catalog", limitQuality: "verified",
       observedAt: snapshot.observedAt, stale: snapshot.stale, resolvedModelId: row.resolvedModelId });
     if (model && this.contextObservation) {
@@ -504,14 +514,14 @@ export class AcpClient extends EventEmitter {
       else this.applyContextCatalog();
       if (this.sessionId && catalogChanged) {
         this.availableModels = this.availableModels.filter(model => !this.catalogAddedModels.has(model.modelId)
-          || model.modelId === this.currentModelId || snapshot.models.some(row => row.modelId === model.modelId));
+          || model.modelId === this.currentModelId || snapshot.models.some(row => modelsMatch(row.modelId, model.modelId)));
         for (const row of snapshot.models) {
-          const model = this.availableModels.find(model => model.modelId === row.modelId);
+          const model = this.availableModels.find(model => modelsMatch(model.modelId, row.modelId));
           if (!model) {
             this.availableModels.push({ modelId: row.modelId, name: row.name, contextLimits: row.limits,
               totalContextTokens: effectiveContextWindow(row.limits), contextQuality: snapshot.stale ? "estimated" : "verified" });
             this.catalogAddedModels.add(row.modelId);
-          } else if (model.modelId !== this.currentModelId) {
+          } else {
             model.contextLimits = row.limits;
             model.totalContextTokens = effectiveContextWindow(row.limits);
             model.contextQuality = snapshot.stale ? "estimated" : "verified";
@@ -1198,9 +1208,24 @@ export class AcpClient extends EventEmitter {
       const r = await this.request("_x.ai/session/info", { sessionId: this.sessionId });
       const parsed = parseSessionInfoRpcResult(r);
       if (!parsed) throw new Error("session/info returned no usable context");
-      this.observeContext({ source: "session", limitQuality: r?._meta?.contextWindowAuthoritative === true ? "verified" : MODEL_CONTEXT_QUALITY[this.provider], usageQuality: MODEL_CONTEXT_QUALITY[this.provider],
-        generation, sessionId, used: parsed.used, limits: { contextWindow: parsed.window, autoCompactThresholdPercent: parsed.autoCompactThresholdPercent } });
-      return parsed;
+      const isAuthoritative = r?._meta?.contextWindowAuthoritative === true;
+      const verifiedLimit = this.contextObservation?.limitQuality === "verified"
+        ? effectiveContextWindow(this.contextObservation.limits)
+        : undefined;
+      const effectiveWindow = isAuthoritative ? parsed.window : (verifiedLimit ?? parsed.window);
+      this.observeContext({
+        source: "session",
+        limitQuality: isAuthoritative ? "verified" : (verifiedLimit ? "verified" : "estimated"),
+        usageQuality: MODEL_CONTEXT_QUALITY[this.provider],
+        generation,
+        sessionId,
+        used: parsed.used,
+        limits: {
+          contextWindow: effectiveWindow,
+          autoCompactThresholdPercent: parsed.autoCompactThresholdPercent ?? this.contextObservation?.limits.autoCompactThresholdPercent,
+        },
+      });
+      return { ...parsed, window: effectiveWindow };
     } catch (e: any) {
       if (isMethodNotFoundError(e)) {
         this.opts.log("[session/info] CLI does not support _x.ai/session/info");
@@ -1837,7 +1862,7 @@ export class AcpClient extends EventEmitter {
               this.emit("modelChanged", modelId);
             }
           }
-          const current = this.availableModels.find((model) => model.modelId === this.currentModelId);
+          const current = this.availableModels.find((model) => modelsMatch(model.modelId, this.currentModelId));
           if (current) current.reasoningEffort = this.currentReasoningEffort;
         }
         if (!isForeignSessionUpdate(params?.sessionId, this.sessionId)) {
@@ -1847,8 +1872,8 @@ export class AcpClient extends EventEmitter {
             this.contextObservation = { ...this.contextObservation, usageQuality: "unknown" };
             this.emit("contextBudget", this.contextObservation);
           }
+          this.emit("xaiNotification", params?.update, params?.sessionId);
         }
-        this.emit("xaiNotification", params?.update);
         if (id != null) this.respondOk(id, {});
         return;
       }

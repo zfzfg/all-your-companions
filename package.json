@@ -733,13 +733,6 @@
           "default": "step",
           "description": "How far a new crew run goes on its own. You can change it per run on the gate. When unset, Auto start next stage = on means Stop on problems."
         },
-        "companions.grok.autoCompactThresholdPercent": {
-          "type": "integer",
-          "default": 95,
-          "minimum": 0,
-          "maximum": 99,
-          "markdownDescription": "Compact Grok's context automatically only when it is this full (percent of the model's context window). 0 keeps Grok's own default (currently 80% from xAI's model list). Higher values keep more of the conversation verbatim; above 97 a single large tool result can overflow the window before compaction runs. Applies to Grok sessions started after the change."
-        },
         "companions.context.nearFullPrompt": {
           "type": "string",
           "enum": [
