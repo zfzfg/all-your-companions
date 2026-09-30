@@ -2,14 +2,14 @@
 
 ### *All your Companions — in one place!*
 
-[![License: FSL-1.1-MIT](https://img.shields.io/badge/License-FSL--1.1--MIT-blue.svg)](https://github.com/phuryn/grok-build-vscode/blob/main/LICENSE) ![Agents](https://img.shields.io/badge/Agents-Antigravity%20%C2%B7%20Grok%20%C2%B7%20Codex%20%C2%B7%20Claude-000000) [![VS Code](https://img.shields.io/badge/VS%20Code-Extension-007ACC?logo=visualstudiocode&logoColor=white)](https://code.visualstudio.com) [![Cursor](https://badgen.net/badge/Cursor/Extension/007ACC)](https://cursor.com)
+[![License: FSL-1.1-MIT](https://img.shields.io/badge/License-FSL--1.1--MIT-blue.svg)](https://github.com/phuryn/grok-build-vscode/blob/main/LICENSE) ![Companions](https://img.shields.io/badge/Companions-Antigravity%20%C2%B7%20Grok%20%C2%B7%20Codex%20%C2%B7%20Claude%20%C2%B7%20Muse-000000) [![VS Code](https://img.shields.io/badge/VS%20Code-Extension-007ACC?logo=visualstudiocode&logoColor=white)](https://code.visualstudio.com) [![Cursor](https://badgen.net/badge/Cursor/Extension/007ACC)](https://cursor.com)
 
-> **Unified GUI for AI Coding Companions** — Google Antigravity, Grok Build, OpenAI Codex, Anthropic Claude Code, and Meta Muse Code.
+> **Local-first sidebar for five AI coding companions** — Google Antigravity, Grok Build, OpenAI Codex, Anthropic Claude Code, and Meta Muse Code. Parallel sessions, crews, native diff review, worktrees, and voice.
 >
 > **Maintainer:** Collin Lerche (zfzfg) | STERRA ([https://sterra.online](https://sterra.online))  
-> **Community Fork:** An independent community fork of *Grok Build for VS Code* (upstream v4.1.8 by Paweł Huryn), redesigned and expanded as a local-first multi-companion powerhouse.
+> **Community Fork:** An independent community fork of *Grok Build for VS Code* (upstream v4.1.8 by Paweł Huryn), redesigned and expanded as a local-first multi-companion sidebar.
 
-The unified, local-first GUI for your favorite AI coding companions: **Google Antigravity CLI** (Gemini 2.5/3), **Grok Build** (Grok 4.7), **OpenAI Codex**, **Claude Code**, and **Muse Code** — right inside your editor. Drop open files in as `@`-context, run **parallel sessions**, inspect **native diff previews** with **one-click revert**, keep **resumable chat history**, typeset **LaTeX & Mermaid diagrams**, and dictate by **voice**.
+The local-first sidebar for five AI coding companions: **Google Antigravity CLI** (Gemini 2.5/3), **Grok Build** (Grok 4.7), **OpenAI Codex**, **Claude Code**, and **Muse Code** — right inside your editor. Drop open files in as `@`-context, run **parallel sessions** and **crews**, inspect **native diff previews** with **one-click revert**, isolate edits in **worktrees**, keep **resumable chat history**, typeset **LaTeX & Mermaid diagrams**, and dictate by **voice**.
 
 ---
 
@@ -24,16 +24,16 @@ _Click any feature to expand._
 <details>
 <summary><strong>Permission cards with diff preview & revert</strong> — see every edit in VS Code's native diff before you approve</summary>
 
-When any companion proposes an edit, hit **open diff →** to review the whole file in VS Code's native diff editor, focused on the first changed line, then *Allow once / always* or *Reject*. The file is written only **after** you approve. Completed edits provide an instant one-click **revert edit ↶** action synthesized across all four providers.
+When any companion proposes an edit, hit **open diff →** to review the whole file in VS Code's native diff editor, focused on the first changed line, then *Allow once / always* or *Reject*. The file is written only **after** you approve. Completed edits provide an instant one-click **revert edit ↶** action synthesized across all five companions.
 
 ![Permission card with a native VS Code diff preview before approval](https://raw.githubusercontent.com/phuryn/grok-build-vscode/main/docs/screenshots/permission_diff.png)
 
 </details>
 
 <details>
-<summary><strong>Universal Multi-Companion Support</strong> — Antigravity (Gemini), Grok, Codex & Claude</summary>
+<summary><strong>Universal Multi-Companion Support</strong> — Antigravity (Gemini), Grok, Codex, Claude & Muse</summary>
 
-Connect any leading AI companion in **Settings → Providers**. Antigravity CLI (`agy`) brings Gemini 2.5/3 Pro & Flash with full streaming reasoning; Grok Build brings Grok 4.7; Codex and Claude Code run over ACP stdio. Change models supported by the current companion; start a new conversation to change companions after a turn.
+Connect any of the five companions in **Settings → Providers**. Antigravity CLI (`agy`) brings Gemini 2.5/3 Pro & Flash with full streaming reasoning; Grok Build brings Grok 4.7; Codex, Claude Code, and Muse Code run over ACP. Muse adds native approval modes, a shell sandbox, and account usage windows. Change models supported by the current companion; start a new conversation to change companions after a turn.
 
 </details>
 
@@ -84,7 +84,7 @@ Both are stored as plain Markdown files you can read, diff and review — **this
 <details>
 <summary><strong>Worktree sessions</strong> — isolate code edits in a git worktree</summary>
 
-**Companions: New Worktree Session** creates an isolated git worktree under `~/.grok/worktrees/` and opens a fresh session whose cwd is that checkout — so agent edits don't touch your main tree until you **Apply worktree**. Works for all four companions: a live Grok session uses Grok's worktree RPCs (including clone mode); otherwise the host runs `git worktree add` itself (linked worktrees only). **Apply worktree** copies files back with a conflict check — a file you changed in the main checkout since the worktree branched is never overwritten silently.
+**Companions: New Worktree Session** creates an isolated git worktree under `~/.grok/worktrees/` and opens a fresh session whose cwd is that checkout — so agent edits don't touch your main tree until you **Apply worktree**. Works for all five companions: a live Grok session uses Grok's worktree RPCs (including clone mode); otherwise the host runs `git worktree add` itself (linked worktrees only). **Apply worktree** copies files back with a conflict check — a file you changed in the main checkout since the worktree branched is never overwritten silently.
 
 `/crew [flow]` walks a step list as a team: each step is a fresh session with a compact briefing, assigned to a role by host rules (you are asked when that is unclear). Sequential is the default; a flow can run independent writers at the same time, each in its own worktree. The Crew panel above the composer shows every step's role, status, duration and cost. **Companions: Run Crew** is the same action from the Command Palette.
 
@@ -237,6 +237,7 @@ All your Companions is completely standalone and local-first — no external rel
 - **xAI Grok Build (`grok`)** — Grok 4.7, SuperGrok, and xAI API integration.
 - **OpenAI Codex CLI (`codex`)** — High-speed ACP JSON-RPC bridge.
 - **Anthropic Claude Code CLI (`claude`)** — Full ACP terminal and session integration.
+- **Meta Muse Code CLI (`muse`)** — Native approval modes, shell sandbox, account usage windows, and workflow cards.
 
 All companion communication runs 100% locally via stdio directly to your installed CLI binaries.
 

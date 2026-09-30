@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## [0.3.0] - 2026-09-30
 
 - Check existing provider authentication before offering login, coalesce Connect checks, invalidate late results on Disconnect, and handle ACP spawn failures safely.
 - Preserve conversation drafts, selections and edited attachments through loading, focus changes and webview restoration using provisional draft identities.

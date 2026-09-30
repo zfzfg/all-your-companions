@@ -21,14 +21,14 @@ const header = `# All your Companions - in one Place!
 
 ### *All your Companions — in one place!*
 
-[![License: FSL-1.1-MIT](https://img.shields.io/badge/License-FSL--1.1--MIT-blue.svg)](https://github.com/phuryn/grok-build-vscode/blob/main/LICENSE) ![Agents](https://img.shields.io/badge/Agents-Antigravity%20%C2%B7%20Grok%20%C2%B7%20Codex%20%C2%B7%20Claude-000000) [![VS Code](https://img.shields.io/badge/VS%20Code-Extension-007ACC?logo=visualstudiocode&logoColor=white)](https://code.visualstudio.com) [![Cursor](https://badgen.net/badge/Cursor/Extension/007ACC)](https://cursor.com)
+[![License: FSL-1.1-MIT](https://img.shields.io/badge/License-FSL--1.1--MIT-blue.svg)](https://github.com/phuryn/grok-build-vscode/blob/main/LICENSE) ![Companions](https://img.shields.io/badge/Companions-Antigravity%20%C2%B7%20Grok%20%C2%B7%20Codex%20%C2%B7%20Claude%20%C2%B7%20Muse-000000) [![VS Code](https://img.shields.io/badge/VS%20Code-Extension-007ACC?logo=visualstudiocode&logoColor=white)](https://code.visualstudio.com) [![Cursor](https://badgen.net/badge/Cursor/Extension/007ACC)](https://cursor.com)
 
-> **Unified GUI for AI Coding Companions** — Google Antigravity, Grok Build, OpenAI Codex, Anthropic Claude Code, and Meta Muse Code.
+> **Local-first sidebar for five AI coding companions** — Google Antigravity, Grok Build, OpenAI Codex, Anthropic Claude Code, and Meta Muse Code. Parallel sessions, crews, native diff review, worktrees, and voice.
 >
 > **Maintainer:** Collin Lerche (zfzfg) | STERRA ([https://sterra.online](https://sterra.online))  
-> **Community Fork:** An independent community fork of *Grok Build for VS Code* (upstream v4.1.8 by Paweł Huryn), redesigned and expanded as a local-first multi-companion powerhouse.
+> **Community Fork:** An independent community fork of *Grok Build for VS Code* (upstream v4.1.8 by Paweł Huryn), redesigned and expanded as a local-first multi-companion sidebar.
 
-The unified, local-first GUI for your favorite AI coding companions: **Google Antigravity CLI** (Gemini 2.5/3), **Grok Build** (Grok 4.7), **OpenAI Codex**, **Claude Code**, and **Muse Code** — right inside your editor. Drop open files in as \`@\`-context, run **parallel sessions**, inspect **native diff previews** with **one-click revert**, keep **resumable chat history**, typeset **LaTeX & Mermaid diagrams**, and dictate by **voice**.
+The local-first sidebar for five AI coding companions: **Google Antigravity CLI** (Gemini 2.5/3), **Grok Build** (Grok 4.7), **OpenAI Codex**, **Claude Code**, and **Muse Code** — right inside your editor. Drop open files in as \`@\`-context, run **parallel sessions** and **crews**, inspect **native diff previews** with **one-click revert**, isolate edits in **worktrees**, keep **resumable chat history**, typeset **LaTeX & Mermaid diagrams**, and dictate by **voice**.
 
 ---
 
@@ -75,6 +75,7 @@ All your Companions is completely standalone and local-first — no external rel
 - **xAI Grok Build (\`grok\`)** — Grok 4.7, SuperGrok, and xAI API integration.
 - **OpenAI Codex CLI (\`codex\`)** — High-speed ACP JSON-RPC bridge.
 - **Anthropic Claude Code CLI (\`claude\`)** — Full ACP terminal and session integration.
+- **Meta Muse Code CLI (\`muse\`)** — Native approval modes, shell sandbox, account usage windows, and workflow cards.
 
 All companion communication runs 100% locally via stdio directly to your installed CLI binaries.
 
