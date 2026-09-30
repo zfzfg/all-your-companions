@@ -1,3 +1,4 @@
+import { museSettings } from "./mode-prefs";
 /**
  * SidebarStateHost: webview initial state building, rehydration replay,
  * and context chip localization.
@@ -91,6 +92,7 @@ export class SidebarStateHost {
       readRepliesAloud: cfg.get("readRepliesAloud", false),
       telemetryEnabled: cfg.get("telemetry.enabled", true),
       thumbsFeedback: cfg.get("thumbsFeedback", false),
+      museSettings: museSettings(cfg),
       appPurpose: this.appPurpose() || DEFAULT_APP_PURPOSE,
       ...(commandLanguage ? { commandLanguage } : {}),
       hostKind: this.deps.host.canSwitchWorkspaceFolder ? "desktop" : "extension",

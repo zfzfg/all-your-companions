@@ -1,3 +1,4 @@
+import type { ModeId, MuseSettings } from "./mode-prefs";
 // Single source of truth for the host <-> webview message contract.
 //
 // Two directions, two discriminated unions:
@@ -231,6 +232,8 @@ export const HOST_CAPABILITIES = {
   // webview must not post `queueSend.chips` (a v2.0.4 host would ignore them
   // and silently drop the files). Field presence, not a version check.
   queueSendChips: true,
+  composerDraftSession: true,
+  installMuse: true,
 } as const;
 
 /**
@@ -264,6 +267,8 @@ export type HostErrorCode = typeof INTERRUPTED_SEND_CODE;
 
 /** Host-kind affordances merged into `initialState.capabilities` at post time. */
 export type HostUiCapabilities = {
+  composerDraftSession?: boolean;
+  installMuse?: boolean;
   deleteActiveSession?: boolean;
   /**
    * Settings → Connectors. OPT-IN: absent/false = hide the nav row and keep
@@ -554,6 +559,7 @@ export type HostMsg =
        * from this field; `feedbackAvailability` remains the affordance gate.
        */
       thumbsFeedback?: boolean;
+      museSettings?: MuseSettings;
       capabilities: HostUiCapabilities }
   /** Live retraction of `capabilities.moveViewHint`, sent the moment the user
    *  opens the host's move-view picker. `initialState` is not re-sent on a
@@ -934,7 +940,9 @@ export type HostMsg =
       verifySuggestions?: string[];
       defaultAutonomy?: "step" | "stop-on-problems" | "autopilot";
     }
-  | { type: "modeChanged"; modeId: string }
+  | { type: "modeChanged"; modeId: string; modes?: ModeId[] }
+  | { type: "startupStatus"; stage: "session" | "consent" | "cli-update" | null; sessionId?: string; generation: number; sequence: number }
+  | { type: "museSettings"; value: MuseSettings }
   | { type: "openModePopover" }
   | { type: "voiceState"; status: "listening" | "transcribing" | "idle" }
   | { type: "voiceConfigured"; value: boolean; sendPhrase?: string; keyterms?: string[]; backendState?: VoiceBackendState }
@@ -1435,7 +1443,7 @@ export type WebviewMsg =
   | { type: "newSession"; cwd?: string; draftId?: string }
   | { type: "cancel" }
   | { type: "pickModel" }
-  | { type: "setMode"; modeId: "agent" | "plan" | "yolo" }
+  | { type: "setMode"; modeId: ModeId }
   // AP-15. A DIFFERENT axis from `setMode` above: that one is the per-turn
   // permission mode, this one is what kind of conversation the session is.
   // Host-local and host-authoritative — a locked session rejects it (ST-2).
@@ -1862,6 +1870,8 @@ export type WebviewMsg =
   | { type: "updateProviderCli"; provider: "codex" | "claude" }
   | { type: "cancelCodexInstall" }
   | { type: "runInstallCmd" }
+  | { type: "runMuseInstallCmd" }
+  | { type: "setMuseSetting"; key: keyof MuseSettings; value: boolean | string }
   | { type: "runGrokLogin"; provider?: AcpProvider }
   | { type: "logout"; provider?: AcpProvider }
   | { type: "checkGrokUpdate" }
@@ -2046,7 +2056,7 @@ const HOST_MESSAGE_TYPE_MAP: Record<HostMsg["type"], true> = {
   nearFullPrompt: true,
   initialState: true, moveViewHint: true, welcomeTips: true, projectSetup: true, githubState: true, githubRepos: true, providerState: true, mcpServers: true, mcpConnectors: true, routines: true, codexInstallProgress: true, planModeAvailability: true, showThinking: true, appPurpose: true, fontScale: true, grokUpdateStatus: true, updateAvailable: true, updateReady: true, telemetryEnabled: true, thumbsFeedback: true,
   initialized: true, cliUpdating: true, session: true, sessionName: true, modelChanged: true,
-  modeChanged: true, sessionType: true, companionSubagent: true, subagentTray: true, workflowRun: true, workflowList: true, openModePopover: true, voiceState: true, voiceConfigured: true,
+  startupStatus: true, modeChanged: true, museSettings: true, sessionType: true, companionSubagent: true, subagentTray: true, workflowRun: true, workflowList: true, openModePopover: true, voiceState: true, voiceConfigured: true,
   voicePartial: true, voiceSubmit: true, voiceTranscript: true, voiceError: true,
   chips: true, commandsUpdate: true, mentionResults: true, userMessage: true, agentStart: true,
   thoughtChunk: true, messageChunk: true, media: true, userMessageChunk: true,
@@ -2082,7 +2092,7 @@ const WEBVIEW_MESSAGE_TYPE_MAP: Record<WebviewMsg["type"], true> = {
   setShowThinking: true, setAppPurpose: true, setExpandCommandOutputs: true, setSteerByDefault: true, setPromptNav: true,
   setSoundNotifications: true, setProcessingSound: true, setReadRepliesAloud: true, setSummarizeRepliesAloud: true, setVoiceSendPhrase: true, setVoiceKeyterms: true, setTelemetryEnabled: true, setThumbsFeedback: true, summarizeSpeech: true, requestImageOriginal: true, composerFocus: true,
   dropFile: true, permissionAnswer: true, listPermissionRules: true, deletePermissionRule: true, adoptPermissionRules: true, exitPlanAnswer: true, questionAnswer: true, limitOfferAnswer: true,
-  questionCancel: true, questionDraft: true, setModel: true, installCodex: true, updateProviderCli: true, cancelCodexInstall: true, runInstallCmd: true, runGrokLogin: true,
+  questionCancel: true, questionDraft: true, setModel: true, installCodex: true, updateProviderCli: true, cancelCodexInstall: true, runInstallCmd: true, runMuseInstallCmd: true, setMuseSetting: true, runGrokLogin: true,
   
   logout: true, checkGrokUpdate: true, updateGrok: true, recheckConnection: true, refreshProviders: true, retryProviderSession: true,
   listSessions: true, listRepoSessions: true, selectRepo: true, toggleRepoPin: true, toggleSessionPin: true,

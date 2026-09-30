@@ -63,7 +63,7 @@ describe("native plan verdict orchestration", () => {
   it("settles approval state and interjects feedback before releasing native exit_plan_mode outcomes", () => {
     // Approval restores remembered Auto-accept via the injected Host config surface
     // (was `vscode.workspace.getConfiguration` before the host extraction).
-    const restoreYolo = handleExitPlan.indexOf("session.autoApprove = this.deps.host.getConfiguration");
+    const restoreYolo = handleExitPlan.indexOf('session.autoApprove = (this.deps.state.get<Record<string, string>>("grok.modeByProvider"');
     const dropGate = handleExitPlan.indexOf("this.deps.uiOps.setPlanActive(session, false)", restoreYolo);
     const interject = nativeVerdicts.indexOf("client.interject(feedback");
     const respond = nativeVerdicts.indexOf("client.respondExitPlan(requestId, verdict)");

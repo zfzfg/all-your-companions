@@ -1,3 +1,4 @@
+import { sessionModes, type MusePosture } from "./mode-prefs";
 import { AcpClient } from "./acp";
 import type { SubagentDirective } from "./subagent-directives";
 import type { CompanionsSkipReason } from "./companion-subagents";
@@ -143,6 +144,9 @@ export function preferredPermissionAllowOption(
  */
 export class Session {
   composerDraftId?: string;
+  startupSequence = 0;
+  startupStatus?: Extract<HostMsg, { type: "startupStatus" }>;
+  musePosture?: MusePosture;
   /** Provider is fixed once the first user turn enters history, except an
    *  explicit limit-failover switch (AP-06) that the user confirmed. */
   provider: AcpProvider = "grok";
@@ -1007,7 +1011,8 @@ export function sessionUiSnapshot(
   if (session.client?.currentModelId) {
     messages.push({ type: "modelChanged", modelId: session.client.currentModelId });
   }
-  messages.push({ type: "modeChanged", modeId });
+  messages.push({ type: "modeChanged", modeId, modes: sessionModes(session.provider, session.musePosture?.shellSandbox) });
+  if (session.startupStatus) messages.push(session.startupStatus);
   // AP-15. Replacing state like the mode badge beside it: the webview needs it
   // back after a focus switch or a reload, and the `locked`
   // flag is what decides between the segmented control and the read-only badge.

@@ -1474,6 +1474,7 @@ export class SessionCatalog {
       await this.deps.lifecycleOps.startSession(unused.id, this.deps.getFocused(), "ensure");
     } else if (unused) {
       await this.openSession(unused.id, unused.cwd);
+      if (draftId && this.deps.getFocused().activeSessionId === unused.id) this.deps.uiOps.postLocal({ type: "composerDraftSession", draftId, sessionId: unused.id });
     } else {
       const fresh = this.deps.lifecycleOps.newLocalSession();
       fresh.composerDraftId = draftId;

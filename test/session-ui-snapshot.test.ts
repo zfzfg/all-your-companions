@@ -15,7 +15,7 @@ describe("sessionUiSnapshot", () => {
 
     expect(sessionUiSnapshot(session, "plan")).toEqual([
       { type: "subscriptionUsage", windows: [] },
-      { type: "modeChanged", modeId: "plan" },
+      { type: "modeChanged", modeId: "plan", modes: ["agent", "yolo", "plan"] },
       // AP-15. Replacing state like the mode badge: a focus switch, a reload or
       // a remote attach must put the Session type control back. The id is empty
       // because this session has not been named by a CLI yet — which is exactly

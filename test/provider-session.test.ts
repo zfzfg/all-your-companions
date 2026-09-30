@@ -48,6 +48,7 @@ function makeMockDeps(): ProviderSessionDeps {
     setFocused: vi.fn(),
     getPool: () => new Set([session]),
     sessionOps: {
+      detachClient: vi.fn((s: Session) => { const client = s.client; s.client = undefined; s.gen++; return client; }),
       sessionCwd: vi.fn(() => "/workspace/test"),
       setSessionCwd: vi.fn(),
       workspaceRoot: vi.fn(() => "/workspace/test"),
@@ -168,7 +169,7 @@ describe("ProviderSession (W-15 S4)", () => {
 
       await ps.setMode("yolo", session);
 
-      expect(deps.sessionOps.rememberGrokConfig).toHaveBeenCalledWith("defaultMode", "yolo");
+      expect(deps.state.update).toHaveBeenCalledWith("grok.modeByProvider", { [session.provider]: "yolo" });
     });
   });
 

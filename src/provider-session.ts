@@ -1,3 +1,4 @@
+import { isMuseModeId, MUSE_MODE_PREF_KEY, sessionModes, type ModeId } from "./mode-prefs";
 import { providerCapability } from "./provider-capabilities";
 import { customModelItem } from "./provider-ui";
 import { PROVIDER_CLI } from "./provider-cli";
@@ -90,6 +91,7 @@ export interface ProviderSessionSessionOps {
   sessionCwd(session?: Session): string;
   setSessionCwd(session: Session, cwd: string, root?: string): void;
   workspaceRoot(): string;
+  detachClient(session: Session): AcpClient | undefined;
   newLocalSession(): Session;
   startSession(model?: string, targetSession?: Session): Promise<any>;
   restartSession(mode: any, session: Session): Promise<any>;
@@ -237,6 +239,7 @@ export class ProviderSession {
         try { await client.deleteSession(discardId); }
         catch (error) { this.deps.host.appendLine(`[${oldProvider}] could not discard empty session ${discardId}: ${(error as Error).message}`); }
       }
+      await this.deps.sessionOps.detachClient(session)?.dispose();
       session.provider = provider;
       await this.deps.sessionOps.rememberProjectProvider(this.deps.sessionOps.sessionCwd(session), provider, modelId || undefined);
       await this.deps.sessionOps.startSession(undefined, session);
@@ -255,7 +258,9 @@ export class ProviderSession {
       return;
     }
     try {
+      const generation = session.gen;
       await client.setModel(modelId);
+      if (session.client !== client || session.gen !== generation || session.provider !== provider) return;
       await this.deps.sessionOps.rememberProjectProvider(this.deps.sessionOps.sessionCwd(session), provider, modelId);
       if (provider === "grok") await this.deps.sessionOps.rememberGrokConfig("defaultModel", modelId);
     } catch (e) {
@@ -278,16 +283,38 @@ export class ProviderSession {
   }
 
   public async setMode(
-    modeId: "agent" | "plan" | "yolo",
+    modeId: ModeId,
     session: Session = this.deps.getFocused(),
   ): Promise<void> {
     const override = this.deps.getOverride?.<typeof this.setMode>("setMode");
     if (override) return override(modeId, session);
 
     if (!session.client || !session.client.sessionId || session.priming) return;
+    const modeClient = session.client, modeGeneration = session.gen;
+    if (session.provider === "muse") {
+      if (!isMuseModeId(modeId)) { this.deps.uiOps.notifyUser("error", "Couldn't switch mode: Muse does not offer Plan mode."); return; }
+      const client = session.client;
+      try { await client.setMode(modeId); }
+      catch (error) { this.deps.uiOps.notifyUser("error", `Couldn't switch mode: ${(error as Error).message}`); return; }
+      if (session.client !== client) return;
+      await this.deps.state.update(MUSE_MODE_PREF_KEY, modeId);
+      if (session.client !== client) return;
+      if (session.musePosture) session.musePosture = { ...session.musePosture, mode: modeId };
+      const id = session.activeSessionId;
+      if (id && session.musePosture) {
+        const current = this.deps.state.get<any>("grok.sessionMeta", {});
+        await this.deps.state.update("grok.sessionMeta", { ...current, [id]: { ...current[id], musePosture: session.musePosture } });
+      }
+      session.autoApprove = modeId === "yolo";
+      this.deps.uiOps.setPlanActive(session, false);
+      this.deps.uiOps.emit(session, { type: "modeChanged", modeId, modes: sessionModes("muse", session.musePosture?.shellSandbox) });
+      return;
+    }
+    if (modeId === "onRequest") return;
     if (modeId === "plan" && !session.planModeAvailable) {
       if (!session.planModeVersionVerified) {
         const rechecked = await this.recheckPlanModeAvailability(session);
+        if (session.client !== modeClient || session.gen !== modeGeneration) return;
         if (!rechecked || !session.planModeAvailable) {
           this.deps.uiOps.notifyUser("warning",
             session.planModeUnavailableReason ?? "Plan mode is unavailable for this Grok CLI version.",
@@ -307,7 +334,9 @@ export class ProviderSession {
     }
     const remember = modeToRemember(modeId);
     if (remember) {
-      void this.deps.sessionOps.rememberGrokConfig("defaultMode", remember);
+      const modes = this.deps.state.get<Record<string, string>>("grok.modeByProvider", {});
+      await this.deps.state.update("grok.modeByProvider", { ...modes, [session.provider]: remember });
+      if (session.client !== modeClient || session.gen !== modeGeneration) return;
     }
     if (modeId === "yolo") {
       session.autoApprove = true;
@@ -328,7 +357,9 @@ export class ProviderSession {
       }
       if (session.client) {
         try {
-          await applyHostMode(session.client, session.provider, "plan");
+          const client = session.client, generation = session.gen;
+          await applyHostMode(client, session.provider, "plan");
+          if (session.client !== client || session.gen !== generation) return;
           session.autoApprove = false;
           this.deps.uiOps.setPlanActive(session, true);
         } catch (e) {
@@ -366,7 +397,7 @@ export class ProviderSession {
     const sidebar = this.deps.uiOps;
     const resolveCard = () => this.deps.uiOps.emit(session, { type: "planResolved", requestId, verdict });
     if (verdict === "approved") {
-      session.autoApprove = this.deps.host.getConfiguration("grok").get<string>("defaultMode", "") === "yolo";
+      session.autoApprove = (this.deps.state.get<Record<string, string>>("grok.modeByProvider", {})[session.provider] ?? this.deps.host.getConfiguration("grok").get<string>("defaultMode", "")) === "yolo";
       this.deps.uiOps.setPlanActive(session, false);
     } else if (verdict === "rejected") {
       session.autoApprove = false;
@@ -608,7 +639,7 @@ export class ProviderSession {
       return;
     }
 
-    if (!claimWarning && (session.autoApprove || (nativePlanTools && (client.planActive || session.planActive))) && !planActive && !isPlanReviewPermission(req.toolCall?.kind)) {
+    if (session.provider !== "muse" && !claimWarning && (session.autoApprove || (nativePlanTools && (client.planActive || session.planActive))) && !planActive && !isPlanReviewPermission(req.toolCall?.kind)) {
       const opt = req.options.find((o: any) => o.kind === "allow_always") ??
                   req.options.find((o: any) => o.kind === "allow_once");
       if (opt) {

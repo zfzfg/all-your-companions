@@ -1,7 +1,13 @@
+import { isMuseModeId, type MusePosture } from "./mode-prefs";
 import { hostModeSequence, type HostMode } from "./provider-modes";
 import * as path from "node:path";
 import { contextTokens, contextUsed } from "./context-budget";
 import type { AcpBackend, BackendConfigState, BackendSpawnOptions } from "./acp-backend";
+
+export function withMuseCredentialBackend(env: NodeJS.ProcessEnv, platform: NodeJS.Platform = process.platform): NodeJS.ProcessEnv {
+  if (platform === "darwin" || "TBH_CREDENTIAL_BACKEND" in env) return env;
+  return { ...env, TBH_CREDENTIAL_BACKEND: "file" };
+}
 
 /** Runs the installed vendor CLI through our ACP adapter. */
 export class MuseBackend implements AcpBackend<"muse"> {
@@ -9,11 +15,13 @@ export class MuseBackend implements AcpBackend<"muse"> {
   readonly processName = "Muse ACP adapter";
   readonly usesClientPlanGate = false;
 
+  constructor(private readonly posture?: MusePosture) {}
+
   spawn(options: BackendSpawnOptions) {
     return {
       command: process.execPath,
       args: [path.join(__dirname, "muse-adapter", "main.mjs")],
-      env: { ...options.env, ELECTRON_RUN_AS_NODE: "1", MUSE_CODE_EXECUTABLE: options.cliPath },
+      env: { ...withMuseCredentialBackend(options.env), ELECTRON_RUN_AS_NODE: "1", MUSE_CODE_EXECUTABLE: options.cliPath, GROK_MUSE_POSTURE: JSON.stringify(this.posture ?? {}) },
       shell: false,
     };
   }
@@ -21,6 +29,7 @@ export class MuseBackend implements AcpBackend<"muse"> {
   normalizeSessionResponse(response: any) { return { ...response, models: response.models ?? response._meta?.models }; }
   normalizePromptResult(result: any) { return result; }
   normalizeUpdate(update: any, meta: any) {
+    if (update?.sessionUpdate === "session_info_update" && update._meta?.["muse/workflow"]) return { workflowUpdate: update._meta["muse/workflow"] };
     if (update?.sessionUpdate === "usage_update") return { update,
       meta, contextUsed: contextUsed(update.used), contextWindow: contextTokens(update.size), contextQuality: "verified" as const };
     return { update, meta };
@@ -33,13 +42,14 @@ export class MuseBackend implements AcpBackend<"muse"> {
     return { method: "session/set_config_option", params: { sessionId, configId: "reasoning_effort", value: level } };
   }
   hostModeSequence(mode: HostMode): readonly string[] { return hostModeSequence("muse", mode); }
-  setMode(_sessionId: string, _modeId: string): never {
-    throw new Error("Muse mode switching is unavailable");
+  setMode(sessionId: string, modeId: string) {
+    if (!isMuseModeId(modeId)) throw new Error("Muse does not offer Plan mode or unknown approval modes");
+    return { method: "session/set_mode", params: { sessionId, modeId } };
   }
   steeringCapabilities() { return { supported: false, acceptsContent: false }; }
   interject() { return null; }
   steerDelivered() { return false; }
-  configState(_response: any, fallback: BackendConfigState) { return fallback; }
+  configState(response: any, fallback: BackendConfigState) { return { ...fallback, modeId: response?.modes?.currentModeId ?? response?._meta?.modes?.currentModeId ?? fallback.modeId }; }
   modelSetSucceeded() { return true; }
   async listSessions(request: (method: string, params: any) => Promise<any>, cwd: string) {
     const sessions = [];

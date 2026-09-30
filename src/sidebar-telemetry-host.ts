@@ -13,7 +13,7 @@ import {
   shouldSendTelemetry,
   OFFICIAL_EXTENSION_ID
 } from "./telemetry";
-import { rememberedEffort, type EffortPrefs } from "./mode-prefs";
+import { rememberedEffort, type EffortPrefs, type ModeId } from "./mode-prefs";
 import { Session } from "./session";
 import { PersistedState } from "./persisted-state";
 import * as os from "node:os";
@@ -23,7 +23,7 @@ export interface SidebarTelemetryHostSidebarOps {
   readonly context: HostContext;
   sessionCwd: (session?: Session) => string;
   readonly state: PersistedState;
-  displayMode: (session?: Session) => "agent" | "plan" | "yolo";
+  displayMode: (session?: Session) => ModeId;
   chatFontScale: () => number;
   appPurpose: () => AppPurpose;
   readonly lastVoiceConfiguredByCwd: Map<string, boolean>;

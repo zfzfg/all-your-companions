@@ -1,3 +1,5 @@
+import { MuseBackend } from "./muse-backend";
+import { isMuseModeId, museSettings, musePosture, MUSE_MODE_PREF_KEY, sessionModes } from "./mode-prefs";
 import { compactNotice } from "./provider-ui";
 import { effectiveContextWindow, type ContextObservation } from "./context-budget";
 import { PROVIDER_CLI } from "./provider-cli";
@@ -334,9 +336,21 @@ export class SessionStart {
     intent: SessionStartIntent = "replace",
     clock?: OpenClock,
   ): Promise<AcpClient | undefined> {
-    return this.runExclusiveSessionStart(target, () =>
-      this.startSessionBody(resumeId, target, intent, clock),
-    );
+    return this.runExclusiveSessionStart(target, async () => {
+      this.postStartupStatus(target, "session");
+      let started: AcpClient | undefined;
+      try { return started = await this.startSessionBody(resumeId, target, intent, clock); }
+      finally {
+        if (!started && !target.client) { target.priming = false; this.deps.emit(target, { type: "setBusy", value: false }); }
+        this.postStartupStatus(target, null);
+      }
+    });
+  }
+
+  private postStartupStatus(session: Session, stage: "session" | "consent" | "cli-update" | null): void {
+    session.startupStatus = { type: "startupStatus", stage, sessionId: session.composerDraftId ?? session.activeSessionId,
+      generation: session.gen, sequence: ++session.startupSequence };
+    this.deps.emit(session, session.startupStatus);
   }
 
   /**
@@ -416,11 +430,13 @@ export class SessionStart {
       return undefined;
     }
 
+    this.postStartupStatus(target, "consent");
     const consentAt = clock.now();
     if (autoApproveNativePlanTools(target.provider) && !(await this.deps.eventOps.confirmRepoForcedAutoApprove(this.deps.sessionCwd(target)))) {
       return undefined;
     }
     approveGateMs = clock.elapsed(consentAt);
+    this.postStartupStatus(target, "session");
 
     const startDecision = decideSessionStart(target, resumeId, intent);
     if (startDecision === "reuse" || startDecision === "refuse-turn") {
@@ -477,11 +493,14 @@ export class SessionStart {
     clock.record("dispose", disposeMs);
 
     const rememberedYolo = startsInYolo(
-      this.deps.host.getConfiguration("grok").get<string>("defaultMode", ""),
+      this.deps.state.get<Record<string, string>>("grok.modeByProvider", {})[session.provider] ?? this.deps.host.getConfiguration("grok").get<string>("defaultMode", ""),
       !!resumeId,
     );
     const configAutoApprove = autoApproveNativePlanTools(session.provider) && this.deps.eventOps.configForcesAutoApprove(this.deps.sessionCwd(session));
-    session.autoApprove = rememberedYolo || configAutoApprove;
+    session.musePosture = session.provider === "muse" ? musePosture(this.deps.state.get(MUSE_MODE_PREF_KEY),
+      resumeId ? this.deps.state.get<SessionMetaOverrides>(SESSION_META_KEY, {})[resumeId]?.musePosture : undefined,
+      museSettings(this.deps.host.getConfiguration("grok"))) : undefined;
+    session.autoApprove = session.musePosture ? session.musePosture.mode === "yolo" : rememberedYolo || configAutoApprove;
     session.planActive = false;
     session.sessionPermissionRules = [];
     session.hasHistory = !!resumeId;
@@ -522,7 +541,7 @@ export class SessionStart {
     session.adapterCompactThisTurn = false;
     session.adapterTurnCallUsed = [];
 
-    this.deps.emit(session, { type: "modeChanged", modeId: session.autoApprove ? "yolo" : "agent" });
+
     if (configAutoApprove) this.deps.eventOps.noticeAlwaysApproveOnce(this.deps.sessionCwd(session));
     if (resumeId) this.deps.emit(session, { type: "clearMessages" });
 
@@ -603,7 +622,7 @@ export class SessionStart {
           }
           if (session.autoApprove) {
             try {
-              await applyHostMode(client, session.provider, "yolo");
+              if (session.provider !== "muse") await applyHostMode(client, session.provider, "yolo");
             } catch { /* best-effort */ }
           }
         }
@@ -744,7 +763,9 @@ export class SessionStart {
     let grokVersionVerified = false;
 
     if (providerCapability(session.provider, "planMode").state === "probe") {
-      await this.deps.providerOps.maybeUpdateCliOnUpgrade(cliPath);
+      this.postStartupStatus(session, "cli-update");
+      try { await this.deps.providerOps.maybeUpdateCliOnUpgrade(cliPath); }
+      finally { if (gen === session.gen) this.postStartupStatus(session, "session"); }
       if (gen !== session.gen) return { grokVersionVerified: false };
       await this.deps.providerOps.maybePinBrokenCli(cliPath);
       if (gen !== session.gen) return { grokVersionVerified: false };
@@ -755,14 +776,14 @@ export class SessionStart {
       grokHandshakeVersion = grokVersionVerified ? compatibility.cliVersion : undefined;
       this.deps.reviewAndPlanOps.applyPlanModeCompatibility(session, compatibility);
     } else {
-      session.planModeAvailable = true;
+      session.planModeAvailable = providerCapability(session.provider, "planMode").state === "yes";
       session.planModeVersionVerified = true;
       session.planModeUnavailableReason = undefined;
       this.deps.emit(session, {
         type: "providerCapabilities",
         provider: session.provider,
         capabilities: allProviderCapabilities(session.provider, {
-          planModeAvailable: true,
+          planModeAvailable: session.planModeAvailable,
           cliVerified: true,
         }),
       });
@@ -836,7 +857,7 @@ export class SessionStart {
       mcpServers: async () => supportsClientMcpServers(session.provider) ? this.deps.eventOps.hostMcpServersFor(session) : [],
       ...(session.provider === "grok"
         ? { grokVersion: handshake.grokHandshakeVersion, grokVersionVerified: handshake.grokVersionVerified }
-        : { backend: this.deps.providerOps.createProviderBackend(session.provider, effort) }),
+        : { backend: session.provider === "muse" ? new MuseBackend(session.musePosture) : this.deps.providerOps.createProviderBackend(session.provider, effort) }),
     });
 
     session.client = client;
@@ -915,9 +936,11 @@ export class SessionStart {
             ...(current[res.sessionId] ?? {}),
             provider: session.provider,
             providerCwd: cwd,
+            ...(session.musePosture ? { musePosture: session.musePosture } : {}),
           },
         }));
       }
+      this.deps.emit(session, { type: "modeChanged", modeId: session.musePosture?.mode ?? (session.autoApprove ? "yolo" : "agent"), modes: sessionModes(session.provider, session.musePosture?.shellSandbox) });
       if (session.composerDraftId && res.sessionId) {
         this.deps.emit(session, { type: "composerDraftSession", draftId: session.composerDraftId, sessionId: res.sessionId });
         session.composerDraftId = undefined;
@@ -995,6 +1018,12 @@ export class SessionStart {
 
     client.on("modeChanged", (id) => {
       if (gen !== session.gen) return;
+      if (session.provider === "muse" && isMuseModeId(id)) {
+        if (session.musePosture) session.musePosture = { ...session.musePosture, mode: id };
+        session.autoApprove = id === "yolo";
+        this.deps.emit(session, { type: "modeChanged", modeId: id, modes: sessionModes("muse", session.musePosture?.shellSandbox) });
+        return;
+      }
       if (id === "plan") {
         session.autoApprove = false;
         this.deps.reviewAndPlanOps.setPlanActive(session, true);
@@ -1306,6 +1335,15 @@ export class SessionStart {
       if (autoCompactNote) this.deps.emit(session, { type: "autoCompactNotice", text: autoCompactNote });
     });
 
+    client.on("notice", (text: string) => {
+      if (gen === session.gen && session.client === client) this.deps.emit(session, { type: "hostNotice", level: "info", text });
+    });
+    client.on("workflowUpdate", (update: unknown) => {
+      if (gen !== session.gen || session.client !== client) return;
+      const progress = parseRunProgressUpdate(update);
+      if (progress) this.deps.emit(session, { type: "runProgress", update: progress });
+    });
+
     client.on("subagentLifecycle", (u: unknown, meta?: any) => {
       if (gen !== session.gen) return;
       if ((u as { sessionUpdate?: unknown })?.sessionUpdate === "turn_completed") {
@@ -1474,7 +1512,7 @@ export class SessionStart {
         const restorePlan = decision.planActive && session.planModeAvailable;
         this.deps.reviewAndPlanOps.setPlanActive(session, restorePlan);
         const targetMode = restorePlan ? "plan" : "agent";
-        try { await applyHostMode(client, session.provider, targetMode); } catch { /* best-effort */ }
+        try { if (session.provider !== "muse") await applyHostMode(client, session.provider, targetMode); } catch { /* best-effort */ }
       }
     }
 
@@ -1534,7 +1572,12 @@ export class SessionStart {
     }
 
     const client = session.client ?? await this.ensureClient(session);
-    if (!client) return;
+    if (!client) {
+      const id = session.activeSessionId ?? session.composerDraftId;
+      if (session === this.deps.getFocused() || session.composerDraftId) this.deps.emit(session, { type: "restoreComposer", text, chips: session.chips, sessionId: id, draft: true });
+      else if (id) await this.deps.workspaceOps.updateSessionMeta(current => ({ ...current, [id]: { ...current[id], queuedDraft: text, queuedDraftChips: session.chips } }));
+      return;
+    }
 
     if (!sessionReadyForPrompt(session)) {
       if (!queuedSendCommit) this.deps.turnAndSendOps.divertRacingSend(session, text, bare);

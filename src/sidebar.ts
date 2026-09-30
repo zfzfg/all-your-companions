@@ -1,3 +1,4 @@
+import { sessionModes, type ModeId } from "./mode-prefs";
 import { SidebarViewHost } from "./sidebar-view-host";
 import { SidebarTelemetryHost } from "./sidebar-telemetry-host";
 import { SessionMetadataHost } from "./session-metadata-host";
@@ -1583,6 +1584,7 @@ hasProviderConsent: (...args) => self.hasProviderConsent(...args),
       setFocused: (session) => { self.focused = session; },
       getPool: () => self.pool,
       sessionOps: {
+        detachClient: (session) => self.detachClient(session),
         sessionCwd: (...args) => self.sessionCwd(...args),
         setSessionCwd: (session, cwd, root) => self.setSessionCwd(session, cwd, root ?? self.workspaceRoot()),
         workspaceRoot: () => self.workspaceRoot(),
@@ -3166,14 +3168,15 @@ See design doc for the full state machine diagram.`;
    * doesn't model (the CLI only knows agent/plan), so we derive the button label
    * here rather than echoing the CLI's raw mode id.
    */
-  private displayMode(session: Session = this.focused): "agent" | "plan" | "yolo" {
+  private displayMode(session: Session = this.focused): ModeId {
+    if (session.provider === "muse") return session.musePosture?.mode ?? "agent";
     if (session.planActive) return "plan";
     if (session.autoApprove) return "yolo";
     return "agent";
   }
 
   private postMode(session: Session = this.focused): void {
-    const message: HostMsg = { type: "modeChanged", modeId: this.displayMode(session) };
+    const message: HostMsg = { type: "modeChanged", modeId: this.displayMode(session), modes: sessionModes(session.provider, session.musePosture?.shellSandbox) };
     if (session === this.focused) this.view?.webview.postMessage(message);
   }
 
@@ -3502,6 +3505,7 @@ ${detail}`,
    *  unread plan, and the card must stay answerable. A card with no allow
    *  option is left for the user as well. */
   private autoApprovePendingPermissions(session: Session): void {
+    if (session.provider === "muse") return;
     const client = session.client;
     if (!client || session.pendingPermissions.size === 0) return;
     let resolved = 0;
@@ -6537,6 +6541,7 @@ ${detail}`,
    *  return to that conversation. The other two would re-steal focus and re-open
    *  the mode picker on reconnect. */
   private static readonly TRANSIENT_TYPES = new Set([
+    "startupStatus",
     "restoreComposer", "focusInput", "findInSession", "openModePopover",
     // Replaying a DESTRUCTIVE modal after a reconnect is the bug, not the fix.
     "uiConfirmRequest", "uiConfirmResolved",

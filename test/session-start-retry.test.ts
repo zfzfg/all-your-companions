@@ -316,4 +316,17 @@ describe("startSession bounded spawn retry", () => {
     expect(onboardings(sidebar)).toHaveLength(1);
     expect(onboardings(sidebar)[0]).toMatchObject({ type: "onboarding" });
   });
+  it("returns a declined startup to idle and records ordered approval status", async () => {
+    const sidebar = makeSidebar("/repo");
+    sidebar.focused.priming = true;
+    sidebar.confirmRepoForcedAutoApprove = vi.fn(async () => false);
+    const client = await sidebar.startSession(undefined, sidebar.focused);
+    expect(client).toBeUndefined(); expect(sidebar.focused.priming).toBe(false);
+    expect(startControl.starts).toBe(0);
+    const status = sidebar.focused.startupStatus;
+    expect(status).toMatchObject({ stage: null });
+    expect(status.sequence).toBeGreaterThan(1);
+    expect(sidebar.posted).toContainEqual({ type: "setBusy", value: false });
+  });
+
 });

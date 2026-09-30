@@ -4,7 +4,25 @@
 
 import type { ConfigTarget } from "./host";
 
-export type ModeId = "agent" | "plan" | "yolo";
+export type MuseModeId = "agent" | "yolo" | "onRequest";
+export type ModeId = "agent" | "plan" | "yolo" | "onRequest";
+export const MUSE_MODE_PREF_KEY = "grok.defaultMuseMode";
+export interface MuseSettings { shellSandbox: boolean; sandboxNetwork: "proxy-only" | "restricted" | "enabled"; trustWorkspaces: boolean; }
+export interface MusePosture extends MuseSettings { mode: MuseModeId; }
+export function isMuseModeId(value: unknown): value is MuseModeId {
+  return value === "agent" || value === "yolo" || value === "onRequest";
+}
+export function sessionModes(provider: string, shellSandbox = true): ModeId[] {
+  return provider === "muse" ? ["agent", "yolo", ...(shellSandbox ? ["onRequest" as const] : [])] : ["agent", "yolo", "plan"];
+}
+export function museSettings(config: { get<T>(key: string, fallback: T): T }): MuseSettings {
+  return { shellSandbox: config.get("museShellSandbox", true), sandboxNetwork: config.get("museSandboxNetwork", "proxy-only"), trustWorkspaces: config.get("museTrustWorkspaces", false) };
+}
+export function musePosture(mode: unknown, saved: MusePosture | undefined, settings: MuseSettings): MusePosture {
+  if (saved) return saved;
+  const selected = isMuseModeId(mode) ? mode : "agent";
+  return { ...settings, mode: selected, shellSandbox: selected === "onRequest" || (selected !== "yolo" && settings.shellSandbox) };
+}
 
 /**
  * The mode value to persist for a user's mode switch, or `null` to leave the
@@ -12,7 +30,7 @@ export type ModeId = "agent" | "plan" | "yolo";
  * never remembered (#25). Mirrors how `defaultModel`/`defaultEffort` persist.
  */
 export function modeToRemember(modeId: ModeId): "agent" | "yolo" | null {
-  return modeId === "plan" ? null : modeId;
+  return modeId === "agent" || modeId === "yolo" ? modeId : null;
 }
 
 /**
