@@ -7,7 +7,7 @@ import { compactNotice, customModelItem } from "../src/provider-ui";
 describe("provider CLI and usage policies", () => {
   const args = { grok: ["login"], codex: ["login"], claude: ["auth", "login"], gemini: [], muse: ["login"] };
   const logoutArgs = { ...args, gemini: [] };
-  const sources = { grok: "rpc", codex: "codex-file", claude: "updates", gemini: "none", muse: "none" };
+  const sources = { grok: "rpc", codex: "codex-file", claude: "updates", gemini: "none", muse: "updates" };
   it.each(ACP_PROVIDERS)("defines explicit auth, storage and usage strategies for %s", (provider) => {
     const policy = PROVIDER_CLI[provider];
     expect(policy.loginArgs).toEqual(args[provider]);

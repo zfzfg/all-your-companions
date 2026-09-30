@@ -233,7 +233,7 @@ export function adapterListEntry(
     customName,
     updatedAt,
     createdAt: updatedAt,
-    numMessages: 0,
+    numMessages: provider === "muse" && Number(raw.turnCount ?? raw._meta?.turnCount) > 0 ? 1 : 0,
     provider,
     pinnedAt: meta?.pinnedAt,
   };

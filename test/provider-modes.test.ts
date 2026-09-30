@@ -14,7 +14,7 @@ const expected = {
   codex: [["default", "agent"], ["default", "agent-full-access"], ["plan"]],
   claude: [["agent"], ["yolo"], ["plan"]],
   gemini: [["agent"], ["yolo"], ["plan"]],
-  muse: [[], [], []],
+  muse: [["agent"], ["yolo"], []],
 };
 describe("backend host mode sequences", () => {
   it.each(ACP_PROVIDERS)("preserves ordered RPCs for %s", async (provider) => {

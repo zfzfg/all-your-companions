@@ -8,7 +8,7 @@ import {
 import { ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { createInterface, Interface } from "node:readline";
 import { EventEmitter } from "node:events";
-import { claudeSubscriptionWindows, grokSubscriptionWindows, type SubscriptionWindow } from "./subscription-usage";
+import { claudeSubscriptionWindows, grokSubscriptionWindows, museSubscriptionWindows, type SubscriptionWindow } from "./subscription-usage";
 import {
   collectToolImages,
   contextUsedFromCompactNotification,
@@ -245,6 +245,8 @@ export { buildGrokAgentArgs } from "./grok-backend";
 export type AcpClientCapabilities = {
   fs: { readTextFile?: true; writeTextFile: true };
   terminal: true;
+  subagents?: Record<string, never>;
+  _meta?: { jetbrains: { air: { version: number; capabilities: string[] } } };
 };
 
 /** Handshake every provider used before grok 1.0 — client-delegated fs. */
@@ -291,6 +293,8 @@ export function acpClientCapabilities(
   grokVersion?: string | null,
   versionVerified = false,
 ): AcpClientCapabilities {
+  if (provider === "codex") return { ...ACP_DELEGATED_FS_CAPABILITIES, subagents: {}, _meta: { jetbrains: { air: { version: 1, capabilities: ["nativeSubagentSessions"] } } } };
+  if (provider === "claude") return { ...ACP_DELEGATED_FS_CAPABILITIES, _meta: { jetbrains: { air: { version: 1, capabilities: ["asyncTasks"] } } } };
   if (provider !== "grok") return ACP_DELEGATED_FS_CAPABILITIES;
   if (!versionVerified) return ACP_DELEGATED_FS_CAPABILITIES;
   const parsed = parseGrokVersion(grokVersion ?? "");
@@ -705,6 +709,7 @@ export class AcpClient extends EventEmitter {
         this.opts.log(`[acp] Failed to set reasoning effort to ${requestedEffort}: ${(err as Error).message}.`);
       }
     }
+    if (this.provider === "muse") { this.currentModeId = this.backend.configState(res, {}).modeId; if (this.currentModeId) this.emit("modeChanged", this.currentModeId); }
     this.emit("session", res);
 
     if (modelId && modelId !== this.currentModelId) {
@@ -761,6 +766,7 @@ export class AcpClient extends EventEmitter {
     // session override, not a stale global value.
     const loadedEffort = this.availableModels.find((m) => m.modelId === this.currentModelId)?.reasoningEffort;
     if (loadedEffort) this.currentReasoningEffort = loadedEffort;
+    if (this.provider === "muse") { this.currentModeId = this.backend.configState(res, {}).modeId; if (this.currentModeId) this.emit("modeChanged", this.currentModeId); }
     this.emit("session", { sessionId, ...(res ?? {}) });
     this.emit("sessionLoaded", { sessionId });
     if (modelId && modelId !== this.currentModelId) {
@@ -1562,6 +1568,8 @@ export class AcpClient extends EventEmitter {
   private handleSessionUpdate(u: any, meta?: any, sessionId?: string): void {
     const foreign = isForeignSessionUpdate(sessionId, this.sessionId);
     const normalized = this.backend.normalizeUpdate(u, meta);
+    if (!foreign && normalized.notice) this.emit("notice", normalized.notice);
+    if (!foreign && normalized.workflowUpdate) this.emit("workflowUpdate", normalized.workflowUpdate);
     const updateModel = meta?.modelId ?? u?._meta?.modelId;
     const staleModel = typeof updateModel === "string" && updateModel !== this.currentModelId
       && updateModel !== this.contextObservation?.resolvedModelId;
@@ -1698,6 +1706,11 @@ export class AcpClient extends EventEmitter {
 
   private async handleServerRequest(msg: any): Promise<void> {
     const { method, id, params } = msg;
+    if (method === "_muse/subscription_usage" && this.provider === "muse") {
+      if (!isForeignSessionUpdate(params?.sessionId, this.sessionId)) this.emit("subscriptionUsage", museSubscriptionWindows(params?.usage));
+      if (id != null) this.respondOk(id, {});
+      return;
+    }
     try {
       if (
         method === "_x.ai/mcp/servers_updated" ||

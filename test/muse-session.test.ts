@@ -7,11 +7,19 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { AcpClient } from "../src/acp";
 import { MuseBackend } from "../src/muse-backend";
+import { MspError } from "@muse-code/sdk";
+import { RequestError } from "@agentclientprotocol/sdk";
+import { adapterListEntry } from "../src/provider-ui";
+import museListing from "./fixtures/muse-session-list.json";
 
 // The session tests inject a fake SDK connection; no vendor executable is used.
-vi.mock("@muse-code/sdk", () => ({ spawnMspConnection: () => { throw new Error("inject the fake spawn"); } }));
+vi.mock("@muse-code/sdk", async importOriginal => ({
+  ...await importOriginal<typeof import("@muse-code/sdk")>(),
+  spawnMspConnection: () => { throw new Error("inject the fake spawn"); },
+}));
 const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform")!;
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllEnvs();
   Object.defineProperty(process, "platform", platformDescriptor);
 });
@@ -29,14 +37,14 @@ function setup() {
   const exited = deferred<{ code: number; signal: null }>();
   const closed = deferred<void>();
   const admission = deferred<any>();
-  const command = vi.fn(async (method: string) => {
-    if (method === "session/start") return { session: { sessionId: "session", modelId: "default-model" } };
+  const command = vi.fn(async (method: string, params?: any) => {
+    if (method === "session/start") return { session: { sessionId: "session", modelId: "default-model", approvalMode: { mode: params.approvalMode, source: "startup" } } };
     if (method === "turn/start") return admission.promise;
     return {};
   });
   const description = "Your content, including inter-session messages, may be used for product improvement.";
   const connection = { command, closed: closed.promise,
-    request: vi.fn(async () => ({ models: [{ modelId: "default-model", displayLabel: "Default",
+    request: vi.fn(async (): Promise<any> => ({ models: [{ modelId: "default-model", displayLabel: "Default",
       description, contextLimit: 1007997 }] })) };
   const handshake = { exited: exited.promise, onNotification: (fn: typeof notify) => { notify = fn; },
     onProtocolError: (fn: typeof protocolError) => { protocolError = fn; }, onServerRequest: vi.fn(),
@@ -46,7 +54,8 @@ function setup() {
   const logs: string[] = [], fatal = vi.fn(), spawn = vi.fn((_options: { command: string; args: string[] }) => handshake);
   const session = new MuseSession(client as any, message => logs.push(message), fatal, spawn as any);
   const event = (method: string, params: any = {}) => notify({ method, params: { sessionId: "session", ...params } });
-  return { session, spawn, handshake, client, logs, fatal, event, admission, exited, closed, command, connection, description, protocolError: (e: Error) => protocolError(e) };
+  const raw = (method: string, params: Record<string, any> = {}) => notify({ method, params });
+  return { session, spawn, handshake, client, logs, fatal, event, raw, admission, exited, closed, command, connection, description, protocolError: (e: Error) => protocolError(e) };
 }
 
 async function ready() {
@@ -55,6 +64,248 @@ async function ready() {
   const result = await s.session.newSession("/workspace", []);
   return { ...s, result };
 }
+
+describe("Muse native modes", () => {
+  it("keeps the SDK dictionary but offers only available modes under Muse's names", async () => {
+    const require = createRequire(import.meta.url);
+    const schema = readFileSync(join(dirname(require.resolve("@muse-code/sdk")), "msp.d.ts"), "utf8");
+    const vocabulary = schema.match(/export type ApprovalMode = ([^;]+);/)![1];
+    expect([...vocabulary.matchAll(/"([^"]+)"/g)].map(match => match[1])).toEqual(["allowAll", "promptUnmatched", "onRequest", "denyUnmatched"]);
+    const s = await ready();
+    expect(s.result.modes?.availableModes).toEqual([
+      { id: "yolo", name: "Full access" }, { id: "agent", name: "Prompt unmatched" },
+      { id: "onRequest", name: "On request" },
+    ]);
+  });
+
+  it.each([{ mode: "yolo" }, { mode: "agent", shellSandbox: false }])("rejects On request before sending it from unsandboxed %j, even after switching to Prompt unmatched", async posture => {
+    vi.stubEnv("GROK_MUSE_POSTURE", JSON.stringify(posture));
+    const s = await ready();
+    s.command.mockResolvedValueOnce({ status: "accepted", effectiveMode: { mode: "promptUnmatched" } } as any);
+    await s.session.setMode("session", "agent");
+    s.command.mockClear();
+    await expect(s.session.setMode("session", "onRequest")).rejects.toThrow("requires the shell sandbox");
+    expect(s.command).not.toHaveBeenCalled();
+  });
+
+  it("fails closed before forwarding pending approvals if an unsandboxed resume replays On request", async () => {
+    vi.stubEnv("GROK_MUSE_POSTURE", JSON.stringify({ mode: "yolo" }));
+    const s = setup();
+    await s.session.initialize();
+    s.command.mockResolvedValueOnce({ session: { sessionId: "session", workspaceRoot: "/workspace", approvalMode: { mode: "onRequest" } },
+      history: { mode: "inline", items: [] }, pendingRequests: [{}] } as any);
+    await expect(s.session.loadSession("session", "/workspace", [])).rejects.toThrow("requires the shell sandbox");
+    expect(s.client.notify).toHaveBeenCalledWith("session/update", { sessionId: "session", update: { sessionUpdate: "current_mode_update", currentModeId: "onRequest" } });
+    expect(s.fatal).toHaveBeenCalled();
+    expect(s.client.request).not.toHaveBeenCalled();
+    await expect(s.session.prompt("session", [{ type: "text", text: "go" }])).rejects.toThrow("Unknown Muse session");
+    expect(s.command.mock.calls.some(([method]) => method === "turn/start")).toBe(false);
+  });
+
+  it("uses the latest mode notification buffered during resume", async () => {
+    const s = setup();
+    await s.session.initialize();
+    s.command.mockImplementationOnce(async () => {
+      s.event("session/approvalModeChanged", { mode: "denyUnmatched" });
+      return { session: { sessionId: "session", workspaceRoot: "/workspace", approvalMode: { mode: "promptUnmatched" } },
+        history: { mode: "inline", items: [] } } as any;
+    });
+    s.command.mockResolvedValueOnce({ status: "accepted", effectiveMode: { mode: "promptUnmatched" } } as any);
+    const result = await s.session.loadSession("session", "/workspace", []);
+    expect(result.modes?.currentModeId).toBe("agent");
+    expect(s.command).toHaveBeenLastCalledWith("session/setApprovalMode", { sessionId: "session", mode: "promptUnmatched" });
+  });
+
+  it.each([
+    [{ mode: "agent" }, ["serve"], "promptUnmatched"],
+    [{ mode: "agent", shellSandbox: false }, ["serve", "--disable-sandbox"], "promptUnmatched"],
+    [{ mode: "agent", sandboxNetwork: "restricted", trustWorkspaces: true }, ["serve", "--sandbox-network", "restricted", "--trust-workspace"], "promptUnmatched"],
+    [{ mode: "agent", sandboxNetwork: "enabled" }, ["serve", "--sandbox-network", "enabled"], "promptUnmatched"],
+    [{ mode: "agent", sandboxNetwork: "proxy-only", trustWorkspaces: false }, ["serve"], "promptUnmatched"],
+    [{ mode: "yolo", shellSandbox: true, trustWorkspaces: false }, ["serve", "--disable-sandbox", "--trust-workspace"], "allowAll"],
+    [{ mode: "onRequest", shellSandbox: false }, ["serve"], "onRequest"],
+    [{ mode: "onRequest", shellSandbox: true, sandboxNetwork: "restricted" }, ["serve", "--sandbox-network", "restricted"], "onRequest"],
+    [{ mode: "denyUnmatched", shellSandbox: true }, ["serve"], "promptUnmatched"],
+    [{ mode: "denyUnmatched", shellSandbox: false }, ["serve", "--disable-sandbox"], "promptUnmatched"],
+  ])("spawns %j and starts in %s", async (posture, args, approvalMode) => {
+    for (const platform of ["win32", "linux"] as const) {
+      const s = setup();
+      Object.defineProperty(process, "platform", { value: platform });
+      const executable = platform === "win32" ? "C:\\Muse Code\\muse.cmd" : "/fake/muse";
+      const backend = new MuseBackend(posture as any);
+      const spec = backend.spawn({ cliPath: executable, cwd: "/workspace", env: {} });
+      vi.stubEnv("MUSE_CODE_EXECUTABLE", executable);
+      vi.stubEnv("GROK_MUSE_POSTURE", spec.env.GROK_MUSE_POSTURE!);
+      await s.session.initialize();
+      expect(s.spawn.mock.calls[0][0].args).toEqual(platform === "win32" ? ["/d", "/c", executable, ...args] : args);
+      const result = await s.session.newSession("/workspace", []);
+      expect(s.command).toHaveBeenCalledWith("session/start", { workspaceRoot: "/workspace", approvalMode });
+      expect(result.modes?.currentModeId).toBe(posture.mode === "denyUnmatched" ? "agent" : posture.mode);
+    }
+  });
+
+  it("switches approval on the live MSP connection and carries the accepted mode through ACP", async () => {
+    const s = await ready();
+    const host = new AcpClient({ cliPath: "/unused", cwd: "/workspace", backend: new MuseBackend(), log: () => {} });
+    vi.spyOn(host as any, "request").mockImplementation(async (...args: unknown[]) => {
+      const [method, p] = args as [string, any];
+      if (method === "session/new") return s.result;
+      if (method === "session/set_mode") return s.session.setMode(p.sessionId, p.modeId);
+      throw new Error(method);
+    });
+    const changed = vi.fn();
+    host.on("modeChanged", changed);
+    await host.newSession();
+    expect(host.currentModeId).toBe("agent");
+    for (const [modeId, mode] of [["yolo", "allowAll"], ["agent", "promptUnmatched"], ["onRequest", "onRequest"]]) {
+      s.command.mockResolvedValueOnce({ status: "accepted", effectiveMode: { mode, source: "approvalReconfigure" } } as any);
+      await host.setMode(modeId);
+      expect(s.command).toHaveBeenLastCalledWith("session/setApprovalMode", { sessionId: "session", mode });
+      expect(host.currentModeId).toBe(modeId);
+      expect(changed).toHaveBeenLastCalledWith(modeId);
+    }
+    expect(s.spawn).toHaveBeenCalledOnce();
+  });
+
+  it.each(["allowAll", "promptUnmatched", "onRequest", "denyUnmatched"])("reopens with replayed %s driving the host mode", async mode => {
+    const s = setup();
+    await s.session.initialize();
+    s.command.mockResolvedValueOnce({ session: { sessionId: "session", workspaceRoot: "/workspace", modelId: "default-model",
+      approvalMode: { mode, source: "replay", lastCommandId: "stored" } }, history: { mode: "inline", items: [] } } as any);
+    if (mode === "denyUnmatched") s.command.mockResolvedValueOnce({ status: "accepted", effectiveMode: { mode: "promptUnmatched" } } as any);
+    const host = new AcpClient({ cliPath: "/unused", cwd: "/workspace", backend: new MuseBackend(), log: () => {} });
+    vi.spyOn(host as any, "request").mockImplementation(async (...args: unknown[]) => {
+      const [method, p] = args as [string, any];
+      expect(method).toBe("session/load");
+      return s.session.loadSession(p.sessionId, p.cwd, p.mcpServers);
+    });
+    const changed = vi.fn();
+    host.on("modeChanged", changed);
+    await host.loadSession("session");
+    expect(host.currentModeId).toBe(mode === "allowAll" ? "yolo" : mode === "promptUnmatched" || mode === "denyUnmatched" ? "agent" : mode);
+    expect(changed).toHaveBeenLastCalledWith(host.currentModeId);
+    expect(s.command.mock.calls).toEqual([
+      ["session/resume", { sessionId: "session", history: "inline" }],
+      ...(mode === "denyUnmatched" ? [["session/setApprovalMode", { sessionId: "session", mode: "promptUnmatched" }]] : []),
+    ]);
+  });
+
+  it.each([false, true])("repairs durable Deny unmatched before pending approvals and a turn (cloud=%s)", async cloud => {
+    vi.stubEnv("GROK_MUSE_POSTURE", JSON.stringify({ mode: "denyUnmatched", cloud }));
+    const s = setup();
+    await s.session.initialize();
+    s.command.mockResolvedValueOnce({ session: { sessionId: "session", workspaceRoot: "/workspace", approvalMode: { mode: "denyUnmatched" } },
+      history: { mode: "inline", items: [] }, pendingRequests: [{}] } as any);
+    const repair = deferred<any>();
+    s.command.mockReturnValueOnce(repair.promise);
+    s.connection.request.mockImplementation(async (method?: string) => method === "approval/listPending"
+      ? { approvals: [], userInputs: [] } as any : { models: [] });
+    const loading = s.session.loadSession("session", "/workspace", []);
+    await vi.waitFor(() => expect(s.command).toHaveBeenCalledWith("session/setApprovalMode", { sessionId: "session", mode: "promptUnmatched" }));
+    expect(s.connection.request).not.toHaveBeenCalledWith("approval/listPending", expect.anything());
+    repair.resolve({ status: "accepted", effectiveMode: { mode: "promptUnmatched" } });
+    expect((await loading).modes?.currentModeId).toBe("agent");
+    expect(s.client.notify).toHaveBeenCalledWith("session/update", { sessionId: "session", update: { sessionUpdate: "current_mode_update", currentModeId: "agent" } });
+    expect(s.client.notify.mock.calls.some(([, payload]) => payload.update?.currentModeId === "denyUnmatched")).toBe(false);
+    s.admission.resolve({ status: "accepted", turnId: "next", disposition: "started" });
+    const prompt = s.session.prompt("session", [{ type: "text", text: "go" }]);
+    await vi.waitFor(() => expect(s.command).toHaveBeenCalledWith("turn/start", expect.anything()));
+    s.event("turn/completed", { turnId: "next", terminal: "completed" });
+    await prompt;
+  });
+
+  it("fails resume without approvals or a turn if the Deny unmatched repair is refused", async () => {
+    const s = setup();
+    await s.session.initialize();
+    s.command.mockResolvedValueOnce({ session: { sessionId: "session", workspaceRoot: "/workspace", approvalMode: { mode: "denyUnmatched" } },
+      history: { mode: "inline", items: [] }, pendingRequests: [{}] } as any);
+    s.command.mockResolvedValueOnce({ status: "rejected" } as any);
+    await expect(s.session.loadSession("session", "/workspace", [])).rejects.toThrow("not accepted");
+    expect(s.client.request).not.toHaveBeenCalled();
+    await expect(s.session.prompt("session", [{ type: "text", text: "go" }])).rejects.toThrow("Unknown Muse session");
+  });
+
+  it("does not report a refused or missing effective mode as accepted", async () => {
+    const s = await ready();
+    for (const response of [{ status: "rejected" }, { status: "accepted" }, { status: "accepted", effectiveMode: { mode: "promptUnmatched" } }]) {
+      s.command.mockResolvedValueOnce(response as any);
+      await expect(s.session.setMode("session", "yolo")).rejects.toThrow("not accepted");
+    }
+    s.command.mockClear();
+    await expect(s.session.setMode("session", "denyUnmatched")).rejects.toThrow("temporarily unavailable");
+    await expect(s.session.setMode("session", "plan")).rejects.toThrow("Plan");
+    await expect(s.session.setMode("foreign", "yolo")).rejects.toThrow("Unknown Muse session");
+    expect(s.command).not.toHaveBeenCalled();
+  });
+
+  it("publishes replayed full access before forwarding pending approvals", async () => {
+    const s = setup();
+    await s.session.initialize();
+    s.command.mockResolvedValueOnce({ session: { sessionId: "session", workspaceRoot: "/workspace", approvalMode: { mode: "allowAll", source: "replay" } },
+      history: { mode: "inline", items: [] }, pendingRequests: [{}] } as any);
+    s.connection.request.mockImplementation(async (method?: string) => method === "approval/listPending"
+      ? { approvals: [{ approvalId: "pending" }], userInputs: [] } as any : { models: [] });
+    const accept = vi.spyOn((s.session as any).approvals, "accept").mockImplementation(() => {
+      expect(s.client.notify).toHaveBeenCalledWith("session/update", { sessionId: "session", update: { sessionUpdate: "current_mode_update", currentModeId: "yolo" } });
+    });
+    await s.session.loadSession("session", "/workspace", []);
+    expect(accept).toHaveBeenCalledWith("approval/requested", { approvalId: "pending" });
+  });
+
+  it("projects live approval changes and ignores foreign sessions", async () => {
+    const s = await ready();
+    s.event("session/approvalModeChanged", { mode: "allowAll" });
+    s.event("session/approvalModeChanged", { mode: "promptUnmatched", sessionId: "foreign" });
+    await Promise.resolve();
+    expect(s.client.notify).toHaveBeenCalledWith("session/update", { sessionId: "session", update: { sessionUpdate: "current_mode_update", currentModeId: "yolo" } });
+  });
+});
+
+describe("Muse blank session history", () => {
+  // session/list from the Run 3 binary/store, with paths, IDs and prompts scrubbed.
+  // The blank row has a NUMBER zero; title/firstUserPrompt are omitted, not null.
+  it("hides the real blank listing shape before it reaches rail/history, including a fresh catalog client", async () => {
+    for (let reopen = 0; reopen < 2; reopen++) {
+      const s = setup();
+      await s.session.initialize(); // catalog only: no session/start or prompt
+      s.connection.request.mockResolvedValue(museListing as any);
+      const result = await new MuseBackend().listSessions(async (_method, params) =>
+        JSON.parse(JSON.stringify(await s.session.listSessions(params.cwd, params.cursor))), "/example/project");
+      const rows = result.sessions.map(entry => adapterListEntry(entry, {}, "muse"));
+      expect(rows.map(row => row.id)).toEqual(["muse-parallel-demo", "muse-sequential-demo"]);
+      expect(rows.map(row => row.numMessages)).toEqual([1, 1]);
+      expect(rows.every(row => !row.displayName.startsWith("Untitled"))).toBe(true);
+      expect(s.command).not.toHaveBeenCalled();
+    }
+  });
+
+  it.each([
+    { firstUserPrompt: "Interrupted before the first turn completed" },
+    { title: "A conversation with content" },
+    { lastActivityAt: "2026-09-27T05:45:52.000000Z" },
+    { activeTurnId: "in-flight" },
+    { status: "running" },
+    { forkedFrom: { sessionId: "source", viewCursor: "opaque" } },
+    { turnCount: 1 },
+    { turnCount: undefined },
+    { activeTurnId: undefined },
+    { forkedFrom: undefined },
+  ])("preserves zero-turn content or uncertain metadata: %j", async content => {
+    const s = setup(); await s.session.initialize();
+    const row = { ...museListing.sessions[2], ...content };
+    s.connection.request.mockResolvedValue({ sessions: [row], nextCursor: null } as any);
+    expect((await s.session.listSessions("/example/project")).sessions).toHaveLength(1);
+  });
+
+  it("continues pagination through an entirely blank page", async () => {
+    const s = setup(); await s.session.initialize();
+    s.connection.request.mockResolvedValueOnce({ sessions: [museListing.sessions[2]], nextCursor: "next" } as any)
+      .mockResolvedValueOnce({ sessions: [museListing.sessions[0]], nextCursor: null } as any);
+    const result = await new MuseBackend().listSessions((_method, params) => s.session.listSessions(params.cwd, params.cursor), "/example/project");
+    expect(result.sessions.map(row => row.sessionId)).toEqual(["muse-parallel-demo"]);
+    expect(s.connection.request).toHaveBeenLastCalledWith("session/list", { workspaceRoot: "/example/project", cursor: "next", limit: 200 });
+  });
+});
 
 describe("Muse reasoning effort", () => {
   const levels = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"] as const;
@@ -204,7 +455,164 @@ describe("Muse CLI spawn", () => {
   });
 });
 
+describe("Muse subscription usage", () => {
+  const usage = {
+    tier: "hidden-tier", observedAtMs: 1_700_000_000_000,
+    window: { usedPercent: 12, resetsAtMs: 1_700_000_300_000, windowDurationMins: 300 },
+    weekly: { usedPercent: 40, resetsAtMs: 1_700_600_000_000 },
+  };
+
+  it("sends usage after a turn and on usage/changed, and nothing without a session", async () => {
+    const s = setup();
+    await s.session.initialize();
+    s.raw("usage/changed", usage);
+    expect(s.client.notify).not.toHaveBeenCalled();
+
+    await s.session.newSession("/workspace", []);
+    s.connection.request.mockResolvedValueOnce({ usage });
+    const prompt = s.session.prompt("session", [{ type: "text", text: "hello" }]);
+    s.admission.resolve({ status: "accepted", turnId: "turn", startedNewTurn: true, disposition: "started" });
+    s.event("turn/completed", { turnId: "turn", terminal: "completed" });
+    await expect(prompt).resolves.toEqual({ stopReason: "end_turn" });
+    expect(s.connection.request).toHaveBeenCalledWith("usage/read", {});
+    expect(s.client.notify).toHaveBeenCalledWith("_muse/subscription_usage", { sessionId: "session", usage });
+
+    s.client.notify.mockClear();
+    s.command.mockResolvedValueOnce({ status: "accepted", turnId: "next", startedNewTurn: true, disposition: "started" } as any);
+    s.connection.request.mockResolvedValueOnce({});
+    const quiet = s.session.prompt("session", [{ type: "text", text: "again" }]);
+    s.event("turn/completed", { turnId: "next", terminal: "completed" });
+    await expect(quiet).resolves.toEqual({ stopReason: "end_turn" });
+    expect(s.client.notify).not.toHaveBeenCalled();
+
+    s.raw("usage/changed", usage);
+    expect(s.client.notify).toHaveBeenCalledWith("_muse/subscription_usage", { sessionId: "session", usage });
+  });
+
+  it("logs a failed usage read and still finishes the turn", async () => {
+    const s = await ready();
+    s.connection.request.mockRejectedValueOnce(new Error("usage unavailable"));
+    const prompt = s.session.prompt("session", [{ type: "text", text: "hello" }]);
+    s.admission.resolve({ status: "accepted", turnId: "turn", startedNewTurn: true, disposition: "started" });
+    s.event("turn/completed", { turnId: "turn", terminal: "completed" });
+    await expect(prompt).resolves.toEqual({ stopReason: "end_turn" });
+    expect(s.fatal).not.toHaveBeenCalled();
+    expect(s.logs).toContain("Muse usage/read failed: usage unavailable");
+    expect(s.client.notify.mock.calls.some((call: any[]) => call[0] === "_muse/subscription_usage")).toBe(false);
+  });
+});
+
 describe("Muse turn admission and process ownership", () => {
+  it.each([false, true])("admits a queued prompt with delivery already observed=%s and waits for its own terminal", async observed => {
+    const s = await ready();
+    if (observed) s.event("turn/started", { turnId: "delivery" });
+    const prompt = s.session.prompt("session", [{ type: "text", text: "hello" }]);
+    const settled = vi.fn(); void prompt.then(settled);
+    expect(s.command).toHaveBeenCalledWith("turn/start", { sessionId: "session", ifBusy: "queue", input: [{ type: "text", text: "hello" }] });
+    s.admission.resolve({ status: "accepted", turnId: "user", startedNewTurn: false, disposition: "queued" });
+    await new Promise(resolve => setImmediate(resolve));
+    await expect(s.session.prompt("session", [{ type: "text", text: "again" }])).rejects.toThrow("already has an active prompt");
+    s.event("turn/completed", { turnId: "delivery", terminal: "completed" });
+    await new Promise(resolve => setImmediate(resolve));
+    expect(settled).not.toHaveBeenCalled();
+    s.event("turn/started", { turnId: "user" });
+    s.event("turn/completed", { turnId: "user", terminal: "completed" });
+    await expect(prompt).resolves.toEqual({ stopReason: "end_turn" });
+    expect(s.command.mock.calls.filter(([method]) => method === "turn/start")).toHaveLength(1);
+  });
+
+  it.each([false, true])("withdraws a queued prompt, including cancel before admission=%s", async beforeAdmission => {
+    const s = await ready();
+    s.event("turn/started", { turnId: "delivery" });
+    await s.session.cancel("session");
+    const prompt = s.session.prompt("session", [{ type: "text", text: "hello" }]);
+    const settled = vi.fn(); void prompt.then(settled);
+    if (beforeAdmission) await s.session.cancel("session");
+    expect(s.command).not.toHaveBeenCalledWith("turn/cancel", expect.anything());
+    s.admission.resolve({ status: "accepted", turnId: "user", startedNewTurn: false, disposition: "queued" });
+    await new Promise(resolve => setImmediate(resolve));
+    if (!beforeAdmission) await s.session.cancel("session");
+    expect(s.command).toHaveBeenCalledWith("turn/unqueue", { sessionId: "session", turnId: "user" });
+    s.event("turn/completed", { turnId: "delivery", terminal: "completed" });
+    await new Promise(resolve => setImmediate(resolve));
+    expect(settled).not.toHaveBeenCalled();
+    s.event("turn/unqueued", { turnId: "user" });
+    await expect(prompt).resolves.toEqual({ stopReason: "cancelled" });
+    expect(s.command).not.toHaveBeenCalledWith("turn/cancel", expect.anything());
+  });
+
+  it("cancels only the admitted prompt when launch wins the unqueue race", async () => {
+    const s = await ready();
+    s.event("turn/started", { turnId: "delivery" });
+    const prompt = s.session.prompt("session", [{ type: "text", text: "hello" }]);
+    s.admission.resolve({ status: "accepted", turnId: "user", startedNewTurn: false, disposition: "queued" });
+    await new Promise(resolve => setImmediate(resolve));
+    s.command.mockRejectedValueOnce(new MspError({ code: -32030, message: "already launched", data: { kind: "commandRejected" } }));
+    await s.session.cancel("session");
+    expect(s.command).toHaveBeenCalledWith("turn/cancel", { sessionId: "session", turnId: "user" });
+    expect(s.command).not.toHaveBeenCalledWith("turn/cancel", { sessionId: "session", turnId: "delivery" });
+    s.event("turn/completed", { turnId: "user", terminal: "cancelled" });
+    await expect(prompt).resolves.toEqual({ stopReason: "cancelled" });
+  });
+
+  it.each(["turn/completed", "turn/unqueued"])("keeps queued settlement before acknowledgement: %s", async method => {
+    const s = await ready();
+    const prompt = s.session.prompt("session", [{ type: "text", text: "hello" }]);
+    s.event(method, { turnId: "user", terminal: "completed" });
+    s.admission.resolve({ status: "accepted", turnId: "user", startedNewTurn: false, disposition: "queued" });
+    await expect(prompt).resolves.toEqual({ stopReason: method === "turn/unqueued" ? "cancelled" : "end_turn" });
+  });
+
+  it("does not turn an unqueue transport failure into a foreground cancellation", async () => {
+    const s = await ready();
+    const prompt = s.session.prompt("session", [{ type: "text", text: "hello" }]);
+    s.admission.resolve({ status: "accepted", turnId: "user", startedNewTurn: false, disposition: "queued" });
+    await new Promise(resolve => setImmediate(resolve));
+    s.command.mockRejectedValueOnce(new Error("transport lost"));
+    await expect(s.session.cancel("session")).rejects.toThrow("transport lost");
+    expect(s.command).not.toHaveBeenCalledWith("turn/cancel", expect.anything());
+    s.event("turn/completed", { turnId: "user", terminal: "completed" });
+    await expect(prompt).resolves.toEqual({ stopReason: "end_turn" });
+  });
+
+  it("uses authoritative disposition instead of the legacy boolean and rejects steering", async () => {
+    const s = await ready();
+    const prompt = s.session.prompt("session", [{ type: "text", text: "hello" }]);
+    s.admission.resolve({ status: "accepted", turnId: "delivery", startedNewTurn: true, disposition: "steered" });
+    await expect(prompt).rejects.toThrow("Muse did not admit a prompt turn");
+    await s.session.cancel("session");
+    expect(s.command).not.toHaveBeenCalledWith("turn/cancel", expect.anything());
+  });
+
+  it("keeps rejecting a second prompt during our own admission and active turn", async () => {
+    const s = await ready();
+    const first = s.session.prompt("session", [{ type: "text", text: "hello" }]);
+    await expect(s.session.prompt("session", [{ type: "text", text: "second" }])).rejects.toThrow("already has an active prompt");
+    s.admission.resolve({ status: "accepted", turnId: "user", startedNewTurn: true, disposition: "started" });
+    s.event("turn/started", { turnId: "user" });
+    await expect(s.session.prompt("session", [{ type: "text", text: "third" }])).rejects.toThrow("already has an active prompt");
+    s.event("turn/completed", { turnId: "user", terminal: "completed" });
+    await expect(first).resolves.toEqual({ stopReason: "end_turn" });
+  });
+
+  it.each(["protocol", "close"])("cleans up a queued prompt on %s", async failure => {
+    vi.useFakeTimers();
+    const s = await ready();
+    s.event("turn/started", { turnId: "delivery" });
+    const prompt = s.session.prompt("session", [{ type: "text", text: "hello" }]);
+    s.admission.resolve({ status: "accepted", turnId: "user", disposition: "queued", startedNewTurn: false });
+    await Promise.resolve();
+    const rejected = expect(prompt).rejects.toThrow(failure === "protocol" ? "invalid MSP" : "closing");
+    if (failure === "protocol") s.protocolError(new Error("invalid MSP"));
+    else {
+      s.exited.resolve({ code: 0, signal: null });
+      await s.session.close();
+    }
+    await rejected;
+    expect(s.command).toHaveBeenCalledWith("turn/start", expect.anything());
+    expect(vi.getTimerCount()).toBeLessThanOrEqual(failure === "close" ? 1 : 0);
+  });
+
   it("requests no capabilities and preserves the complete model description", async () => {
     const s = await ready();
     expect(s.handshake.initialize).toHaveBeenCalledWith({ clientInfo: { name: "grok_build_muse_adapter", version: "1" },
@@ -219,7 +627,7 @@ describe("Muse turn admission and process ownership", () => {
     const prompt = s.session.prompt("session", [{ type: "text", text: "hello" }]);
     let settled = false;
     void prompt.then(() => { settled = true; });
-    s.admission.resolve({ status: "accepted", turnId: "turn", startedNewTurn: true });
+    s.admission.resolve({ status: "accepted", turnId: "turn", startedNewTurn: true, disposition: "started" });
     await new Promise(resolve => setImmediate(resolve));
     expect(settled).toBe(false);
     s.event("turn/completed", { turnId: "old", terminal: "completed" });
@@ -235,9 +643,9 @@ describe("Muse turn admission and process ownership", () => {
     const s = await ready();
     const first = s.session.prompt("session", [{ type: "text", text: "one" }]);
     s.event("turn/completed", { turnId: "first", terminal: "completed" });
-    s.admission.resolve({ status: "accepted", turnId: "first", startedNewTurn: true });
+    s.admission.resolve({ status: "accepted", turnId: "first", startedNewTurn: true, disposition: "started" });
     await expect(first).resolves.toEqual({ stopReason: "end_turn" });
-    s.command.mockImplementation(async () => ({ status: "accepted", turnId: "second", startedNewTurn: true }));
+    s.command.mockImplementation(async () => ({ status: "accepted", turnId: "second", startedNewTurn: true, disposition: "started" }));
     const second = s.session.prompt("session", [{ type: "text", text: "two" }]);
     s.event("turn/completed", { turnId: "second", terminal: "completed" });
     await expect(second).resolves.toEqual({ stopReason: "end_turn" });
@@ -247,7 +655,7 @@ describe("Muse turn admission and process ownership", () => {
     const s = await ready();
     const prompt = s.session.prompt("session", [{ type: "text", text: "hello" }]);
     const rejected = expect(prompt).rejects.toBeInstanceOf(Error);
-    s.admission.resolve({ status: "accepted", turnId: "turn", startedNewTurn: true });
+    s.admission.resolve({ status: "accepted", turnId: "turn", startedNewTurn: true, disposition: "started" });
     await new Promise(resolve => setImmediate(resolve));
     if (failure === "protocol") s.protocolError(new Error("invalid MSP"));
     if (failure === "transport") s.closed.resolve();
@@ -273,12 +681,84 @@ describe("Muse turn admission and process ownership", () => {
 
 
 describe("Muse cancellation and resume", () => {
+  const busy = () => new MspError({ code: -32021, message: "session session is already in use",
+    data: { kind: "sessionInUse", retryable: false, sessionId: "session" } });
+
+  it.each([1, 5, 33])("resumes after %i lease conflicts on the same connection and projects history once", async conflicts => {
+    vi.useFakeTimers();
+    const s = setup();
+    await s.session.initialize();
+    for (let i = 0; i < conflicts; i++) s.command.mockRejectedValueOnce(busy());
+    s.command.mockResolvedValue({ session: { sessionId: "session", workspaceRoot: "/workspace" },
+      history: { mode: "inline", items: [{ itemId: "answer", revision: 1, kind: "agentMessage", text: "Restored" }] },
+    } as any);
+    const loading = s.session.loadSession("session", "/workspace", []);
+    await vi.advanceTimersByTimeAsync(299);
+    expect(s.command).toHaveBeenCalledOnce();
+    expect(s.client.notify).not.toHaveBeenCalled();
+    expect(s.fatal).not.toHaveBeenCalled();
+    await expect(s.session.newSession("/workspace", [])).rejects.toThrow("already owns a session");
+    await vi.advanceTimersByTimeAsync(conflicts * 300 - 299);
+    await loading;
+    expect(s.command).toHaveBeenCalledTimes(conflicts + 1);
+    // No commandId override: each SDK command call gets a fresh id.
+    for (const call of s.command.mock.calls) expect(call).toEqual(["session/resume", { sessionId: "session", history: "inline" }]);
+    expect(s.spawn).toHaveBeenCalledOnce();
+    expect(s.handshake.initialize).toHaveBeenCalledOnce();
+    expect(s.handshake.close).not.toHaveBeenCalled();
+    expect(s.fatal).not.toHaveBeenCalled();
+    expect(s.client.notify).toHaveBeenCalledOnce();
+    expect(s.client.notify.mock.calls[0]?.[1].update.content.text).toBe("Restored");
+  });
+
+  it("reports a persistent lease conflict through ACP after 10 seconds without spawning or creating sessions", async () => {
+    vi.useFakeTimers();
+    const s = setup();
+    await s.session.initialize();
+    s.command.mockRejectedValue(busy());
+    const loading = s.session.loadSession("session", "/workspace", []);
+    const failed = loading.catch(error => error);
+    await vi.advanceTimersByTimeAsync(9999);
+    expect(s.fatal).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    const error = await failed;
+    expect(error).toBeInstanceOf(RequestError);
+    expect(error.toErrorResponse()).toEqual({ code: -32021,
+      message: "Muse Code is busy with this conversation in another window. Try again in a moment." });
+    expect(s.fatal).toHaveBeenCalledOnce();
+    expect(s.fatal).toHaveBeenCalledWith(error);
+    expect(s.command).toHaveBeenCalledTimes(34);
+    for (const call of s.command.mock.calls) expect(call).toEqual(["session/resume", { sessionId: "session", history: "inline" }]);
+    expect(s.spawn).toHaveBeenCalledOnce();
+    expect(s.handshake.initialize).toHaveBeenCalledOnce();
+    expect(s.handshake.close).not.toHaveBeenCalled();
+    expect(s.connection.request).not.toHaveBeenCalled();
+    expect(s.client.notify).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("preserves fast failure for non-transient resume errors", async () => {
+    vi.useFakeTimers();
+    const s = setup();
+    await s.session.initialize();
+    const error = new MspError({ code: -32020, message: "Session not found",
+      data: { kind: "sessionNotFound", retryable: false } });
+    s.command.mockRejectedValue(error);
+    await expect(s.session.loadSession("session", "/workspace", [])).rejects.toBe(error);
+    expect(s.command).toHaveBeenCalledOnce();
+    expect(s.fatal).toHaveBeenCalledOnce();
+    expect(s.fatal).toHaveBeenCalledWith(error);
+    expect(s.spawn).toHaveBeenCalledOnce();
+    expect(s.client.notify).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it("queues cancellation before admission and waits for the terminal", async () => {
     const s = await ready();
     const prompt = s.session.prompt("session", [{ type: "text", text: "hello" }]);
     await s.session.cancel("session");
     expect(s.command).not.toHaveBeenCalledWith("turn/cancel", expect.anything());
-    s.admission.resolve({ status: "accepted", turnId: "turn", startedNewTurn: true });
+    s.admission.resolve({ status: "accepted", turnId: "turn", startedNewTurn: true, disposition: "started" });
     await new Promise(resolve => setImmediate(resolve));
     expect(s.command).toHaveBeenCalledWith("turn/cancel", { sessionId: "session", turnId: "turn" });
     let settled = false;
@@ -312,7 +792,7 @@ describe("Muse cancellation and resume", () => {
     s.event("item/completed", { item: { itemId: "answer", revision: 2, kind: "agentMessage", text: "Hello world" } });
     await new Promise(resolve => setImmediate(resolve));
     expect(s.client.notify).toHaveBeenCalledTimes(3);
-    s.command.mockImplementation(async () => ({ status: "accepted", turnId: "next", startedNewTurn: true }));
+    s.command.mockImplementation(async () => ({ status: "accepted", turnId: "next", startedNewTurn: true, disposition: "started" }));
     const next = s.session.prompt("session", [{ type: "text", text: "next" }]);
     s.event("item/delta", { itemId: "next-answer", field: "text", delta: "Next" });
     s.event("turn/completed", { turnId: "next", terminal: "completed" });
@@ -352,9 +832,9 @@ it("keeps reminder identities hidden across consecutive turns", async () => {
   const s = await ready();
   const first = s.session.prompt("session", [{ type: "text", text: "first" }]);
   s.event("item/started", { item: { itemId: "reminder", revision: 1, kind: "reminderChild" } });
-  s.admission.resolve({ status: "accepted", turnId: "first", startedNewTurn: true });
+  s.admission.resolve({ status: "accepted", turnId: "first", startedNewTurn: true, disposition: "started" });
   s.event("turn/completed", { turnId: "first", terminal: "completed" }); await first;
-  s.command.mockImplementation(async () => ({ status: "accepted", turnId: "second", startedNewTurn: true }));
+  s.command.mockImplementation(async () => ({ status: "accepted", turnId: "second", startedNewTurn: true, disposition: "started" }));
   const second = s.session.prompt("session", [{ type: "text", text: "second" }]);
   s.event("item/delta", { itemId: "reminder", field: "text", delta: "must stay hidden" });
   s.event("item/delta", { itemId: "answer", field: "text", delta: "Answer" });
@@ -379,5 +859,36 @@ it("acknowledges approval presentation and deduplicates the paired notification"
   await new Promise(resolve => setImmediate(resolve));
   expect(s.command).toHaveBeenCalledWith("approval/decide", { sessionId: "session", approvalId: "approval",
     choiceId: "server-denial", requirementId: params.currentRequirementId });
+  expect(s.fatal).not.toHaveBeenCalled();
+});
+
+const museApproval = (turnId: string) => ({ sessionId: "session", approvalId: `approval-${turnId}`, turnId, toolCallId: "call",
+  toolName: "bash", rawArgs: "{}", currentRequirementId: { approvalId: `approval-${turnId}`, sourceIndex: 0 },
+  availableChoices: [{ choiceId: "allow", decision: "approved", scope: "once", label: "Allow" }] });
+
+it("keeps an approval from Muse's own turn answerable while a prompt queues behind it", async () => {
+  const s = await ready();
+  const answer = deferred<any>(); s.client.request.mockReturnValue(answer.promise);
+  s.event("approval/requested", museApproval("delivery"));
+  const prompt = s.session.prompt("session", [{ type: "text", text: "while Muse is busy" }]);
+  s.admission.resolve({ status: "accepted", turnId: "mine", startedNewTurn: false, disposition: "queued" });
+  await new Promise(resolve => setImmediate(resolve));
+  answer.resolve({ outcome: { outcome: "selected", optionId: "allow" } });
+  await new Promise(resolve => setImmediate(resolve));
+  expect(s.command).toHaveBeenCalledWith("approval/decide", expect.objectContaining({ approvalId: "approval-delivery", choiceId: "allow" }));
+  s.event("turn/completed", { turnId: "delivery", terminal: "completed" });
+  s.event("turn/completed", { turnId: "mine", terminal: "completed" });
+  await expect(prompt).resolves.toEqual({ stopReason: "end_turn" });
+  expect(s.fatal).not.toHaveBeenCalled();
+});
+
+it("drops a finished turn's approval so a late answer never reaches Muse", async () => {
+  const s = await ready();
+  const answer = deferred<any>(); s.client.request.mockReturnValue(answer.promise);
+  s.event("approval/requested", museApproval("done"));
+  s.event("turn/completed", { turnId: "done", terminal: "cancelled" });
+  answer.resolve({ outcome: { outcome: "selected", optionId: "allow" } });
+  await new Promise(resolve => setImmediate(resolve));
+  expect(s.command).not.toHaveBeenCalledWith("approval/decide", expect.anything());
   expect(s.fatal).not.toHaveBeenCalled();
 });

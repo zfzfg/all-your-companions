@@ -1,3 +1,6 @@
+import { museInstallCommand } from "./muse-install";
+import { withMuseCredentialBackend } from "./muse-backend";
+import { museSettings, configWriteTarget } from "./mode-prefs";
 import { autoApproveNativePlanTools } from "./provider-modes";
 import { PROVIDER_CLI } from "./provider-cli";
 import { providerCapability } from "./provider-capabilities";
@@ -1485,6 +1488,23 @@ export class ProjectInboundRouter {
       case "githubLoginWithToken":
         await this.deps.providers.githubLoginWithToken(msg.token);
         break;
+      case "setMuseSetting": {
+        const valid = msg.key === "sandboxNetwork" ? ["proxy-only", "restricted", "enabled"].includes(String(msg.value))
+          : ["shellSandbox", "trustWorkspaces"].includes(msg.key) && typeof msg.value === "boolean";
+        if (!valid) break;
+        const cfg = this.deps.host.getConfiguration("grok");
+        const key = { shellSandbox: "museShellSandbox", sandboxNetwork: "museSandboxNetwork", trustWorkspaces: "museTrustWorkspaces" }[msg.key];
+        await cfg.update(key, msg.value, configWriteTarget(cfg.inspect(key)));
+        this.deps.post({ type: "museSettings", value: museSettings(cfg) });
+        break;
+      }
+      case "runMuseInstallCmd": {
+        if (!(await this.deps.review.confirmHostExecute("Install Muse Code CLI?", "This runs the official installer from dev.meta.ai in a terminal.", "Install"))) break;
+        const terminal = this.deps.host.createTerminal("Install Muse Code");
+        terminal.show();
+        terminal.sendText(museInstallCommand(process.platform));
+        break;
+      }
       case "runInstallCmd": {
         // Host-owned confirmation, because this is one of the two messages that
         // run something. The renderer does not supply the command — it is the
@@ -1541,6 +1561,7 @@ export class ProjectInboundRouter {
           const term = this.deps.host.createTerminal({
             name: `${providerDisplayName(provider)} Login`, shellPath: cliPath,
             shellArgs: [...PROVIDER_CLI[provider].loginArgs],
+            ...(provider === "muse" ? { env: withMuseCredentialBackend(process.env) } : {}),
           });
           term.show();
           if (PROVIDER_CLI[provider].credentialProbe !== "unavailable") this.deps.providers.watchProviderLogin(provider);

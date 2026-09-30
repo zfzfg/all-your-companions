@@ -1,15 +1,35 @@
-import { spawnMspConnection, type MspHandshake, type SpawnedMspConnection } from "@muse-code/sdk";
-import type { AgentContext, ContentBlock, PromptResponse } from "@agentclientprotocol/sdk";
+import { MspError, spawnMspConnection, type MspHandshake, type SpawnedMspConnection } from "@muse-code/sdk";
+import { RequestError, type AgentContext, type ContentBlock, type PromptResponse } from "@agentclientprotocol/sdk";
 import { Projection } from "./projection.mjs";
 import { Approvals } from "./approvals.mjs";
 // A deep import because the SDK root re-exports nothing from `msp.js`, and
 // this is the only route to the effort vocabulary. Type-only, so it costs
 // the packaging graph nothing; the disk-read assertion in
 // `test/muse-session.test.ts` is what catches the union changing under us.
-import type { ReasoningEffort } from "@muse-code/sdk/dist/src/msp.js";
+import type { ApprovalMode, ReasoningEffort } from "@muse-code/sdk/dist/src/msp.js";
 
 // MSP exposes a session-wide vocabulary, with no per-model capability list.
 export const REASONING_EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"] as const satisfies readonly ReasoningEffort[];
+
+// This adapter has its own NodeNext rootDir; the host keeps the wire ids in mode-prefs.ts.
+const APPROVAL_MODES = { yolo: "allowAll", agent: "promptUnmatched", onRequest: "onRequest", denyUnmatched: "denyUnmatched" } as const satisfies Record<string, ApprovalMode>;
+const MODE_NAMES = { yolo: "Full access", agent: "Prompt unmatched", onRequest: "On request", denyUnmatched: "Deny unmatched" };
+function approvalModeFor(id: string): ApprovalMode | undefined {
+  return Object.hasOwn(APPROVAL_MODES, id) ? APPROVAL_MODES[id as keyof typeof APPROVAL_MODES] : undefined;
+}
+
+const RESUME_RETRY_DELAY_MS = 300;
+const RESUME_RETRY_WINDOW_MS = 10_000;
+
+/** turnCount counts completed turns, not prompts. Keep unfinished work and
+ *  forks; creation/resume bookkeeping can advance updatedAt on a blank row. */
+function isBlankMuseSession(session: Record<string, any>): boolean {
+  const hasText = (value: unknown) => typeof value === "string" && !!value.trim();
+  return session.turnCount === 0 && session.activeTurnId === null
+    && session.forkedFrom === null && session.status !== "running"
+    && !hasText(session.firstUserPrompt) && !hasText(session.title)
+    && !hasText(session.lastActivityAt);
+}
 
 /**
  * How long a closing adapter waits for `muse serve` to actually exit. The host
@@ -39,6 +59,7 @@ function childExitTimeout(): Promise<undefined> {
 
 interface PendingTurn {
   turnId?: string;
+  queued?: boolean;
   cancelRequested?: boolean;
   early: Map<string, Record<string, any>>;
   resolve: (result: Record<string, any>) => void;
@@ -53,7 +74,8 @@ export class MuseSession {
   private closing?: Promise<void>;
   private sessionId?: string;
   private reasoningEffort?: ReasoningEffort;
-  private activeTurnId?: string;
+  private approvalMode: ApprovalMode = "promptUnmatched";
+  private shellSandbox = true;
   private creating = false;
   private replayBuffer?: { method: string; params: Record<string, any> }[];
   private pending?: PendingTurn;
@@ -94,9 +116,20 @@ export class MuseSession {
     // executable and `serve` stay separate argv entries. Omit /s: it strips
     // Node's quotes around a spaced executable path before cmd resolves it.
     const needsShell = museCliNeedsShell(executable);
+    const posture = JSON.parse(process.env.GROK_MUSE_POSTURE || "{}");
+    this.approvalMode = approvalModeFor(posture.mode) ?? "promptUnmatched";
+    if (this.approvalMode === "denyUnmatched") this.approvalMode = "promptUnmatched";
+    this.shellSandbox = (posture.mode === "onRequest" || (posture.mode !== "yolo" && posture.shellSandbox !== false));
+    this.assertSandbox(this.approvalMode);
+    const args = ["serve"];
+    if (!this.shellSandbox) args.push("--disable-sandbox");
+    if ((posture.sandboxNetwork === "restricted" || posture.sandboxNetwork === "enabled")) {
+      args.push("--sandbox-network", posture.sandboxNetwork);
+    }
+    if (posture.mode === "yolo" || posture.trustWorkspaces === true) args.push("--trust-workspace");
     const handshake = this.handshake = this.spawn({
       command: needsShell ? process.env.COMSPEC || "cmd.exe" : executable,
-      args: needsShell ? ["/d", "/c", executable, "serve"] : ["serve"],
+      args: needsShell ? ["/d", "/c", executable, ...args] : args,
       cwd: process.cwd(), env: process.env,
       onStderr: chunk => process.stderr.write(chunk) });
     handshake.onNotification(notification => {
@@ -140,11 +173,13 @@ export class MuseSession {
     if (mcpServers.length) throw new Error("Muse adapter does not accept client MCP servers");
     this.creating = true;
     try {
-      const result = await this.connection().command("session/start", { workspaceRoot });
-      const session = result.session as { sessionId?: string; modelId?: string } | undefined;
+      const result = await this.connection().command("session/start", { workspaceRoot, approvalMode: this.approvalMode });
+      const session = result.session as { sessionId?: string; modelId?: string; approvalMode?: { mode: ApprovalMode } } | undefined;
       if (!session?.sessionId) throw new Error("Muse session/start returned no sessionId");
       this.sessionId = session.sessionId;
-      return { sessionId: session.sessionId, models: await this.models(session.modelId) };
+      this.approvalMode = session.approvalMode?.mode ?? this.approvalMode;
+      this.assertSandbox(this.approvalMode);
+      return { sessionId: session.sessionId, models: await this.models(session.modelId), ...this.modes(session.approvalMode?.mode) };
     } finally { this.creating = false; }
   }
 
@@ -169,7 +204,7 @@ export class MuseSession {
       ...(cwd ? { workspaceRoot: cwd } : {}), ...(cursor ? { cursor } : {}), limit: 200,
     });
     if (!Array.isArray(result.sessions)) throw new Error("Muse session/list returned no sessions");
-    return { sessions: result.sessions.map((s: any) => ({ sessionId: s.sessionId, cwd: s.workspaceRoot,
+    return { sessions: result.sessions.filter((s: any) => !isBlankMuseSession(s)).map((s: any) => ({ sessionId: s.sessionId, cwd: s.workspaceRoot,
       title: s.title || s.firstUserPrompt, updatedAt: s.updatedAt,
       _meta: { createdAt: s.createdAt, turnCount: s.turnCount, modelId: s.modelId, branch: s.branch } })),
       nextCursor: result.nextCursor as string | null };
@@ -182,12 +217,75 @@ export class MuseSession {
     return {};
   }
 
+  private modes(mode: unknown) {
+    const currentModeId = Object.keys(APPROVAL_MODES).find(id => approvalModeFor(id) === mode);
+    if (!currentModeId) return {};
+    return { modes: { currentModeId, availableModes: Object.entries(MODE_NAMES)
+      .filter(([id]) => id !== "denyUnmatched").map(([id, name]) => ({ id, name })) } };
+  }
+
+  private assertSandbox(mode: unknown): void {
+    if (mode === "onRequest" && !this.shellSandbox) {
+      throw new Error("Muse On request requires the shell sandbox. Reopen with a sandboxed process before continuing.");
+    }
+  }
+
+  private publishMode(mode: unknown): Promise<void> {
+    const modes = this.modes(mode).modes;
+    if (!modes) return this.updates;
+    this.approvalMode = mode as ApprovalMode;
+    this.updates = this.updates.then(async () => {
+      // Repair the durable mode before publishing or admitting a resumed turn.
+      // Deny unmatched blocks Muse's own reminder agent (research/muse-modes.md).
+      if (mode === "denyUnmatched") await this.setMode(this.sessionId!, "agent");
+      else this.approvalMode = mode as ApprovalMode;
+      await this.client.notify("session/update", {
+        sessionId: this.sessionId!, update: { sessionUpdate: "current_mode_update", currentModeId: mode === "denyUnmatched" ? "agent" : modes.currentModeId },
+      });
+    });
+    void this.updates.catch(error => this.fail(error));
+    return this.updates;
+  }
+
+  async setMode(sessionId: string, modeId: string) {
+    this.assertSession(sessionId);
+    if (modeId === "denyUnmatched") throw new Error("Muse Deny unmatched is temporarily unavailable; use Prompt unmatched.");
+    const mode = approvalModeFor(modeId);
+    if (!mode) throw new Error("Muse does not offer Plan mode or unknown approval modes");
+    this.assertSandbox(mode);
+    const result = await this.connection().command("session/setApprovalMode", { sessionId, mode });
+    const effective = result.effectiveMode as { mode?: string } | undefined;
+    if (result.status !== "accepted" || effective?.mode !== mode) throw new Error("Muse approval mode was not accepted");
+    this.approvalMode = mode;
+    return { _meta: this.modes(effective.mode) };
+  }
+
   async setReasoningEffort(sessionId: string, reasoningEffort: ReasoningEffort) {
     this.assertSession(sessionId);
     const result = await this.connection().command("session/setReasoningEffort", { sessionId, reasoningEffort });
     if (result.status !== "accepted") throw new Error(`Muse reasoning effort "${reasoningEffort}" was rejected`);
     this.reasoningEffort = reasoningEffort;
     return {};
+  }
+
+  private async resumeSession(sessionId: string) {
+    const deadline = Date.now() + RESUME_RETRY_WINDOW_MS;
+    do {
+      if (this.closing) throw new Error("Muse adapter is closing");
+      try {
+        // Each command() mints a fresh commandId on the existing connection.
+        return await this.connection().command("session/resume", { sessionId, history: "inline" });
+      } catch (error) {
+        if (!(error instanceof MspError) || (error.kind !== "sessionInUse" && error.code !== -32021)) throw error;
+        // Other serves briefly take the writer lease even for sessions they do
+        // not own. This is transient despite MSP reporting retryable: false.
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) break;
+        await new Promise(resolve => setTimeout(resolve, Math.min(RESUME_RETRY_DELAY_MS, remaining)));
+      }
+    } while (Date.now() < deadline);
+    // An ordinary Error loses its message at the ACP boundary.
+    throw new RequestError(-32021, "Muse Code is busy with this conversation in another window. Try again in a moment.");
   }
 
   async loadSession(sessionId: string, cwd: string, mcpServers: unknown[]) {
@@ -197,10 +295,14 @@ export class MuseSession {
     this.sessionId = sessionId;
     this.replayBuffer = [];
     try {
-      const result = await this.connection().command("session/resume", { sessionId, history: "inline" });
+      const result = await this.resumeSession(sessionId);
       const resumed = result.session as any;
       if (resumed?.sessionId !== sessionId || resumed.workspaceRoot !== cwd) throw new Error("Muse resume workspace/session mismatch");
-      this.activeTurnId = resumed.activeTurnId ?? undefined;
+      // Native mode must reach the host before Muse reissues pending approvals.
+      await this.publishMode(resumed.approvalMode?.mode);
+      // Preserve the replayed fact for the host's next start, but never admit
+      // tools or pending approvals under On request in this unsandboxed child.
+      this.assertSandbox(this.approvalMode);
       const history = result.history as any;
       this.reasoningEffort = history?.snapshot?.state?.reasoningEffort?.reasoningEffort;
       const seen = new Set<string>();
@@ -238,13 +340,15 @@ export class MuseSession {
       const buffered = this.replayBuffer;
       this.replayBuffer = undefined;
       for (const event of buffered) if (!seen.has(event.params.viewCursor)) this.notification(event.method, event.params);
+      await this.updates;
+      this.assertSandbox(this.approvalMode);
       if (Array.isArray(result.pendingRequests) && result.pendingRequests.length) {
         const pending = await this.connection().request("approval/listPending", { sessionId });
         if (Array.isArray(pending.userInputs) && pending.userInputs.length) throw new Error("Muse resume has an unsupported user-input request");
         for (const approval of (pending.approvals as any[] ?? [])) this.approvals.accept("approval/requested", approval);
       }
       await this.updates;
-      return { _meta: { models: await this.models(resumed.modelId) } };
+      return { _meta: { models: await this.models(resumed.modelId) }, ...this.modes(this.approvalMode) };
     } catch (error) {
       this.sessionId = undefined;
       this.projection.clear();
@@ -255,9 +359,10 @@ export class MuseSession {
 
   async prompt(sessionId: string, prompt: ContentBlock[]): Promise<PromptResponse> {
     this.assertSession(sessionId);
-    if (this.pending || this.activeTurnId) throw new Error("Muse session already has an active prompt");
+    if (this.approvalMode === "denyUnmatched") await this.updates;
+    this.assertSandbox(this.approvalMode);
+    if (this.pending) throw new Error("Muse session already has an active prompt");
     if (!prompt.length || prompt.some(part => part.type !== "text")) throw new Error("Muse adapter accepts text prompts only");
-    this.approvals.clear();
     let pending!: PendingTurn;
     const completed = new Promise<Record<string, any>>((resolve, reject) => {
       pending = { resolve, reject, early: new Map() };
@@ -266,13 +371,17 @@ export class MuseSession {
     void completed.catch(() => {});
     this.pending = pending;
     try {
+      // Approvals belong to Muse's turns, not to this prompt: one raised by a turn
+      // Muse runs on its own must stay answerable while this prompt queues behind it.
       const admitted = await Promise.race([this.connection().command("turn/start", {
-        sessionId, input: prompt.map(part => ({ type: "text", text: (part as { text: string }).text })),
+        sessionId, ifBusy: "queue", input: prompt.map(part => ({ type: "text", text: (part as { text: string }).text })),
       }), completed.then(() => new Promise<never>(() => {}))]);
-      if (admitted.status !== "accepted" || typeof admitted.turnId !== "string" || admitted.startedNewTurn !== true) {
-        throw new Error(`Muse did not start a new turn: ${JSON.stringify(admitted)}`);
+      if (admitted.status !== "accepted" || typeof admitted.turnId !== "string" || !admitted.turnId
+        || (admitted.disposition !== "started" && admitted.disposition !== "queued")) {
+        throw new Error(`Muse did not admit a prompt turn: ${JSON.stringify(admitted)}`);
       }
       pending.turnId = admitted.turnId;
+      pending.queued = admitted.disposition === "queued";
       this.log(`Muse turn admitted: ${admitted.turnId}`);
       const early = pending.early.get(admitted.turnId);
       if (early) pending.resolve(early);
@@ -280,40 +389,88 @@ export class MuseSession {
       pending.early.clear();
       const terminal = await completed;
       await this.updates;
+      await this.readSubscriptionUsage();
       this.log(`Muse turn completed: ${JSON.stringify({ turnId: terminal.turnId, terminal: terminal.terminal })}`);
       if (terminal.terminal === "completed") return { stopReason: "end_turn" };
       if (terminal.terminal === "cancelled") return { stopReason: "cancelled" };
       throw new Error(`Muse turn failed: ${JSON.stringify(terminal.error ?? terminal.terminal)}`);
     } finally {
       this.pending = undefined;
-      this.approvals.clear();
     }
   }
 
   async cancel(sessionId: string): Promise<void> {
     this.assertSession(sessionId);
-    if (this.pending) this.pending.cancelRequested = true;
-    const turnId = this.pending?.turnId ?? this.activeTurnId;
-    if (turnId) await this.connection().command("turn/cancel", { sessionId, turnId });
+    const pending = this.pending;
+    if (!pending) return;
+    pending.cancelRequested = true;
+    const turnId = pending.turnId;
+    if (!turnId) return; // Admission will cancel using its authoritative ID.
+    if (pending.queued) {
+      try {
+        await this.connection().command("turn/unqueue", { sessionId, turnId });
+        return; // Settlement is turn/unqueued, not the command acknowledgement.
+      } catch (error) {
+        if (!(error instanceof MspError) || error.kind !== "commandRejected") throw error;
+        // Launch can win the reclaim race. Stop only this same admitted turn.
+      }
+    }
+    await this.connection().command("turn/cancel", { sessionId, turnId });
   }
 
   private assertSession(id: string): void {
     if (!this.sessionId || id !== this.sessionId) throw new Error("Unknown Muse session");
   }
 
+  /** MSP `usage/read` after a turn, and `usage/changed` (no session id). The
+   *  host maps the raw payload. A failed read is logged and never fatal. */
+  private async readSubscriptionUsage(): Promise<void> {
+    if (!this.sessionId) return;
+    try {
+      const result = await this.connection().request("usage/read", {});
+      const usage = result?.usage;
+      if (usage && typeof usage === "object") await this.publishSubscriptionUsage(usage as Record<string, any>);
+    } catch (error) {
+      this.log(`Muse usage/read failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private publishSubscriptionUsage(usage: Record<string, any>): Promise<void> {
+    const sessionId = this.sessionId;
+    if (!sessionId) return Promise.resolve();
+    try {
+      return Promise.resolve(this.client.notify("_muse/subscription_usage", { sessionId, usage })).catch(error => {
+        this.log(`Muse subscription usage was not delivered: ${error instanceof Error ? error.message : String(error)}`);
+      });
+    } catch (error) {
+      this.log(`Muse subscription usage was not delivered: ${error instanceof Error ? error.message : String(error)}`);
+      return Promise.resolve();
+    }
+  }
+
   private notification(method: string, params: Record<string, any>): void {
+    // `usage/changed` carries no session id, so the check below would drop it.
+    if (method === "usage/changed") {
+      if (this.sessionId) void this.publishSubscriptionUsage(params);
+      return;
+    }
     if (params.sessionId !== this.sessionId) return;
     if (this.replayBuffer) { this.replayBuffer.push({ method, params }); return; }
-    if (method === "turn/started") this.activeTurnId = params.turnId;
-    if (method === "turn/completed" && params.turnId === this.activeTurnId) this.activeTurnId = undefined;
+    if (method === "session/approvalModeChanged") {
+      void this.publishMode(params.mode).then(() => this.assertSandbox(params.mode)).catch(error => this.fail(error));
+      return;
+    }
+    this.assertSandbox(this.approvalMode);
     this.projection.accept(method, params);
     this.approvals.accept(method, params);
+    if (method === "turn/completed" && typeof params.turnId === "string") this.approvals.forgetTurn(params.turnId);
     if (method === "userInput/requested" || method === "view/gap") {
       this.fail(new Error(`Muse ${method} is unsupported in this boundary slice`));
     }
-    if (method === "turn/completed" && this.pending && typeof params.turnId === "string") {
-      if (!this.pending.turnId) this.pending.early.set(params.turnId, params);
-      else if (params.turnId === this.pending.turnId) this.pending.resolve(params);
+    if (["turn/completed", "turn/unqueued"].includes(method) && this.pending && typeof params.turnId === "string") {
+      const terminal = method === "turn/unqueued" ? { ...params, terminal: "cancelled" } : params;
+      if (!this.pending.turnId) this.pending.early.set(params.turnId, terminal);
+      else if (params.turnId === this.pending.turnId) this.pending.resolve(terminal);
     }
   }
 

@@ -8,7 +8,7 @@ const MODES: Record<AcpProvider, Record<HostMode, readonly string[]>> = {
   codex: { agent: ["default", "agent"], yolo: ["default", "agent-full-access"], plan: ["plan"] },
   claude: { agent: ["agent"], yolo: ["yolo"], plan: ["plan"] },
   gemini: { agent: ["agent"], yolo: ["yolo"], plan: ["plan"] },
-  muse: { agent: [], yolo: [], plan: [] },
+  muse: { agent: ["agent"], yolo: ["yolo"], plan: [] },
 };
 
 export function hostModeSequence(provider: AcpProvider, mode: HostMode): readonly string[] {

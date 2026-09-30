@@ -9,6 +9,59 @@ interface ItemState {
   toolCallId?: string;
 }
 
+const MUSE_FAILURE_OUTPUT_LINES = 8;
+
+/** MSP full workflow snapshots, including the same item in resume history. */
+function workflowUpdate(item: Record<string, any>): Record<string, any> | undefined {
+  if (typeof item.workflowRunId !== "string" || !item.workflowRunId) return;
+  let summary: unknown;
+  const match = typeof item.message === "string"
+    ? /^<workflow-launch-reconciled>([\s\S]*)<\/workflow-launch-reconciled>$/.exec(item.message.trim()) : null;
+  if (match) {
+    try { summary = JSON.parse(match[1])?.final_summary?.summary; } catch { /* Incomplete envelope: no output yet. */ }
+  }
+  if (typeof summary === "string") {
+    try {
+      // Muse's entire returned value is output, including arbitrary JSON.
+      // Four backticks mark our validated JSON; the shared renderer suppresses
+      // three-backtick CLI envelopes that may have been truncated.
+      summary = "````json\n" + JSON.stringify(JSON.parse(summary), null, 2).replace(/`/g, "\\u0060") + "\n````";
+    } catch { /* Already prose or Markdown. */ }
+  }
+  const children = Array.isArray(item.children) ? item.children : [];
+  return {
+    sessionUpdate: "workflow_updated", run_id: item.workflowRunId,
+    name: item.entryId || item.scriptId || "Workflow", revision: item.revision,
+    status: item.status === "inProgress" ? "running" : item.status === "completed" ? "completed"
+      : item.status === "cancelled" ? "cancelled" : "failed",
+    controlsAvailable: false,
+    agentProgressDots: true,
+    result_summary: typeof summary === "string" ? summary : undefined,
+    agents: children.filter((child: any) => child && typeof child.childId === "string").map((child: any, i: number) => ({
+      agent_id: child.childId, label: `Agent ${i + 1}`,
+      state: child.status === "terminal" ? child.terminal || "stopped"
+        : child.status === "started" || child.status === "usage" ? "active" : child.status,
+      tokens_used: typeof child.usage?.inputTokens === "number" && typeof child.usage?.outputTokens === "number"
+        ? child.usage.inputTokens + child.usage.outputTokens : undefined,
+    })),
+  };
+}
+
+/** The row already names the tool. Show why it stopped: the reported reason,
+ *  the server's one-line summary, else the tail of what the tool printed. */
+function museToolFailureMessage(item: Record<string, any>): string {
+  const reason = typeof item.failureReason === "string" ? item.failureReason.trim() : "";
+  if (reason) return reason;
+  const fallback = typeof item.fallbackText === "string" ? item.fallbackText.trim() : "";
+  if (fallback) return fallback;
+  if (typeof item.visibleOutput === "string") {
+    const lines = item.visibleOutput.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+    if (lines.length) return lines.slice(-MUSE_FAILURE_OUTPUT_LINES).join("\n");
+  }
+  const status = typeof item.status === "string" && item.status.trim() ? item.status.trim() : "failed";
+  return `Muse reported "${status}" without a reason.`;
+}
+
 /** A single session's raw MSP stream, independent of transport and SDK folds. */
 export class Projection {
   private readonly items = new Map<string, ItemState>();
@@ -77,18 +130,34 @@ export class Projection {
     state.revision = item.revision;
     state.kind = item.kind;
     if (item.kind === "reminderChild") return;
-    if (item.kind === "toolCall") {
+    if (item.kind === "workflow") {
+      const workflow = workflowUpdate(item);
+      // Keep ACP schema-valid: provider metadata carries the rollup to our
+      // backend, which emits the existing runProgress presentation message.
+      if (workflow) this.emit({ sessionUpdate: "session_info_update", _meta: { "muse/workflow": workflow } });
+    } else if (item.kind === "toolCall") {
       const first = !state.toolCallId;
       state.toolCallId = item.callId || id;
       // MSP's open enum has exactly one nonterminal value. ACP has no
-      // terminal-unknown status: use its non-success terminal and preserve
-      // the reported outcome as generic text, including future MSP values.
+      // terminal-unknown status: use its non-success terminal. The reason
+      // stays on rawOutput.message, which is what the row reads first.
       const status = item.status === "inProgress" ? "in_progress"
         : item.status === "completed" ? "completed" : "failed";
+      // Output has to ride the update whose status is completed. The row
+      // fills its output box only from that update, and a later content-only
+      // update is not merged. A failed command also carries `output` (what
+      // it printed, or "") beside `message`. Replay commandOutput has no
+      // toolCallId and is served to the oldest row with that command which
+      // has not received output yet, so every run emits its own.
+      const printed = typeof item.visibleOutput === "string" ? item.visibleOutput : undefined;
+      const visible = status === "completed" ? printed : undefined;
       this.emit({ sessionUpdate: first ? "tool_call" : "tool_call_update",
         toolCallId: state.toolCallId!, title: item.tool || "Muse tool",
         kind: item.tool === "bash" ? "execute" : "other", status, rawInput: parseToolInput(item.args),
-        rawOutput: status === "failed" ? { message: `Muse tool ended with status: ${item.status}` } : undefined });
+        rawOutput: status === "failed" ? { message: museToolFailureMessage(item), output: printed ?? "" }
+          : visible !== undefined ? { output: visible } : undefined,
+        ...(visible !== undefined ? { content: [{ type: "content", content: { type: "text", text: visible } }] } : {}),
+      });
       if (typeof item.visibleOutput === "string") this.append(state, id, "output", item.visibleOutput);
     } else if (item.kind === "agentMessage" && typeof item.text === "string") {
       this.append(state, id, "text", item.text);

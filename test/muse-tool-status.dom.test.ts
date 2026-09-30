@@ -14,6 +14,6 @@ it.each(["rejected", "timedOut", "futureStatus"])("renders Muse %s as terminal w
     dispatch(h.window, { type: "messageChunk", text: "Turn ended" } as any);
     expect({ running: h.doc.querySelector(".tool-group.in-progress"),
       outcome: h.doc.querySelector(".tool-flat .tool-error")?.textContent })
-      .toEqual({ running: null, outcome: `Muse tool ended with status: ${status}` });
+      .toEqual({ running: null, outcome: `Muse reported "${status}" without a reason.` });
   } finally { void h.window.happyDOM.abort(); }
 });

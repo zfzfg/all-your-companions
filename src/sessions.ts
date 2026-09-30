@@ -1,3 +1,4 @@
+import type { MusePosture } from "./mode-prefs";
 import type { ContextChip } from "./context-chips";
 import type { AcpProvider } from "./acp-backend";
 import * as nodeFs from "node:fs";
@@ -163,6 +164,7 @@ export interface SessionMetaOverride extends SessionTypeMeta {
    *  and cleared in the same write so a reopen cannot append it twice. */
   queuedDraft?: string;
   queuedDraftChips?: ContextChip[];
+  musePosture?: MusePosture;
 }
 export type SessionMetaOverrides = Record<string, SessionMetaOverride>;
 

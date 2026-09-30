@@ -66,6 +66,8 @@ export interface BackendConfigState {
 }
 
 export interface BackendUpdate {
+  workflowUpdate?: any;
+  notice?: string;
   update?: any;
   meta?: any;
   sessionTitle?: string;
@@ -83,6 +85,8 @@ export interface BackendUpdate {
 }
 
 export interface BackendSessionListEntry {
+  turnCount?: number;
+  _meta?: { turnCount?: number };
   sessionId: string;
   cwd: string;
   title?: string;

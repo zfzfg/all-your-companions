@@ -718,8 +718,8 @@ describe("acpClientCapabilities", () => {
   });
 
   it("keeps the delegated handshake for Codex", () => {
-    expect(acpClientCapabilities("codex")).toEqual(ACP_DELEGATED_FS_CAPABILITIES);
-    expect(acpClientCapabilities("codex", "1.0.4", true)).toEqual(ACP_DELEGATED_FS_CAPABILITIES);
+    expect(acpClientCapabilities("codex")).toMatchObject({ ...ACP_DELEGATED_FS_CAPABILITIES, subagents: {}, _meta: { jetbrains: { air: { version: 1, capabilities: ["nativeSubagentSessions"] } } } });
+    expect(acpClientCapabilities("codex", "1.0.4", true)).toEqual(acpClientCapabilities("codex"));
   });
 
   it("keeps the delegated handshake when the grok version is unknown", () => {

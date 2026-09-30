@@ -10,5 +10,5 @@ export const PROVIDER_USAGE: Record<AcpProvider, ProviderUsagePolicy> = {
   codex: { source: "codex-file", cache: "shared" },
   claude: { source: "updates", cache: "session" },
   gemini: { source: "none", cache: "session" },
-  muse: { source: "none", cache: "session" },
+  muse: { source: "updates", cache: "session" },
 };

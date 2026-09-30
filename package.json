@@ -1,7 +1,7 @@
 {
   "name": "all-your-companions",
   "displayName": "All your Companions - in one Place!",
-  "description": "Unified GUI for AI Coding Companions: Google Antigravity, Grok Build, OpenAI Codex, and Claude Code. Multi-session chat, voice control, rich media, and universal diff review. Fork of Grok Build for VS Code (v4.1.8) by Paweł Huryn.",
+  "description": "Unified GUI for AI Coding Companions: Google Antigravity, Grok Build, OpenAI Codex, and Claude Code. Multi-session chat, voice control, rich media, and universal diff review. Fork of Grok Build for VS Code (v4.1.8) by Pawe\u0142 Huryn.",
   "version": "0.2.0",
   "publisher": "zfzfg",
   "author": {
@@ -190,15 +190,15 @@
       },
       {
         "command": "companions._debugDummyPlan",
-        "title": "All your Companions: Debug — Show dummy plan card (for testing Approve/Reject/Cancel)"
+        "title": "All your Companions: Debug \u2014 Show dummy plan card (for testing Approve/Reject/Cancel)"
       },
       {
         "command": "companions.composerForward",
-        "title": "All your Companions: Composer — Move Forward"
+        "title": "All your Companions: Composer \u2014 Move Forward"
       },
       {
         "command": "companions.composerPreviousLine",
-        "title": "All your Companions: Composer — Move to Previous Line"
+        "title": "All your Companions: Composer \u2014 Move to Previous Line"
       },
       {
         "command": "grok.open",
@@ -283,15 +283,15 @@
       },
       {
         "command": "grok._debugDummyPlan",
-        "title": "All your Companions: Debug — Show dummy plan card (for testing Approve/Reject/Cancel)"
+        "title": "All your Companions: Debug \u2014 Show dummy plan card (for testing Approve/Reject/Cancel)"
       },
       {
         "command": "grok.composerForward",
-        "title": "All your Companions: Composer — Move Forward"
+        "title": "All your Companions: Composer \u2014 Move Forward"
       },
       {
         "command": "grok.composerPreviousLine",
-        "title": "All your Companions: Composer — Move to Previous Line"
+        "title": "All your Companions: Composer \u2014 Move to Previous Line"
       }
     ],
     "keybindings": [
@@ -494,7 +494,7 @@
           "enumDescriptions": [
             "Agent mode (default)",
             "Agent mode",
-            "Auto accept — auto-approve every permission request"
+            "Auto accept \u2014 auto-approve every permission request"
           ],
           "default": "",
           "description": "Mode for new sessions. Empty = Agent."
@@ -506,8 +506,8 @@
             "crew"
           ],
           "enumDescriptions": [
-            "Agent — one companion you chat with, which may delegate to companion subagents.",
-            "Crew — a stage-gated workflow run: you describe an idea, the crew plans, implements and reviews it."
+            "Agent \u2014 one companion you chat with, which may delegate to companion subagents.",
+            "Crew \u2014 a stage-gated workflow run: you describe an idea, the crew plans, implements and reviews it."
           ],
           "default": "agent",
           "description": "Session type for new sessions. Chosen before the first message and locked once one is sent. This is a different setting from the Agent/Plan/Auto-accept permission mode above."
@@ -535,7 +535,7 @@
         "companions.subagents.roster": {
           "type": "object",
           "default": {},
-          "description": "Per-companion subagent settings, keyed by companion id (grok, codex, claude, gemini). Each entry may set enabled, allowedModels, defaultModel, defaultEffort, maxEffort, notes and allowWrite. Edit this in Settings → Agents & Crew rather than by hand.",
+          "description": "Per-companion subagent settings, keyed by companion id (grok, codex, claude, gemini). Each entry may set enabled, allowedModels, defaultModel, defaultEffort, maxEffort, notes and allowWrite. Edit this in Settings \u2192 Agents & Crew rather than by hand.",
           "additionalProperties": {
             "type": "object",
             "properties": {
@@ -639,7 +639,7 @@
         "companions.subagents.routing": {
           "type": "array",
           "default": [],
-          "description": "Prefer a particular companion when a subagent's task mentions certain words. An ordered list of { match: [\"grep\", \"overview\"], target: { provider, model, effort } } — earlier rules win. Advice only: what the agent asks for explicitly, and a role's own companion, both still win, and a rule pointing at a companion that is off or signed out is skipped.",
+          "description": "Prefer a particular companion when a subagent's task mentions certain words. An ordered list of { match: [\"grep\", \"overview\"], target: { provider, model, effort } } \u2014 earlier rules win. Advice only: what the agent asks for explicitly, and a role's own companion, both still win, and a rule pointing at a companion that is off or signed out is skipped.",
           "items": {
             "type": "object"
           }
@@ -964,7 +964,7 @@
           "enumDescriptions": [
             "Agent mode (CLI default)",
             "Agent mode",
-            "Auto accept — auto-approve every permission request"
+            "Auto accept \u2014 auto-approve every permission request"
           ],
           "default": "",
           "description": "Mode for new sessions. Updated automatically to remember your last switch between Agent and Auto accept (Plan is never remembered). Empty = Agent."
@@ -984,7 +984,7 @@
           "type": "number",
           "default": 1800000,
           "minimum": 0,
-          "markdownDescription": "How long a live `session/prompt` may stay silent before the extension reports **ACP request timed out**. Any `session/update` or in-turn server request (permission, terminal, …) resets this idle clock. Default 1800000 (30 minutes). `0` disables the idle cap. Applies to newly started sessions (#117)."
+          "markdownDescription": "How long a live `session/prompt` may stay silent before the extension reports **ACP request timed out**. Any `session/update` or in-turn server request (permission, terminal, \u2026) resets this idle clock. Default 1800000 (30 minutes). `0` disables the idle cap. Applies to newly started sessions (#117)."
         },
         "grok.acp.promptAbsoluteTimeoutMs": {
           "type": "number",
@@ -996,7 +996,7 @@
           "type": "number",
           "default": 120000,
           "minimum": 1000,
-          "markdownDescription": "Timeout for ACP methods other than `session/prompt` (`initialize`, `session/new`, `session/set_model`, …). Default 120000 (2 minutes). Applies to newly started sessions."
+          "markdownDescription": "Timeout for ACP methods other than `session/prompt` (`initialize`, `session/new`, `session/set_model`, \u2026). Default 120000 (2 minutes). Applies to newly started sessions."
         },
         "grok.defaultEffort": {
           "type": "string",
@@ -1015,12 +1015,12 @@
             "CLI default (no flag passed to grok agent stdio)",
             "None",
             "Minimal",
-            "Low — faster, lighter reasoning",
+            "Low \u2014 faster, lighter reasoning",
             "Medium",
             "High",
-            "XHigh — deepest reasoning, slowest",
-            "Max — maximum reasoning effort",
-            "Ultracode — xHigh + workflows"
+            "XHigh \u2014 deepest reasoning, slowest",
+            "Max \u2014 maximum reasoning effort",
+            "Ultracode \u2014 xHigh + workflows"
           ],
           "default": "",
           "description": "Reasoning effort passed as --reasoning-effort to grok agent stdio. Values match the grok CLI's accepted set (none, minimal, low, medium, high, xhigh). Applies live on recent CLIs (grok 0.2.101+); older CLIs, and resetting to the model default, restart the session."
@@ -1045,36 +1045,36 @@
             "cmd"
           ],
           "enumDescriptions": [
-            "PowerShell on Windows (pwsh, then Windows PowerShell 5.1); the shell $SHELL names on macOS and Linux — matches the standalone Grok CLI",
+            "PowerShell on Windows (pwsh, then Windows PowerShell 5.1); the shell $SHELL names on macOS and Linux \u2014 matches the standalone Grok CLI",
             "Force cmd.exe on Windows, /bin/sh on macOS and Linux"
           ],
           "default": "auto",
-          "markdownDescription": "Which shell runs the agent's commands. `auto` (default) matches the standalone Grok CLI: PowerShell on Windows — `pwsh.exe` if installed, else Windows PowerShell 5.1 (#46) — and the shell `$SHELL` names on macOS and Linux (typically `/bin/zsh`) instead of `/bin/sh`, which on macOS is bash 3.2 and cannot run a modern sdkman init (#140). The agent's command is also unwrapped from the `bash -lc` envelope Grok sends, and run as an explicit argument, so your shell cannot hand it straight back to bash. A `$SHELL` that isn't POSIX-compatible (fish, nushell) falls back to `/bin/sh`, because the agent writes POSIX commands. `cmd` forces `cmd.exe` on Windows and `/bin/sh` on macOS/Linux, if matching your shell causes trouble — a profile that prints on startup, or is slow to load. On Windows, changing this switches the shell straight away but the agent is told which dialect to write when a conversation starts, so **start a new conversation** for the change to apply to both halves. **Tip: install PowerShell 7 (`pwsh`)** — the 5.1 fallback rejects `&&` chains and reports every failing command's exit code as 1."
+          "markdownDescription": "Which shell runs the agent's commands. `auto` (default) matches the standalone Grok CLI: PowerShell on Windows \u2014 `pwsh.exe` if installed, else Windows PowerShell 5.1 (#46) \u2014 and the shell `$SHELL` names on macOS and Linux (typically `/bin/zsh`) instead of `/bin/sh`, which on macOS is bash 3.2 and cannot run a modern sdkman init (#140). The agent's command is also unwrapped from the `bash -lc` envelope Grok sends, and run as an explicit argument, so your shell cannot hand it straight back to bash. A `$SHELL` that isn't POSIX-compatible (fish, nushell) falls back to `/bin/sh`, because the agent writes POSIX commands. `cmd` forces `cmd.exe` on Windows and `/bin/sh` on macOS/Linux, if matching your shell causes trouble \u2014 a profile that prints on startup, or is slow to load. On Windows, changing this switches the shell straight away but the agent is told which dialect to write when a conversation starts, so **start a new conversation** for the change to apply to both halves. **Tip: install PowerShell 7 (`pwsh`)** \u2014 the 5.1 fallback rejects `&&` chains and reports every failing command's exit code as 1."
         },
         "grok.showThinking": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Show Grok's reasoning (thinking) traces in chat. Off by default — a lightweight \"Thinking…\" indicator stands in while Grok reasons. Also toggleable live from the gear menu → **Config & debug → Show thinking traces** (applies to already-loaded sessions too)."
+          "markdownDescription": "Show Grok's reasoning (thinking) traces in chat. Off by default \u2014 a lightweight \"Thinking\u2026\" indicator stands in while Grok reasons. Also toggleable live from the gear menu \u2192 **Config & debug \u2192 Show thinking traces** (applies to already-loaded sessions too)."
         },
         "grok.expandCommandOutputs": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Expand tool details by default — each shell command's IN/OUT block (full command text + captured output) and each edit's inline diff (useful for auditing Auto-accept sessions). With this setting on, groups containing command or edit details (such as \"Ran N commands\" or \"Edited N files\") open too; read/explore-only groups stay collapsed, and a lone command outside a group opens its details. Off: click a row or group header (›) to expand it — edit rows always show a `+N −M` change count, even when their diff is closed. Also toggleable live from the gear menu → **Config & debug → Expand tool details**."
+          "markdownDescription": "Expand tool details by default \u2014 each shell command's IN/OUT block (full command text + captured output) and each edit's inline diff (useful for auditing Auto-accept sessions). With this setting on, groups containing command or edit details (such as \"Ran N commands\" or \"Edited N files\") open too; read/explore-only groups stay collapsed, and a lone command outside a group opens its details. Off: click a row or group header (\u203a) to expand it \u2014 edit rows always show a `+N \u2212M` change count, even when their diff is closed. Also toggleable live from the gear menu \u2192 **Config & debug \u2192 Expand tool details**."
         },
         "grok.steerByDefault": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Send straight into Grok's running turn instead of queueing it. Off (default): a message you send while Grok is working waits, and is sent as one prompt when the turn ends — you can still steer it on demand with the **Steer** button on the pending message. On: sending while Grok works **skips the queue** and injects the message into the turn immediately, so Grok changes course mid-answer. Steering never cancels the turn and never discards in-flight tool work — it is not a Stop. It carries plain text only: no attached files, no editor context, and no `/commands`. Needs a recent Grok Build CLI; where it's unsupported, messages fall back to the queue. Also toggleable live from the gear menu → **Config & debug → Steer by default**."
+          "markdownDescription": "Send straight into Grok's running turn instead of queueing it. Off (default): a message you send while Grok is working waits, and is sent as one prompt when the turn ends \u2014 you can still steer it on demand with the **Steer** button on the pending message. On: sending while Grok works **skips the queue** and injects the message into the turn immediately, so Grok changes course mid-answer. Steering never cancels the turn and never discards in-flight tool work \u2014 it is not a Stop. It carries plain text only: no attached files, no editor context, and no `/commands`. Needs a recent Grok Build CLI; where it's unsupported, messages fall back to the queue. Also toggleable live from the gear menu \u2192 **Config & debug \u2192 Steer by default**."
         },
         "grok.soundNotifications": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Play a short sound when Grok finishes a turn or hits an error — a rising chime on completion, a lower tone on error. Off by default. Plays **only when the Grok panel isn't focused** (you've switched to the editor or another window), so it notifies you when you've stepped away without beeping while you watch. Also toggleable live from the gear menu → **Config & debug → Sound notifications**."
+          "markdownDescription": "Play a short sound when Grok finishes a turn or hits an error \u2014 a rising chime on completion, a lower tone on error. Off by default. Plays **only when the Grok panel isn't focused** (you've switched to the editor or another window), so it notifies you when you've stepped away without beeping while you watch. Also toggleable live from the gear menu \u2192 **Config & debug \u2192 Sound notifications**."
         },
         "grok.processingSound": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Play a quiet repeating sound while Grok is still working. The first cue waits seven seconds, then repeats every eight seconds until the turn ends. Off by default and separate from the completion/error sound. Also toggleable live from the gear menu → **Config & debug → Still-processing sound**."
+          "markdownDescription": "Play a quiet repeating sound while Grok is still working. The first cue waits seven seconds, then repeats every eight seconds until the turn ends. Off by default and separate from the completion/error sound. Also toggleable live from the gear menu \u2192 **Config & debug \u2192 Still-processing sound**."
         },
         "grok.readRepliesAloud": {
           "type": "boolean",
@@ -1089,19 +1089,19 @@
         "grok.thumbsFeedback": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Show thumbs on a finished Grok turn so you can send a rating to SpaceXAI. **Off by default.** On, thumbs appear only when this Grok session actually supports feedback — never on Codex or Claude. Ratings are not stored. Toggle live from Settings → General → **Thumbs feedback to SpaceXAI**."
+          "markdownDescription": "Show thumbs on a finished Grok turn so you can send a rating to SpaceXAI. **Off by default.** On, thumbs appear only when this Grok session actually supports feedback \u2014 never on Codex or Claude. Ratings are not stored. Toggle live from Settings \u2192 General \u2192 **Thumbs feedback to SpaceXAI**."
         },
         "grok.telemetry.enabled": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "Send anonymous, privacy-first usage telemetry. A single `session_start` event per session carries an anonymous install id (a random GUID, no account/identity) plus a low-cardinality settings snapshot (including mode/model/effort, host kind, UI preferences, whether voice input is available, and which providers are connected; full list in [docs/privacy.md](https://github.com/PawelHuryn/grok-vscode/blob/main/docs/privacy.md)) — **never** any message content, code, file paths, or free-text settings. Also requires VS Code's global `telemetry.telemetryLevel` to be enabled and this to be the official build; turning either setting off stops all sending."
+          "markdownDescription": "Send anonymous, privacy-first usage telemetry. A single `session_start` event per session carries an anonymous install id (a random GUID, no account/identity) plus a low-cardinality settings snapshot (including mode/model/effort, host kind, UI preferences, whether voice input is available, and which providers are connected; full list in [docs/privacy.md](https://github.com/PawelHuryn/grok-vscode/blob/main/docs/privacy.md)) \u2014 **never** any message content, code, file paths, or free-text settings. Also requires VS Code's global `telemetry.telemetryLevel` to be enabled and this to be the official build; turning either setting off stops all sending."
         },
         "grok.chatFontScale": {
           "type": "number",
           "default": 100,
           "minimum": 60,
           "maximum": 300,
-          "markdownDescription": "Zoom for the Grok chat panel only, as a percent (100 = default). Scales the whole chat UI — text, icons, spacing — without affecting the rest of VS Code (unlike `Ctrl/Cmd+Shift+=`). Applies live, no reload needed. Supports User (global) and Workspace (local) scope."
+          "markdownDescription": "Zoom for the Grok chat panel only, as a percent (100 = default). Scales the whole chat UI \u2014 text, icons, spacing \u2014 without affecting the rest of VS Code (unlike `Ctrl/Cmd+Shift+=`). Applies live, no reload needed. Supports User (global) and Workspace (local) scope."
         },
         "grok.voiceApiKey": {
           "type": "string",
@@ -1121,7 +1121,7 @@
         "grok.voiceSendPhrase": {
           "type": "string",
           "default": "grok send",
-          "description": "Spoken phrase that auto-submits the message when it ends a voice transcription (e.g. say \"…fix the bug, grok send\"). The phrase is stripped before sending. Leave empty to disable hands-free sending."
+          "description": "Spoken phrase that auto-submits the message when it ends a voice transcription (e.g. say \"\u2026fix the bug, grok send\"). The phrase is stripped before sending. Leave empty to disable hands-free sending."
         },
         "grok.voiceKeyterms": {
           "type": "array",
@@ -1189,6 +1189,46 @@
           ],
           "default": "gpt-live-transcribe",
           "description": "OpenAI Realtime transcription model. Dictionary terms become model-specific vocabulary hints. The explicit batch mode uses gpt-4o-transcribe."
+        },
+        "companions.museShellSandbox": {
+          "type": "boolean",
+          "default": true,
+          "description": "Use Muse shell sandbox for new conversations. Changing this requires a new conversation."
+        },
+        "companions.museSandboxNetwork": {
+          "type": "string",
+          "default": "proxy-only",
+          "description": "Muse sandbox network policy for new conversations.",
+          "enum": [
+            "proxy-only",
+            "restricted",
+            "enabled"
+          ]
+        },
+        "companions.museTrustWorkspaces": {
+          "type": "boolean",
+          "default": false,
+          "description": "Trust the workspace when starting new Muse conversations."
+        },
+        "grok.museShellSandbox": {
+          "type": "boolean",
+          "default": true,
+          "description": "Use Muse shell sandbox for new conversations. Changing this requires a new conversation."
+        },
+        "grok.museSandboxNetwork": {
+          "type": "string",
+          "default": "proxy-only",
+          "description": "Muse sandbox network policy for new conversations.",
+          "enum": [
+            "proxy-only",
+            "restricted",
+            "enabled"
+          ]
+        },
+        "grok.museTrustWorkspaces": {
+          "type": "boolean",
+          "default": false,
+          "description": "Trust the workspace when starting new Muse conversations."
         }
       }
     }

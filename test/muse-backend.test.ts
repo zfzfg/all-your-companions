@@ -1,7 +1,7 @@
 import { AcpClient } from "../src/acp";
 import { describe, expect, it } from "vitest";
 import * as path from "node:path";
-import { MuseBackend } from "../src/muse-backend";
+import { MuseBackend, withMuseCredentialBackend } from "../src/muse-backend";
 import { locateMuseCli } from "../src/muse-cli-locator";
 
 describe("Muse backend boundary", () => {
@@ -11,7 +11,7 @@ describe("Muse backend boundary", () => {
     expect(backend.provider).toBe("muse");
     expect(spec.command).toBe(process.execPath);
     expect(spec.args[0]).toBe(path.resolve(__dirname, "../src/muse-adapter/main.mjs"));
-    expect(spec.env).toEqual({ TEST: "kept", ELECTRON_RUN_AS_NODE: "1", MUSE_CODE_EXECUTABLE: "/bin/muse" });
+    expect(spec.env).toEqual({ ...withMuseCredentialBackend({ TEST: "kept" }), ELECTRON_RUN_AS_NODE: "1", MUSE_CODE_EXECUTABLE: "/bin/muse", GROK_MUSE_POSTURE: "{}" });
     expect(spec.shell).toBe(false);
   });
 
@@ -57,4 +57,11 @@ it("reports Muse's exact context occupancy, including decreases and zero", () =>
   client.on("contextUsage", (...args) => seen.push(args));
   for (const used of [250, 100, 0]) (client as any).handleSessionUpdate({ sessionUpdate: "usage_update", used, size: 1007997 });
   expect(seen).toEqual([[250, 1007997], [100, 1007997], [0, 1007997]]);
+});
+
+it("keeps explicit credential backends and macOS Keychain behavior", () => {
+ expect(withMuseCredentialBackend({}, "win32")).toEqual({ TBH_CREDENTIAL_BACKEND: "file" });
+ expect(withMuseCredentialBackend({}, "linux")).toEqual({ TBH_CREDENTIAL_BACKEND: "file" });
+ expect(withMuseCredentialBackend({}, "darwin")).toEqual({});
+ expect(withMuseCredentialBackend({ TBH_CREDENTIAL_BACKEND: "custom" }, "win32")).toEqual({ TBH_CREDENTIAL_BACKEND: "custom" });
 });

@@ -30,7 +30,7 @@ describe("Muse as a provider", () => {
 
   it("declares what the adapter can and cannot do in the capability matrix", () => {
     expect(usesAdapterHistory("muse")).toBe(true);
-    expect(supportsModeSwitching("muse")).toBe(false);
+    expect(supportsModeSwitching("muse")).toBe(true);
     expect(supportsClientMcpServers("muse")).toBe(false);
     expect(providerCapability("muse", "steer").state).toBe("no");
     expect(providerCapability("muse", "delegationShim").state).toBe("yes");

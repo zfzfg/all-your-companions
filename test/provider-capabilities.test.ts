@@ -216,7 +216,7 @@ describe("W-16 native and host capabilities", () => {
     ["nativeRewind", ["grok"]],
     ["nativeWorktree", ["grok"]],
     ["sessionInfo", ["grok","gemini"]],
-    ["subscriptionUsage", ["grok","codex","claude"]],
+    ["subscriptionUsage", ["grok","codex","claude","muse"]],
     ["nearFullPrompt", ["grok","codex","claude","gemini"]],
   ] as const)("pins every provider cell for %s", (cap, supported) => {
     for (const provider of ACP_PROVIDERS) {
