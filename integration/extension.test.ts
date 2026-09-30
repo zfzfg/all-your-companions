@@ -465,8 +465,17 @@ suite("VS Code host adapter URI surface", () => {
   };
 
   // Compiled extension output (CommonJS) — not recompiled by integration/tsconfig.
+  // Loads from out-modules (unbundled build) if available, falling back to out.
+  const resolveCompiledModule = (name: string): string => {
+    try {
+      return require.resolve(`../out-modules/${name}`);
+    } catch {
+      return require.resolve(`../out/${name}`);
+    }
+  };
+
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const hostMod = require("../out/vscode-host") as {
+  const hostMod = require(resolveCompiledModule("vscode-host")) as {
     createVsCodeHost: (output: vscode.OutputChannel) => {
       asRelativePath(uri: PortableUri): string;
       fs: {
@@ -501,7 +510,7 @@ suite("VS Code host adapter URI surface", () => {
     fromVsCodeUri: (u: vscode.Uri) => PortableUri;
   };
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { Uri } = require("../out/host") as {
+  const { Uri } = require(resolveCompiledModule("host")) as {
     Uri: {
       from(components: {
         scheme: string;

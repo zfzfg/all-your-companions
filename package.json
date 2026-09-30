@@ -1213,7 +1213,7 @@
     "test:watch": "vitest",
     "test:perf": "vitest run --config vitest.perf.config.ts",
     "compile:integration": "node -e \"require('fs').rmSync('out-integration',{recursive:true,force:true})\" && tsc -p integration/tsconfig.json",
-    "test:integration": "npm run compile && npm run compile:integration && vscode-test",
+    "test:integration": "npm run compile && npm run compile:modules && npm run compile:integration && vscode-test",
     "test:live": "npm run compile:modules && node scripts/live-tests.cjs",
     "e2e:hc-colour": "node scripts/hc-colour-screens.mjs",
     "e2e:welcome-tip": "node scripts/ide-welcome-tip-screens.mjs",
