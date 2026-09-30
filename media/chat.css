@@ -2918,6 +2918,11 @@ body.vscode-light {
   margin: 10px 0;
   display: block;
 }
+hr {
+  border: 0;
+  border-top: 1px solid var(--vscode-textSeparator-foreground, var(--vscode-contrastBorder, var(--vscode-editorWidget-border, rgba(127, 127, 127, 0.25))));
+  margin: 12px 0;
+}
 blockquote {
   margin: 8px 0;
   padding: 6px 12px;

@@ -184,3 +184,103 @@ describe("markdown: code spans and hrefs are literal (#143)", () => {
     expect(render("`a` `b` [c](d) *e*\n")).not.toMatch(NUL);
   });
 });
+
+describe("markdown: thematic breaks (<hr>) and setext headings", () => {
+  it("renders a standalone divider (---) as an <hr> tag", () => {
+    const html = render("---\n");
+    expect(html).toBe("<hr>");
+  });
+
+  it("renders a divider between paragraphs with clean block boundaries", () => {
+    const html = render("Paragraph 1\n\n---\n\nParagraph 2\n");
+    expect(html).toBe("Paragraph 1<hr>Paragraph 2");
+  });
+
+  it("renders thematic breaks with spaces and alternative markers (- - -, ***, ___ , ----)", () => {
+    expect(render("- - -\n")).toBe("<hr>");
+    expect(render("***\n")).toBe("<hr>");
+    expect(render("* * *\n")).toBe("<hr>");
+    expect(render("___\n")).toBe("<hr>");
+    expect(render("_ _ _\n")).toBe("<hr>");
+    expect(render("----\n")).toBe("<hr>");
+  });
+
+  it("distinguishes setext headings (level 1 and 2) from standalone thematic breaks", () => {
+    // Heading immediately followed by --- (no blank line) -> H2
+    const h2 = render("My Section Title\n---\nBody text\n");
+    expect(h2).toContain("<h2>My Section Title</h2>");
+    expect(h2).not.toContain("<hr>");
+    expect(h2).toContain("Body text");
+
+    // Heading immediately followed by === (no blank line) -> H1
+    const h1 = render("Top Level Title\n===\nBody text\n");
+    expect(h1).toContain("<h1>Top Level Title</h1>");
+    expect(h1).not.toContain("<hr>");
+
+    // Separated by blank line -> not a setext heading, but paragraph + divider
+    const separated = render("Paragraph\n\n---\n\nMore text\n");
+    expect(separated).toContain("<hr>");
+    expect(separated).not.toContain("<h2");
+  });
+
+  it("preserves inline code containing --- without emitting <hr>", () => {
+    const html = render("Check `---` in code span\n");
+    expect(html).toContain("<code>---</code>");
+    expect(html).not.toContain("<hr>");
+  });
+
+  it("preserves code blocks containing --- without emitting <hr>", () => {
+    const html = render("```yaml\n---\nkey: value\n---\n```\n");
+    expect(html).toContain("<code>---\nkey: value\n---</code>");
+    expect(html).not.toContain("<hr>");
+  });
+
+  it("preserves table separator rows without emitting <hr>", () => {
+    const html = render("| Header 1 | Header 2 |\n| --- | --- |\n| Cell 1 | Cell 2 |\n");
+    expect(html).toContain("md-table-wrap");
+    expect(html).toContain("<table>");
+    expect(html).not.toContain("<hr>");
+  });
+
+  it("closes lists cleanly before a thematic break and preserves --- inside list item text", () => {
+    const listThenHr = render("- item 1\n- item 2\n---\nAfter text\n");
+    expect(listThenHr).toContain("<ul>");
+    expect(listThenHr).toContain("<li>item 1</li>");
+    expect(listThenHr).toContain("<li>item 2</li></ul>");
+    expect(listThenHr).toContain("<hr>");
+    expect(listThenHr).toContain("After text");
+
+    const listWithDashes = render("- item with --- dashes in prose\n");
+    expect(listWithDashes).toContain("<li>item with --- dashes in prose</li>");
+    expect(listWithDashes).not.toContain("<hr>");
+  });
+
+  it("renders thematic breaks identically under CRLF line endings", () => {
+    const crlf = "Line 1\r\n\r\n---\r\n\r\nLine 2\r\n";
+    const lf = "Line 1\n\n---\n\nLine 2\n";
+    expect(render(crlf)).toBe(render(lf));
+    expect(render(crlf)).toBe("Line 1<hr>Line 2");
+  });
+
+  it("does not produce setext headings during streaming of bullet markers", () => {
+    // Single dash on next line should NOT turn previous paragraph into <h2>
+    const streaming = render("Here is a list:\n-");
+    expect(streaming).not.toContain("<h2>");
+    expect(streaming).toContain("Here is a list:");
+  });
+
+  it("safely escapes HTML inside setext headings", () => {
+    const html = render("<script>alert(1)</script>\n---\n");
+    expect(html).toContain("<h2>&lt;script&gt;alert(1)&lt;/script&gt;</h2>");
+    expect(html).not.toContain("<script>");
+  });
+
+  it("verifies <hr> element creation in happy-dom DOM harness", () => {
+    const h = bootWebview({ ready: true });
+    const div = h.window.document.createElement("div");
+    div.innerHTML = render("First\n\n---\n\nSecond\n");
+    const hr = div.querySelector("hr");
+    expect(hr).not.toBeNull();
+    expect(hr?.tagName.toLowerCase()).toBe("hr");
+  });
+});

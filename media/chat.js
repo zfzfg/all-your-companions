@@ -1834,7 +1834,8 @@
       stack = stack.slice(0, depth);
     }
 
-    for (const line of lines) {
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
       if (!line.trim()) {
         if (stack.length === 0 && !lastWasBlock) pendingBreak = true;
         lastPara = false;
@@ -1898,6 +1899,17 @@
         continue;
       }
 
+      // Standalone thematic break: 3+ matching dashes, asterisks or underscores.
+      // Checked before lists and before Setext underline lookahead.
+      if (/^ {0,3}(?:(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,})$/.test(line)) {
+        closeFrom(0);
+        out += '<hr>';
+        lastWasBlock = true;
+        lastPara = false;
+        pendingBreak = false;
+        continue;
+      }
+
       const lm = line.match(/^( *)([-*]|\d+\.) (.+)$/);
       if (lm) {
         const indent = lm[1].length;
@@ -1927,6 +1939,22 @@
         lastPara = false;
         pendingBreak = false;
         continue;
+      }
+
+      // Setext heading: paragraph text immediately followed by === (H1) or --- (H2).
+      // Look ahead to next non-empty line without skipping over blank lines.
+      if (i + 1 < lines.length) {
+        const sm = lines[i + 1].match(/^ {0,3}(={2,}|-{2,})[ \t]*$/);
+        if (sm) {
+          closeFrom(0);
+          const level = sm[1][0] === '=' ? 1 : 2;
+          out += `<h${level}>${inline(line.trim())}</h${level}>`;
+          lastWasBlock = true;
+          lastPara = false;
+          pendingBreak = false;
+          i++;
+          continue;
+        }
       }
 
       closeFrom(0);
