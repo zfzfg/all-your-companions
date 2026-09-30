@@ -4,10 +4,11 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { createInterface, type Interface } from "node:readline";
-import { DEFAULT_GEMINI_MODELS, contextWindowForModel } from "./gemini-backend";
+import { DEFAULT_GEMINI_MODELS, contextWindowForModel, parseAgyModelsOutput, type AgyModelEntry } from "./gemini-backend";
 import { MAX_DIFF_EXPAND_BYTES } from "./diff-view";
 import { mergeDiffIntoContent, synthesizeEditDiff, type AcpDiffBlock } from "./diff-synthesize";
 import { antigravitySettingsPaths } from "./gemini-cli-locator";
+import { grokCliNeedsShell } from "./cli-process";
 
 /**
  * What `agy` actually does with `--effort`, measured against 1.1.26.
@@ -471,6 +472,7 @@ export function cleanPromptTitle(text: string): string {
 }
 
 export interface AgyAdapterOptions {
+  modelDiscovery?: () => Promise<string>;
   agyPath?: string;
   cwd?: string;
   env?: NodeJS.ProcessEnv;
@@ -633,6 +635,20 @@ export class AgyAcpAdapterServer {
     this.input = options.inputStream || process.stdin;
     this.output = options.outputStream || process.stdout;
     this.spawnFn = options.spawnFn || ((cmd, args, opts) => spawn(cmd, args, opts));
+    // Fake long-lived processes must not cause real binary probes in unit tests.
+    this.modelDiscovery = options.modelDiscovery ?? (!options.spawnFn ? () => new Promise<string>((resolve, reject) => {
+      const proc = this.spawnFn(this.agyPath, ["models"], { cwd: this.cwd, env: this.env,
+        stdio: ["pipe", "pipe", "pipe"], shell: grokCliNeedsShell(this.agyPath), windowsHide: true });
+      let output = "";
+      const timer = setTimeout(() => { proc.kill(); reject(new Error("Model discovery timed out")); }, 3000);
+      timer.unref();
+      proc.stdout.on("data", chunk => {
+        output += chunk.toString();
+        if (output.length > 1024 * 1024) { proc.kill(); clearTimeout(timer); reject(new Error("Model listing too large")); }
+      });
+      proc.on("error", error => { clearTimeout(timer); reject(error); });
+      proc.on("close", code => { clearTimeout(timer); if (code === 0) resolve(output); else reject(new Error("Model discovery unavailable")); });
+    }) : undefined);
     this.diskPollAttempts = options.diskPollAttempts ?? 50;
     this.diskPollDelayMs = options.diskPollDelayMs ?? 200;
     // A caller-supplied spawnFn means a test harness stands in for the real
@@ -648,6 +664,21 @@ export class AgyAcpAdapterServer {
   private readonly effortRequirementOverrides = new Map<string, boolean>();
   private readonly lastStderrBuffer: string[] = [];
   private lastUsage: PromptUsage = { inputTokens: 0, outputTokens: 0, thoughtTokens: 0, totalTokens: 0 };
+  private discoveredModels?: AgyModelEntry[];
+  private modelDiscovery?: () => Promise<string>;
+
+  private async refreshAvailableModels(): Promise<void> {
+    if (!this.modelDiscovery) return;
+    try {
+      const result = parseAgyModelsOutput(await this.modelDiscovery());
+      if (result.availableModels.length) this.discoveredModels = result.availableModels;
+    } catch { /* Offline/auth failure: retain last listing, with known fallbacks. */ }
+  }
+
+  private modelContextWindow(modelId: string): number | undefined {
+    return this.discoveredModels?.find(model => model.modelId === modelId)?._meta.totalContextTokens
+      ?? contextWindowForModel(modelId);
+  }
 
   /**
    * Async on purpose: a synchronous `spawnSync` here (even with `windowsHide:
@@ -702,7 +733,8 @@ export class AgyAcpAdapterServer {
   }
 
   getAvailableModels(): any[] {
-    const list = [...DEFAULT_GEMINI_MODELS];
+    const list: any[] = this.discoveredModels ? [...this.discoveredModels]
+      : DEFAULT_GEMINI_MODELS.map(model => ({ ...model, _meta: { ...model._meta, contextQuality: "estimated" } }));
     if (this.currentModelId && !list.some((m) => m.modelId === this.currentModelId)) {
       list.unshift({
         modelId: this.currentModelId,
@@ -711,7 +743,7 @@ export class AgyAcpAdapterServer {
         _meta: {
           supportsReasoningEffort: this.effectiveModelRequiresEffort(this.currentModelId),
           reasoningEfforts: [{ value: "low" }, { value: "medium" }, { value: "high" }],
-          totalContextTokens: 1048576,
+          totalContextTokens: contextWindowForModel(this.currentModelId),
         },
       });
     }
@@ -1314,6 +1346,7 @@ export class AgyAcpAdapterServer {
       }
 
       case "session/new": {
+        await this.refreshAvailableModels();
         this.pendingExitPlanId = undefined;
         ensureAntigravityToolRules(this.geminiHome);
         if (typeof params?.cwd === "string" && params.cwd) {
@@ -1336,6 +1369,7 @@ export class AgyAcpAdapterServer {
       }
 
       case "session/load": {
+        await this.refreshAvailableModels();
         this.pendingExitPlanId = undefined;
         if (typeof params?.cwd === "string" && params.cwd) {
           this.cwd = params.cwd;
@@ -1562,9 +1596,14 @@ export class AgyAcpAdapterServer {
 
       case "_x.ai/session/info":
       case "x.ai/session/info": {
-        const windowSize = contextWindowForModel(this.currentModelId);
+        const windowSize = this.modelContextWindow(this.currentModelId);
+        if (windowSize === undefined) {
+          this.sendError(id, -32601, "Context limit unknown for this model");
+          break;
+        }
         const used = this.lastUsage.totalTokens || 0;
         this.sendResponse(id, {
+          _meta: { contextWindowAuthoritative: this.discoveredModels?.find(model => model.modelId === this.currentModelId)?._meta.contextQuality === "verified" },
           context: {
             used,
             total: windowSize,
@@ -1968,7 +2007,7 @@ export class AgyAcpAdapterServer {
 
         const usedTokens = u.total_tokens ?? ((u.input_tokens ?? 0) + (u.output_tokens ?? 0));
         if (typeof usedTokens === "number" && usedTokens > 0) {
-          const windowSize = contextWindowForModel(this.currentModelId);
+          const windowSize = this.modelContextWindow(this.currentModelId);
           this.sendNotification("session/update", {
             sessionId: this.sessionId,
             update: {
@@ -2009,7 +2048,7 @@ export class AgyAcpAdapterServer {
 
             const usedTokens = res.usage.total_tokens ?? ((res.usage.input_tokens ?? 0) + (res.usage.output_tokens ?? 0));
             if (typeof usedTokens === "number" && usedTokens > 0) {
-              const windowSize = contextWindowForModel(this.currentModelId);
+              const windowSize = this.modelContextWindow(this.currentModelId);
               this.sendNotification("session/update", {
                 sessionId: this.sessionId,
                 update: {

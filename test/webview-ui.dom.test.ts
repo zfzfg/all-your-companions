@@ -959,38 +959,38 @@ describe("context donut (token usage)", () => {
   it("updates on a real totalTokens; keeps the last value when the host stripped it", () => {
     const { window, doc } = boot();
     dispatch(window, { type: "promptComplete", meta: { totalTokens: 32000 } });
-    expect($(doc, "donut-label").textContent).toBe("32K/100K");
+    expect($(doc, "donut-label").textContent).toBe("≈ 32K/100K");
     // gateZeroTokenMeta strips totalTokens:0 host-side (#39 — /session-info AND
     // /compact report 0, never a real measurement), so the webview only ever
     // sees a real number or nothing. Nothing = keep the last real value.
     dispatch(window, { type: "promptComplete", meta: { totalTokens: undefined } });
     dispatch(window, { type: "promptComplete", meta: {} });
     dispatch(window, { type: "promptComplete" });
-    expect($(doc, "donut-label").textContent).toBe("32K/100K");
+    expect($(doc, "donut-label").textContent).toBe("≈ 32K/100K");
   });
 
   it("contextUsage (host-read signals.json) updates used and the window", () => {
     const { window, doc } = boot();
     dispatch(window, { type: "contextUsage", used: 29088, window: 200000 });
-    expect($(doc, "donut-label").textContent).toBe("29K/200K");
+    expect($(doc, "donut-label").textContent).toBe("≈ 29K/200K");
     expect($(doc, "donut").title).toBe(
-      `Context usage — ${(29088).toLocaleString()} / ${(200000).toLocaleString()} tokens`,
+      `Context usage — ≈ ${(29088).toLocaleString()} / ${(200000).toLocaleString()} tokens`,
     );
   });
 
   it("contextUsage without a window keeps the model-derived window", () => {
     const { window, doc } = boot();
     dispatch(window, { type: "contextUsage", used: 29088 });
-    expect($(doc, "donut-label").textContent).toBe("29K/100K");
+    expect($(doc, "donut-label").textContent).toBe("≈ 29K/100K");
   });
 
   it("seeds a cold restore: the session event zeroes the donut, contextUsage restores it", () => {
     // Cold-restore buffered order: `session` (resets the donut to 0) → replay →
     // `contextUsage` (the host reads signals.json after loadSession returns).
     const { window, doc } = boot();
-    expect($(doc, "donut-label").textContent).toBe("0K/100K");
+    expect($(doc, "donut-label").textContent).toBe("≈ 0K/100K");
     dispatch(window, { type: "contextUsage", used: 44123, window: 100000 });
-    expect($(doc, "donut-label").textContent).toBe("44K/100K");
+    expect($(doc, "donut-label").textContent).toBe("≈ 44K/100K");
   });
 
   it("a stripped zero keeps the donut, a later contextUsage corrects it", () => {
@@ -1002,14 +1002,14 @@ describe("context donut (token usage)", () => {
     // (e.g. /session-info) — compact shrinks context, it doesn't empty it.
     dispatch(window, { type: "promptComplete", meta: {} });
     dispatch(window, { type: "contextUsage", used: 29088 });
-    expect($(doc, "donut-label").textContent).toBe("29K/100K");
+    expect($(doc, "donut-label").textContent).toBe("≈ 29K/100K");
   });
 
   it("a window-only contextUsage rescales without inventing a used count", () => {
     const { window, doc } = boot();
     dispatch(window, { type: "contextUsage", used: 44123, window: 100000 });
     dispatch(window, { type: "contextUsage", window: 1000000 });
-    expect($(doc, "donut-label").textContent).toBe("44K/1000K");
+    expect($(doc, "donut-label").textContent).toBe("≈ 44K/1000K");
   });
 
   it("switching from Grok to Claude resets the donut window without leaking Grok's 512k", () => {
@@ -1021,7 +1021,7 @@ describe("context donut (token usage)", () => {
       currentModelId: "grok-build",
       models: [{ modelId: "grok-build", name: "Grok Build", totalContextTokens: 512000 }],
     });
-    expect($(doc, "donut-label").textContent).toBe("0K/512K");
+    expect($(doc, "donut-label").textContent).toBe("≈ 0K/512K");
 
     dispatch(window, {
       type: "session",
@@ -1030,7 +1030,7 @@ describe("context donut (token usage)", () => {
       currentModelId: "claude-sonnet-5",
       models: [{ modelId: "claude-sonnet-5", name: "Claude Sonnet 5" }],
     });
-    expect($(doc, "donut-label").textContent).toBe("0K/1000K");
+    expect($(doc, "donut-label").textContent).toBe("0K/?");
   });
 });
 

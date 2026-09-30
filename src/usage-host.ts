@@ -185,6 +185,15 @@ export class UsageHost {
     if (!id) return undefined;
     const overrides = this.deps.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
     const next = persistSessionContext(overrides[id] ?? {}, event);
+    if (typeof event.occupancy === "number") {
+      const current = session.client?.contextBudget;
+      // Adapter turn occupancy is an estimate unless the native session reports it.
+      if (!(current?.usageQuality === "verified" && current.used === next.contextUsed)) {
+        session.client?.observeContext?.({ source: "adapter", limitQuality: "unknown", limits: {},
+          used: next.contextUsed, usageQuality: event.authoritative ? "verified" : "estimated" });
+      }
+    }
+    next.contextObservation = session.client?.contextBudget ?? next.contextObservation;
     void this.deps.state.update(SESSION_META_KEY, { ...overrides, [id]: next });
     const usage = persistedContextUsage(next);
     if (usage) {
@@ -203,18 +212,25 @@ export class UsageHost {
     const id = session.activeSessionId;
     if (!id) return;
     if (isAdapterProvider(session.provider)) {
-      const usage = persistedContextUsage(this.deps.state.get<SessionMetaOverrides>(SESSION_META_KEY, {})[id]);
+      const stored = this.deps.state.get<SessionMetaOverrides>(SESSION_META_KEY, {})[id];
+      const usage = persistedContextUsage(stored);
       if (usage) {
         this.deps.emit(session, {
           type: "contextUsage",
           used: usage.used,
           ...(usage.window ? { window: usage.window } : {}),
+          context: session.client?.contextBudget ?? (stored?.contextObservation ? { ...stored.contextObservation, stale: true } : {
+            provider: session.provider, access: "historical", sessionId: id, generation: 0, source: "persisted",
+            observedAt: 0, stale: true, limitQuality: "estimated", usageQuality: "estimated", limits: { contextWindow: usage.window }, used: usage.used,
+          }),
         });
       }
       return;
     }
     const cwd = this.deps.sessionCwd(session);
     const usage = readContextUsage({ fs: defaultFs, grokHome: resolveGrokHome(process.env), cwd, id });
+    if (usage) session.client?.observeContext?.({ source: "persisted", limitQuality: "estimated", usageQuality: "estimated",
+      stale: true, used: usage.used, limits: { contextWindow: usage.window } });
     if (usage) this.deps.emit(session, { type: "contextUsage", used: usage.used, window: usage.window });
   }
 
@@ -316,7 +332,7 @@ export class UsageHost {
     threshold: number | undefined,
   ): void {
     if (used === undefined || window === undefined) return;
-    const effective = threshold ?? session.compactThresholdReported;
+    const effective = threshold ?? session.compactThresholdReported ?? 80;
     if (providerCapability(session.provider, "nearFullPrompt").state === "no") return;
     let mode: "ask" | "off" = "ask";
     try {
@@ -330,7 +346,7 @@ export class UsageHost {
       used,
       window,
       threshold: effective!,
-      canCompact: providerCapability(session.provider, "manualCompact").state !== "no",
+      canCompact: providerCapability(session.provider, "manualCompact").state === "yes",
     });
   }
 
@@ -339,6 +355,7 @@ export class UsageHost {
     gen: number,
     opts: { force?: boolean } = {},
   ): Promise<boolean> {
+    if (gen === session.gen) await session.client?.refreshContextCatalog?.();
     if (providerCapability(session.provider, "sessionInfo").state === "no" || gen !== session.gen || session.sessionInfoUnsupported) return false;
     const client = session.client;
     if (!client?.sessionId) return false;

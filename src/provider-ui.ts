@@ -170,7 +170,8 @@ export function modelsForConnectedProviders(
       });
       continue;
     }
-    for (const model of source) out.push({ ...model, provider });
+    const stale = source !== live?.models && (!cache[provider]?.seenAt || Date.now() - cache[provider]!.seenAt >= 86400000);
+    for (const model of source) out.push({ ...model, ...(stale ? { contextQuality: "estimated" as const, contextStale: true } : {}), provider });
   }
   return out;
 }

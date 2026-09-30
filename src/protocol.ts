@@ -818,7 +818,7 @@ export type HostMsg =
   | { type: "initialized"; info: { cliPath: string; cwd: string; version: string | null; provider?: AcpProvider; steeringSupported?: boolean; init: { protocolVersion?: unknown } } }
   | { type: "cliUpdating" }
   // `worktree` gates the gear's Apply/Remove worktree items to worktree sessions.
-  | { type: "session"; sessionId: string; models: ModelInfo[]; currentModelId: string | undefined; worktree?: boolean; provider?: AcpProvider }
+  | { type: "session"; sessionId: string; models: ModelInfo[]; currentModelId: string | undefined; worktree?: boolean; provider?: AcpProvider; preserveContext?: boolean }
   // The focused conversation's display name, using the same precedence as a
   // history row. It is separate from `sessions` because VS Code does not keep
   // that browser-only list populated while the history popover is closed.
@@ -1023,6 +1023,8 @@ export type HostMsg =
   // The structured fields are only populated by Grok's `_x.ai/session/info`.
   | {
       type: "contextUsage";
+      reset?: boolean;
+      context?: import("./context-budget").ContextObservation;
       used?: number;
       window?: number;
       categories?: { label: string; tokens: number; detail?: string }[];
@@ -1112,7 +1114,7 @@ export type HostMsg =
   | { type: "compactSummary"; summary: string }
   // K-05: a turn failed because the context overflowed. Replaces the generic
   // agentError line; `canCompact` hides "Compact and retry" where there is no /compact.
-  | { type: "contextOverflow"; id: string; text: string; canCompact: boolean; status?: TurnEndStatus; durationMs?: number; children?: string }
+  | { type: "contextOverflow"; id: string; text: string; canCompact: boolean; canReduce?: boolean; status?: TurnEndStatus; durationMs?: number; children?: string }
   | { type: "agentReset" }
   // status/durationMs are additive turn-footer data: how THIS turn ended and
   // how long it ran ("Worked for 12.4s" / "Cancelled after 4.1s" / "Failed

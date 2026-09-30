@@ -104,8 +104,8 @@ describe("Claude session model mapping", () => {
     expect(contextWindowForClaudeModel("claude-sonnet-5")).toBe(1000000);
     expect(contextWindowForClaudeModel("claude-opus-5")).toBe(1000000);
     expect(contextWindowForClaudeModel("claude-fable-5-1")).toBe(1000000);
-    expect(contextWindowForClaudeModel("sonnet", "Claude Sonnet 5")).toBe(1000000);
-    expect(contextWindowForClaudeModel("custom-model", "Model [1M]")).toBe(1000000);
+    expect(contextWindowForClaudeModel("sonnet", "Claude Sonnet 5")).toBeUndefined();
+    expect(contextWindowForClaudeModel("custom-model", "Model [1M]")).toBeUndefined();
     expect(contextWindowForClaudeModel("claude-haiku-4-5")).toBe(200000);
     expect(contextWindowForClaudeModel("claude-3-5-sonnet")).toBe(200000);
   });
@@ -125,6 +125,7 @@ describe("Claude output and usage normalization", () => {
         update: { sessionUpdate: "usage_update", used: 12, size: 200000 },
         meta: { replay: false },
         contextWindow: 200000,
+        contextQuality: "estimated",
         usageUpdateUsed: 12,
       });
   });
@@ -477,4 +478,3 @@ describe("Claude native sessions and options", () => {
     });
   });
 });
-

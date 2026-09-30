@@ -154,6 +154,7 @@ export function normalizeCodexUpdate(update: any, meta?: any): BackendUpdate {
       update,
       meta,
       contextWindow: size,
+      contextQuality: "verified",
       usageUpdateUsed: used,
     };
   }

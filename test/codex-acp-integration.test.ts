@@ -191,6 +191,7 @@ describe("Codex ACP integration (real subprocess, fake adapter)", () => {
       await warmCodexModelCache({
         cliPath: "C:\\Tools\\codex.exe",
         tempRoot,
+        env: { ...process.env, CODEX_HOME: codexHome },
         backend: { adapterPath: path.join(__dirname, "fixtures", "fake-codex-acp.cjs") },
         log: (message) => logs.push(message),
         onModels: (models, current) => {

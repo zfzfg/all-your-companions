@@ -1,4 +1,5 @@
 import { hostModeSequence, type HostMode } from "./provider-modes";
+import { contextTokens } from "./context-budget";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { grokCliNeedsShell } from "./cli-process";
@@ -29,11 +30,8 @@ function selectOptions(option: any): any[] {
   return Array.isArray(option?.options) ? option.options : [];
 }
 
-export function contextWindowForModel(modelId: string): number {
-  if (modelId.startsWith("gemini-")) return 1048576;
-  if (modelId.startsWith("claude-")) return 200000;
-  if (modelId.startsWith("gpt-oss-")) return 131072;
-  return 1048576;
+export function contextWindowForModel(modelId: string): number | undefined {
+  return DEFAULT_GEMINI_MODELS.find(model => model.modelId === modelId)?._meta.totalContextTokens;
 }
 
 export const DEFAULT_GEMINI_MODELS = [
@@ -114,6 +112,8 @@ export interface AgyModelEntry {
     supportsReasoningEffort: boolean;
     reasoningEfforts?: Array<{ value: string }>;
     totalContextTokens?: number;
+    contextQuality?: "verified" | "estimated" | "unknown";
+    contextLimits?: import("./context-budget").ModelContextLimits;
   };
 }
 
@@ -121,6 +121,25 @@ export function parseAgyModelsOutput(output: string): {
   rawModels: Array<{ modelId: string; name: string }>;
   availableModels: AgyModelEntry[];
 } {
+  if (/^[\s]*[\[{]/.test(output)) {
+    try {
+      const body = JSON.parse(output);
+      const rows = Array.isArray(body) ? body : body.models;
+      if (Array.isArray(rows)) {
+        const availableModels: AgyModelEntry[] = rows.flatMap((row: any) => {
+          const modelId = row.modelId ?? row.id;
+          if (typeof modelId !== "string" || !modelId || row.hidden === true) return [];
+          const size = contextTokens(row.context_window ?? row.contextLimit ?? row._meta?.totalContextTokens);
+          const input = contextTokens(row.inputTokenLimit);
+          return [{ modelId, name: row.name ?? row.displayName ?? modelId,
+            _meta: { supportsReasoningEffort: row.supportsReasoningEffort === true,
+              totalContextTokens: input ?? size, contextQuality: size || input ? "verified" : "unknown",
+              contextLimits: { contextWindow: size, inputTokenLimit: input, outputTokenLimit: contextTokens(row.outputTokenLimit) } } }];
+        });
+        return { availableModels, rawModels: availableModels.map(row => ({ modelId: row.modelId, name: row.name })) };
+      }
+    } catch { /* Fall through to the CLI's tab-separated listing. */ }
+  }
   const lines = output.trim().split(/\r?\n/);
   const rawModels: Array<{ modelId: string; name: string }> = [];
   const grouped = new Map<string, { baseName: string; efforts: string[] }>();
@@ -166,6 +185,7 @@ export function parseAgyModelsOutput(output: string): {
       _meta: {
         supportsReasoningEffort: orderedEfforts.length > 0,
         totalContextTokens: contextWindowForModel(baseId),
+        contextQuality: "estimated",
         ...(orderedEfforts.length > 0 ? { reasoningEfforts: orderedEfforts } : {}),
       },
     });
@@ -199,6 +219,7 @@ export function modelsFromGeminiConfigOptions(configOptions: any): { currentMode
           supportsReasoningEffort: effortValues.length > 0,
           reasoningEfforts: effortValues.map((value) => ({ value })),
           totalContextTokens,
+          contextQuality: "estimated",
           ...(currentModelId === modelId && currentEffort && currentEffort !== "default"
             ? { reasoningEffort: currentEffort }
             : {}),
@@ -280,7 +301,8 @@ function synthesizeGeminiDiff(rawInput: any): AcpDiffBlock | undefined {
 }
 
 export function normalizeGeminiUpdate(update: any, meta: any): BackendUpdate {
-  const size = typeof update?.size === "number" ? update.size : (typeof update?.contextWindow === "number" ? update.contextWindow : 1048576);
+  const size = update?.sessionUpdate === "usage_update"
+    ? contextTokens(update.size) ?? contextTokens(update.contextWindow) : undefined;
   if (update?.rawInput && typeof update.rawInput === "object") {
     const r = update.rawInput;
     if (r.CommandLine && !r.command) {
@@ -315,6 +337,7 @@ export function normalizeGeminiUpdate(update: any, meta: any): BackendUpdate {
       update,
       meta,
       contextWindow: size,
+      contextQuality: update?._meta?.contextWindowAuthoritative === true ? "verified" : "estimated",
       usageUpdateUsed: typeof update?.used === "number" ? update.used : undefined,
     };
   }
@@ -325,12 +348,11 @@ export function normalizeGeminiUpdate(update: any, meta: any): BackendUpdate {
         return {
           update: { ...update, content: mergeDiffIntoContent(update.content, diff) },
           meta,
-          contextWindow: size,
         };
       }
     }
   }
-  return { update, meta, contextWindow: size };
+  return { update, meta };
 }
 
 export function normalizeGeminiPermissionParams(params: any): any {

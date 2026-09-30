@@ -1012,7 +1012,8 @@ public postSessionModels(session: Session): void {
       models: this.modelsForSession(session, client.availableModels, client.currentModelId, true),
       currentModelId: client.currentModelId,
       worktree: !!session.worktree,
-      provider: session.provider
+      provider: session.provider,
+      preserveContext: true
     });
   }
 

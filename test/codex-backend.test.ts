@@ -147,6 +147,7 @@ describe("Codex output and usage normalization", () => {
         update: { sessionUpdate: "usage_update", used: 1234, size: 258400 },
         meta: { replay: false },
         contextWindow: 258400,
+        contextQuality: "verified",
         usageUpdateUsed: 1234,
       });
   });

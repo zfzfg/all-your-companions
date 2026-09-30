@@ -509,9 +509,9 @@ describe("contextUsedFromCompactNotification (live auto_compact_completed donut)
     expect(contextUsedFromCompactNotification({ sessionUpdate: "model_changed" })).toBeNull();
   });
 
-  it("returns null for a missing, zero, negative, or non-numeric tokens_after", () => {
+  it("accepts zero and rejects missing, negative, or non-numeric tokens_after", () => {
     expect(contextUsedFromCompactNotification({ sessionUpdate: "auto_compact_completed" })).toBeNull();
-    expect(contextUsedFromCompactNotification({ sessionUpdate: "auto_compact_completed", tokens_after: 0 })).toBeNull();
+    expect(contextUsedFromCompactNotification({ sessionUpdate: "auto_compact_completed", tokens_after: 0 })).toBe(0);
     expect(contextUsedFromCompactNotification({ sessionUpdate: "auto_compact_completed", tokens_after: -5 })).toBeNull();
     expect(contextUsedFromCompactNotification({ sessionUpdate: "auto_compact_completed", tokens_after: "1000" })).toBeNull();
     expect(contextUsedFromCompactNotification({ sessionUpdate: "auto_compact_completed", tokens_after: NaN })).toBeNull();

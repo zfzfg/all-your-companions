@@ -1,10 +1,17 @@
 import { supportsSessionDeletion } from "./acp-backend";
+import { ContextCatalogReader, type ContextCatalogSnapshot } from "./context-catalog";
+import {
+  ContextBudgetExceededError, DOCUMENTED_CONTEXT, checkContextBudget, contextTokens, contextUsed,
+  effectiveContextWindow, estimateContextPrompt, mergeContextObservation, validContextLimits,
+  type ContextObservation, type ContextPromptCount, type ModelContextLimits,
+} from "./context-budget";
 import { ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { createInterface, Interface } from "node:readline";
 import { EventEmitter } from "node:events";
 import { claudeSubscriptionWindows, grokSubscriptionWindows, type SubscriptionWindow } from "./subscription-usage";
 import {
   collectToolImages,
+  contextUsedFromCompactNotification,
   contextUsedFromUpdateEnvelope,
   extractGeneratedMediaPaths,
   isMediaGenToolCall,
@@ -82,8 +89,12 @@ import type { EffortLevel, PromptContentBlock } from "./acp-types";
 export type { EffortLevel, PromptContentBlock } from "./acp-types";
 
 export { buildInterjectParams, cliHonorsInterjectContent, GROK_INTERJECT_CONTENT_MIN_VERSION } from "./grok-backend";
+const MODEL_CONTEXT_QUALITY = { grok: "verified", codex: "verified", claude: "estimated", gemini: "estimated", muse: "verified" } as const;
+const SESSION_CONTEXT_RESERVE: Partial<Record<AcpProvider, boolean>> = { codex: true };
 
 export interface AcpClientOptions {
+  /** Only mark complete when counting the entire serialized CLI request. */
+  contextTokenCounter?: (prompt: readonly PromptContentBlock[], observation?: ContextObservation) => Promise<ContextPromptCount>;
   cliPath: string;
   cwd: string;
   effort?: EffortLevel;
@@ -122,6 +133,9 @@ export interface ModelInfo {
   name: string;
   description?: string;
   totalContextTokens?: number;
+  contextLimits?: ModelContextLimits;
+  contextQuality?: "verified" | "estimated" | "unknown";
+  contextStale?: boolean;
   supportsReasoningEffort?: boolean;
   /** The model's ACTIVE reasoning effort as advertised in `_meta.reasoningEffort`
    *  — the session override (from `SessionHandle.reasoning_effort`), not merely
@@ -307,6 +321,107 @@ export class AcpClient extends EventEmitter {
   lastMeta?: PromptResultMeta;
   private lastContextUsed?: number;
   private lastContextWindow?: number;
+  private contextGeneration = 0;
+  private contextObservation?: ContextObservation;
+  private contextCatalog?: ContextCatalogReader;
+  private catalogSnapshot?: ContextCatalogSnapshot;
+  private contextNoticeGeneration = -1;
+  private catalogSignature?: string;
+  private catalogAddedModels = new Set<string>();
+
+  get contextBudget(): ContextObservation | undefined { return this.contextObservation; }
+
+  private resetContextBudget(): void {
+    this.contextGeneration++;
+    this.lastContextUsed = undefined;
+    this.lastContextWindow = undefined;
+    this.contextObservation = undefined;
+    this.seedContextBudget();
+    this.emit("contextBudget", { ...(this.contextBudget ?? {}), reset: true });
+  }
+
+  private seedContextBudget(): void {
+    const model = this.availableModels.find(entry => entry.modelId === this.currentModelId);
+    if (model?.totalContextTokens) {
+      this.observeContext({ limits: model.contextLimits ?? { contextWindow: model.totalContextTokens },
+        source: "adapter", limitQuality: model.contextQuality ?? "estimated", stale: model.contextStale });
+    }
+    this.applyContextCatalog();
+    const documented = DOCUMENTED_CONTEXT[this.provider]?.[this.currentModelId ?? ""];
+    if (!this.contextObservation && documented) this.observeContext({ limits: documented, source: "documented", limitQuality: "estimated" });
+  }
+
+  private applyContextCatalog(): void {
+    const snapshot = this.catalogSnapshot;
+    if (snapshot && this.sessionId) {
+      for (const row of snapshot.models) {
+        if (!this.availableModels.some(model => model.modelId === row.modelId)) {
+          this.availableModels.push({ modelId: row.modelId, name: row.name, contextLimits: row.limits,
+            totalContextTokens: effectiveContextWindow(row.limits), contextQuality: snapshot.stale ? "estimated" : "verified" });
+          this.catalogAddedModels.add(row.modelId);
+        }
+      }
+    }
+    const row = snapshot?.models.find(entry => entry.modelId === this.currentModelId || entry.resolvedModelId === this.currentModelId);
+    if (!snapshot || !row) return;
+    const model = this.availableModels.find(entry => entry.modelId === this.currentModelId);
+    this.observeContext({ limits: row.limits, source: "catalog", limitQuality: "verified",
+      observedAt: snapshot.observedAt, stale: snapshot.stale, resolvedModelId: row.resolvedModelId });
+    if (model && this.contextObservation) {
+      model.contextLimits = this.contextObservation.limits;
+      model.contextQuality = snapshot.stale ? "estimated" : this.contextObservation.limitQuality;
+      model.totalContextTokens = this.lastContextWindow;
+    }
+  }
+
+  /** Host measurements share the same source resolution as wire updates. */
+  observeContext(input: Pick<ContextObservation, "limits" | "source" | "limitQuality"> & Partial<ContextObservation>): void {
+    if (input.generation !== undefined && input.generation !== this.contextGeneration) return;
+    if (input.sessionId && input.sessionId !== this.sessionId) return;
+    if (input.modelId && input.modelId !== this.currentModelId) return;
+    const incoming: ContextObservation = { provider: this.provider, access: this.catalogSnapshot?.access ?? this.provider,
+      modelId: this.currentModelId, sessionId: this.sessionId, generation: this.contextGeneration,
+      documentedLimits: DOCUMENTED_CONTEXT[this.provider]?.[this.currentModelId ?? ""],
+      observedAt: Date.now(), usageQuality: "unknown", ...input };
+    if (incoming.used !== undefined) incoming.usageObservedAt ??= Date.now();
+    this.contextObservation = mergeContextObservation(this.contextObservation, incoming);
+    this.lastContextWindow = effectiveContextWindow(this.contextObservation.limits);
+    this.lastContextUsed = this.contextObservation.used;
+    this.emit("contextBudget", this.contextObservation);
+  }
+
+  async refreshContextCatalog(): Promise<void> { await this.contextCatalog?.refresh(); }
+
+  private async checkPromptContext(prompt: readonly PromptContentBlock[]): Promise<void> {
+    // Native slash commands must be dispatchable even when the context is full.
+    if (prompt.length === 1 && prompt[0].type === "text" && /^\/(?:compact|session-info|clear)(?:\s|$)/.test(prompt[0].text)) return;
+    await this.contextCatalog?.refresh();
+    if (!this.contextObservation) this.seedContextBudget();
+    const generation = this.contextGeneration;
+    const sessionId = this.sessionId;
+    if (providerCapability(this.provider, "sessionInfo").state === "yes") {
+      try { await this.getSessionInfo(); } catch { /* Keep previous data explicitly stale. */
+        if (this.contextObservation) {
+          this.contextObservation = { ...this.contextObservation, stale: true };
+          this.emit("contextBudget", this.contextObservation);
+        }
+      }
+    }
+    let count = estimateContextPrompt(prompt);
+    if (this.opts.contextTokenCounter) {
+      try { count = await this.opts.contextTokenCounter(prompt, this.contextObservation); }
+      catch { /* Unavailable counter degrades to an explicit estimate. */ }
+    }
+    if (generation !== this.contextGeneration || sessionId !== this.sessionId) throw new Error("Context changed while preparing the message. Please send it again.");
+    const decision = checkContextBudget(this.contextObservation, count);
+    if (decision.action === "block") throw new ContextBudgetExceededError(decision);
+    if (decision.action === "warn" && (decision.reason !== "unknown" || this.contextNoticeGeneration !== generation)) {
+      this.contextNoticeGeneration = generation;
+      this.emit("contextBudgetNotice", decision.reason === "unknown"
+        ? "Context limit unknown. The CLI manages the limit; protection before sending is limited."
+        : `Estimated context may exceed ${decision.window?.toLocaleString()} tokens. The CLI manages hidden context and compaction.`);
+    }
+  }
   /**
    * Remembered -32601 for `_x.ai/git/worktree/list`.
    *
@@ -371,6 +486,41 @@ export class AcpClient extends EventEmitter {
   }
 
   async start(): Promise<void> {
+    this.contextCatalog = new ContextCatalogReader(this.provider, this.opts.env ?? process.env, snapshot => {
+      const signature = JSON.stringify(snapshot);
+      const catalogChanged = signature !== this.catalogSignature;
+      this.catalogSignature = signature;
+      const accessChanged = this.catalogSnapshot && this.catalogSnapshot.access !== snapshot.access;
+      if (!this.catalogSnapshot && this.contextObservation) this.contextObservation.access = snapshot.access;
+      this.catalogSnapshot = snapshot;
+      if (accessChanged) {
+        for (const model of this.availableModels) {
+          model.contextLimits = undefined;
+          model.totalContextTokens = undefined;
+          model.contextQuality = "unknown";
+        }
+        this.resetContextBudget();
+      }
+      else this.applyContextCatalog();
+      if (this.sessionId && catalogChanged) {
+        this.availableModels = this.availableModels.filter(model => !this.catalogAddedModels.has(model.modelId)
+          || model.modelId === this.currentModelId || snapshot.models.some(row => row.modelId === model.modelId));
+        for (const row of snapshot.models) {
+          const model = this.availableModels.find(model => model.modelId === row.modelId);
+          if (!model) {
+            this.availableModels.push({ modelId: row.modelId, name: row.name, contextLimits: row.limits,
+              totalContextTokens: effectiveContextWindow(row.limits), contextQuality: snapshot.stale ? "estimated" : "verified" });
+            this.catalogAddedModels.add(row.modelId);
+          } else if (model.modelId !== this.currentModelId) {
+            model.contextLimits = row.limits;
+            model.totalContextTokens = effectiveContextWindow(row.limits);
+            model.contextQuality = snapshot.stale ? "estimated" : "verified";
+          }
+        }
+        this.emit("modelsCatalogChanged");
+      }
+    }, this.opts.log, `${this.opts.cliPath}:${this.opts.grokVersion ?? this.backend.processName}`);
+    this.contextCatalog.start();
     const spawnSpec = this.backend.spawn({
       cliPath: this.opts.cliPath,
       cwd: this.opts.cwd,
@@ -503,7 +653,9 @@ export class AcpClient extends EventEmitter {
       modelId: m.modelId,
       name: m.name,
       description: m.description,
-      totalContextTokens: m._meta?.totalContextTokens,
+      totalContextTokens: contextTokens(m._meta?.totalContextTokens),
+      contextLimits: m._meta?.contextLimits ? validContextLimits(m._meta.contextLimits) : undefined,
+      contextQuality: m._meta?.contextQuality ?? MODEL_CONTEXT_QUALITY[this.provider],
       supportsReasoningEffort: m._meta?.supportsReasoningEffort === true,
       reasoningEffort: typeof m._meta?.reasoningEffort === "string" ? m._meta.reasoningEffort : undefined,
       reasoningEfforts: Array.isArray(m._meta?.reasoningEfforts)
@@ -511,6 +663,7 @@ export class AcpClient extends EventEmitter {
         : undefined,
     }));
     this.currentModelId = resolveModelId(res.models?.currentModelId, this.availableModels);
+    this.resetContextBudget();
     // The active session effort is authoritative from the advertised current
     // model (grok stamps SessionHandle.reasoning_effort onto it); fall back to
     // the spawn flag only when it's absent.
@@ -580,7 +733,9 @@ export class AcpClient extends EventEmitter {
         modelId: m.modelId,
         name: m.name,
         description: m.description,
-        totalContextTokens: m._meta?.totalContextTokens,
+        totalContextTokens: contextTokens(m._meta?.totalContextTokens),
+        contextLimits: m._meta?.contextLimits ? validContextLimits(m._meta.contextLimits) : undefined,
+        contextQuality: m._meta?.contextQuality ?? MODEL_CONTEXT_QUALITY[this.provider],
         supportsReasoningEffort: m._meta?.supportsReasoningEffort === true,
         reasoningEffort: typeof m._meta?.reasoningEffort === "string" ? m._meta.reasoningEffort : undefined,
       reasoningEfforts: Array.isArray(m._meta?.reasoningEfforts)
@@ -590,6 +745,7 @@ export class AcpClient extends EventEmitter {
     }
     this.currentModelId =
       resolveModelId(res?.models?.currentModelId, this.availableModels) ?? this.currentModelId;
+    this.resetContextBudget();
     // Restore the session's persisted effort from the advertised current model —
     // NOT the global spawn default — so a later model switch carries the real
     // session override, not a stale global value.
@@ -609,6 +765,7 @@ export class AcpClient extends EventEmitter {
 
   async setModel(modelId: string): Promise<void> {
     if (!this.sessionId) throw new Error("no session");
+    if ([...this.pending.values()].some(request => request.isPrompt)) throw new Error("Wait for the current turn before changing model.");
     // Carry the live effort override through a compatible switch — a bare
     // set_model lets the server resolve the new model's default effort, silently
     // dropping a prior live setReasoningEffort. But ONLY carry a level the TARGET
@@ -646,6 +803,7 @@ export class AcpClient extends EventEmitter {
         const current = this.availableModels.find((entry) => entry.modelId === this.currentModelId);
         if (current) current.reasoningEffort = this.currentReasoningEffort;
       }
+      this.resetContextBudget();
       this.emit("modelChanged", this.currentModelId);
     }
   }
@@ -748,7 +906,8 @@ export class AcpClient extends EventEmitter {
     const prompt: PromptContentBlock[] =
       typeof textOrBlocks === "string"
         ? [{ type: "text", text: textOrBlocks }]
-        : textOrBlocks;
+        : structuredClone(textOrBlocks);
+    await this.checkPromptContext(prompt);
     const raw = await this.request("session/prompt", {
       sessionId: this.sessionId,
       prompt,
@@ -1034,9 +1193,13 @@ export class AcpClient extends EventEmitter {
     if (!this.sessionId) throw new Error("no session");
     if (this.provider !== "grok" && this.provider !== "gemini") return "unsupported";
     try {
+      const generation = this.contextGeneration;
+      const sessionId = this.sessionId;
       const r = await this.request("_x.ai/session/info", { sessionId: this.sessionId });
       const parsed = parseSessionInfoRpcResult(r);
       if (!parsed) throw new Error("session/info returned no usable context");
+      this.observeContext({ source: "session", limitQuality: r?._meta?.contextWindowAuthoritative === true ? "verified" : MODEL_CONTEXT_QUALITY[this.provider], usageQuality: MODEL_CONTEXT_QUALITY[this.provider],
+        generation, sessionId, used: parsed.used, limits: { contextWindow: parsed.window, autoCompactThresholdPercent: parsed.autoCompactThresholdPercent } });
       return parsed;
     } catch (e: any) {
       if (isMethodNotFoundError(e)) {
@@ -1156,6 +1319,7 @@ export class AcpClient extends EventEmitter {
    * callers can ignore the returned promise — the kill is still initiated now.
    */
   dispose(timeoutMs = 3000): Promise<void> {
+    this.contextCatalog?.dispose();
     this.setHumanWaitActive(false);
     this.rl?.close();
     const proc = this.proc;
@@ -1373,6 +1537,9 @@ export class AcpClient extends EventEmitter {
   private handleSessionUpdate(u: any, meta?: any, sessionId?: string): void {
     const foreign = isForeignSessionUpdate(sessionId, this.sessionId);
     const normalized = this.backend.normalizeUpdate(u, meta);
+    const updateModel = meta?.modelId ?? u?._meta?.modelId;
+    const staleModel = typeof updateModel === "string" && updateModel !== this.currentModelId
+      && updateModel !== this.contextObservation?.resolvedModelId;
     if (!foreign) {
       if (this.provider === "claude") {
         // Claude only PUSHES its account window, on a rate-limit event.
@@ -1383,15 +1550,16 @@ export class AcpClient extends EventEmitter {
         this.currentSessionTitle = normalized.sessionTitle;
         this.emit("sessionTitle", normalized.sessionTitle);
       }
-      if (normalized.contextWindow !== undefined) {
-        this.lastContextWindow = normalized.contextWindow;
+      if (!staleModel && contextTokens(normalized.contextWindow) !== undefined) {
+        this.observeContext({ source: "session", limitQuality: normalized.contextQuality ?? "estimated",
+          limits: { contextWindow: normalized.contextWindow, reserveIncluded: SESSION_CONTEXT_RESERVE[this.provider] } });
         // Claude's live id is often an alias (`opus[1m]`) that is not the
         // picker value. Still keep the window — the webview reads it off
         // contextUsage, not the model catalog.
         const model = this.currentModelId
           ? this.availableModels.find((entry) => entry.modelId === this.currentModelId)
           : undefined;
-        if (model) model.totalContextTokens = normalized.contextWindow;
+        if (model) model.totalContextTokens = this.lastContextWindow;
       }
     }
     if (normalized.update === undefined && normalized.usageUpdateUsed === undefined && normalized.contextWindow === undefined && normalized.contextUsed === undefined) {
@@ -1401,7 +1569,7 @@ export class AcpClient extends EventEmitter {
       u = normalized.update;
       meta = normalized.meta;
     }
-    if (!foreign) {
+    if (!foreign && !staleModel) {
       // Ordinary adapter usage_update.used is billed per call (includes
       // output) and is not occupancy by itself. Compact's getContextUsage
       // is the exception — sidebar adopts it only after a compact
@@ -1411,9 +1579,11 @@ export class AcpClient extends EventEmitter {
         this.emit("adapterUsageUpdate", normalized.usageUpdateUsed, this.lastContextWindow);
       }
       // A backend that reports occupancy directly (Muse) wins over the envelope.
-      const contextUsed = normalized.contextUsed ?? contextUsedFromUpdateEnvelope(meta);
-      const usedChanged = contextUsed !== null && contextUsed !== this.lastContextUsed;
-      if (usedChanged) this.lastContextUsed = contextUsed;
+      const used = contextUsed(normalized.contextUsed ?? contextUsedFromUpdateEnvelope(meta));
+      const usedChanged = used !== undefined && used !== this.lastContextUsed;
+      if (usedChanged) this.observeContext({ source: "session", limitQuality: "unknown",
+        usageQuality: normalized.contextQuality ?? MODEL_CONTEXT_QUALITY[this.provider], used,
+        limits: {} });
       if (usedChanged || normalized.contextWindow !== undefined) {
         this.emit("contextUsage", this.lastContextUsed, this.lastContextWindow);
       }
@@ -1435,7 +1605,11 @@ export class AcpClient extends EventEmitter {
         reasoningEffort: this.currentReasoningEffort,
         modeId: this.currentModeId,
       });
-      if (state.modelId) this.currentModelId = state.modelId;
+      if (state.modelId && state.modelId !== this.currentModelId) {
+        this.currentModelId = state.modelId;
+        this.resetContextBudget();
+        this.emit("modelChanged", this.currentModelId);
+      }
       if (state.reasoningEffort !== undefined) {
         this.currentReasoningEffort = state.reasoningEffort;
         const current = this.availableModels.find((entry) => entry.modelId === this.currentModelId);
@@ -1656,10 +1830,23 @@ export class AcpClient extends EventEmitter {
           // otherwise leave a later set_model/setReasoningEffort pointing at the
           // stale model, silently switching it back.
           if (typeof upd.model_id === "string" && upd.model_id) {
-            this.currentModelId = resolveModelId(upd.model_id, this.availableModels) ?? upd.model_id;
+            const modelId = resolveModelId(upd.model_id, this.availableModels) ?? upd.model_id;
+            if (modelId !== this.currentModelId) {
+              this.currentModelId = modelId;
+              this.resetContextBudget();
+              this.emit("modelChanged", modelId);
+            }
           }
           const current = this.availableModels.find((model) => model.modelId === this.currentModelId);
           if (current) current.reasoningEffort = this.currentReasoningEffort;
+        }
+        if (!isForeignSessionUpdate(params?.sessionId, this.sessionId)) {
+          const used = contextUsedFromCompactNotification(upd);
+          if (used !== null) this.observeContext({ source: "session", limitQuality: "unknown", limits: {}, used, usageQuality: "verified" });
+          else if (upd?.sessionUpdate === "auto_compact_started" && this.contextObservation) {
+            this.contextObservation = { ...this.contextObservation, usageQuality: "unknown" };
+            this.emit("contextBudget", this.contextObservation);
+          }
         }
         this.emit("xaiNotification", params?.update);
         if (id != null) this.respondOk(id, {});

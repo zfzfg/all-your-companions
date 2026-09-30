@@ -1,4 +1,5 @@
 import { compactNotice } from "./provider-ui";
+import { effectiveContextWindow, type ContextObservation } from "./context-budget";
 import { PROVIDER_CLI } from "./provider-cli";
 import { providerCapability } from "./provider-capabilities";
 import { applyHostMode } from "./provider-modes";
@@ -953,6 +954,36 @@ export class SessionStart {
       });
     });
 
+    client.on("modelsCatalogChanged", () => {
+      if (gen !== session.gen || !client.sessionId) return;
+      this.deps.providerOps.cacheProviderModels(session.provider, client.availableModels, client.currentModelId);
+      this.deps.emit(session, { type: "session", sessionId: client.sessionId,
+        models: this.deps.providerOps.modelsForSession(session, client.availableModels, client.currentModelId),
+        currentModelId: client.currentModelId, provider: session.provider, worktree: !!session.worktree, preserveContext: true });
+    });
+
+    client.on("contextBudget", (context: ContextObservation & { reset?: boolean }) => {
+      if (gen !== session.gen) return;
+      const window = context.limits && effectiveContextWindow(context.limits);
+      const sid = client.sessionId ?? session.activeSessionId;
+      if (sid) void this.deps.workspaceOps.updateSessionMeta(current => ({ ...current, [sid]: {
+        ...(current[sid] ?? {}), contextObservation: context,
+        contextWindow: window, contextUsed: context.used,
+      } }));
+      if (context.reset) {
+        session.lastSessionInfoUsed = undefined;
+        session.lastSessionInfoAt = 0;
+        session.sessionInfoStale = true;
+        session.adapterTurnCallUsed = [];
+      }
+      this.deps.emit(session, { type: "contextUsage", reset: context.reset, context,
+        window, used: context.used });
+    });
+    client.on("contextBudgetNotice", (text: string) => {
+      if (gen !== session.gen) return;
+      this.deps.emit(session, { type: "hostNotice", level: "warning", text });
+    });
+
     client.on("modelChanged", (id) => {
       if (gen !== session.gen) return;
       this.deps.emit(session, { type: "modelChanged", modelId: id });
@@ -1173,6 +1204,7 @@ export class SessionStart {
       if (gen !== session.gen) return;
       if (isAdapterProvider(session.provider)) {
         this.deps.usageOps.rememberAdapterContext(session, {
+          ...(typeof used === "number" && client.contextBudget?.usageQuality === "verified" ? { occupancy: used, authoritative: true } : {}),
           ...(typeof window === "number" && Number.isFinite(window) && window > 0 ? { window } : {}),
         });
         return;
@@ -1186,7 +1218,7 @@ export class SessionStart {
       }
       this.deps.emit(session, {
         type: "contextUsage",
-        ...(typeof used === "number" && Number.isFinite(used) && used > 0 ? { used } : {}),
+        ...(typeof used === "number" && Number.isSafeInteger(used) && used >= 0 ? { used } : {}),
         ...(typeof window === "number" && Number.isFinite(window) && window > 0 ? { window } : {}),
       });
     });

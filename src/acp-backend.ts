@@ -70,6 +70,7 @@ export interface BackendUpdate {
   meta?: any;
   sessionTitle?: string;
   contextWindow?: number;
+  contextQuality?: "verified" | "estimated" | "unknown";
   /** Direct occupancy reported by a backend, including an empty context. */
   contextUsed?: number;
   /**

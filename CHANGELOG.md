@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Resolve context budgets by CLI access, model and session, with independent source/usage quality. Discover native Grok/Codex catalog changes, include GPT-6.1 Sol, and apply Codex's effective factor once.
+- Show unknown, estimated and stale limits honestly; remove generic Claude/Antigravity context defaults and preserve verified limits across ordinary updates. Reset context on model switches and forks.
+- Route all ACP prompts through a common budget preflight. Complete verified counts can block excess requests; incomplete estimates warn. Preserve blocked drafts and attachments through context recovery and failed compaction.
+
 ## [0.2.0] - 2026-09-24
 
 **Caught up with Grok Build 4.3–4.11 and major Companion Subagents & Crew updates.** The improvements from upstream that apply to a VS Code-only, multi-companion extension are ported. Remote, phone and desktop-app changes are left out, because this fork doesn't have those parts.

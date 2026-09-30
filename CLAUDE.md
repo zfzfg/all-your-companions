@@ -27,6 +27,7 @@ you are deciding something, not on every turn.
 
 | Looking for | Read |
 |---|---|
+| Context limits, source priority, catalogs and send protection | [research/context-budgets.md](research/context-budgets.md) |
 | What each subsystem does and why | [architecture.md § Subsystem notes](docs/architecture.md#subsystem-notes) |
 | Which file holds what | [architecture.md § Module map](docs/architecture.md#module-map) |
 | Which ACP methods are wired, and how | [architecture.md § ACP surfaces implemented](docs/architecture.md#acp-surfaces-implemented) |

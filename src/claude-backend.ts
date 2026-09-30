@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import packageManifest from "../package.json";
+import { DOCUMENTED_CONTEXT, contextTokens } from "./context-budget";
 import { grokCliNeedsShell } from "./cli-process";
 import type {
   AcpBackend,
@@ -54,13 +55,8 @@ function selectOptions(option: any): any[] {
   return Array.isArray(option?.options) ? option.options : [];
 }
 
-export function contextWindowForClaudeModel(modelId?: string, name?: string, description?: string): number {
-  const combined = `${modelId ?? ""} ${name ?? ""} ${description ?? ""}`.toLowerCase();
-  if (/\b1m\b/i.test(combined)) return 1_000_000;
-  if (/\b200k\b/i.test(combined)) return 200_000;
-  if (/\bhaiku\b/i.test(combined) && !/\b1m\b/i.test(combined)) return 200_000;
-  if (/\bclaude-3\b/i.test(combined) && !/\b1m\b/i.test(combined)) return 200_000;
-  return 1_000_000;
+export function contextWindowForClaudeModel(modelId?: string, _name?: string, _description?: string): number | undefined {
+  return DOCUMENTED_CONTEXT.claude?.[modelId ?? ""]?.contextWindow;
 }
 
 /** Canonical 6-level reasoning effort ladder for Claude Code. */
@@ -90,6 +86,7 @@ export function modelsFromClaudeConfigOptions(configOptions: any): { currentMode
           supportsReasoningEffort: effortValues.length > 0,
           reasoningEfforts: effortValues.map((value) => ({ value })),
           totalContextTokens,
+          contextQuality: "estimated",
           ...(currentModelId === modelId && currentEffort && currentEffort !== "default"
             ? { reasoningEffort: currentEffort }
             : {}),
@@ -184,11 +181,12 @@ export function normalizeClaudeUpdate(
   }
   if (update.sessionUpdate === "usage_update") {
     const used = finiteNumber(update.used);
-    const size = finiteNumber(update.size);
+    const size = contextTokens(update.size);
     return {
       update,
       meta,
       contextWindow: size,
+      contextQuality: update._meta?.contextWindowAuthoritative === true ? "verified" : "estimated",
       usageUpdateUsed: used,
     };
   }

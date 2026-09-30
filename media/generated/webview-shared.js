@@ -410,11 +410,11 @@ var GrokWebviewShared = (() => {
   }
 
   // src/shared/context-chip.ts
-  function v(e) {
+  function S(e) {
     const t = e && e.kind;
     return t === "diagnostics" || t === "terminal" ? t : "file";
   }
-  function S(e) {
+  function v(e) {
     return String(e || "").split(/[\\/]/).pop() || String(e || "");
   }
   function h(e, t) {
@@ -432,16 +432,16 @@ var GrokWebviewShared = (() => {
     return (r < 10 ? r.toFixed(1) : String(Math.round(r))) + " MB";
   }
   function k(e) {
-    const t = v(e);
+    const t = S(e);
     if (t === "diagnostics") {
       const r = h(e.count || 0, C(e.severity));
-      return e.scope === "file" && e.path ? r + " in " + S(e.path) : r;
+      return e.scope === "file" && e.path ? r + " in " + v(e.path) : r;
     }
     if (t === "terminal") return "Terminal: " + (e.label || "Terminal");
-    return S(e && e.relPath);
+    return v(e && e.relPath);
   }
   function x(e) {
-    const t = v(e);
+    const t = S(e);
     if (t === "diagnostics") {
       const r = e.scope === "file" && e.path ? e.path : "the whole workspace";
       return h(e.count || 0, C(e.severity)) + " in " + r + " \u2014 collected again when you send";

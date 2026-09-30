@@ -1,5 +1,6 @@
 import { hostModeSequence, type HostMode } from "./provider-modes";
 import * as path from "node:path";
+import { contextTokens, contextUsed } from "./context-budget";
 import type { AcpBackend, BackendConfigState, BackendSpawnOptions } from "./acp-backend";
 
 /** Runs the installed vendor CLI through our ACP adapter. */
@@ -21,7 +22,7 @@ export class MuseBackend implements AcpBackend<"muse"> {
   normalizePromptResult(result: any) { return result; }
   normalizeUpdate(update: any, meta: any) {
     if (update?.sessionUpdate === "usage_update") return { update,
-      meta, contextUsed: update.used, contextWindow: update.size };
+      meta, contextUsed: contextUsed(update.used), contextWindow: contextTokens(update.size), contextQuality: "verified" as const };
     return { update, meta };
   }
   normalizePermissionParams(params: any) { return params; }

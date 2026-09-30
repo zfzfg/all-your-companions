@@ -1433,10 +1433,9 @@ describe("readContextUsage", () => {
     expect(readContextUsage({ fs, grokHome, cwd, id: "s1" })).toBeNull();
   });
 
-  it("returns null when the count is missing, zero, or not a finite number", () => {
+  it("returns null when the count is missing, negative, or not a finite number", () => {
     for (const bad of [
       "{}",
-      JSON.stringify({ contextTokensUsed: 0, contextWindowTokens: 200000 }),
       JSON.stringify({ contextTokensUsed: -5 }),
       JSON.stringify({ contextTokensUsed: "29088" }),
       JSON.stringify({ contextTokensUsed: null }),
@@ -1444,6 +1443,12 @@ describe("readContextUsage", () => {
       const fs = buildFs({ [signalsPath("s1")]: { isDir: false, content: bad } });
       expect(readContextUsage({ fs, grokHome, cwd, id: "s1" })).toBeNull();
     }
+  });
+
+  it("accepts a measured empty context", () => {
+    const fs = buildFs({ [signalsPath("s1")]: { isDir: false,
+      content: JSON.stringify({ contextTokensUsed: 0, contextWindowTokens: 200000 }) } });
+    expect(readContextUsage({ fs, grokHome, cwd, id: "s1" })).toEqual({ used: 0, window: 200000 });
   });
 
   it("returns used without a window when contextWindowTokens is absent or invalid", () => {

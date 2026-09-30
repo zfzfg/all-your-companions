@@ -641,6 +641,8 @@ export interface ContextOccupancyEvent {
   compacted?: boolean;
   /** Compaction failed; keep the stored figure and stop waiting. */
   compactFailed?: boolean;
+  /** A session measurement may shrink even without a compaction event. */
+  authoritative?: boolean;
 }
 
 export function applyContextOccupancy(
@@ -652,11 +654,11 @@ export function applyContextOccupancy(
     return { used: state.used, window, pendingCompact: false };
   }
   const pendingCompact = event.compacted ? true : !!state.pendingCompact;
-  const occupancy = positiveTokens(event.occupancy);
+  const occupancy = typeof event.occupancy === "number" && Number.isSafeInteger(event.occupancy) && event.occupancy >= 0 ? event.occupancy : undefined;
   if (occupancy === undefined) {
     return { used: state.used, window, pendingCompact };
   }
-  if (pendingCompact || state.used === undefined) {
+  if (event.authoritative || pendingCompact || state.used === undefined) {
     return { used: occupancy, window, pendingCompact: false };
   }
   return { used: Math.max(state.used, occupancy), window, pendingCompact: false };
@@ -718,14 +720,14 @@ export function adapterCompactSignal(update: unknown): "started" | "completed" |
  * `gateZeroTokenMeta`) and signals.json keeps the pre-compact count until the
  * next inference turn's flush (research/oss-surfaces-probe.cjs, grok 0.2.101).
  * The donut tracks the context window itself (from `modelChanged`), so only
- * `used` is returned; a zero/negative/non-numeric `tokens_after` yields `null`
+ * `used` is returned; a negative/non-numeric `tokens_after` yields `null`
  * (the donut keeps its last real value).
  */
 export function contextUsedFromCompactNotification(update: unknown): number | null {
   const u = update as { sessionUpdate?: unknown; tokens_after?: unknown } | null | undefined;
   if (!u || u.sessionUpdate !== "auto_compact_completed") return null;
   const used = u.tokens_after;
-  return typeof used === "number" && Number.isFinite(used) && used > 0 ? used : null;
+  return typeof used === "number" && Number.isSafeInteger(used) && used >= 0 ? used : null;
 }
 
 /**

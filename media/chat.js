@@ -310,7 +310,8 @@
     selectedWorkflow: "",
     effort: "",
     cwd: "",
-    contextWindow: 200000,
+    contextWindow: undefined,
+    contextObservation: undefined,
     usedTokens: 0,
     useCtrlEnter: false,
     // The host appends its own slash commands to every commandsUpdate.
@@ -2067,11 +2068,25 @@
     };
 
     const used = state.usedTokens || 0;
-    const pct = Math.min(100, Math.round((used / state.contextWindow) * 100));
+    const pct = state.contextWindow > 0 ? Math.round((used / state.contextWindow) * 100) : undefined;
+    const observation = state.contextObservation;
+    const approximate = observation && (observation.limitQuality !== "verified" || observation.usageQuality !== "verified");
     info(
       "Context used",
-      `${tok(used)} / ${tok(state.contextWindow)} (${pct}%)`,
+      state.contextWindow > 0 ? `${approximate ? "≈ " : ""}${tok(used)} / ${tok(state.contextWindow)} (${pct}%)`
+        : `${tok(used)} tokens — limit unknown`,
     );
+    if (observation) {
+      info("Source", `${observation.source || "unknown"}${observation.stale ? " (stale)" : ""}`);
+      if (observation.observedAt > 0) info("Measured", new Date(observation.observedAt).toLocaleString());
+      if (observation.documentedLimits) {
+        const apiLimit = observation.documentedLimits.inputTokenLimit || observation.documentedLimits.contextWindow;
+        if (apiLimit) info("Public API maximum", tok(apiLimit));
+      }
+      if (observation.limits && observation.limits.contextWindow && observation.limits.contextWindow !== state.contextWindow) {
+        info("Model window", tok(observation.limits.contextWindow));
+      }
+    }
 
     // Compact sits directly under the context line — it is the action ON that
     // number, so it belongs to it, not stranded below the billing sections.
@@ -12204,7 +12219,7 @@
     retry.onclick = () => settle("retry");
     actions.appendChild(retry);
     actions.appendChild(h("span", { class: "cx-spacer" }));
-    const dismiss = h("button", { class: "cx-btn cx-btn--sm cx-btn--ghost", type: "button" }, "Dismiss");
+    const dismiss = h("button", { class: "cx-btn cx-btn--sm cx-btn--ghost", type: "button" }, msg.canReduce ? "Reduce context" : "Dismiss");
     dismiss.onclick = () => settle("dismiss");
     actions.appendChild(dismiss);
     el.appendChild(actions);
@@ -15809,12 +15824,8 @@
 
   // ---------- donut ----------
 
-  function defaultContextWindowForProvider(provider) {
-    if (provider === "claude") return 1000000;
-    if (provider === "gemini") return 1048576;
-    if (provider === "grok") return 512000;
-    if (provider === "codex") return 258400;
-    return 200000;
+  function defaultContextWindowForProvider(_provider) {
+    return undefined;
   }
 
   // A thin tick on the ring where auto-compaction happens (K-03).
@@ -15847,7 +15858,7 @@
     if (used != null) state.usedTokens = used;
     used = state.usedTokens || 0;
     const max = state.contextWindow;
-    const pct = Math.min(100, Math.round((used / max) * 100));
+    const pct = max > 0 ? Math.min(100, Math.round((used / max) * 100)) : 0;
     const circumference = 2 * Math.PI * 6; // must match the donut circles' r in getHtml
     const arc = (pct / 100) * circumference;
     donutArc.setAttribute("stroke-dasharray", `${arc} ${circumference}`);
@@ -15861,12 +15872,15 @@
     } else if (pct > 90) color = "var(--vscode-charts-red, #f48771)";
     else if (pct > 70) color = "var(--vscode-charts-yellow, #d7ba7d)";
     donutArc.setAttribute("stroke", color);
-    paintDonutThresholdMark(threshold);
-    donutLabel.textContent = `${toK(used)}/${toK(max)}`;
+    paintDonutThresholdMark(max > 0 ? threshold : undefined);
+    const observation = state.contextObservation;
+    const approximate = observation && (observation.limitQuality !== "verified" || observation.usageQuality !== "verified");
+    donutLabel.textContent = max > 0 ? `${approximate ? "≈ " : ""}${toK(used)}/${toK(max)}` : `${toK(used)}/?`;
     const isGeminiAutoCompacted = state.activeProvider === "gemini" && used >= max;
     const usageDetail = isGeminiAutoCompacted
       ? `${used.toLocaleString()} / ${max.toLocaleString()} tokens (automatically compressed in background by Antigravity)`
-      : `${used.toLocaleString()} / ${max.toLocaleString()} tokens`;
+      : max > 0 ? `${approximate ? "≈ " : ""}${used.toLocaleString()} / ${max.toLocaleString()} tokens${observation && observation.stale ? " (stale)" : ""}`
+        : `${used.toLocaleString()} tokens — limit unknown`;
     donutLabel.title = usageDetail;
     donutEl.title = `Context usage — ${usageDetail}`;
     // Occupancy can move without a contextUsage frame (promptComplete,
@@ -18021,7 +18035,7 @@
         break;
       }
       case "session": {
-        state.subscriptionWindows = [];
+        if (!msg.preserveContext) state.subscriptionWindows = [];
         if (!contextPopover.hidden) renderContextPopover();
         state.currentModelId = msg.currentModelId;
         state.activeProvider = msg.provider === "codex" || msg.provider === "claude" || msg.provider === "gemini" || msg.provider === "muse" ? msg.provider : "grok";
@@ -18034,13 +18048,20 @@
         state.availableModels = msg.models || [];
         renderProviderSignInCard();
         const m = state.availableModels.find((x) => x.modelId === msg.currentModelId && (!x.provider || x.provider === state.activeProvider));
-        if (m?.totalContextTokens) {
+        if (msg.preserveContext && state.contextObservation && state.contextObservation.modelId === msg.currentModelId) {
+          const limits = state.contextObservation.limits || {};
+          state.contextWindow = limits.effectiveContextTokens || limits.inputTokenLimit || limits.contextWindow;
+        } else if (m?.totalContextTokens) {
           state.contextWindow = m.totalContextTokens;
         } else {
           state.contextWindow = defaultContextWindowForProvider(state.activeProvider);
         }
-        state.contextBreakdown = null;
-        updateDonut(0);
+        if (!msg.preserveContext) {
+          state.contextBreakdown = null;
+          state.contextObservation = m ? { modelId: m.modelId, source: "adapter", limitQuality: m.contextQuality || "estimated",
+            usageQuality: "unknown", limits: m.contextLimits || { contextWindow: m.totalContextTokens } } : undefined;
+        }
+        updateDonut(msg.preserveContext ? undefined : 0);
         break;
       }
       case "sessionName": {
@@ -18084,12 +18105,21 @@
       }
       case "modelChanged": {
         state.currentModelId = msg.modelId;
+        if (state.contextObservation && state.contextObservation.modelId !== msg.modelId) {
+          state.contextObservation = undefined;
+          state.usedTokens = 0;
+          state.contextBreakdown = undefined;
+          state.compactThresholdPct = undefined;
+        }
         // The context window is model-specific (grok-build 512K vs Composer 200K).
         // The initial `session` event carries grok's *default* model, so when we
         // switch (e.g. to the configured default) recompute the max — otherwise the
         // donut keeps showing the wrong ceiling and an inflated percentage.
         const m = state.availableModels.find((x) => x.modelId === msg.modelId && (!x.provider || x.provider === state.activeProvider));
-        if (m && m.totalContextTokens) {
+        if (state.contextObservation && state.contextObservation.modelId === msg.modelId) {
+          const limits = state.contextObservation.limits || {};
+          state.contextWindow = limits.effectiveContextTokens || limits.inputTokenLimit || limits.contextWindow;
+        } else if (m && m.totalContextTokens) {
           state.contextWindow = m.totalContextTokens;
         } else {
           state.contextWindow = defaultContextWindowForProvider(state.activeProvider);
@@ -18752,6 +18782,18 @@
         if (!contextPopover.hidden) renderContextPopover();
         break;
       case "contextUsage":
+        if (msg.reset) {
+          state.contextWindow = undefined;
+          state.usedTokens = 0;
+          state.contextBreakdown = undefined;
+          state.contextObservation = undefined;
+          state.compactThresholdPct = undefined;
+        }
+        if (msg.context) {
+          state.contextObservation = msg.context;
+          const limits = msg.context.limits || {};
+          state.contextWindow = limits.effectiveContextTokens || limits.inputTokenLimit || limits.contextWindow;
+        }
         // Host-authoritative occupancy: grok's signals.json / live envelope,
         // or the remembered adapter prompt size. A window-only frame updates
         // the denominator without inventing a used count.

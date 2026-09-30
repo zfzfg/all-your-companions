@@ -1,4 +1,5 @@
 import { steerUnavailableNotice } from "./provider-ui";
+import { ContextBudgetExceededError } from "./context-budget";
 import { explicitVisibleChips } from "./queued-send";
 import { OpenClock } from "./open-timing";
 import { randomUUID } from "node:crypto";
@@ -523,9 +524,10 @@ export class TurnEdit {
         ...forkedType,
         customName: forkName,
         uploadedFiles: [...new Set([...(prev.uploadedFiles ?? []), ...parentUploads])],
-        contextUsed: parentMeta.contextUsed,
-        contextWindow: parentMeta.contextWindow,
-        contextPendingCompact: parentMeta.contextPendingCompact,
+        contextUsed: undefined,
+        contextWindow: undefined,
+        contextObservation: undefined,
+        contextPendingCompact: undefined,
       };
       if (session.worktree) {
         carried.worktreePath = session.worktree.path;
@@ -1072,13 +1074,14 @@ export class TurnEdit {
 
     if (!isContextOverflowError(errorDetail(err))) return false;
     const id = randomUUID();
-    session.pendingOverflow = { id, text: displayText, chips: chips.slice() };
+    session.pendingOverflow = { id, text: displayText, chips: chips.slice(), notSent: err instanceof ContextBudgetExceededError };
     this.deps.sidebarOps.host.appendLine(`[context] overflow: ${errorDetail(err)}`);
     this.deps.sidebarOps.emit(session, {
       type: "contextOverflow",
       id,
       text: CONTEXT_OVERFLOW_TEXT,
-      canCompact: providerCapability(session.provider, "manualCompact").state !== "no",
+      canCompact: providerCapability(session.provider, "manualCompact").state === "yes",
+      canReduce: err instanceof ContextBudgetExceededError,
       ...this.deps.sidebarOps.turnEndFields(session, "failed")
     });
     this.deps.sidebarOps.noteLiveTurnEnded(session);
@@ -1095,17 +1098,24 @@ export class TurnEdit {
 
     const pending = session.pendingOverflow;
     if (!pending || pending.id !== msg.id) return;
+    const restore = () => {
+      session.chips = [...pending.chips, ...session.chips].filter((chip, index, all) => all.findIndex(other => other.id === chip.id) === index);
+      this.deps.sidebarOps.emit(session, { type: "restoreComposer", text: pending.text });
+      this.deps.sidebarOps.emit(session, { type: "chips", chips: session.chips });
+    };
     session.pendingOverflow = undefined;
     if (msg.action === "fresh") {
+      restore();
       await this.deps.sidebarOps.continueInFreshSession(session);
       return;
     }
-    if (msg.action !== "compact-retry") return;
+    if (msg.action !== "compact-retry") { if (pending.notSent) restore(); return; }
     // One attempt: compact, then the lost message once more. A second
     // overflow shows the card again; nothing loops on its own.
-    await this.deps.sidebarOps.handleSend("/compact", true, session);
-    if (session.status === "error") return;
-    session.chips = [...pending.chips, ...session.chips];
+    try { await this.deps.sidebarOps.handleSend("/compact", true, session); }
+    catch { restore(); return; }
+    if (session.status === "error") { restore(); return; }
+    session.chips = [...pending.chips, ...session.chips].filter((chip, index, all) => all.findIndex(other => other.id === chip.id) === index);
     await this.deps.sidebarOps.handleSend(pending.text, false, session);
   }
 }

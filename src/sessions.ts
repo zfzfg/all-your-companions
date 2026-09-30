@@ -124,6 +124,7 @@ export interface SessionMetaOverride extends SessionTypeMeta {
    */
   contextUsed?: number;
   contextWindow?: number;
+  contextObservation?: import("./context-budget").ContextObservation;
   contextPendingCompact?: boolean;
   /** Last verdict the user gave to an exit_plan_mode card in this session, for the restore-card label. */
   lastPlanVerdict?: "approved" | "rejected" | "abandoned";
@@ -1345,7 +1346,7 @@ export function persistSessionContext(
 
 export function persistedContextUsage(override: SessionMetaOverride | undefined): ContextUsage | null {
   const used = override?.contextUsed;
-  if (typeof used !== "number" || !Number.isFinite(used) || used <= 0) return null;
+  if (typeof used !== "number" || !Number.isSafeInteger(used) || used < 0) return null;
   const window = override?.contextWindow;
   const hasWindow = typeof window === "number" && Number.isFinite(window) && window > 0;
   return { used, window: hasWindow ? window : undefined };
@@ -1385,7 +1386,7 @@ export function readContextUsage(deps: {
   try {
     const raw = JSON.parse(fs.readFileSync(signalsPath, "utf8"));
     const used = raw?.contextTokensUsed;
-    if (typeof used !== "number" || !Number.isFinite(used) || used <= 0) return null;
+    if (typeof used !== "number" || !Number.isSafeInteger(used) || used < 0) return null;
     const window = raw?.contextWindowTokens;
     const hasWindow = typeof window === "number" && Number.isFinite(window) && window > 0;
     return { used, window: hasWindow ? window : undefined };

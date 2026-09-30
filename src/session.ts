@@ -261,7 +261,7 @@ export class Session {
    * always goes to a *different* provider — never back to this one.
    */
   /** K-05: the prompt a context overflow ate, for one "Compact and retry". */
-  pendingOverflow?: { id: string; text: string; chips: ContextChip[] };
+  pendingOverflow?: { id: string; text: string; chips: ContextChip[]; notSent?: boolean };
   pendingLimitOffer?: {
     id: string;
     kind: "rate" | "quota";

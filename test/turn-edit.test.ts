@@ -2,6 +2,7 @@ import { unwiredOps } from "./unwired-ops";
 import { describe, expect, it, vi } from "vitest";
 import { TurnEdit, createTurnEdit, type TurnEditDeps } from "../src/turn-edit";
 import { Session } from "../src/session";
+import { ContextBudgetExceededError } from "../src/context-budget";
 
 function makeMockDeps(): TurnEditDeps {
   const session = new Session();
@@ -80,6 +81,31 @@ function makeMockDeps(): TurnEditDeps {
 }
 
 describe("TurnEdit", () => {
+  it("keeps a blocked draft and restores its attachments once on reduce", async () => {
+    const deps = makeMockDeps();
+    const session = deps.getFocused();
+    const emit = vi.fn();
+    const edit = createTurnEdit({ ...deps, sidebarOps: { emit, host: deps.host, turnEndFields: () => ({}), noteLiveTurnEnded: vi.fn(), setStatus: vi.fn() } as any });
+    const chip = { id: "attachment" } as any;
+    const error = new ContextBudgetExceededError({ action: "block", reason: "overflow", quality: "verified", projected: 101, window: 100 });
+    expect(edit.surfaceContextOverflow(session, error, "draft", [chip])).toBe(true);
+    expect(emit.mock.calls.some(([, frame]) => frame.type === "restoreComposer")).toBe(false);
+    session.chips = [chip];
+    await edit.answerContextOverflow(session, { id: session.pendingOverflow!.id, action: "dismiss" });
+    expect(session.chips).toEqual([chip]);
+    expect(emit).toHaveBeenCalledWith(session, { type: "restoreComposer", text: "draft" });
+  });
+  it("restores the draft after failed compaction without retrying the turn", async () => {
+    const deps = makeMockDeps();
+    const session = deps.getFocused();
+    const emit = vi.fn();
+    const send = vi.fn(async () => { session.status = "error"; });
+    session.pendingOverflow = { id: "overflow", text: "draft", chips: [] };
+    await createTurnEdit({ ...deps, sidebarOps: { emit, handleSend: send } as any }).answerContextOverflow(session, { id: "overflow", action: "compact-retry" });
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith("/compact", true, session);
+    expect(emit).toHaveBeenCalledWith(session, { type: "restoreComposer", text: "draft" });
+  });
   it("creates an instance via factory", () => {
     const deps = makeMockDeps();
     const turnEdit = createTurnEdit(deps);
