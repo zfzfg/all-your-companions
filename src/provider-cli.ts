@@ -5,7 +5,7 @@ import type { AcpProvider } from "./acp-backend";
 import { locateGrokCli } from "./cli-locator";
 import { locateCodexCli, resolveCodexHome } from "./codex-cli-locator";
 import { locateClaudeCli } from "./claude-cli-locator";
-import { isAntigravityCli, locateGeminiCli } from "./gemini-cli-locator";
+import { locateGeminiCli } from "./gemini-cli-locator";
 import { locateMuseCli } from "./muse-cli-locator";
 import { resolveGrokHome } from "./sessions";
 import { CODEX_MANAGED_VERSION } from "./codex-managed-installer";

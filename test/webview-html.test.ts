@@ -42,6 +42,10 @@ describe("webview documents", () => {
     const html = new WebviewHtml(deps()).getProjectsRailHtml(webview);
     expect(html).toContain('id="projects-rail"');
     expect(html).toContain("projects-rail.js");
+    expect(html.indexOf("generated/webview-shared.js")).toBeLessThan(html.indexOf("webview-helpers.js"));
+    const scriptNonces = [...html.matchAll(/<script nonce="([^"]+)"/g)].map(hit => hit[1]);
+    expect(new Set(scriptNonces).size).toBe(1);
+    expect(html).toContain("script-src 'nonce-" + scriptNonces[0] + "'");
     expect(html).not.toContain("chat.js");
     expect(joined.some((uri) => uri.includes("/ext") && uri.includes("media"))).toBe(true);
   });

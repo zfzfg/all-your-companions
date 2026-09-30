@@ -57,6 +57,7 @@ body { display: flex; flex-direction: column;
   });
 </script>
 ${BODY}
+<script src="${path.join(media, "generated/webview-shared.js")}"></script>
 <script src="${path.join(media, "webview-helpers.js")}"></script>
 <script src="${path.join(media, "settings.js")}"></script>
 <script src="${path.join(media, "syntax-highlight.js")}"></script>

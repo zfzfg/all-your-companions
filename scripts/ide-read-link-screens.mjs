@@ -66,6 +66,7 @@ body { margin: 0; background: var(--vscode-editor-background); color: var(--vsco
   });
 </script>
 ${BODY}
+<script src="${path.join(media, "generated/webview-shared.js")}"></script>
 <script src="${path.join(media, "webview-helpers.js")}"></script>
 <script src="${path.join(media, "settings.js")}"></script>
 <script src="${path.join(media, "syntax-highlight.js")}"></script>

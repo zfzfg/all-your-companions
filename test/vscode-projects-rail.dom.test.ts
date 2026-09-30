@@ -38,6 +38,8 @@ function bootRail() {
       <div id="rail-scroll" class="rail-scroll"></div>
     </aside>
   `;
+  window.eval(read("../media/generated/webview-shared.js"));
+  window.eval(read("../media/webview-helpers.js"));
   window.eval(railSrc);
   return { window, doc, posted };
 }
@@ -782,6 +784,7 @@ describe("VS Code projects rail renderer", () => {
       // menu to open rather than a one-item fallthrough to the picker.
       const helpers = read("../media/webview-helpers.js");
       const { doc, window, posted } = bootRail();
+      window.eval(read("../media/generated/webview-shared.js"));
       window.eval(helpers);
       railApi(window).onMessage({
         type: "repos",

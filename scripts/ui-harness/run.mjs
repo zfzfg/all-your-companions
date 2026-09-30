@@ -88,6 +88,7 @@ ${THEME_BOOT}
   });
 </script>
 ${chatBody()}
+<script src="${url(path.join(media, "generated/webview-shared.js"))}"></script>
 <script src="${url(path.join(media, "webview-helpers.js"))}"></script>
 <script src="${url(path.join(media, "settings.js"))}"></script>
 <script src="${url(path.join(media, "chat.js"))}"></script>

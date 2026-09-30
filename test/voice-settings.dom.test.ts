@@ -9,6 +9,7 @@ const backendState = { provider: "codex", preference: "auto", backend: "openai",
 describe("voice Settings on every surface", () => {
   it("the row is host-backed and hidden until supporting data arrives, including standalone Settings", () => {
     const w = new Window({ url: "https://localhost/" });
+    (w as any).eval(readFileSync(new URL("../media/generated/webview-shared.js", import.meta.url), "utf8"));
     (w as any).eval(readFileSync(new URL("../media/webview-helpers.js", import.meta.url), "utf8"));
     (w as any).eval(readFileSync(new URL("../media/settings.js", import.meta.url), "utf8"));
     const api = (w as any).GrokSettings;

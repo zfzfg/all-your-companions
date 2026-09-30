@@ -245,7 +245,6 @@ export function filterCommands(commands: SlashCmd[], query: string): SlashCmd[] 
   if (!q) return commands;
   // Name prefix, then mid-name, then description-only. Name hits always beat
   // a description-only hit. Walk once so each tier keeps advertised order (#110).
-  // KEEP IN STEP with media/webview-helpers.js filterCommands.
   const prefix: SlashCmd[] = [];
   const substring: SlashCmd[] = [];
   const description: SlashCmd[] = [];

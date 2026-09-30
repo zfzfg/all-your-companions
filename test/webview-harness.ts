@@ -17,6 +17,7 @@ export type HarnessWindow = Window & typeof globalThis & {
 };
 
 const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
+const sharedSrc = read("../media/generated/webview-shared.js");
 const helperSrc = read("../media/webview-helpers.js");
 const settingsSrc = read("../media/settings.js");
 const filePanelSrc = read("../media/file-panel.js");
@@ -155,6 +156,7 @@ export function bootWebview(opts: {
     newBtn?.parentElement?.insertBefore(slot, newBtn.nextSibling);
   }
   if (opts.beforeScripts) opts.beforeScripts(window);
+  (window as any).eval(sharedSrc);
   (window as any).eval(helperSrc);
   (window as any).eval(settingsSrc);
   // Only the desktop host (host.canPreviewInApp) loads this before chat.js; VS Code

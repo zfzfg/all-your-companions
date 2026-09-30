@@ -104,6 +104,7 @@ export class WebviewHtml {
     </div>
     <div id="rail-scroll" class="rail-scroll"></div>
   </aside>
+  <script nonce="${nonce}" src="${mediaUri("generated/webview-shared.js")}"></script>
   <script nonce="${nonce}" src="${mediaUri("webview-helpers.js")}"></script>
   <script nonce="${nonce}" src="${mediaUri("projects-rail.js")}"></script>
 </body>
@@ -197,6 +198,7 @@ export class WebviewHtml {
 <body class="settings-page">
   <div id="settings-root"></div>
   <script nonce="${nonce}">window.__grokSettingsBoot = ${bootJson};</script>
+  <script nonce="${nonce}" src="${mediaUri("generated/webview-shared.js")}"></script>
   <script nonce="${nonce}" src="${mediaUri("webview-helpers.js")}"></script>
   <script nonce="${nonce}" src="${mediaUri("settings.js")}"></script>
   <script nonce="${nonce}">
@@ -603,6 +605,7 @@ ${closeMain}
   </script>
   <script nonce="${nonce}" src="${mediaUri("mathjax/tex-svg-full.js")}"></script>
   <script nonce="${nonce}" src="${mediaUri("mermaid/mermaid.min.js")}"></script>
+  <script nonce="${nonce}" src="${mediaUri("generated/webview-shared.js")}"></script>
   <script nonce="${nonce}" src="${mediaUri("webview-helpers.js")}"></script>
   <script nonce="${nonce}" src="${mediaUri("settings.js")}"></script>
   ${filePanelScript}

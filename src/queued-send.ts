@@ -1,5 +1,6 @@
 import type { ContextChip } from "./context-chips";
-import { isImplicitChip } from "./chips";
+import { explicitVisibleChips, queuedSendsText } from "./shared/queued-send";
+export { explicitVisibleChips, queuedSendsText } from "./shared/queued-send";
 import { isFileChip } from "./context-chips";
 import type { HostMsg, QueuedSend } from "./protocol";
 
@@ -17,9 +18,6 @@ export function cloneChipForQueue(chip: ContextChip): ContextChip {
 }
 
 /** Explicit attachments the user staged — not the ambient editor chip. */
-export function explicitVisibleChips(chips: readonly ContextChip[]): ContextChip[] {
-  return chips.filter((chip) => !chip.hidden && !isImplicitChip(chip));
-}
 
 /**
  * Which composer chips a `queueSend` should snapshot.
@@ -59,9 +57,6 @@ export function enqueueQueuedSend(
   return [...items, { text, chips: chips.map(cloneChipForQueue) }];
 }
 
-export function queuedSendsText(items: readonly QueuedSendEntry[]): string {
-  return items.map((item) => item.text).join("\n\n");
-}
 
 export function queuedSendsHaveContent(items: readonly QueuedSendEntry[]): boolean {
   return items.some((item) => !!item.text.trim() || item.chips.length > 0);

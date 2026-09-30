@@ -171,42 +171,7 @@ function plural(n: number, noun: string): string {
   return `${n} ${noun}${n === 1 ? "" : "s"}`;
 }
 
-function severityNoun(severity: DiagnosticsSeverityFilter): string {
-  return severity === "error" ? "error" : severity === "warning" ? "warning" : "problem";
-}
-
-/** Human-readable size for a terminal capture ("812 B", "4.1 KB"). */
-export function formatChipBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes < 0) return "0 B";
-  if (bytes < 1024) return `${Math.round(bytes)} B`;
-  const kb = bytes / 1024;
-  if (kb < 1024) return `${kb < 10 ? kb.toFixed(1) : Math.round(kb)} KB`;
-  const mb = kb / 1024;
-  return `${mb < 10 ? mb.toFixed(1) : Math.round(mb)} MB`;
-}
-
-/** The chip's visible text. File chips get the bare basename — the caller adds
- *  the `:12-40` range suffix, which only files have. */
-export function contextChipLabel(chip: ContextChip): string {
-  if (isDiagnosticsChip(chip)) {
-    const head = plural(chip.count, severityNoun(chip.severity));
-    return chip.scope === "file" && chip.path ? `${head} in ${basename(chip.path)}` : head;
-  }
-  if (isTerminalChip(chip)) return `Terminal: ${chip.label}`;
-  return basename(chip.relPath);
-}
-
-/** The chip's `title` (hover) text. */
-export function contextChipTitle(chip: ContextChip): string {
-  if (isDiagnosticsChip(chip)) {
-    const where = chip.scope === "file" && chip.path ? chip.path : "the whole workspace";
-    return `${plural(chip.count, severityNoun(chip.severity))} in ${where} — collected again when you send`;
-  }
-  if (isTerminalChip(chip)) {
-    return `Output of terminal "${chip.label}" (${formatChipBytes(chip.bytes)}) — collected again when you send`;
-  }
-  return chip.originRelPath || chip.path;
-}
+export { formatChipBytes, contextChipLabel, contextChipTitle } from "./shared/context-chip";
 
 // ── Send-time payloads ───────────────────────────────────────────────────────
 

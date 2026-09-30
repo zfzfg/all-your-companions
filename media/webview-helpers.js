@@ -1,4 +1,9 @@
 (function (root) {
+  // Generated pure TypeScript exports; CommonJS consumers keep the existing API.
+  /** @type {typeof import("../src/webview-shared")} */
+  const shared = typeof require === "function"
+    ? require("./generated/webview-shared.js") : root.GrokWebviewShared;
+  const { HOST_MESSAGE_TYPES, WEBVIEW_MESSAGE_TYPES, EXTENSION_HOST_SLASH_COMMANDS, isKnownHostMessage, explicitVisibleChips, composerHasSendIntent, normalizeQueuedSends, queuedSendsText, queuedSendsChips, isAdvertisedSkill, getSlashQuery, applySlashPick, filterCommands, formatChipBytes, contextChipLabel, contextChipTitle } = shared;
   // Both the standalone VS Code Settings webview and the chat mount this
   // catalog extension. Rows stay hidden until the host supplies availability.
   root.GrokVoiceSettings = {
@@ -44,117 +49,6 @@
    * three survive as bare tokens.
    */
   const BARE_DOTFILE_NAMES = new Set(["env", "gitignore", "dockerignore"]);
-
-  // The host <-> webview message contract. These MUST stay in sync with the TS
-  // discriminated unions in src/protocol.ts (which is the source of truth) — the
-  // webview is plain JS and can't import the compiled types, so it carries its own
-  // copy and test/protocol.test.ts asserts the two are set-equal in both
-  // directions (and that chat.js actually handles every host type).
-  const HOST_MESSAGE_TYPES = [
-    "initialState", "moveViewHint", "welcomeTips", "projectSetup", "githubState", "githubRepos", "providerState", "providerCapabilities", "mcpServers", "mcpConnectors", "routines", "codexInstallProgress", "planModeAvailability", "showThinking", "appPurpose", "fontScale", "grokUpdateStatus", "updateAvailable", "updateReady", "telemetryEnabled", "thumbsFeedback", "initialized",
-    "cliUpdating", "session", "sessionName", "sessionRemoved", "modelChanged", "modeChanged", "sessionType", "companionSubagent", "subagentTray", "workflowRun", "workflowList", "openModePopover",
-    "voiceState", "voiceConfigured", "voicePartial", "voiceSubmit", "voiceTranscript",
-    "voiceError", "chips", "commandsUpdate", "mentionResults", "userMessage", "agentStart", "thoughtChunk",
-    "messageChunk", "media", "userMessageChunk", "historyReplay", "permissionHistoryQueue",
-    "planHistoryQueue", "toolCall", "toolCallUpdate", "permissionRequest", "permissionOptions",
-    "permissionResolved", "toolEditReverted", "exitPlanRequest", "planResolved", "questionRequest", "questionResolved", "planNotice", "autoCompactNotice", "planBlocked",
-    "promptComplete", "contextUsage", "commandOutput", "expandCommandOutputs", "setAllToolDetails", "focusInput", "findInSession", "restoreComposer", "truncateMessages", "uiConfirmRequest", "uiConfirmResolved", "subscriptionUsage", "agentReset", "agentError", "limitOffer", "limitOfferResolved", "agentResult", "agentEnd", "exit", "setBusy", "summarizing",
-    "sessionContext", "clearMessages", "onboarding", "error", "hostNotice", "xaiNotification", "subagentUpdate", "childStream", "runProgress", "sessions", "repoSessions", "pinnedSessions", "repos",
-    "sessionDot", "queuedSends", "steerUnavailable", "feedbackAvailability", "turnFeedbackAck", "usage", "planEntries", "reviewCenter", "crewRun", "steerByDefault", "promptNav", "soundNotifications", "processingSound", "readRepliesAloud", "summarizeRepliesAloud", "speechSummary", "imageOriginal", "moveComposerCaret",
-    "ruleFiles", "permissionRules", "agentRoles", "workflowGenerator", "scrollToWaiting", "runningChildren", "sessionDelegation", "subagentApprovalResolved", "subagentApproval", "childContext", "childActivity", "contextOverflow", "nearFullPrompt", "compactSummary",
-  ];
-  const WEBVIEW_MESSAGE_TYPES = [
-    "ready", "send", "newSession", "cancel", "pickModel", "setMode", "setSessionType", "setSubagentsEnabled", "subagentRosterSave", "subagentRoutingSave", "setCrewStageSubagents", "companionSubagentAction", "workflowStart", "workflowGateAction", "openCrewWithGoal", "setConfigOption", "removeChip",
-    "toggleChip", "openFile", "showInFolder", "openUrl", "openText", "openDiff", "revertToolEdit", "reviewRevertFile", "reviewRevertAll", "exportExpr", "setEffort",
-    "addProjectFolder", "removeProjectFolder", "createProject", "cloneProject", "setupGithubCli", "listGithubRepos", "githubSignOut", "githubLoginWithToken",
-    "openGlobalConfig", "openProjectConfig", "listRuleFiles", "openRuleFile", "appendRuleFile", "listAgentRoles", "saveAgentRole", "deleteAgentRole", "saveCrewFlow", "deleteCrewFlow", "saveWorkflow", "validateWorkflow", "generateWorkflow", "cancelWorkflowGenerate", "setDefaultWorkflow", "addWorkflowStagesBlock", "runWorkflow", "listPermissionRules", "deletePermissionRule", "adoptPermissionRules", "listMcpServers", "connectMcpConnector", "disconnectMcpConnector", "showLogs", "toggleDevTools", "openSettings", "openSettingsSurface", "closeSettingsSurface", "dismissWelcomeTip", "welcomeTipShown", "moveView",
-    "listRoutines", "saveRoutine", "deleteRoutine", "setRoutinePaused", "runRoutineNow",
-    "setShowThinking", "setAppPurpose", "setExpandCommandOutputs",
-    "dropFile", "permissionAnswer", "exitPlanAnswer", "questionAnswer", "limitOfferAnswer", "questionCancel", "questionDraft",
-    "setModel", "installCodex", "updateProviderCli", "cancelCodexInstall", "runInstallCmd", "runGrokLogin", "logout", "checkGrokUpdate", "updateGrok",
-    "recheckConnection", "refreshProviders", "retryProviderSession", "listSessions", "listRepoSessions", "selectRepo", "toggleRepoPin", "setRepoArchived", "setRepoColor", "toggleSessionPin", "openAgentArtifact", "openCrewSession", "stopCrew", "requestHandoff", "resumeSession", "renameSession", "deleteSession",
-      "clearAllSessions", "pickFile", "mentionQuery", "addMentionFile", "addContextChip", "openContextChipSource", "pasteImage", "voiceStart", "voiceStop",
-      "setVoiceBackend", "configureOpenAiVoice",
-    "queueSend", "dequeueSend", "clearQueuedSends", "steerSend", "turnFeedback", "forkSession", "setSteerByDefault", "setPromptNav",
-    "setSoundNotifications", "setProcessingSound", "setReadRepliesAloud", "setSummarizeRepliesAloud", "setVoiceSendPhrase", "setVoiceKeyterms", "setTelemetryEnabled", "setThumbsFeedback", "summarizeSpeech", "requestImageOriginal", "composerFocus",
-    "newWorktreeSession", "applyWorktree", "removeWorktree", "rewindSession", "editLastMessage", "uiConfirmAnswer", "workflowControl", "refreshContextDetails", "refreshSubscriptionUsage",
-        "openUpdateRelease", "restartToUpdate", "setCompanionsSetting", "childOverviewAction", "setSessionDelegation", "subagentApprovalAnswer", "workflowPlanEdit", "childMessage", "contextOverflowAnswer", "continueInFreshSession",
-  ];
-  const EXTENSION_HOST_SLASH_COMMANDS = [
-    {
-      name: "agent",
-      description: "Run a single task with a named agent role (e.g. planner, reviewer, implementer)",
-    },
-    {
-      name: "agents",
-      description: "List and manage available agent roles for this project",
-    },
-    {
-      name: "crew",
-      description: "Walk the current plan step-by-step with a team of specialized roles (/crew [preset] [goal])",
-    },
-    {
-      name: "handoff",
-      description: "Hand off conversation context to another role (default: implementer)",
-    },
-    {
-      name: "second-opinion",
-      description: "Request an independent review of recent changes from another model/reviewer",
-    },
-    {
-      name: "subagents",
-      description: "Show whether this session can start a companion subagent (e.g. Gemini)",
-    },
-  ];
-  const HOST_MESSAGE_TYPE_SET = new Set(HOST_MESSAGE_TYPES);
-  /** True when `type` is a host->webview message the contract knows about. A
-   *  false here means the host posted a type this webview build can't handle —
-   *  drift the sync test is designed to prevent, warned at runtime as a backstop. */
-  function isKnownHostMessage(type) {
-    return HOST_MESSAGE_TYPE_SET.has(type);
-  }
-
-  function isImplicitChipId(id) {
-    return String(id || "").startsWith("implicit:");
-  }
-
-  /** Explicit (user-staged) visible chips — images, files, @-mentions. */
-  function explicitVisibleChips(chips) {
-    return (chips || []).filter((chip) => chip && !chip.hidden && !isImplicitChipId(chip.id));
-  }
-
-  /** Typed text or a staged attachment — the implicit editor chip is not send-intent. */
-  function composerHasSendIntent(text, chips) {
-    if (String(text || "").trim()) return true;
-    return explicitVisibleChips(chips).length > 0;
-  }
-
-  /**
-   * Prefer additive `queued` entries (text + chips). Fall back to `items: string[]`
-   * so an older host still renders the text-only block.
-   */
-  function normalizeQueuedSends(msg) {
-    if (msg && Array.isArray(msg.queued)) {
-      return msg.queued.map((entry) => ({
-        text: typeof entry?.text === "string" ? entry.text : String(entry || ""),
-        chips: Array.isArray(entry?.chips) ? entry.chips : [],
-      }));
-    }
-    const items = msg && Array.isArray(msg.items) ? msg.items : [];
-    return items.map((text) => ({ text: String(text || ""), chips: [] }));
-  }
-
-  function queuedSendsText(entries) {
-    return (entries || []).map((entry) => entry.text || "").join("\n\n");
-  }
-
-  function queuedSendsChips(entries) {
-    const chips = [];
-    for (const entry of entries || []) {
-      if (Array.isArray(entry.chips)) chips.push(...entry.chips);
-    }
-    return chips;
-  }
 
   /**
    * CLI legend-row remainder: `used - (system + messages)`, floored at 0.
@@ -775,68 +669,6 @@
     const head = Math.floor(keep / 2);
     const tail = keep - head;
     return s.slice(0, head) + "…" + s.slice(s.length - tail);
-  }
-
-  // KEEP IN STEP with src/slash-filter.ts isAdvertisedSkill: grok advertises
-  // skills with `_meta.scope` + `_meta.path`; builtins omit those keys.
-  function isAdvertisedSkill(cmd) {
-    if (!cmd || typeof cmd !== "object") return false;
-    const meta = cmd._meta || cmd.meta;
-    if (!meta || typeof meta !== "object") return false;
-    const path = meta.path;
-    const scope = meta.scope;
-    return typeof path === "string" && path.length > 0 && typeof scope === "string" && scope.length > 0;
-  }
-
-  function isSlashBoundary(ch) {
-    return ch === " " || ch === "\t" || ch === "\n" || ch === "\r" || ch === "\f" || ch === "\v";
-  }
-
-  // KEEP IN STEP with src/slash-filter.ts getSlashQuery. Skills load anywhere
-  // (`atStart: false` after whitespace); commands dispatch only at position 0.
-  function getSlashQuery(text, caret) {
-    const src = text == null ? "" : String(text);
-    const pos = Math.max(0, Math.min(Number(caret) || 0, src.length));
-    const before = src.slice(0, pos);
-    const m = before.match(/\/(\S*)$/);
-    if (!m) return null;
-    const slashIndex = before.length - m[0].length;
-    if (slashIndex > 0 && !isSlashBoundary(before.charAt(slashIndex - 1))) return null;
-    return { query: m[1], atStart: slashIndex === 0 };
-  }
-
-  // KEEP IN STEP with src/slash-filter.ts applySlashPick.
-  function applySlashPick(text, caret, name) {
-    const src = text == null ? "" : String(text);
-    const pos = Math.max(0, Math.min(Number(caret) || 0, src.length));
-    const before = src.slice(0, pos);
-    const after = src.slice(pos);
-    const hit = getSlashQuery(src, pos);
-    if (!hit) return { text: src, caret: pos };
-    const m = before.match(/\/(\S*)$/);
-    if (!m) return { text: src, caret: pos };
-    const slashIndex = before.length - m[0].length;
-    const newBefore = before.slice(0, slashIndex) + "/" + name + " ";
-    return { text: newBefore + after, caret: newBefore.length };
-  }
-
-  // KEEP IN STEP with src/slash-filter.ts filterCommands: name prefix, then
-  // mid-name, then description-only; advertised order inside each tier (#110).
-  function filterCommands(commands, query) {
-    const list = Array.isArray(commands) ? commands : [];
-    const q = String(query || "").toLowerCase();
-    if (!q) return list;
-    const prefix = [];
-    const substring = [];
-    const description = [];
-    for (const c of list) {
-      if (!c || typeof c.name !== "string") continue;
-      const name = c.name.toLowerCase();
-      if (name.startsWith(q)) prefix.push(c);
-      else if (name.includes(q)) substring.push(c);
-      else if (String(c.description || "").toLowerCase().includes(q)) description.push(c);
-    }
-    return prefix.concat(substring, description);
   }
 
   // First case-insensitive run of `query` in `text`, as text parts. Never
@@ -2854,66 +2686,6 @@
     if (min < 60) return `${min}m ${sec % 60}s`;
     const hr = Math.floor(min / 60);
     return `${hr}h ${min % 60}m`;
-  }
-
-  // ---------- context chips (AP-03) ----------
-  // Twins of src/context-chips.ts. A chip whose `kind` is absent or "file" is
-  // the shape this file has always seen — every branch below leaves it alone,
-  // which is also what makes an UNKNOWN future kind harmless: it falls through
-  // to `relPath`, which every variant carries for exactly that reason.
-
-  function contextChipKind(chip) {
-    const kind = chip && chip.kind;
-    return kind === "diagnostics" || kind === "terminal" ? kind : "file";
-  }
-
-  function chipBasename(p) {
-    return String(p || "").split(/[\/]/).pop() || String(p || "");
-  }
-
-  function chipPlural(n, noun) {
-    return n + " " + noun + (n === 1 ? "" : "s");
-  }
-
-  function chipSeverityNoun(severity) {
-    return severity === "error" ? "error" : severity === "warning" ? "warning" : "problem";
-  }
-
-  /** Human-readable size for a terminal capture ("812 B", "4.1 KB"). */
-  function formatChipBytes(bytes) {
-    if (typeof bytes !== "number" || !isFinite(bytes) || bytes < 0) return "0 B";
-    if (bytes < 1024) return Math.round(bytes) + " B";
-    const kb = bytes / 1024;
-    if (kb < 1024) return (kb < 10 ? kb.toFixed(1) : String(Math.round(kb))) + " KB";
-    const mb = kb / 1024;
-    return (mb < 10 ? mb.toFixed(1) : String(Math.round(mb))) + " MB";
-  }
-
-  /** The chip's visible text. File chips get the bare basename — the caller
-   *  adds the `:12-40` range suffix, which only files have. */
-  function contextChipLabel(chip) {
-    const kind = contextChipKind(chip);
-    if (kind === "diagnostics") {
-      const head = chipPlural(chip.count || 0, chipSeverityNoun(chip.severity));
-      return chip.scope === "file" && chip.path ? head + " in " + chipBasename(chip.path) : head;
-    }
-    if (kind === "terminal") return "Terminal: " + (chip.label || "Terminal");
-    return chipBasename(chip && chip.relPath);
-  }
-
-  /** The chip's hover text. */
-  function contextChipTitle(chip) {
-    const kind = contextChipKind(chip);
-    if (kind === "diagnostics") {
-      const where = chip.scope === "file" && chip.path ? chip.path : "the whole workspace";
-      return chipPlural(chip.count || 0, chipSeverityNoun(chip.severity))
-        + " in " + where + " — collected again when you send";
-    }
-    if (kind === "terminal") {
-      return 'Output of terminal "' + (chip.label || "Terminal") + '" ('
-        + formatChipBytes(chip.bytes) + ") — collected again when you send";
-    }
-    return (chip && (chip.originRelPath || chip.path)) || "";
   }
 
   // Peel the fenced blocks buildPrompt (src/prompt-builder.ts) emits for
