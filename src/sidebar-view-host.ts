@@ -455,6 +455,7 @@ export class SidebarViewHost {
 
   /** Webview→host actions the rail may post. Closed set — never send/cancel/etc. */
   private static readonly PROJECTS_RAIL_WEBVIEW_TYPES = new Set<WebviewMsg["type"]>([
+    "refreshProviders",
     "createProject",
     "cloneProject",
     "setupGithubCli",

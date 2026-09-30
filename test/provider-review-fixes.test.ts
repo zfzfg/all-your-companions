@@ -157,7 +157,7 @@ describe("multi-provider review regressions", () => {
     const reprobeEnd = providerSetupSrc.indexOf("\n  private providerCredentialFilePresent(", reprobeStart);
     const reprobe = providerSetupSrc.slice(reprobeStart, reprobeEnd > 0 ? reprobeEnd : undefined);
     expect(reprobe).toContain("PROVIDER_CLI[provider].credentialProbe");
-    expect(reprobe).toContain("return this[probe]()");
+    expect(reprobe).toContain("return this[probe](requireProof)");
     const cli = fs.readFileSync(path.join(root, "src", "provider-cli.ts"), "utf8");
     expect(cli).toContain('credentialProbe: "warmConnectedCodexModels"');
     const inboundSrc = fs.readFileSync(path.join(root, "src", "sidebar-inbound.ts"), "utf8").replace(/\r\n/g, "\n");

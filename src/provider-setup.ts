@@ -96,6 +96,8 @@ export class ProviderSetup {
   museSessionCacheAt = new Map<string, number>();
   museSessionRefresh = new Map<string, Promise<void>>();
   loginReprobeTimers = new Map<AcpProvider, NodeJS.Timeout>();
+  private connectChecks = new Set<AcpProvider>();
+  private credentialGenerations = new Map<AcpProvider, number>();
 
   constructor(private readonly deps: ProviderSetupDeps) {}
 
@@ -281,6 +283,13 @@ export class ProviderSetup {
 
   setProviderConnectedInMemory(provider: AcpProvider, connected: boolean): void {
     const current = this.providerConnections();
+    if (!connected) {
+      this.credentialGenerations.set(provider, (this.credentialGenerations.get(provider) ?? 0) + 1);
+      const timer = this.loginReprobeTimers.get(provider);
+      if (timer) clearTimeout(timer);
+      this.loginReprobeTimers.delete(provider);
+    }
+    if (connected && !current[provider]) this.providerNeedsLogin = { ...this.providerNeedsLogin, [provider]: true };
     if (!connected || !current[provider]) this.invalidateSubscriptionUsage(provider);
     this.providerConnectionState = { ...current, [provider]: connected };
     if (!connected && isAdapterProvider(provider)) {
@@ -342,14 +351,16 @@ export class ProviderSetup {
     this.deps.rearmAuthRecovery(provider);
   }
 
-  async warmConnectedCodexModels(): Promise<boolean> {
+  async warmConnectedCodexModels(requireProof = false): Promise<boolean> {
     if (!this.hasProviderConsent("codex")) return false;
     const cliPath = this.locateProvider("codex");
     if (!cliPath) return false;
+    const generation = this.credentialGenerations.get("codex") ?? 0;
+    const current = () => this.hasProviderConsent("codex") && generation === (this.credentialGenerations.get("codex") ?? 0);
     try {
       await warmCodexModelCache({
         cliPath,
-        onModels: (models, currentModelId) => this.cacheProviderModels("codex", models, currentModelId),
+        onModels: (models, currentModelId) => current() ? this.cacheProviderModels("codex", models, currentModelId) : undefined,
         log: (message) => this.host.appendLine(message),
         // Codex answered "Internal error" for a session in a bare temp dir on
         // Windows, so the cache never filled and a freshly connected Codex was
@@ -357,16 +368,18 @@ export class ProviderSetup {
         // workspace is the cwd a real session uses, so it is known to work.
         fallbackCwd: this.workspaceRoot() || undefined,
       });
+      if (!current()) return false;
       this.setProviderNeedsLogin("codex", false);
       return true;
     } catch (error) {
+      if (!current()) return false;
       this.host.appendLine(`[codex] model-cache warm-up failed: ${(error as Error).message}`);
       // The warm-up is the first thing that talks to the agent after a connect,
       // so its failure is the earliest honest answer about the credentials —
       // but only when the failure IS about credentials.
       if (isCodexCredentialError(error)) {
         this.setProviderNeedsLogin("codex", true);
-      } else {
+      } else if (!requireProof) {
         // Anything else says nothing about the sign-in, and leaving a stale
         // needs-login standing made Codex permanently unusable: it never
         // cleared, so it stayed out of the model picker and out of the
@@ -379,14 +392,16 @@ export class ProviderSetup {
     }
   }
 
-  async warmConnectedClaudeModels(): Promise<boolean> {
+  async warmConnectedClaudeModels(requireProof = false): Promise<boolean> {
     if (!this.hasProviderConsent("claude")) return false;
     const cliPath = this.locateProvider("claude");
     if (!cliPath) return false;
+    const generation = this.credentialGenerations.get("claude") ?? 0;
+    const current = () => this.hasProviderConsent("claude") && generation === (this.credentialGenerations.get("claude") ?? 0);
     try {
       await warmClaudeModelCache({
         cliPath,
-        onModels: (models, currentModelId) => this.cacheProviderModels("claude", models, currentModelId),
+        onModels: (models, currentModelId) => current() ? this.cacheProviderModels("claude", models, currentModelId) : undefined,
         log: (message) => this.host.appendLine(message),
         // Same refusal Codex saw: `session/new` answering "Internal error" for
         // a session in a bare temp directory on Windows, so the cache never
@@ -394,13 +409,15 @@ export class ProviderSetup {
         // the cwd a real session uses, so it is known to work.
         fallbackCwd: this.workspaceRoot() || undefined,
       });
+      if (!current()) return false;
       this.setProviderNeedsLogin("claude", false);
       return true;
     } catch (error) {
+      if (!current()) return false;
       this.host.appendLine(`[claude] model-cache warm-up failed: ${(error as Error).message}`);
       if (isClaudeCredentialError(error)) {
         this.setProviderNeedsLogin("claude", true);
-      } else {
+      } else if (!requireProof) {
         // Anything else says nothing about the sign-in, and a stale needs-login
         // left standing made Codex permanently unusable in exactly this way: it
         // never cleared, so the account stayed out of the model picker and out
@@ -412,14 +429,16 @@ export class ProviderSetup {
     }
   }
 
-  async warmConnectedGeminiModels(): Promise<boolean> {
+  async warmConnectedGeminiModels(requireProof = false): Promise<boolean> {
     if (!this.hasProviderConsent("gemini")) return false;
     const cliPath = this.locateProvider("gemini");
     if (!cliPath) return false;
+    const generation = this.credentialGenerations.get("gemini") ?? 0;
+    const current = () => this.hasProviderConsent("gemini") && generation === (this.credentialGenerations.get("gemini") ?? 0);
     try {
       await warmGeminiModelCache({
         cliPath,
-        onModels: (models, currentModelId) => this.cacheProviderModels("gemini", models, currentModelId),
+        onModels: (models, currentModelId) => current() ? this.cacheProviderModels("gemini", models, currentModelId) : undefined,
         log: (message) => this.host.appendLine(message),
         fallbackCwd: this.workspaceRoot() || undefined,
       });
@@ -428,13 +447,15 @@ export class ProviderSetup {
       // account. Cached credentials or keyring indicate a signed-in account.
       const signedIn = hasAntigravityCredentials();
       if (!signedIn) this.host.appendLine("[gemini] no cached Antigravity credentials found — start `agy` to sign in");
+      if (!current()) return false;
       this.setProviderNeedsLogin("gemini", !signedIn);
       return signedIn;
     } catch (error) {
+      if (!current()) return false;
       this.host.appendLine(`[gemini] model-cache warm-up failed: ${(error as Error).message}`);
       if (isGeminiCredentialError(error)) {
         this.setProviderNeedsLogin("gemini", true);
-      } else {
+      } else if (!requireProof) {
         this.setProviderNeedsLogin("gemini", false);
       }
       return false;
@@ -443,13 +464,15 @@ export class ProviderSetup {
 
   /** Explicit credential observation. Unlike history refresh this never obeys
    * the listing freshness clock, so a completed sign-in is visible at once. */
-  async reprobeProviderCredentials(provider: AcpProvider): Promise<boolean> {
+  async reprobeProviderCredentials(provider: AcpProvider, requireProof = false): Promise<boolean> {
     const override = this.deps.getOverride?.<typeof this.reprobeProviderCredentials>("reprobeProviderCredentials");
-    if (override) return override(provider);
+    if (override) return override(provider, requireProof);
     if (!this.hasProviderConsent(provider)) return false;
     const probe = PROVIDER_CLI[provider].credentialProbe;
     if (probe === "unavailable") return false;
-    if (probe !== "native") return this[probe]();
+    if (probe !== "native") return this[probe](requireProof);
+    const generation = this.credentialGenerations.get(provider) ?? 0;
+    const current = () => this.hasProviderConsent(provider) && generation === (this.credentialGenerations.get(provider) ?? 0);
     const cliPath = this.locateProvider("grok");
     if (!cliPath) return false;
     // session/new is what actually proves the account, but grok has no ACP
@@ -470,12 +493,13 @@ export class ProviderSetup {
     try {
       await client.start();
       await client.newSession();
+      if (!current()) return false;
       this.cacheProviderModels("grok", client.availableModels, client.currentModelId);
       this.setProviderNeedsLogin("grok", false);
       return true;
     } catch (error) {
       this.host.appendLine(`[grok] credential re-probe failed: ${errorDetail(error)}`);
-      if (client.isCredentialError(error) || isCredentialError(error)) {
+      if (current() && (client.isCredentialError(error) || isCredentialError(error))) {
         this.setProviderNeedsLogin("grok", true);
       }
       return false;
@@ -505,7 +529,10 @@ export class ProviderSetup {
     const delays = [0, 2_000, 5_000, 10_000, 20_000, 30_000, 60_000];
     const attempt = async (index: number): Promise<void> => {
       this.loginReprobeTimers.delete(provider);
-      if (await this.reprobeProviderCredentials(provider)) return;
+      const generation = this.credentialGenerations.get(provider) ?? 0;
+      if (!this.hasProviderConsent(provider)) return;
+      if (await this.reprobeProviderCredentials(provider, true)) return;
+      if (!this.hasProviderConsent(provider) || generation !== (this.credentialGenerations.get(provider) ?? 0)) return;
       const delay = delays[index + 1];
       if (delay === undefined) return;
       const timer = setTimeout(() => void attempt(index + 1), delay);
@@ -552,8 +579,15 @@ export class ProviderSetup {
     }
   }
 
+  setProviderConnectChecking(provider: AcpProvider, checking: boolean): void {
+    if (checking) this.connectChecks.add(provider);
+    else this.connectChecks.delete(provider);
+    this.postProviderState();
+  }
+
   providerStateMessage(): Extract<HostMsg, { type: "providerState" }> {
-    const connected = this.providerConnections();
+    const connected = { ...this.providerConnections() };
+    for (const provider of this.connectChecks) connected[provider] = false;
     const located = this.locatedProviders();
     const versions = this.providerCliVersions ?? {};
     const needsLogin = this.providerNeedsLogin ?? {};
@@ -603,7 +637,7 @@ export class ProviderSetup {
           ...(museConnected && versions.muse ? { cliVersion: versions.muse } : {}),
         },
       ],
-      ...(this.providerRefreshInFlight ? { checking: true } : {}),
+      ...(this.providerRefreshInFlight || this.connectChecks.size ? { checking: true } : {}),
     };
   }
 

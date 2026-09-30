@@ -136,6 +136,7 @@ describe("an agent that will not authenticate", () => {
     vi.useFakeTimers();
     try {
       const sidebar = makeSidebar();
+      sidebar.providerConnectionState.grok = true;
       sidebar.reprobeProviderCredentials = vi.fn()
         .mockResolvedValueOnce(false)
         .mockResolvedValueOnce(true);
@@ -143,7 +144,7 @@ describe("an agent that will not authenticate", () => {
       await sidebar.onMessage({ type: "runGrokLogin", provider: "grok" });
       await Promise.resolve();
       expect(sidebar.reprobeProviderCredentials).toHaveBeenCalledTimes(1);
-      expect(sidebar.reprobeProviderCredentials).toHaveBeenLastCalledWith("grok");
+      expect(sidebar.reprobeProviderCredentials).toHaveBeenLastCalledWith("grok", true);
 
       await vi.advanceTimersByTimeAsync(2_000);
       expect(sidebar.reprobeProviderCredentials).toHaveBeenCalledTimes(2);

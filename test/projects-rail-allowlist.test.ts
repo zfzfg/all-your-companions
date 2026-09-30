@@ -29,6 +29,10 @@ const reaches = async (msg: Record<string, unknown>) => {
 };
 
 describe("projects rail allowlist", () => {
+  it("passes provider refresh through to the host", async () => {
+    expect(await reaches({ type: "refreshProviders" })).toBe(true);
+  });
+
   it("passes a pasted GitHub token through to the host", async () => {
     expect(await reaches({ type: "githubLoginWithToken", token: "github_pat_x" })).toBe(true);
   });

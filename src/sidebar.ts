@@ -1393,6 +1393,7 @@ export class GrokSidebar {
         refreshProviderStates: (...args: any[]) => (self as any).refreshProviderStates(...args),
         reprobeProviderCredentials: (...args: any[]) => (self as any).reprobeProviderCredentials(...args),
         resolveVoiceApiKey: (...args: any[]) => (self as any).resolveVoiceApiKey(...args),
+        setProviderConnectChecking: (provider, checking) => self.providerSetup.setProviderConnectChecking(provider, checking),
         setProviderConnected: (...args: any[]) => (self as any).setProviderConnected(...args),
         setupGithubCli: (...args: any[]) => (self as any).setupGithubCli(...args),
         updateGrokCliOnDemand: (...args: any[]) => (self as any).updateGrokCliOnDemand(...args),
@@ -2968,8 +2969,8 @@ get host() { return self.host; },
     return this.delegateSidebarMethod("warmConnectedGeminiModels", () => this.providerSetup.warmConnectedGeminiModels());
   }
 
-  private async reprobeProviderCredentials(provider: AcpProvider): Promise<boolean> {
-    return this.delegateSidebarMethod("reprobeProviderCredentials", () => this.providerSetup.reprobeProviderCredentials(provider));
+  private async reprobeProviderCredentials(provider: AcpProvider, requireProof = false): Promise<boolean> {
+    return this.delegateSidebarMethod("reprobeProviderCredentials", () => this.providerSetup.reprobeProviderCredentials(provider, requireProof));
   }
 
   private providerCredentialFilePresent(provider: AcpProvider): boolean {

@@ -251,6 +251,7 @@ export interface InboundProviderOps {
   refreshProviderStates(...args: any[]): any;
   reprobeProviderCredentials(...args: any[]): any;
   resolveVoiceApiKey(...args: any[]): any;
+  setProviderConnectChecking(provider: AcpProvider, checking: boolean): void;
   setProviderConnected(...args: any[]): any;
   setupGithubCli(...args: any[]): any;
   updateGrokCliOnDemand(...args: any[]): any;
@@ -1443,6 +1444,7 @@ export class SettingsInboundRouter {
 }
 
 export class ProjectInboundRouter {
+  private readonly connectChecks = new Set<AcpProvider>();
   constructor(private readonly deps: SidebarInboundDeps) {}
   async tryHandle(msg: WebviewMsg, session: Session, _attachmentOwner: AttachmentOwner, _messageCwd: string): Promise<boolean> {
     switch (msg.type) {
@@ -1509,75 +1511,45 @@ export class ProjectInboundRouter {
       }
       case "runGrokLogin": {
         const provider: AcpProvider = isAcpProvider(msg.provider) ? msg.provider : "grok";
+        if (this.connectChecks.has(provider)) break;
         const cliPath = this.deps.providers.locateProvider(provider);
         if (!cliPath) {
-          this.deps.post({
-            type: "onboarding",
-            state: missingProviderState(provider),
-            platform: process.platform,
-            provider,
-          });
+          this.deps.post({ type: "onboarding", state: missingProviderState(provider), platform: process.platform, provider });
           break;
         }
-        // Connecting an account and RENEWING one are different errands, and
-        // only the second is about the conversation on screen. Read the flag
-        // before any probe below can clear it (upstream 61e0c57).
+        const connecting = !this.deps.providers.hasProviderConsent(provider);
         const renewing = !!this.deps.slots.providerNeedsLogin?.[provider];
-        // Pressing Connect / Sign in IS the consent, recorded before any CLI
-        // runs (#171). Everything after may now execute this agent's binary.
-        await this.deps.providers.setProviderConnected(provider, true);
-        // The CLI owns login; Gemini/Antigravity authenticate on interactive startup.
-        const loginArgs = [...PROVIDER_CLI[provider].loginArgs];
-        const term = this.deps.host.createTerminal({
-          name: `${providerDisplayName(provider)} Login`,
-          shellPath: cliPath,
-          shellArgs: loginArgs,
-        });
-        term.show();
-        // The terminal is outside the host protocol, so completion cannot be
-        // observed directly. Probe immediately as well: browser/desktop login
-        // helpers may already have completed, and the explicit Re-check below
-        // remains available for interactive terminals still in progress.
-        // Muse has no credential-status probe to poll; Re-check reads its
-        // credential file instead (upstream 9a4aa6b).
-        if (PROVIDER_CLI[provider].credentialProbe !== "unavailable") this.deps.providers.watchProviderLogin(provider);
-        // Connecting an agent is about the NEXT conversation, not the one on
-        // screen. Showing its sign-in panel over a session with history covered
-        // that transcript, and the confirmation afterwards had nowhere sensible
-        // to land — the owner connected Claude from an open Grok conversation
-        // and got the panel there, then no confirmation at all. So start a fresh
-        // session first and run the whole flow in it.
-        // Not without a project: on desktop with nothing open, workspaceRoot()
-        // is deliberately empty rather than the install directory, so there is
-        // nowhere to start a session. Connecting still works — it only opens a
-        // terminal — and the panel below still shows; the fresh session simply
-        // waits until there is a project to put it in.
-        //
-        // A RENEWAL is the exception: the composer's sign-in card sits on a
-        // conversation whose replies are being refused and offers to fix THAT
-        // conversation, so parking it for the login panel is not wanted.
-        if (session.hasHistory && this.deps.workspaceRoot() && !renewing) {
-          await this.deps.sessions.newFocusedSession();
+        this.connectChecks.add(provider);
+        if (connecting) this.deps.providers.setProviderConnectChecking(provider, true);
+        try {
+          this.deps.sessionSettings.setProviderNeedsLogin(provider, true);
+          await this.deps.providers.setProviderConnected(provider, true);
+          if (connecting) {
+            const ready = PROVIDER_CLI[provider].credentialProbe === "unavailable"
+              ? this.deps.providers.providerCredentialFilePresent(provider)
+              : await this.deps.providers.reprobeProviderCredentials(provider, true).catch(() => false);
+            if (!this.deps.providers.hasProviderConsent(provider)) break;
+            if (ready) {
+              this.deps.sessionSettings.setProviderNeedsLogin(provider, false);
+              await this.deps.providers.adoptSessionsForConnectedProvider(provider, session);
+              break;
+            }
+            this.deps.post({ type: "onboarding", state: providerLoginState(provider), provider, platform: process.platform });
+            break;
+          }
+          if (!this.deps.providers.hasProviderConsent(provider)) break;
+          const term = this.deps.host.createTerminal({
+            name: `${providerDisplayName(provider)} Login`, shellPath: cliPath,
+            shellArgs: [...PROVIDER_CLI[provider].loginArgs],
+          });
+          term.show();
+          if (PROVIDER_CLI[provider].credentialProbe !== "unavailable") this.deps.providers.watchProviderLogin(provider);
+          if (session.hasHistory && this.deps.workspaceRoot() && !renewing) await this.deps.sessions.newFocusedSession();
+          this.deps.post({ type: "onboarding", state: providerLoginState(provider), platform: process.platform, provider, launched: true });
+        } finally {
+          this.connectChecks.delete(provider);
+          if (connecting) this.deps.providers.setProviderConnectChecking(provider, false);
         }
-        // ALWAYS show this provider's login panel, and say the terminal was
-        // launched. Two bugs lived in the gate this replaces.
-        //
-        // It only posted when the provider was not marked connected, so
-        // connecting a lapsed Codex from Settings opened its browser flow and
-        // left the chat on whatever panel was already there — no instructions,
-        // and no Re-check button to finish with.
-        //
-        // And `launched` matters because this terminal is opened by the HOST,
-        // not by a click in the webview. The done mark was only set on click, so
-        // an automatically opened terminal left the button looking untouched —
-        // which reads as "that did nothing, press it again".
-        this.deps.post({
-          type: "onboarding",
-          state: providerLoginState(provider),
-          platform: process.platform,
-          provider,
-          launched: true,
-        });
         break;
       }
       case "recheckConnection": {
