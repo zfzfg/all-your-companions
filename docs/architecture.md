@@ -163,9 +163,12 @@ Settings live in one shared surface ([media/settings.js](../media/settings.js)):
 The `postMessage` half (host↔webview) is a **typed contract**: [src/protocol.ts](../src/protocol.ts)
 is the single source of truth — `HostMsg` (host→webview) and `WebviewMsg` (webview→host)
 discriminated unions. The host types `post`/`emit` against `HostMsg`, and a test asserts the
-webview's mirror of the type list ([media/webview-helpers.js](../media/webview-helpers.js)) stays
-in sync and that `chat.js` handles every host type — closing the "post one shape, handle another"
-gap the untyped `any` direction used to leave open around restore, pagination, and media.
+generated browser type list stays exhaustive and that `chat.js` handles every host type.
+[src/webview-shared.ts](../src/webview-shared.ts) re-exports the protocol arrays and pure
+slash, chip and queue helpers. esbuild creates the checked-in browser IIFE
+[media/generated/webview-shared.js](../media/generated/webview-shared.js); every HTML
+surface loads it before `webview-helpers.js`, with the same nonce and CSP.
+The latter preserves `GrokWebviewHelpers` and its CommonJS API.
 
 ## How a session starts
 
@@ -588,6 +591,10 @@ The extension host build uses `esbuild` (`scripts/build.mjs`) to bundle `src/ext
 | [src/openai-voice.ts](../src/openai-voice.ts) / [src/ffmpeg-locate.ts](../src/ffmpeg-locate.ts) | OpenAI Realtime transcription adapter for dictation, and ffmpeg discovery with actionable failures; see [research/openai-voice.md](../research/openai-voice.md) |
 | [src/async-serial.ts](../src/async-serial.ts) / [src/session-request-state.ts](../src/session-request-state.ts) / [src/workflow-state.ts](../src/workflow-state.ts) | Small helpers: a one-at-a-time promise tail, a map keyed by session object plus request id, and reading a workflow's terminal state from disk to repair a missed completion notification |
 | [media/chat.{js,css}](../media/) | Webview UI |
+| [src/webview-shared.ts](../src/webview-shared.ts) | Pure browser entry: protocol arrays, slash/skill helpers, chip presentation, queue text; imports no host runtime. Generates `GrokWebviewShared` (browser) and CommonJS exports |
+| [src/shared/context-chip.ts](../src/shared/context-chip.ts) | Single chip label/title/byte-format implementation; host re-exports from `context-chips.ts`; accepts unknown future kinds |
+| [src/shared/queued-send.ts](../src/shared/queued-send.ts) | Shared explicit-visible-chip selection and queue paragraph joining; host re-exports from `queued-send.ts` |
+| [media/generated/webview-shared.js](../media/generated/webview-shared.js) | Checked-in esbuild IIFE; deterministic freshness test compares bytes without changing the artifact |
 | [media/webview-helpers.js](../media/webview-helpers.js) | Pure webview helpers (file-ref detection, relative-time, mic-button state machine, trailing send-phrase highlight, math extraction `splitMath`/`stripUnsupportedTex`, and the subagent classifier `isSubagentToolCall`/`subagentLabel`) — shared between webview and tests |
 
 ## History at scale

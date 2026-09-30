@@ -645,7 +645,7 @@ posted.
 
 ## Webview DOM tests
 
-`test/plan-card.dom.test.ts` and `test/webview-ui.dom.test.ts` run the **real shipped** `media/chat.js` inside a [happy-dom](https://github.com/capricorn86/happy-dom) `Window`, via the shared `test/webview-harness.ts`. The trick: happy-dom doesn't execute inline `<script>` text synchronously, but `window.eval(src)` runs in the window's realm and shares its globals — so the harness `eval`s `webview-helpers.js` then `chat.js`, stubs `acquireVsCodeApi` to capture `postMessage` payloads, and dispatches `MessageEvent`s exactly as the extension host would. This tests the webview **logic** (event wiring, payload shapes, and show/hide state) without VS Code; it does **not** replace real GUI click-through, CSS, or the live `acquireVsCodeApi` bridge — those wait for the `@vscode/test-electron` suite (roadmap item #1).
+`test/plan-card.dom.test.ts` and `test/webview-ui.dom.test.ts` run the **real shipped** `media/chat.js` inside a [happy-dom](https://github.com/capricorn86/happy-dom) `Window`, via the shared `test/webview-harness.ts`. The trick: happy-dom doesn't execute inline `<script>` text synchronously, but `window.eval(src)` runs in the window's realm and shares its globals — so the harness `eval`s `generated/webview-shared.js`, `webview-helpers.js`, the shared components, then `chat.js`, stubs `acquireVsCodeApi` to capture `postMessage` payloads, and dispatches `MessageEvent`s exactly as the extension host would. This tests the webview **logic** (event wiring, payload shapes, and show/hide state) without VS Code; it does **not** replace real GUI click-through, CSS, or the live `acquireVsCodeApi` bridge — those wait for the `@vscode/test-electron` suite (roadmap item #1).
 
 ---
 
@@ -675,3 +675,7 @@ Layer 1 runs in a few seconds with no network, no `grok` binary, and no fixtures
 2. ~~**AcpClient integration test** — fixture script pretending to be `grok agent stdio`.~~ **Done** — shipped as `test/acp-integration.test.ts` (driven by `test/fixtures/fake-grok-acp.cjs`) and now runs in layer 1; see its section above.
 3. **Webview snapshot test** — Playwright loads the webview HTML in isolation, sends representative messages, snapshots the DOM. Catches CSS/layout regressions.
 4. **Permission round-trip** — fake permission request from a fixture, click card button, assert correct `respondPermission` JSON written to fixture's stdin.
+
+## W-18 shared helper validation
+
+`test/webview-shared-fresh.test.ts` regenerates the browser IIFE in memory using the production build configuration, audits its dependency graph, and compares exact bytes with the checked-in file. No preparatory build is needed for `npm test`. Existing CommonJS imports and the browser `GrokWebviewHelpers` API remain supported. Slash/skill, context-chip, send-queue and markdown DOM tests drive the actual scripts. `ui:screens -- --only w18` exercises skill selection, chips, queue paragraph text, thematic breaks and setext headings in real Chromium across Dark/Light/HC. See [validation](docs/w18-validation.md).

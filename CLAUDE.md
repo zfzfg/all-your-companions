@@ -51,7 +51,7 @@ npm run package  # → all-your-companions-<version>.vsix (`prepackage` deletes 
 
 For W-15/W-16 and subsequent maintainability work, run typecheck or compile plus focused behavior tests and lint for each cohesive block. Run the complete compile/typecheck/lint/unit/Electron gate at the milestone, and repeat affected checks after repairs. Do not add test skips or typecheck exclusions. Collaborator dependency and operations interfaces, including grouped state/actions and inherited members, stay at or under 25 properties.
 
-Provider capability questions use `provider-capabilities.ts`; backend modes use `AcpBackend.hostModeSequence`. CLI/auth/storage policies use `provider-cli.ts`, usage sources `provider-usage.ts`, and presentation `provider-ui.ts`. Run `node scripts/provider-inventory.cjs` to reject unreviewed direct provider branches. See [W-15/W-16 validation](docs/w15-w16-validation.md). W-09 DOM typing is complete (zero test excludes); W-15/W-16 are accepted; W-17 esbuild bundling and unbundled pipeline is complete; W-18–W-19 remain separate work.
+Provider capability questions use `provider-capabilities.ts`; backend modes use `AcpBackend.hostModeSequence`. CLI/auth/storage policies use `provider-cli.ts`, usage sources `provider-usage.ts`, and presentation `provider-ui.ts`. Run `node scripts/provider-inventory.cjs` to reject unreviewed direct provider branches. See [W-15/W-16 validation](docs/w15-w16-validation.md). W-09 DOM typing is complete (zero test excludes); W-15/W-16 are accepted; W-17 esbuild bundling and unbundled pipeline is complete; W-18 shared browser helpers are generated from pure TypeScript with a checked-in IIFE and freshness test; W-19 remains separate work.
 
 ### Test taxonomy — three layers
 

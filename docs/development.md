@@ -7,7 +7,7 @@ are here to *use* it, [README.md](../README.md) is the right page.
 
 ```bash
 npm install
-npm run compile           # esbuild bundle (extension + agy-acp-adapter) + Muse adapter → out/
+npm run compile           # esbuild host bundles + generated browser helpers + Muse adapter
 npm run compile:modules   # unbundled tsc compilation → out-modules/ (for live-tests, telemetry-probe, smoke)
 npm run typecheck         # tsc over src/ and over the tests (tsconfig.test.json)
 npm run lint              # ESLint, correctness rules only (eslint.config.mjs)
@@ -32,6 +32,23 @@ can make. Anything about *painted geometry* belongs there instead.
 
 Full test taxonomy: **[CLAUDE.md](../CLAUDE.md#test-taxonomy--three-layers)**.
 Architecture: **[architecture.md](architecture.md)**.
+
+## Shared browser helpers
+
+`src/webview-shared.ts` is the pure browser entry. It re-exports the message contract
+and slash functions, and the presentation/queue functions in `src/shared/`.
+`scripts/build.mjs` generates `media/generated/webview-shared.js` for compile and
+watch, with `GrokWebviewShared` and CommonJS exports. Browser dependencies are
+explicitly audited; Node, filesystem and VS Code modules cannot enter this graph.
+Chat remains an unbundled `media/chat.js` entry. HTML, DOM loaders and screenshot
+pages load the generated IIFE before `webview-helpers.js` and its consumers.
+
+Commit the generated file after changing shared source. `npm test` works directly
+from the checkout: `test/webview-shared-fresh.test.ts` runs the same esbuild options
+with `write: false` and compares bytes. A stale file fails instead of repairing itself.
+Use `node scripts/build.mjs --shared-only` to regenerate only this artifact and
+`node scripts/build.mjs --check-shared` to check freshness without writing.
+See [W-18 validation](w18-validation.md) for gates and local package verification.
 
 ## The two READMEs
 
