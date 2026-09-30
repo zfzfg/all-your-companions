@@ -191,8 +191,11 @@ describe("addGeneratedMedia (/imagine-video video)", () => {
     expect(video.getAttribute("src")).toBe(VIDEO_DATA);
     expect(video.controls).toBe(true);
     // Drop Chromium's overflow (⋯) — Download + PiP; keep play/scrub/fullscreen.
-    // Mutation: remove controlsList / disablePictureInPicture → this fails.
-    const list = String(video.controlsList || video.getAttribute("controlslist") || "");
+    const list = String(
+      (video as HTMLVideoElement & { controlsList?: string | DOMTokenList }).controlsList ||
+      video.getAttribute("controlslist") ||
+      "",
+    );
     expect(list).toMatch(/nodownload/);
     expect(list).toMatch(/noremoteplayback/);
     expect(list).toMatch(/noplaybackrate/);

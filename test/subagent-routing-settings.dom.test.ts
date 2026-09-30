@@ -274,8 +274,8 @@ describe("Crew stages may use subagents (§7.9)", () => {
     const { root, posted } = mount({ crewStagesMayUseSubagents: false });
     const row = qa(root, ".settings-row").find(
       (el) => (el as { dataset: { id: string } }).dataset.id === "crewStageSubagents",
-    ) as { querySelector: (s: string) => { click: () => void } };
-    row.querySelector("button, input[type=checkbox]")!.click();
+    ) as { querySelector: (s: string) => { click: () => void } } | undefined;
+    row!.querySelector("button, input[type=checkbox]")!.click();
     expect(posted.some((m) => m.type === "setCrewStageSubagents" && m.value === true)).toBe(true);
   });
 });

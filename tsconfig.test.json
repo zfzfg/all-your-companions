@@ -12,14 +12,9 @@
     "types": ["node"]
   },
   "include": ["src/**/*", "test/**/*", "vitest.config.ts", "vitest.perf.config.ts"],
-  // TODO(W-09): the happy-dom suites pass happy-dom's Window/Document/Event
-  // where lib.dom types are declared (~850 errors, almost all that one
-  // mismatch). Excluded until they share one typed harness; see
-  // UMSETZUNG_WARTBARKEIT.md. The list must only shrink.
   "exclude": [
     "node_modules",
-    "out",
-    "test/**/*.dom.test.ts",
-    "test/projects-rail-sections.test.ts"
+    "out"
   ]
 }
+

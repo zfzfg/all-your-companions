@@ -10,7 +10,6 @@ import { describe, it, expect } from "vitest";
 import { bootWebview, dispatch } from "./webview-harness";
 import { normalizeCodexUpdate } from "../src/codex-backend";
 import { createMcpPrepareState, prepareMcpToolCall } from "../src/mcp-tool";
-// @ts-expect-error — plain JS module, no types
 import { middleElide, TOOL_LABEL_MAX } from "../media/webview-helpers.js";
 
 const tc = (call: any) => ({ type: "toolCall", call });

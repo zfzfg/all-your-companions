@@ -3,7 +3,7 @@
  * Separate from test/projects-rail.dom.test.ts, which drives the chat.js rail mount.
  */
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { Window } from "happy-dom";
+import { Window as HappyWindow } from "happy-dom";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
@@ -15,9 +15,11 @@ interface Posted {
   [k: string]: unknown;
 }
 
+type DomWindow = Window & typeof globalThis & { eval: (src: string) => unknown };
+
 function bootRail() {
   const posted: Posted[] = [];
-  const window = new Window({ url: "https://example.test/" });
+  const window = new HappyWindow({ url: "https://example.test/" }) as unknown as DomWindow;
   const doc = window.document;
   (window as any).acquireVsCodeApi = () => ({
     postMessage: (m: Posted) => {

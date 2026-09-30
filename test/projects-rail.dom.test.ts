@@ -518,7 +518,7 @@ describe("projects rail", () => {
 
   it("fans out to the remaining repos only once a preview comes back", () => {
     const { doc, window, posted } = boot();
-    const probes = () => posted.filter((p) => p.type === "listRepoSessions").map((p) => p.cwd);
+    const probes = () => posted.filter((p) => p.type === "listRepoSessions").map((p) => p.cwd as string);
     expect(probes()).toHaveLength(1);
 
     // Whichever repo the probe picked — asserting on the probe rather than on a
@@ -1100,7 +1100,7 @@ describe("projects rail", () => {
       // Whether it is open is the same kind of answer as a project fold, so it
       // keeps the same company and survives a reload.
       const key = Object.keys(window.localStorage).find((k) => k.startsWith("grok.remote.railShape"));
-      const saved = JSON.parse(window.localStorage.getItem(key as string));
+      const saved = JSON.parse(window.localStorage.getItem(key as string) ?? "{}");
       expect(saved.groupCollapsed.archived).toBe(false);
       expect(saved.archiveOpen).toBe(true);
     });
@@ -1592,7 +1592,7 @@ describe("projects rail", () => {
       expect(doc.querySelector(".rail-list.rail-projects")).toBe(null);
 
       const key = Object.keys(window.localStorage).find((k) => k.startsWith("grok.remote.railShape"));
-      const saved = JSON.parse(window.localStorage.getItem(key as string));
+      const saved = JSON.parse(window.localStorage.getItem(key as string) ?? "{}");
       expect(saved.groupCollapsed.recent).toBe(true);
       expect(saved.groupCollapsed.projects).toBe(true);
     });

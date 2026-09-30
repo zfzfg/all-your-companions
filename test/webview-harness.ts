@@ -7,11 +7,14 @@
 // acquireVsCodeApi to capture the postMessage payloads the webview sends back to
 // the extension host, then dispatch the same messages sidebar.ts posts.
 //
-// This file is NOT a test (it has no *.test.ts suffix, so vitest's
-// include glob "test/**/*.test.ts" skips it); it's imported by the DOM tests.
-import { Window } from "happy-dom";
+import { Window as HappyWindow } from "happy-dom";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+
+export type HarnessWindow = Window & typeof globalThis & {
+  happyDOM: HappyWindow["happyDOM"];
+  eval: (script: string) => unknown;
+};
 
 const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
 const helperSrc = read("../media/webview-helpers.js");
@@ -120,7 +123,7 @@ export const BODY = `
 export interface Posted { type: string; [k: string]: unknown }
 
 export interface Harness {
-  window: Window;
+  window: HarnessWindow;
   posted: Posted[];
   doc: Document;
 }
@@ -128,10 +131,11 @@ export interface Harness {
 export function bootWebview(opts: {
   ready?: boolean;
   vscode?: boolean;
+  remote?: boolean;
   postMessage?: (message: Posted) => unknown;
-  beforeScripts?: (window: Window) => void;
+  beforeScripts?: (window: HarnessWindow) => void;
 } = {}): Harness {
-  const window = new Window({ url: "https://localhost/" });
+  const window = new HappyWindow({ url: "https://localhost/" }) as unknown as HarnessWindow;
   const posted: Posted[] = [];
   (window as any).acquireVsCodeApi = () => ({
     postMessage: (m: Posted) => {

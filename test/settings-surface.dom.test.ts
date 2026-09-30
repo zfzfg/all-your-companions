@@ -1,11 +1,17 @@
 // Shared settings surface: overlay in chat.js + the catalog in media/settings.js.
 import { describe, expect, it } from "vitest";
-import { Window } from "happy-dom";
+import { Window as HappyWindow } from "happy-dom";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { TIER1_CONNECTORS } from "../src/mcp-connectors";
 import { bootWebview, click, dispatch } from "./webview-harness";
+
+type DomWindow = Window & typeof globalThis & { eval: (src: string) => void };
+
+function createSettingsWindow(url = "https://localhost/"): DomWindow {
+  return new HappyWindow({ url }) as unknown as DomWindow;
+}
 
 const settingsSrc = readFileSync(
   fileURLToPath(new URL("../media/settings.js", import.meta.url)),
@@ -13,8 +19,8 @@ const settingsSrc = readFileSync(
 );
 
 function loadSettings() {
-  const window = new Window({ url: "https://localhost/" });
-  (window as unknown as { eval: (src: string) => void }).eval(settingsSrc);
+  const window = createSettingsWindow();
+  window.eval(settingsSrc);
   return (window as unknown as { GrokSettings: {
     ROWS: Array<{ id: string; category: string; href?: string; enabled?: (s: unknown) => boolean }>;
     CATEGORIES: Array<{ id: string; title: string }>;
@@ -243,7 +249,7 @@ describe("settings catalog", () => {
     const api = loadSettings();
     const dir = fileURLToPath(new URL("../media/connector-logos", import.meta.url));
     const logoIds = Object.keys(api.CONNECTOR_LOGO_IDS).sort();
-    const catalog = new Set(TIER1_CONNECTORS.map((c) => c.id));
+    const catalog = new Set<string>(TIER1_CONNECTORS.map((c) => c.id));
     expect(logoIds.every((id) => catalog.has(id))).toBe(true);
     // The registry and the directory must agree in BOTH directions. A
     // registered id with no file renders a broken image; a file with no
@@ -1189,7 +1195,7 @@ describe("settings overlay keyboard containment", () => {
 
 describe("settings tab has no overlay Back to app", () => {
   it("omits the Back to app link on the standalone VS Code tab", () => {
-    const window = new Window({ url: "https://localhost/" });
+    const window = createSettingsWindow();
     (window as unknown as { eval: (src: string) => void }).eval(settingsSrc);
     const api = (window as unknown as { GrokSettings: ReturnType<typeof loadSettings> }).GrokSettings;
     const doc = window.document as unknown as Document;
@@ -1232,7 +1238,8 @@ describe("settings restore skips disabled rows", () => {
     expect(ids).toContain("readRepliesAloud");
     expect(ids).not.toContain("summarizeRepliesAloud");
     const summarize = api.ROWS.find((row: { id: string }) => row.id === "summarizeRepliesAloud");
-    expect(api.rowEnabled(summarize, snapshot)).toBe(false);
+    expect(summarize).toBeTruthy();
+    expect(api.rowEnabled(summarize!, snapshot)).toBe(false);
   });
 
   it("never treats free-text or list inputs as restorable", () => {
@@ -1257,7 +1264,7 @@ describe("settings restore skips disabled rows", () => {
   });
 
   it("hides Restore defaults when the page has nothing restorable to change", () => {
-    const window = new Window({ url: "https://localhost/" });
+    const window = createSettingsWindow();
     (window as unknown as { eval: (src: string) => void }).eval(settingsSrc);
     const api = (window as unknown as { GrokSettings: ReturnType<typeof loadSettings> }).GrokSettings;
     const doc = window.document as unknown as Document;
@@ -1280,7 +1287,7 @@ describe("settings restore skips disabled rows", () => {
   });
 
   it("confirms Restore defaults in-surface, lists concrete targets, and cancel posts nothing", () => {
-    const window = new Window({ url: "https://localhost/" });
+    const window = createSettingsWindow();
     (window as unknown as { eval: (src: string) => void }).eval(settingsSrc);
     const api = (window as unknown as { GrokSettings: ReturnType<typeof loadSettings> }).GrokSettings;
     const doc = window.document as unknown as Document;
@@ -1321,7 +1328,7 @@ describe("settings restore skips disabled rows", () => {
   });
 
   it("Restore confirm applies only restorable rows and never posts voice text setters", () => {
-    const window = new Window({ url: "https://localhost/" });
+    const window = createSettingsWindow();
     (window as unknown as { eval: (src: string) => void }).eval(settingsSrc);
     const api = (window as unknown as { GrokSettings: ReturnType<typeof loadSettings> }).GrokSettings;
     const doc = window.document as unknown as Document;
@@ -1357,7 +1364,7 @@ describe("settings restore skips disabled rows", () => {
   });
 
   it("Voice Restore defaults does not post setSummarizeRepliesAloud while the switch is disabled", () => {
-    const window = new Window({ url: "https://localhost/" });
+    const window = createSettingsWindow();
     (window as unknown as { eval: (src: string) => void }).eval(settingsSrc);
     const api = (window as unknown as { GrokSettings: ReturnType<typeof loadSettings> }).GrokSettings;
     const doc = window.document as unknown as Document;
@@ -1433,7 +1440,7 @@ describe("settings About section", () => {
   });
 
   it("puts the non-affiliation disclaimer only at the bottom of the About page", () => {
-    const window = new Window({ url: "https://localhost/" });
+    const window = createSettingsWindow();
     (window as unknown as { eval: (src: string) => void }).eval(settingsSrc);
     const api = (window as unknown as { GrokSettings: ReturnType<typeof loadSettings> }).GrokSettings;
     const doc = window.document as unknown as Document;
@@ -1471,7 +1478,7 @@ function mountAt(category: string, opts: {
   env?: Record<string, unknown>;
   snapshot?: Record<string, unknown>;
 } = {}) {
-  const window = new Window({ url: "https://localhost/" });
+  const window = createSettingsWindow();
   (window as unknown as { eval: (src: string) => void }).eval(settingsSrc);
   const api = (window as unknown as { GrokSettings: ReturnType<typeof loadSettings> }).GrokSettings;
   const doc = window.document as unknown as Document;
@@ -1618,7 +1625,7 @@ describe("settings update() skips an unchanged snapshot", () => {
   });
 
   it("defers a real repaint while the phone category menu is focused", () => {
-    const window = new Window({ url: "https://localhost/" });
+    const window = createSettingsWindow();
     (window as unknown as { matchMedia: (q: string) => { matches: boolean } }).matchMedia = (query) => ({
       matches: String(query).includes("520px"),
       addEventListener() { /* */ },

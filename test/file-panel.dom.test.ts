@@ -3,9 +3,9 @@ import { createRequire } from "node:module";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { Window } from "happy-dom";
-// @ts-expect-error Plain-JS webview module intentionally has no TS build step.
+import { Window as HappyWindow } from "happy-dom";
 import {
+
   applyDraft,
   applySaveSuccess,
   createFilePanel,
@@ -69,13 +69,13 @@ function harness(options?: {
   fileIcons?: { baseUrl: string };
   onMaximizedChanged?: (max: boolean) => void;
 }) {
-  const window = new Window({ url: "https://example.test/" });
+  const window = new HappyWindow({ url: "https://example.test/" }) as unknown as Window & typeof globalThis;
   const document = window.document;
   const scopes = {
     a: { id: "scope-a", label: "app", title: "/work/app" },
     b: { id: "scope-b", label: "relay", title: "/work/relay" },
   } satisfies Record<string, Scope>;
-  let current = scopes.a;
+  let current: Scope = scopes.a;
   let scopeListener: ((scope: Scope) => void) | null = null;
   const reads: Array<{ scopeId: string; relPath: string }> = [];
   const writes: Array<{ scopeId: string; request: Record<string, unknown> }> = [];
@@ -157,12 +157,14 @@ function harness(options?: {
   };
 }
 
-function click(window: Window, target: Element | null) {
+type DomWindow = Window & typeof globalThis;
+
+function click(window: DomWindow, target: Element | null) {
   expect(target).toBeTruthy();
   target!.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
 }
 
-function type(window: Window, document: Document, text: string) {
+function type(window: DomWindow, document: Document, text: string) {
   const editor = document.querySelector(".gfp-editor") as HTMLTextAreaElement | null;
   expect(editor).toBeTruthy();
   editor!.value = text;
@@ -490,7 +492,7 @@ describe("shared file-panel component", () => {
   });
 
   it("uses overlay presentation while the responsive dock host is display-none", async () => {
-    const window = new Window({ url: "https://example.test/" });
+    const window = new HappyWindow({ url: "https://example.test/" }) as unknown as DomWindow;
     const document = window.document;
     const panelHost = document.createElement("main");
     const dockHost = document.createElement("aside");
@@ -723,7 +725,7 @@ describe("shared file-panel component", () => {
     // width IS the panel's width. Measuring it collapses the computed maximum
     // to the minimum, and one drag strands the panel at 200px with no way to
     // widen it again.
-    const window = new Window({ url: "https://example.test/" });
+    const window = new HappyWindow({ url: "https://example.test/" }) as unknown as DomWindow;
     const document = window.document;
     // happy-dom has no layout engine; these are the only measurements
     // setPanelWidth reads.
@@ -768,7 +770,7 @@ describe("file panel resize drag", () => {
       () => ({ width: px });
   }
 
-  function drag(window: Window, resizer: Element, fromX: number, toX: number) {
+  function drag(window: DomWindow, resizer: Element, fromX: number, toX: number) {
     const ev = (type: string, clientX: number) =>
       new window.MouseEvent(type, { bubbles: true, cancelable: true, clientX });
     resizer.dispatchEvent(Object.assign(ev("pointerdown", fromX), { pointerId: 1 }));
@@ -777,7 +779,7 @@ describe("file panel resize drag", () => {
   }
 
   function dockedPanel(zoom: string) {
-    const window = new Window({ url: "https://example.test/" });
+    const window = new HappyWindow({ url: "https://example.test/" }) as unknown as DomWindow;
     const document = window.document;
     document.body.style.setProperty("--chat-zoom", zoom);
     (window as unknown as { GrokWebviewHelpers: { chatZoomFactor: typeof chatZoomFactor; unzoomClientPx: typeof unzoomClientPx } }).GrokWebviewHelpers = {
@@ -1556,7 +1558,7 @@ describe("desktop maximize is opt-in on the mount", () => {
 
   it("hides the control and drops maximize when the panel is an overlay", async () => {
     const seen: boolean[] = [];
-    const window = new Window({ url: "https://example.test/" });
+    const window = new HappyWindow({ url: "https://example.test/" }) as unknown as DomWindow;
     const document = window.document;
     const panelHost = document.createElement("main");
     const dockHost = document.createElement("aside");
@@ -1567,7 +1569,7 @@ describe("desktop maximize is opt-in on the mount", () => {
       document,
       window,
       mount: { panelHost, dockHost, presentation: "responsive", maximize: true },
-      onMaximizedChanged: (max) => { seen.push(max); },
+      onMaximizedChanged: (max: boolean) => { seen.push(max); },
     });
     panel.setOpen(true);
     await settle();

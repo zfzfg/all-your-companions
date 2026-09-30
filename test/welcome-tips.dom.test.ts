@@ -260,10 +260,10 @@ describe("empty-state advice", () => {
     //  is a string[] on the wire, and the client only renders rows whose
     // query still matches the token under the caret — so echo back the query it
     // actually asked with rather than assuming one.
-    const asked = h.posted.find((m) => m.type === "mentionQuery") as { query: string };
+    const asked = h.posted.find((m) => m.type === "mentionQuery") as { type: string; query: string } | undefined;
     dispatch(h.window, {
       type: "mentionResults",
-      query: asked.query,
+      query: asked?.query ?? "",
       files: ["README.md", "src/app.ts"],
     });
     expect(h.doc.getElementById("mention-popover")!.hidden).toBe(false);

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { Window } from "happy-dom";
+import { Window as HappyWindow } from "happy-dom";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { RAIL_EXPANDED, RAIL_PREVIEW } from "../src/projects-rail";
@@ -21,10 +21,11 @@ interface WebviewShape {
   };
 }
 
-const windows: Window[] = [];
+type DomWindow = Window & typeof globalThis & { eval: (src: string) => unknown };
+const windows: DomWindow[] = [];
 
 function bootRail(seed: WebviewShape = {}) {
-  const window = new Window({ url: "https://example.test/" });
+  const window = new HappyWindow({ url: "https://example.test/" }) as unknown as DomWindow;
   windows.push(window);
   const posted: Posted[] = [];
   let stored = seed;

@@ -118,7 +118,7 @@ function messagesOf(doc: Document) {
   return doc.getElementById("messages") as HTMLElement;
 }
 
-function unpinAt(window: Window, messages: HTMLElement, top: number) {
+function unpinAt(window: Window & typeof globalThis, messages: HTMLElement, top: number) {
   messages.dispatchEvent(new window.WheelEvent("wheel", { deltaY: -80, bubbles: true }));
   messages.scrollTop = top;
   messages.dispatchEvent(new window.Event("scroll"));

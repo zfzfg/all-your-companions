@@ -346,7 +346,7 @@ describe("session rows (regression: only the label was clickable)", () => {
     });
     const glyphs = [...h.doc.querySelectorAll(".history-row .provider-glyph")];
     expect(glyphs).toHaveLength(2);
-    expect(glyphs.map((el) => el.querySelector("svg.provider-logo path")?.getAttribute("d")?.length > 100))
+    expect(glyphs.map((el) => (el.querySelector("svg.provider-logo path")?.getAttribute("d")?.length ?? 0) > 100))
       .toEqual([true, true]);
     expect(h.doc.querySelectorAll(".history-row > .history-row-dot")).toHaveLength(0);
     const badges = [...h.doc.querySelectorAll(".history-row .provider-status-badge")];

@@ -24,7 +24,7 @@ function bootWithGeometry() {
   return { ...harness, grow: () => { scrollHeight = 1800; } };
 }
 
-function wheelUp(window: Window, messages: HTMLElement) {
+function wheelUp(window: Window & typeof globalThis, messages: HTMLElement) {
   messages.dispatchEvent(new window.WheelEvent("wheel", { deltaY: -80, bubbles: true }));
 }
 

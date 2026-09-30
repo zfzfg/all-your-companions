@@ -14,7 +14,7 @@ The goal of layers (1)+(2) is to make the protocol surface and UI logic regressi
 
 ## W-15/W-16 verification (2026-09-30)
 
-Compile, full production/test typecheck, lint and all 326 unit-test files pass; Electron integration passes 22/22 on VS Code 1.139.1. No new skips or excludes were added; the pre-existing W-09 DOM excludes remain open. Run targeted checks per coherent extraction/strategy block and the full five-command gate at milestones.
+Compile, full production/test typecheck, lint and all 326 unit-test files pass; Electron integration passes 22/22 on VS Code 1.139.1. No new skips or excludes were added; W-09 DOM typecheck exclusions are completely removed with zero exclusions remaining. Run targeted checks per coherent extraction/strategy block and the full five-command gate at milestones.
 
 `test/sidebar-boundaries.test.ts` uses actual TypeScript declarations and resolved inherited members, including state/actions groups, rather than counting test-fake keys. It also checks call-through overrides and cold disposal without collaborator creation. `test/provider-capabilities.test.ts` pins all 25 dimensions for five providers; `test/provider-modes.test.ts` checks sequential RPCs and failures; `test/provider-cli.test.ts` checks CLI/auth/usage/UI strategies. Existing race, resume, attachment, logout, Crew and fallback tests remain in place. Source pins follow the executing modules.
 

@@ -228,8 +228,8 @@ describe("add project", () => {
     expect(githubConnect(h)?.textContent).toBe("Connect with GitHub CLI");
     expect(h.doc.querySelector(".add-project-github-advanced")?.textContent)
       .toBe("Use a token instead");
-    expect(h.doc.querySelector(".add-project-github-token")?.hidden).toBe(true);
-    expect(h.doc.querySelector(".add-project-github-card")?.hidden).toBe(true);
+    expect(h.doc.querySelector<HTMLElement>(".add-project-github-token")?.hidden).toBe(true);
+    expect(h.doc.querySelector<HTMLElement>(".add-project-github-card")?.hidden).toBe(true);
   });
 
   it("pressing connect replaces the choice with the sign-in card", () => {
@@ -245,8 +245,8 @@ describe("add project", () => {
     click(h.window, githubConnect(h)!);
     expect(h.posted).toContainEqual({ type: "setupGithubCli", action: "auth" });
     expect(githubBox(h)?.dataset.phase).toBe("cli");
-    expect(githubConnect(h)?.closest(".add-project-github-choice")?.hidden).toBe(true);
-    expect(h.doc.querySelector(".add-project-github-card")?.hidden).toBe(false);
+    expect(githubConnect(h)?.closest<HTMLElement>(".add-project-github-choice")?.hidden).toBe(true);
+    expect(h.doc.querySelector<HTMLElement>(".add-project-github-card")?.hidden).toBe(false);
     expect(input(h).hidden).toBe(true);
   });
 
@@ -282,7 +282,7 @@ describe("add project", () => {
       fix: "auth-gh",
     });
     expect(githubBox(h)?.dataset.phase).toBe("choice");
-    expect(h.doc.querySelector(".add-project-github-card")?.hidden).toBe(true);
+    expect(h.doc.querySelector<HTMLElement>(".add-project-github-card")?.hidden).toBe(true);
     expect(fix(h)?.hidden).toBe(false);
   });
 
@@ -436,12 +436,12 @@ describe("add project", () => {
       type: "githubState",
       github: { connected: false, cliPresent: true },
     });
-    expect(h.doc.querySelector(".add-project-github-token")?.hidden).toBe(true);
+    expect(h.doc.querySelector<HTMLElement>(".add-project-github-token")?.hidden).toBe(true);
     click(h.window, h.doc.querySelector(".add-project-github-advanced") as HTMLElement);
     expect(githubBox(h)?.dataset.phase).toBe("token");
-    expect(h.doc.querySelector(".add-project-github-token")?.hidden).toBe(false);
+    expect(h.doc.querySelector<HTMLElement>(".add-project-github-token")?.hidden).toBe(false);
     expect(h.doc.querySelector(".add-project-github-token-input")).toBeTruthy();
-    expect(githubConnect(h)?.closest(".add-project-github-choice")?.hidden).toBe(true);
+    expect(githubConnect(h)?.closest<HTMLElement>(".add-project-github-choice")?.hidden).toBe(true);
   });
 
   it("picking a repository fills the field and does not clone until the button is pressed", () => {
