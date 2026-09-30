@@ -42,14 +42,19 @@ const fs = require("node:fs");
 
 // ── Real extension modules (compiled CJS + shipped webview helper) ───────────
 const REPO = path.resolve(__dirname, "..");
+function resolveCompiled(rel) {
+  const modPath = path.join(REPO, "out-modules", rel);
+  if (fs.existsSync(modPath)) return modPath;
+  return path.join(REPO, "out", rel);
+}
 let dispatch, planGate, helpers, acpMod;
 try {
-  dispatch = require(path.join(REPO, "out", "acp-dispatch.js"));
-  planGate = require(path.join(REPO, "out", "plan-gate.js"));
+  dispatch = require(resolveCompiled("acp-dispatch.js"));
+  planGate = require(resolveCompiled("plan-gate.js"));
   helpers = require(path.join(REPO, "media", "webview-helpers.js"));
-  acpMod = require(path.join(REPO, "out", "acp.js"));
+  acpMod = require(resolveCompiled("acp.js"));
 } catch (e) {
-  console.error("Could not load compiled modules — run `npm run compile` (or `tsc -p .`) first.\n" + e.message);
+  console.error("Could not load compiled modules — run `npm run compile:modules` (or `tsc -p tsconfig.unbundled.json`) first.\n" + e.message);
   process.exit(2);
 }
 const { acpClientCapabilities } = acpMod;
@@ -297,9 +302,9 @@ function assert(cond, msg) { if (!cond) throw new Error(msg); }
 async function testTerminalShell() {
   let TerminalManager, resolveTerminalShell, posixShellFromEnv;
   try {
-    ({ TerminalManager, resolveTerminalShell, posixShellFromEnv } = require(path.join(REPO, "out", "terminal-manager.js")));
+    ({ TerminalManager, resolveTerminalShell, posixShellFromEnv } = require(resolveCompiled("terminal-manager.js")));
   } catch (e) {
-    throw new Skip("out/terminal-manager.js not built — run `npm run compile` (" + e.message + ")");
+    throw new Skip("terminal-manager.js not built — run `npm run compile:modules` (" + e.message + ")");
   }
   const which = (name) => {
     if (process.platform !== "win32") return undefined;
@@ -591,7 +596,7 @@ async function testSessionFork() {
 // not a re-implementation. SKIPs on -32601 — a pre-worktree CLI, where the
 // extension degrades to "unsupported" rather than erroring.
 async function testWorktree() {
-  const wt = require(path.join(REPO, "out", "worktree.js"));
+  const wt = require(resolveCompiled("worktree.js"));
   const execFileSync = require("node:child_process").execFileSync;
   const cwd = mkTmp("wt");
   const acp = new Acp(cwd);
@@ -661,7 +666,7 @@ async function testWorktree() {
 // touches NO files on disk). Reuses the SHIPPED parsers (out/rewind.js). SKIPs on
 // -32601 — a pre-rewind CLI, where the extension degrades to "unsupported".
 async function testRewind() {
-  const rw = require(path.join(REPO, "out", "rewind.js"));
+  const rw = require(resolveCompiled("rewind.js"));
   const cwd = mkTmp("rewind");
   const acp = new Acp(cwd);
   try {
@@ -706,7 +711,7 @@ async function testRewind() {
 // Disposable temp git repo. SKIPs if grok doesn't take the file-edit path
 // (non-deterministic) or the CLI lacks rewind (-32601).
 async function testRewindFiles() {
-  const rw = require(path.join(REPO, "out", "rewind.js"));
+  const rw = require(resolveCompiled("rewind.js"));
   const execFileSync = require("node:child_process").execFileSync;
   const cwd = mkTmp("rewindfiles");
   const acp = new Acp(cwd);
@@ -959,7 +964,7 @@ async function testEditDiffRestore() {
 //
 // Runs against the SHIPPED out/rewind.js, so CLI drift fails the gate here.
 async function testPlanCancelRewind() {
-  const rw = require(path.join(REPO, "out", "rewind.js"));
+  const rw = require(resolveCompiled("rewind.js"));
   const cwd = mkTmp("plancancel");
   const acp = new Acp(cwd, {
     onWrite: () => "ack", // plan mode: never touch disk

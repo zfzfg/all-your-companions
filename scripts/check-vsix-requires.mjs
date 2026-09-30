@@ -70,7 +70,6 @@ const problems = checkEsmPackageGraph(root, packed, ["out/muse-adapter/main.mjs"
 // Those must stay out of the vsix — the adapter bundle does not need
 // them when the host sets CODEX_PATH, and packing them balloons the file.
 const ALLOWED_PACKED_DEPS = new Set([
-  "ws",
   "@agentclientprotocol/codex-acp",
   "@agentclientprotocol/claude-agent-acp",
   "@agentclientprotocol/sdk",
@@ -78,6 +77,18 @@ const ALLOWED_PACKED_DEPS = new Set([
   "@anthropic-ai/claude-agent-sdk",
   "zod",
 ]);
+const REQUIRED_RUNTIME_PACKAGES = [
+  "@agentclientprotocol/codex-acp",
+  "@agentclientprotocol/claude-agent-acp",
+  "@agentclientprotocol/sdk",
+  "@muse-code/sdk",
+  "@anthropic-ai/claude-agent-sdk",
+];
+for (const name of REQUIRED_RUNTIME_PACKAGES) {
+  if (!packedDeps.has(name)) {
+    problems.push(`Required runtime package node_modules/${name}/ is NOT packed in vsix.`);
+  }
+}
 for (const name of packedDeps) {
   if (!ALLOWED_PACKED_DEPS.has(name)) {
     problems.push(
@@ -99,6 +110,9 @@ for (const file of packed) {
     );
   }
 }
+
+// Packages optionally referenced inside bundled dependencies (e.g. ws fallback try-catch)
+const OPTIONAL_BUNDLED_REQUIRES = new Set(["bufferutil", "utf-8-validate"]);
 
 for (const file of packed) {
   // Only our own compiled output. Dependency internals are the dependency's
@@ -128,9 +142,9 @@ for (const file of packed) {
       continue;
     }
 
-    // Bare specifier: a builtin, the editor API, or a real dependency.
+    // Bare specifier: a builtin, the editor API, optional bundled require, or a real dependency.
     const bare = spec.replace(/^node:/, "");
-    if (spec.startsWith("node:") || builtins.has(bare.split("/")[0]) || bare === "vscode") continue;
+    if (spec.startsWith("node:") || builtins.has(bare.split("/")[0]) || bare === "vscode" || OPTIONAL_BUNDLED_REQUIRES.has(bare)) continue;
 
     const name = bare.startsWith("@") ? bare.split("/").slice(0, 2).join("/") : bare.split("/")[0];
     if (!packedDeps.has(name)) {

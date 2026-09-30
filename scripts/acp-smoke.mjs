@@ -394,12 +394,16 @@ async function main() {
   const turnMs = timeoutMs(process.env.ACP_SMOKE_TURN_TIMEOUT_MS, 180_000);
   // `smoke:acp` compiles src first. No stale bundles,
   // TS loader, copied spawn implementation, or adapter-path override.
-  const { CodexBackend, normalizeCodexUpdate, normalizeCodexPermissionParams } = require("../out/codex-backend.js");
-  const { ClaudeBackend } = require("../out/claude-backend.js");
-  const { locateCodexCli } = require("../out/codex-cli-locator.js");
-  const { locateClaudeCli } = require("../out/claude-cli-locator.js");
-  const { acpClientCapabilities } = require("../out/acp.js");
-  const { TerminalManager } = require("../out/terminal-manager.js");
+  const resolveCompiled = (rel) => {
+    const modPath = path.join(root, "out-modules", rel);
+    return fs.existsSync(modPath) ? modPath : path.join(root, "out", rel);
+  };
+  const { CodexBackend, normalizeCodexUpdate, normalizeCodexPermissionParams } = require(resolveCompiled("codex-backend.js"));
+  const { ClaudeBackend } = require(resolveCompiled("claude-backend.js"));
+  const { locateCodexCli } = require(resolveCompiled("codex-cli-locator.js"));
+  const { locateClaudeCli } = require(resolveCompiled("claude-cli-locator.js"));
+  const { acpClientCapabilities } = require(resolveCompiled("acp.js"));
+  const { TerminalManager } = require(resolveCompiled("terminal-manager.js"));
   const outputParent = path.join(root, ".verification", "acp-smoke");
   fs.mkdirSync(outputParent, { recursive: true });
   const output = fs.mkdtempSync(path.join(outputParent, `${new Date().toISOString().replace(/[:.]/g, "-")}-`));

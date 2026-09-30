@@ -8,6 +8,8 @@ test/**
 src/**
 integration/**
 out-integration/**
+out-modules/**
+tsconfig.unbundled.json
 .vscode-test.mjs
 .vscode-test/**
 tsconfig.json
@@ -15,11 +17,9 @@ tsconfig.muse-adapter.json
 adapters/**
 test-support/**
 # ALLOWLIST — this excludes every dependency and re-includes them one by one.
-# out/ is plain tsc output, not a bundle, so anything `require`d at runtime must
-# be named here or the extension installs and then fails to load. Adding a
-# runtime dependency means adding a line here too; nothing warns you.
+# Bundled extension and agy-acp-adapter bundle internal libraries (e.g. ws).
+# Spawned adapters and runtime-resolved external packages are kept in node_modules.
 node_modules/**
-!node_modules/ws/**
 # Adapter files only. `!…/codex-acp/**` would also pack its nested
 # node_modules (diff@9, open@11 — vsce: a later exclude cannot undo a negate).
 # @openai/codex's platform binaries hoist to node_modules/@openai and are kept

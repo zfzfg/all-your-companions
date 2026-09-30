@@ -6,7 +6,12 @@
 const https = require("node:https");
 const os = require("node:os");
 const { randomUUID } = require("node:crypto");
-const { buildSessionStartEvent, aptabaseHost, APTABASE_APP_KEY_DEV } = require("../out/telemetry.js");
+const path = require("node:path");
+const fs = require("node:fs");
+const telemetryModPath = fs.existsSync(path.resolve(__dirname, "../out-modules/telemetry.js"))
+  ? path.resolve(__dirname, "../out-modules/telemetry.js")
+  : path.resolve(__dirname, "../out/telemetry.js");
+const { buildSessionStartEvent, aptabaseHost, APTABASE_APP_KEY_DEV } = require(telemetryModPath);
 
 // Defaults to the DEV project; override with APTABASE_KEY=... to test another key
 // (e.g. a deliberately-wrong one to confirm graceful failure).
