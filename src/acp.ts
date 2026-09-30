@@ -320,6 +320,7 @@ export class AcpClient extends EventEmitter {
   sessionId?: string;
   currentModelId?: string;
   currentModeId?: string;
+  private loadingChildSessionIds?: Set<string>;
   availableModels: ModelInfo[] = [];
   availableCommands: SlashCommand[] = [];
   lastMeta?: PromptResultMeta;
@@ -735,12 +736,16 @@ export class AcpClient extends EventEmitter {
 
   async loadSession(sessionId: string, modelId?: string): Promise<{ sessionId: string }> {
     const meta = await this.resolveSessionMeta();
-    const raw = await this.request("session/load", {
+    this.loadingChildSessionIds = new Set();
+    let raw: any;
+    try {
+      raw = await this.request("session/load", {
       sessionId,
       cwd: this.opts.cwd,
       mcpServers: await this.mcpServersForSession(),
       ...(meta ? { _meta: meta } : {}),
     });
+    } finally { this.loadingChildSessionIds = undefined; }
     const res = this.backend.normalizeSessionResponse(raw);
     this.sessionId = sessionId;
     if (res?.models?.availableModels) {
@@ -1566,7 +1571,13 @@ export class AcpClient extends EventEmitter {
   }
 
   private handleSessionUpdate(u: any, meta?: any, sessionId?: string): void {
-    const foreign = isForeignSessionUpdate(sessionId, this.sessionId);
+    if (this.loadingChildSessionIds && u?.sessionUpdate === "subagent_spawned") {
+      const childId = u.subagentSessionId ?? u.child_session_id ?? u.subagent_id;
+      if (typeof childId === "string" && childId) this.loadingChildSessionIds.add(childId);
+    }
+    const foreign = this.loadingChildSessionIds
+      ? typeof sessionId === "string" && this.loadingChildSessionIds.has(sessionId)
+      : isForeignSessionUpdate(sessionId, this.sessionId);
     const normalized = this.backend.normalizeUpdate(u, meta);
     if (!foreign && normalized.notice) this.emit("notice", normalized.notice);
     if (!foreign && normalized.workflowUpdate) this.emit("workflowUpdate", normalized.workflowUpdate);

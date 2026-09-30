@@ -613,6 +613,14 @@
           : { type: "runGrokLogin", provider: "muse" };
       },
     },
+    ...[ ["shellSandbox", "Shell sandbox", "toggle", true], ["sandboxNetwork", "Sandbox network", "select", "proxy-only"], ["trustWorkspaces", "Trust workspaces", "toggle", false] ].map(([key, title, kind, fallback]) => ({
+      id: "muse:" + key, category: "providers", title: "Muse · " + title, kind,
+      description: "Applies when starting a new conversation. Existing processes keep their settings.",
+      visible: s => !!providerOf(s, "muse").connected,
+      get: s => s.museSettings?.[key] ?? fallback,
+      options: key === "sandboxNetwork" ? ["proxy-only", "restricted", "enabled"].map(value => ({ value, label: value })) : undefined,
+      message: value => ({ type: "setMuseSetting", key, value }),
+    })),
     {
       id: "providerGemini",
       category: "providers",

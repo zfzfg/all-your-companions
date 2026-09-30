@@ -6471,3 +6471,9 @@ select option {
 .running-children-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 0.9em; }
 .running-children-label { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .running-children-target, .running-children-time, .running-children-tokens { color: var(--vscode-descriptionForeground); font-size: 0.85em; }
+
+.pr-open { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--vscode-contrastBorder, var(--vscode-panel-border)); border-radius: 5px; padding: 1px 5px; }
+.pr-open svg { width: 14px; height: 14px; }
+.pr-open-repo { opacity: .8; }
+.native-workflow-roster { margin: 8px; }
+.native-workflow-step { margin: 6px 0; }

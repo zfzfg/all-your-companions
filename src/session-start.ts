@@ -1194,11 +1194,13 @@ export class SessionStart {
 
     client.on("toolCall", (u) => {
       if (gen !== session.gen) return;
+      if (u?.subagent_id) this.deps.eventOps.noteNativeChild(session, { ...u, sessionUpdate: "subagent_spawned", description: u.title });
       emitToolCallEvent("toolCall", u);
     });
 
     client.on("toolCallUpdate", (u) => {
       if (gen !== session.gen) return;
+      if (u?.subagent_id && ["completed", "failed", "cancelled"].includes(u.status)) this.deps.eventOps.noteNativeChild(session, { ...u, sessionUpdate: "subagent_finished" });
       this.deps.eventOps.closeQuestionsForToolCall(session, u);
       emitToolCallEvent("toolCallUpdate", u);
     });

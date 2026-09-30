@@ -70,6 +70,26 @@ const companion = (over = {}) => ({
 // ------------------------------------------------------------ chat scenes --
 
 export const CHAT_SCENARIOS = {
+  "upstream-native-workflow-markdown": {
+    run: async ({ send }) => {
+      await turn(send, "Review with native delegation", "#### Review results\n\nhttps://github.com/example/project/pull/42\n\n[Read file](<C:/Program Files/Project/read me.md:12>)\n\n**https://example.com/review**");
+      await send({ type: "runProgress", update: { kind: "workflow", id: "native", title: "Native review", phase: "paused", done: false, failed: false, cancelled: false, controlsAvailable: false,
+        phases: [{ id: "a", title: "Inspect" }, { id: "b", title: "Review" }, { id: "c", title: "Verify" }, { id: "d", title: "Finish" }], agents: [{ label: "Reviewer", phase: "b", state: "paused" }] } });
+    },
+  },
+  "upstream-muse-modes": {
+    run: async ({ send, page }) => {
+      await send({ type: "session", provider: "muse", sessionId: "muse", currentModelId: "muse", models: [{ modelId: "muse", name: "Muse", provider: "muse" }] });
+      await send({ type: "modeChanged", modeId: "agent", modes: ["agent", "yolo", "onRequest"] });
+      await page.click("#mode-btn");
+    },
+  },
+  "upstream-muse-install": {
+    run: async ({ send }) => {
+      await send({ type: "initialState", capabilities: { installMuse: true } });
+      await send({ type: "onboarding", state: "missing-muse", provider: "muse", platform: "win32" });
+    },
+  },
   "w18-shared-composer": {
     run: async ({ send, page }) => {
       await turn(send, "Shared helpers", "Divider\n\n---\n\nHeading\n---");
@@ -571,6 +591,7 @@ const ADVANCED_SNAPSHOT = {
 };
 
 export const SETTINGS_SCENARIOS = {
+  "upstream-settings-muse": { category: "providers", snapshot: { providers: [{ id: "muse", connected: true }], museSettings: { shellSandbox: true, sandboxNetwork: "proxy-only", trustWorkspaces: false } } },
   "settings-agents": { category: "agents", snapshot: AGENTS_SNAPSHOT },
   "settings-agents-role-open": {
     category: "agents",

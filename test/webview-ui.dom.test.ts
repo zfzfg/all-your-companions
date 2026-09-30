@@ -825,7 +825,7 @@ describe("mode picker (the plan-gate entry path)", () => {
     expect((pop as any).hidden).toBe(true); // selecting a mode closes the popover
   });
 
-  it("does not offer Grok's plan gate in a Codex conversation", () => {
+  it("offers the native Plan mode in a Codex conversation", () => {
     const { window, doc } = bootWebview();
     dispatch(window, {
       type: "session",
@@ -838,7 +838,7 @@ describe("mode picker (the plan-gate entry path)", () => {
     click(window, $(doc, "mode-btn"));
     const labels = [...$(doc, "mode-popover").querySelectorAll(".mode-item-label")]
       .map((label) => label.textContent);
-    expect(labels).toEqual(["Agent mode", "Auto accept"]);
+    expect(labels).toEqual(["Agent mode", "Plan mode", "Auto accept"]);
   });
 
   it("disables only Plan with the host's version reason, then re-enables it", () => {

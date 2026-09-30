@@ -226,20 +226,20 @@
   function looksLikeFileRef(s) {
     if (!s || s.length > 200) return false;
     if (s.includes("://")) return false; // URLs are never file refs
-    const clean = s;
     // Strip only a TRAILING line ref (`:12`, `:12-34`, `:12:5`, `#L12[-L34]`) —
     // the shapes parseFileRef (src/file-ref.ts) can open. Stripping from the
     // FIRST `:`/`#` collapsed `C:\work\file.ts` to `C` (the drive colon), so
     // absolute Windows paths never linkified.
-    const core = clean.replace(/(?::\d+(?:-\d+|:\d+)?|#L\d+(?:-L?\d+)?)$/i, "");
-    if (/[\s"'`<>|&;]/.test(core)) return false;
+    const core = s.replace(/(?::\d+(?:-\d+|:\d+)?|#L\d+(?:-L?\d+)?)$/i, "");
+    const absolute = /^(?:[A-Za-z]:[\\/]|\\\\|\/(?!\/))/.test(core);
+    if (/[\r\n"'`<>|&;]/.test(core) || (!absolute && /\s/.test(core))) return false;
     const m = core.match(/\.([A-Za-z0-9]+)$/);
     if (!m) return false;
     const ext = m[1].toLowerCase();
     if (!FILE_EXTS.has(ext)) return false;
     // "I'll list the main `.md` files" — a bare extension names a TYPE. There is
-    // no file behind it, so the link fails: the host opens an editor on a
-    // missing path. A link
+    // no file behind it, so the link fails: the desk opens an editor on a
+    // missing path and the phone asks the host for a file it hasn't got. A link
     // that leads nowhere is worse than a missing one, because it teaches people
     // not to trust the ones that work.
     //
@@ -412,6 +412,7 @@
 
   function isSubagentToolCall(call) {
     if (!call) return false;
+    if (call._meta?.claudeCode?.subagent === true) return true;
     // Checked before every other signal, including `kind`: these names are ours
     // and unambiguous, and `companions_await_subagents` would otherwise match
     // the "subagent" substring rules further down.

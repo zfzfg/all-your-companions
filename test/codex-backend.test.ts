@@ -274,3 +274,9 @@ describe("Codex auth classification", () => {
     expect(isCodexCredentialError({ message: "quota exhausted for this account" })).toBe(false);
   });
 });
+
+it("normalizes native children with stable identities on both live and replay rails", () => {
+ const call = normalizeCodexUpdate({ sessionUpdate: "subagent_spawned", subagentSessionId: "child", name: "Reviewer", task: "Review" }).update;
+ expect(call).toMatchObject({ kind: "subagent", toolCallId: "codex-subagent:child", subagent_id: "child", child_session_id: "child" });
+ expect(normalizeCodexUpdate({ sessionUpdate: "subagent_state_update", subagentSessionId: "child", state: "completed" }).update).toMatchObject({ toolCallId: call.toolCallId, status: "completed", subagent_id: "child" });
+});

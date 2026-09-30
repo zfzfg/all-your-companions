@@ -28,6 +28,8 @@ describe("host <-> webview message contract (src/protocol.ts is the source of tr
       // so the client has to be told rather than assume. Capability, not version.
       deleteActiveSession: true,
       queueSendChips: true,
+      composerDraftSession: true,
+      installMuse: true,
     });
   });
 

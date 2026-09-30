@@ -9,7 +9,7 @@ var GrokWebviewShared = (() => {
     for (var r in t)
       p(e, r, { get: t[r], enumerable: true });
   };
-  var E = (e, t, r, n) => {
+  var M = (e, t, r, n) => {
     if (t && typeof t === "object" || typeof t === "function") {
       for (let o of P(t))
         if (!I.call(e, o) && o !== r)
@@ -17,7 +17,7 @@ var GrokWebviewShared = (() => {
     }
     return e;
   };
-  var M = (e) => E(p({}, "__esModule", { value: true }), e);
+  var E = (e) => M(p({}, "__esModule", { value: true }), e);
 
   // src/webview-shared.ts
   var G = {};
@@ -77,7 +77,9 @@ var GrokWebviewShared = (() => {
     session: true,
     sessionName: true,
     modelChanged: true,
+    startupStatus: true,
     modeChanged: true,
+    museSettings: true,
     sessionType: true,
     companionSubagent: true,
     subagentTray: true,
@@ -284,6 +286,8 @@ var GrokWebviewShared = (() => {
     updateProviderCli: true,
     cancelCodexInstall: true,
     runInstallCmd: true,
+    runMuseInstallCmd: true,
+    setMuseSetting: true,
     runGrokLogin: true,
     logout: true,
     checkGrokUpdate: true,
@@ -411,11 +415,11 @@ var GrokWebviewShared = (() => {
   }
 
   // src/shared/context-chip.ts
-  function S(e) {
+  function v(e) {
     const t = e && e.kind;
     return t === "diagnostics" || t === "terminal" ? t : "file";
   }
-  function v(e) {
+  function S(e) {
     return String(e || "").split(/[\\/]/).pop() || String(e || "");
   }
   function h(e, t) {
@@ -433,16 +437,16 @@ var GrokWebviewShared = (() => {
     return (r < 10 ? r.toFixed(1) : String(Math.round(r))) + " MB";
   }
   function k(e) {
-    const t = S(e);
+    const t = v(e);
     if (t === "diagnostics") {
       const r = h(e.count || 0, C(e.severity));
-      return e.scope === "file" && e.path ? r + " in " + v(e.path) : r;
+      return e.scope === "file" && e.path ? r + " in " + S(e.path) : r;
     }
     if (t === "terminal") return "Terminal: " + (e.label || "Terminal");
-    return v(e && e.relPath);
+    return S(e && e.relPath);
   }
   function x(e) {
-    const t = S(e);
+    const t = v(e);
     if (t === "diagnostics") {
       const r = e.scope === "file" && e.path ? e.path : "the whole workspace";
       return h(e.count || 0, C(e.severity)) + " in " + r + " \u2014 collected again when you send";
@@ -495,6 +499,6 @@ var GrokWebviewShared = (() => {
     for (const r of e) if (Array.isArray(r.chips)) t.push(...r.chips);
     return t;
   }
-  return M(G);
+  return E(G);
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = GrokWebviewShared; else globalThis.GrokWebviewShared = GrokWebviewShared;

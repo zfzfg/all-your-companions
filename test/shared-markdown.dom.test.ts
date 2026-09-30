@@ -284,3 +284,23 @@ describe("markdown: thematic breaks (<hr>) and setext headings", () => {
     expect(hr?.tagName.toLowerCase()).toBe("hr");
   });
 });
+
+
+describe("reviewed upstream Markdown additions", () => {
+  it("renders all six heading levels", () => { for (let level = 1; level <= 6; level++) expect(render("#".repeat(level) + " Heading")).toContain(`<h${level}>Heading</h${level}>`); });
+  it("links bare URLs while protecting code, existing anchors and emphasis", () => {
+    const html = render("**https://example.com/a_b** `https://example.com/code` [https://example.com/label](https://example.com/target)");
+    expect(html).toContain('<strong><a href="https://example.com/a_b">');
+    expect(html).toContain('<code>https://example.com/code</code>');
+    expect(html.match(/<a /g)?.length).toBe(2);
+  });
+  it("renders GitHub PR URLs as a chip with a host-handled href", () => {
+    const html = render("https://github.com/org/repo/pull/42.");
+    expect(html).toContain('class="pr-open"'); expect(html).toContain('PR #42');
+    expect(html).toContain('href="https://github.com/org/repo/pull/42"');
+  });
+  it("recognizes absolute Windows paths with spaces and parentheses", () => {
+    expect(render("[file](<C:/Program Files (x86)/Project/read me.md:12>)")).toContain('href="C:/Program Files (x86)/Project/read me.md:12"');
+    expect(render("`C:/Program Files/Project/read me.md:12`")).toContain('class="file-ref-link"');
+  });
+});

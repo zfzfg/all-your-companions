@@ -758,6 +758,8 @@
   const PROSE_FENCES = new Set(["", "md", "markdown", "text", "txt", "plain", "plaintext"]);
 
   const ICON = {
+    gitPullRequest: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="19" r="2"/><path d="M6 7v10M18 17V9a4 4 0 0 0-4-4h-2"/></svg>`,
+    externalLink: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M14 3h7v7M21 3 10 14M10 3H3v18h18v-7"/></svg>`,
     eye: `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>`,
     eyeOff: `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" x2="22" y1="2" y2="22"/></svg>`,
     file: `<svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg>`,
@@ -1157,14 +1159,16 @@
   // first thing dropped in a narrow composer — take the id from the caller so
   // the tooltip can never name a different mode than the icon is showing.
   function modeButtonTitle(modeId) {
-    const meta = MODE_META[modeId] || MODE_META.agent;
+    const base = MODE_META[modeId] || MODE_META.agent;
+    const meta = state.activeProvider === "muse" ? { ...base, label: modeId === "yolo" ? "Full access" : modeId === "onRequest" ? "On request" : "Prompt unmatched" } : base;
     if (state.busyLocked) return `${meta.label} — available once the session is ready`;
     if (!state.planModeAvailable) return `${meta.label} — Pick mode — ${state.planModeUnavailableReason}`;
     return `${meta.label} — Pick mode`;
   }
 
   function updateModeBtn(modeId) {
-    const meta = MODE_META[modeId] || MODE_META.agent;
+    const base = MODE_META[modeId] || MODE_META.agent;
+    const meta = state.activeProvider === "muse" ? { ...base, label: modeId === "yolo" ? "Full access" : modeId === "onRequest" ? "On request" : "Prompt unmatched" } : base;
     modeBtn.innerHTML = `${meta.icon}<span class="btn-label">${escapeHtml(meta.label)}</span>`;
     modeBtn.classList.toggle("plan-active", modeId === "plan");
     modeBtn.classList.toggle("yolo-active", modeId === "yolo");
@@ -1594,6 +1598,65 @@
   // HTML in a README cannot become live markup.
   window.__grokRenderMarkdown = (raw) => renderMarkdown(String(raw == null ? "" : raw));
 
+  function parseGitHubPullUrl(raw) {
+    let url;
+    try {
+      url = new URL(raw);
+    } catch {
+      return null;
+    }
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    if (url.username || url.password) return null;
+    const host = url.hostname.toLowerCase();
+    if (host !== "github.com" && host !== "www.github.com") return null;
+    const parts = url.pathname.split("/").filter(Boolean);
+    if (parts.length < 4 || parts[2] !== "pull" || !/^\d+$/.test(parts[3])) return null;
+    if (!/^[A-Za-z0-9_.-]+$/.test(parts[0]) || !/^[A-Za-z0-9_.-]+$/.test(parts[1])) return null;
+    return {
+      href: url.href,
+      owner: parts[0],
+      repo: parts[1],
+      number: parts[3],
+    };
+  }
+
+  function pullRequestChipHtml(pr) {
+    const href = escapeHtml(pr.href).replace(/"/g, "&quot;");
+    const repo = `${pr.owner}/${pr.repo}`;
+    const aria = escapeHtml(`Open pull request #${pr.number} (${repo}) in the browser`).replace(/"/g, "&quot;");
+    return (
+      `<a class="pr-open" href="${href}" title="${aria}" aria-label="${aria}">` +
+        `<span class="pr-open-mark" aria-hidden="true">${ICON.gitPullRequest}</span>` +
+        `<span class="pr-open-label">${escapeHtml(`PR #${pr.number}`)}</span>` +
+        `<span class="pr-open-repo">${escapeHtml(repo)}</span>` +
+        `<span class="pr-open-ext" aria-hidden="true">${ICON.externalLink}</span>` +
+      `</a>`
+    );
+  }
+
+  function unescapeHtml(s) {
+    return String(s)
+      .replace(/&quot;/g, '"')
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&amp;/g, "&");
+  }
+
+  // Leave sentence punctuation and closing emphasis outside the held URL.
+  function splitUrlTrailing(raw) {
+    let url = raw;
+    let trailing = "";
+    while (url && /[.,;:!?*_]$/.test(url)) {
+      trailing = url.slice(-1) + trailing;
+      url = url.slice(0, -1);
+    }
+    if (url.endsWith(")") && !url.includes("(")) {
+      trailing = ")" + trailing;
+      url = url.slice(0, -1);
+    }
+    return { url, trailing };
+  }
+
   function renderMarkdown(raw) {
     // Normalise line endings FIRST. Everything below splits on a newline and
     // then tests each line with $-anchored patterns -- and a carriage return
@@ -1688,11 +1751,27 @@
       // <code> tags mean nothing to a regex (#143). Same shape reaches a URL
       // containing `*`, and a [link](x) written inside backticks.
       //
-      // Link TEXT is deliberately left live: [**bold**](url) is valid markdown
-      // and worked before, so only the href is held.
+      // Format link labels before holding the whole anchor, so URLs in the
+      // label cannot be linkified again.
       const held = [];
       const hold = (html) => `\x00C${held.push(html) - 1}\x00`;
-      return t
+      const restore = (html) => html.replace(/\x00C(\d+)\x00/g, (_, i) => held[+i]);
+      const emphasis = (text) => text
+        .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
+        .replace(/\*([^*\n]+)\*/g, "<em>$1</em>")
+        .replace(/(^|[^\p{L}\p{N}_])_([^_\n]+)_(?=$|[^\p{L}\p{N}_])/gu, "$1<em>$2</em>");
+      // `raw` is the address after HTML escaping. A GitHub pull URL is the chip;
+      // any other http(s) address is an ordinary link. Both are held so the
+      // emphasis pass cannot see characters inside them.
+      function linkifyUrl(raw, autolink = false) {
+        const { url, trailing } = autolink ? { url: raw, trailing: "" } : splitUrlTrailing(raw);
+        if (!url) return raw;
+        const pr = parseGitHubPullUrl(unescapeHtml(url));
+        if (pr) return hold(pullRequestChipHtml(pr)) + trailing;
+        const href = url.replace(/"/g, "&quot;");
+        return hold(`<a href="${href}">${url}</a>`) + trailing;
+      }
+      const protectedText = t
         .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
         .replace(/`([^`\n]+)`/g, (_, code) => {
           if (looksLikeFileRef(code)) {
@@ -1703,16 +1782,30 @@
         })
         .replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_, alt, src) => {
           const safeSrc = /^(?:javascript|vbscript):/i.test(src.trim()) ? "" : src.replace(/"/g, "&quot;");
-          const safeAlt = alt.replace(/"/g, "&quot;");
-          return hold(`<img class="md-image" src="${safeSrc}" alt="${safeAlt}" loading="lazy" />`);
+          return hold(`<img class="md-image" src="${safeSrc}" alt="${alt.replace(/"/g, "&quot;")}" loading="lazy" />`);
         })
-        .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, text, url) => {
+        // A destination with a space stays text — `[see](the docs)` is not a
+        // link — except an absolute local path, which may contain spaces and
+        // one level of parentheses (`Program Files (x86)`). POSIX `/…` (not
+        // `//…`), Windows `X:\` or `X:/`, UNC `\\…`. No newline, quote, or
+        // placeholder. Angle brackets are the CommonMark spelling; this pass
+        // already escaped them to `&lt;`/`&gt;`, and the brackets are not part
+        // of the path. Titles are not parsed: a `"` ends the special case.
+        .replace(/\[([^\]]+)\]\((?:&lt;((?:[A-Za-z]:[\\/]|\\\\|\/(?!\/))(?:[^()\n\x00"]|\([^()\n\x00"]*\))*)&gt;|((?:[A-Za-z]:[\\/]|\\\\|\/(?!\/))(?:[^()\n\x00"]|\([^()\n\x00"]*\))+)|([^)\s]+))\)/g, (_, text, angled, absolute, plain) => {
+          const url = angled ?? absolute ?? plain;
+          const pr = parseGitHubPullUrl(unescapeHtml(url));
+          // The visible text is the address itself: show the chip, not the raw URL.
+          // A named link ([#82](url), [**bold**](url)) stays a normal anchor so
+          // its label and emphasis survive.
+          if (pr && /^https?:\/\//i.test(text.trim())) return hold(pullRequestChipHtml(pr));
           const safe = url.replace(/"/g, "&quot;");
-          return `<a href="${hold(safe)}">${text}</a>`;
+          return hold(`<a href="${safe}">${restore(emphasis(text))}</a>`);
         })
-        .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
-        .replace(/\*([^*\n]+)\*/g, "<em>$1</em>")
-        .replace(/\x00C(\d+)\x00/g, (_, i) => held[+i]);
+        .replace(/&lt;(https?:\/\/[^\s\x00]*?)&gt;/g, (_, url) => linkifyUrl(url, true));
+      // Hold bare URLs before emphasis so their interiors stay literal. Closing
+      // delimiters remain outside the placeholder for the emphasis pass to pair.
+      return restore(emphasis(protectedText
+        .replace(/https?:\/\/[^\s<\x00]+/g, (raw) => linkifyUrl(raw))));
     }
 
     // GFM tables: header row | separator row (|---|---|) | data rows
@@ -1891,7 +1984,7 @@
         continue;
       }
 
-      const hm = line.match(/^(#{1,3}) (.+)$/);
+      const hm = line.match(/^(#{1,6}) (.+)$/);
       if (hm) {
         closeFrom(0);
         out += `<h${hm[1].length}>${inline(hm[2])}</h${hm[1].length}>`;
@@ -2202,6 +2295,9 @@
     // Gate the APPEND, not an early return: the lines that make this popover
     // visible are the last thing the function does.
     if (state.subscriptionUsageKnown) contextPopover.appendChild(subscription);
+    if (state.activeProvider === "muse") {
+      const note = document.createElement("p"); note.className = "context-note"; note.textContent = "Muse: your content, including messages between sessions, may be used for product improvement. Usage windows are separate from conversation context."; contextPopover.appendChild(note);
+    }
 
     // KNOWLEDGE WORK STOPS HERE: the number and the action on it, nothing else.
     //
@@ -2822,6 +2918,7 @@
       promptNav: state.promptNav !== false,
       telemetryEnabled: state.telemetryEnabled,
       thumbsFeedback: !!state.thumbsFeedback,
+      museSettings: state.museSettings,
       providers: state.providers || [],
       providersChecking: !!state.providersChecking,
       githubState: state.githubState || undefined,
@@ -3928,11 +4025,17 @@
     if (!modePopover.hidden) { closePopovers(); return; }
     closePopovers();
     modePopover.innerHTML = "";
-    for (const [id, meta] of Object.entries(MODE_META)) {
+    const modes = state.activeProvider === "muse" ? {
+      agent: { ...MODE_META.agent, label: "Prompt unmatched", desc: "Muse asks for unmatched tools." },
+      yolo: { ...MODE_META.yolo, label: "Full access", desc: "Muse grants full access when accepted by the CLI." },
+      onRequest: { ...MODE_META.agent, label: "On request", desc: "Requires the shell sandbox for this conversation." },
+    } : MODE_META;
+    for (const [id, meta] of Object.entries(modes)) {
+      if (state.availableModes && !state.availableModes.includes(id)) continue;
       // Plan is Grok's extension-owned plan gate. Codex owns its own plan
       // review permission flow, so showing this item there is both inert and
       // misleading.
-      if (id === "plan" && state.activeProvider === "codex") continue;
+
       const el = document.createElement("div");
       const active = id === state.currentModeId;
       // Verified-old CLI: hard-disable Plan. Unverified probe: keep it clickable
@@ -5377,9 +5480,10 @@
 
   // Stored with the existing webview state so a reload retains every draft.
   const composerDrafts = new Map(Object.entries(uiState().composerDrafts || {}));
-  let composerSessionId = uiState().composerSessionId || null;
+  let composerSessionId = uiState().composerSessionId || `draft:initial:${Date.now()}`;
   let composerExpectedSessionId = null;
-  const pendingComposerDrafts = new Set();
+  const restoredComposerDrafts = new Map(Object.entries(uiState().restoredComposerDrafts || {}));
+  const pendingComposerDrafts = new Set([...composerDrafts.keys(), composerSessionId].filter(id => id.startsWith("draft:")));
 
   function saveComposerDraft() {
     if (!composerSessionId) return;
@@ -5410,6 +5514,7 @@
 
   function confirmComposerSession(sessionId) {
     if (!sessionId) return;
+    if (composerSessionId.startsWith("draft:initial:")) { bindComposerDraft(composerSessionId, sessionId); return; }
     if (pendingComposerDrafts.has(composerSessionId)) {
       if (!state.hostCaps?.composerDraftSession && state.railExpectedIdentity?.kind === "new" && railIdentitySatisfies(sessionId)) bindComposerDraft(composerSessionId, sessionId);
       return;
@@ -10022,6 +10127,7 @@
         `<div class="onb">` +
           `<p class="onb-heading">Install Meta's Muse Code CLI</p>` +
           `<p class="onb-desc">Install the <code>muse</code> CLI on this computer (or set <code>companions.museCliPath</code>), then re-check.</p>` +
+          (state.hostCaps?.installMuse ? `<button class="onb-action" type="button" data-act="installMuse">Install Muse Code</button>` : "") +
           `<button class="onb-action" type="button" data-act="recheckProvider" data-provider="muse">Re-check</button>` +
         `</div>`;
     } else if (mode === "muse-login") {
@@ -13162,13 +13268,14 @@
       `<div class="subagent-stream" hidden></div>` +
       `<div class="subagent-result" hidden></div>`;
     setSubagentTitle(el, call);
+    tagSubagentChildSession(el, call);
     // S-06: the same head as a companion card — who runs it and its status in
     // the one vocabulary (E-02). Grok's own subagents run inside this process.
     el.dataset.childKind = "native";
     el.dataset.childStatus = "running";
     if (!state.replaying) el.dataset.startedAt = String(Date.now());
     const kind = el.querySelector(".subagent-label");
-    if (kind) kind.title = "Grok's built-in subagent";
+    if (kind) { kind.title = `${providerDisplayName(state.activeProvider)} native subagent`; kind.textContent = "Native Subagent"; }
     const pill = h("span", { class: "cx-pill cx-pill--info subagent-child-status" }, CHILD_STATUS.running[0]);
     const row = el.querySelector(".subagent-row");
     if (row) row.appendChild(pill);
@@ -13198,7 +13305,15 @@
     // Task → status "completed" + rawOutput {type:"Text", text} with NO
     // duration (the subagent_finished lifecycle event fills that in).
     const out = call && call.rawOutput;
+    const usage = call?._meta?.subagentUsage;
+    if (typeof usage?.durationMs === "number") el._subagentDurationMs = usage.durationMs;
+    if (typeof usage?.tokens === "number") el._subagentTokens = usage.tokens;
     const status = String(call?.status || "").toLowerCase();
+    if (status === "background") {
+      el.querySelector(".blink-dots")?.remove();
+      el.dataset.childStatus = "background";
+      const pill = el.querySelector(".subagent-child-status"); if (pill) pill.textContent = "Background";
+    }
     const finished = status === "completed" || status === "failed" || status === "cancelled" ||
       (out && out.type === "SubagentCompleted");
     if (!finished) return;
@@ -13220,7 +13335,7 @@
     // Thread the failure/cancel through the tool-channel path too — not just the
     // lifecycle rail — since the tool-channel completion is the common ordering.
     finishSubagentCard(el, {
-      durationMs: out && typeof out.duration_ms === "number" ? out.duration_ms : null,
+      durationMs: out && typeof out.duration_ms === "number" ? out.duration_ms : el._subagentDurationMs ?? null,
       output,
       failed: status === "failed",
       cancelled: status === "cancelled",
@@ -13307,8 +13422,17 @@
           `<span class="run-progress-kind"></span>` +
           `<span class="run-progress-sep">·</span>` +
           `<span class="run-progress-title"></span>` +
-          BLINK_DOTS +
+          // After the PHASE, not after the title. `.run-progress-title` is
+          // `text-overflow: ellipsis`, so a long run name really does end in
+          // "…" — and three dots glued to its right edge (the dots carry
+          // `margin-left: 1px`) are indistinguishable from that truncation.
+          // The owner read the card exactly that way the first time he saw a
+          // real one: "those dots in the middle" don't look like liveness,
+          // they look like a name cut short. Past the phase they pulse on the
+          // thing that is actually in progress, which is also the idiom
+          // everywhere else in this file — `Thinking⋯`, never `Think⋯ing`.
           `<span class="run-progress-phase"></span>` +
+          BLINK_DOTS +
         `</div>` +
         `<div class="run-progress-sub" hidden></div>` +
         `<div class="run-progress-detail" hidden></div>` +
@@ -13319,13 +13443,26 @@
 
     const kindLabel = update.kind === "goal" ? "Goal" : "Workflow";
     el.querySelector(".run-progress-kind").textContent = kindLabel;
+    // A goal_updated with no display handle sets `title` to the kind label
+    // itself (src/run-progress.ts), which drew the row as "Goal - Goal". Drop
+    // the redundant half AND its separator -- an emptied span still costs the
+    // row a 6px flex gap.
     const title = update.title || id;
-    el.querySelector(".run-progress-title").textContent = title;
-    el.querySelector(".run-progress-title").title = title;
+    const redundant = title === kindLabel;
+    const titleEl = el.querySelector(".run-progress-title");
+    titleEl.textContent = redundant ? "" : title;
+    titleEl.title = redundant ? "" : title;
+    titleEl.hidden = redundant;
+    el.querySelector(".run-progress-sep").hidden = redundant;
 
     const phase = String(update.phase || "running");
+    // Paused is neither working nor finished, and three places need to agree
+    // on it: the dots (removed), the controls (Resume rather than Pause), and
+    // the phase label. Derived from the machine value, never from the label —
+    // `user_paused` is what a real pause puts here.
+    const paused = /paus/.test(phase);
     const pct =
-      typeof update.progress === "number" && Number.isFinite(update.progress)
+      update.kind !== "workflow" && typeof update.progress === "number" && Number.isFinite(update.progress)
         ? ` ${Math.round(update.progress * 100)}%`
         : "";
     const phaseEl = el.querySelector(".run-progress-phase");
@@ -13336,8 +13473,14 @@
         : update.done
           ? (phase === "completed" || phase === "success" ? "done" : phase)
           : phase;
-    // Underscores are wire syntax (`budget_exceeded`, `user_paused`); the
-    // machine value stays on update.phase (upstream 52caa7c).
+    // Underscores are wire syntax. Most phases are single words, but the ones
+    // that arrive when a run ends badly are not — `budget_exceeded`,
+    // `budget_limited`, `accounting_incomplete` — and neither is the
+    // discriminator the parser falls back to when no phase field arrives at
+    // all. The machine value stays on `update.phase`, which the pause/resume
+    // test below still reads; this is only what the row shows.
+    // (src/run-progress.ts documents why this lives here and not there: the
+    // machine value has to survive the trip intact.)
     phaseEl.textContent = `· ${String(statusWord).replace(/[_-]+/g, " ").trim()}${pct}`;
 
     const sub = el.querySelector(".run-progress-sub");
@@ -13361,45 +13504,52 @@
     el.classList.toggle("run-progress-cancelled", !!update.cancelled && !update.failed);
     el.classList.toggle("run-progress-done", !!update.done);
 
+    // Goal elapsed display retains its existing local clock.
+    const row = el.querySelector(".run-progress-row");
+    if (update.done) clearWaitElapsed(row);
+    else if (row && !row._waitTimer && !state.replaying) armWaitElapsed(row, "run-progress-elapsed");
+
+    if (update.kind === "workflow") {
+      const phases = update.phases || el._workflowPhases || [];
+      const agents = update.agents || el._workflowAgents || [];
+      el._workflowPhases = phases; el._workflowAgents = agents;
+      let roster = el.querySelector(".native-workflow-roster");
+      if (!roster) { roster = document.createElement("details"); roster.className = "native-workflow-roster"; el.appendChild(roster); }
+      const wasOpen = roster.open;
+      roster.hidden = !phases.length && !agents.length && !update.detail;
+      roster.innerHTML = `<summary>${escapeHtml(phases.slice(0, 3).map(p => p.title).join(" · ") || "Native workflow details")}</summary>`
+        + phases.map(p => `<div class="native-workflow-step"><strong>${escapeHtml(p.title)}</strong> ${escapeHtml(p.state || "")}<div>${agents.filter(a => a.phase === p.id || a.phase === p.title).map(a => escapeHtml(a.label) + " · " + escapeHtml(a.state || "")).join("<br>")}</div></div>`).join("")
+        + agents.filter(a => !phases.some(p => a.phase === p.id || a.phase === p.title)).map(a => `<div>${escapeHtml(a.label)} · ${escapeHtml(a.state || "")}</div>`).join("");
+      roster.open = wasOpen;
+      el.querySelector(".run-progress-kind").textContent = "Native workflow";
+      if (update.launchOnly) phaseEl.textContent = "· launched in background";
+      const actions = el.querySelector(".run-progress-actions");
+      actions.hidden = true;
+      if (!update.done && update.controlsAvailable !== false && update.displayName) {
+        actions.hidden = false;
+        actions.innerHTML = `<button type="button">${paused ? "Resume" : "Pause"}</button><button type="button">Stop</button>`;
+        actions.children[0].onclick = () => vscode.postMessage({ type: "workflowControl", action: paused ? "resume" : "pause", displayName: update.displayName });
+        actions.children[1].onclick = () => vscode.postMessage({ type: "workflowControl", action: "stop", displayName: update.displayName });
+      }
+    }
     const dots = el.querySelector(".blink-dots");
-    // Paused is neither working nor finished: no live dots beside "paused"
-    // (upstream 3d26795). Derived from the machine value, never the label.
-    const paused = /paus/.test(phase);
-    if (update.done || paused) {
+    // Not while paused, and this was the owner's sharpest observation on the
+    // real card: "the timer continued, then stopped. But the three blinking
+    // dots didn't." Three dots pulsing beside the word "paused" says the card
+    // does not believe its own label — the dots mean "working", and a paused
+    // run is the one state that is neither working nor finished. The clock
+    // above keeps running on purpose: wall-clock time really is still passing,
+    // and freezing it would need a second timebase we do not have.
+    if (update.done || paused || update.launchOnly) {
       if (dots) dots.remove();
     } else if (!dots) {
-      // Restarted (e.g. resume) — put dots back after the title.
-      const titleEl = el.querySelector(".run-progress-title");
-      if (titleEl) titleEl.insertAdjacentHTML("afterend", BLINK_DOTS);
+      // Restarted (e.g. resume) — put dots back where the template puts them,
+      // after the phase. Anchoring this on the title instead is what would
+      // quietly reintroduce the ellipsis ambiguity on resumed runs only.
+      const phaseAnchor = el.querySelector(".run-progress-phase");
+      if (phaseAnchor) phaseAnchor.insertAdjacentHTML("afterend", BLINK_DOTS);
     }
 
-    // Workflow control buttons (pause/resume/stop) while running or paused.
-    const actions = el.querySelector(".run-progress-actions");
-    if (update.kind === "workflow" && update.displayName && !update.done) {
-      actions.hidden = false;
-      actions.innerHTML = "";
-      const mk = (label, action) => {
-        const b = document.createElement("button");
-        b.type = "button";
-        b.className = "run-progress-btn";
-        b.textContent = label;
-        b.onclick = (e) => {
-          e.stopPropagation();
-          vscode.postMessage({
-            type: "workflowControl",
-            action,
-            displayName: update.displayName,
-          });
-        };
-        return b;
-      };
-      if (paused) actions.appendChild(mk("Resume", "resume"));
-      else actions.appendChild(mk("Pause", "pause"));
-      actions.appendChild(mk("Stop", "stop"));
-    } else {
-      actions.hidden = true;
-      actions.innerHTML = "";
-    }
 
     scrollToBottom();
   }
@@ -16271,7 +16421,7 @@
     stopVoiceForManualSend();
     queueOutgoing(t, chips);
     input.value = "";
-    if (composerSessionId) { composerDrafts.delete(composerSessionId); setUiState({ composerDrafts: Object.fromEntries(composerDrafts) }); }
+    if (composerSessionId) { composerDrafts.delete(composerSessionId); restoredComposerDrafts.delete(composerSessionId); setUiState({ composerDrafts: Object.fromEntries(composerDrafts), restoredComposerDrafts: Object.fromEntries(restoredComposerDrafts) }); }
     renderInputHighlight(); // also flips the busy button back to Stop (empty composer)
     updateSlash();
     updateMention();
@@ -16336,7 +16486,7 @@
     // comes back via postChips) — the host snapshots its own copy on send.
     vscode.postMessage({ type: "send", text: sendText, ...(submissionId ? { submissionId } : {}) });
     input.value = "";
-    if (composerSessionId) { composerDrafts.delete(composerSessionId); setUiState({ composerDrafts: Object.fromEntries(composerDrafts) }); }
+    if (composerSessionId) { composerDrafts.delete(composerSessionId); restoredComposerDrafts.delete(composerSessionId); setUiState({ composerDrafts: Object.fromEntries(composerDrafts), restoredComposerDrafts: Object.fromEntries(restoredComposerDrafts) }); }
     renderInputHighlight();
     slashPopover.hidden = true;
     hideMention();
@@ -17069,6 +17219,8 @@
         thinking.classList.add("expanded");
       }
     }
+    const nativeDetails = el.closest(".native-workflow-roster");
+    if (nativeDetails && !nativeDetails.hidden) nativeDetails.open = true;
     const group = el.closest(".tool-group");
     if (group) setGroupExpanded(group, true);
     const details = el.closest(".tool-item-details");
@@ -17586,6 +17738,7 @@
     }
     switch (msg.type) {
       case "initialState":
+        state.museSettings = msg.museSettings;
         state.useCtrlEnter = msg.useCtrlEnter;
         state.effort = msg.effort || "";
         state.cwd = msg.cwd || "";
@@ -18048,14 +18201,31 @@
         forceScrollToBottom();
         break;
       }
+      case "startupStatus": {
+        const key = msg.sessionId || composerSessionId || "initial";
+        if (msg.sessionId && composerSessionId && msg.sessionId !== composerSessionId && msg.sessionId !== state.activeSessionId) break;
+        const prior = state.startupStatus;
+        if (prior && prior.key === key && (msg.generation < prior.generation || (msg.generation === prior.generation && msg.sequence <= prior.sequence))) break;
+        state.startupStatus = { ...msg, key };
+        if (msg.stage) setWelcomeStatus(msg.stage === "consent" ? "Waiting for approval" : msg.stage === "cli-update" ? "Waiting for CLI update" : "Starting conversation", true);
+        else {  if (!state.busy) setWelcomeStatus("", false); }
+        break;
+      }
       case "composerDraftSession":
         bindComposerDraft(msg.draftId, msg.sessionId);
         break;
       case "restoreComposer": {
+        const restoreId = msg.sessionId || composerSessionId;
+        if (msg.draft && restoreId) {
+          const restored = restoredComposerDrafts.get(restoreId) || [];
+          if (restored.includes(msg.text)) break;
+          restoredComposerDrafts.set(restoreId, [...restored, msg.text]);
+          setUiState({ restoredComposerDrafts: Object.fromEntries(restoredComposerDrafts) });
+        }
         if (msg.sessionId && composerSessionId && msg.sessionId !== composerSessionId) {
           const draft = composerDrafts.get(msg.sessionId) || { text: "", chips: [] };
           composerDrafts.set(msg.sessionId, { ...draft,
-            text: [draft.text, msg.text].filter(Boolean).join("\n\n"),
+            text: msg.draft && draft.text.trim() === (msg.text || "").trim() ? draft.text : [draft.text, msg.text].filter(Boolean).join("\n\n"),
             chips: [...new Map([...draft.chips, ...(msg.chips || [])].map(chip => [chip.id, chip])).values()],
           });
           setUiState({ composerDrafts: Object.fromEntries(composerDrafts) });
@@ -18070,7 +18240,7 @@
         // typed is the user's, and silently destroying it would be the same
         // class of bug as the one Edit exists to fix.
         const existing = input.value.trim();
-        input.value = msg.draft && existing.includes(msg.text || "") ? input.value : [existing, msg.text].filter(Boolean).join("\n\n");
+        input.value = msg.draft && existing === (msg.text || "").trim() ? input.value : [existing, msg.text].filter(Boolean).join("\n\n");
         input.focus();
         updateSlash();
         updateMention();
@@ -18240,7 +18410,12 @@
         updateDonut();
         break;
       }
+      case "museSettings":
+        state.museSettings = msg.value;
+        refreshSettingsOverlay();
+        break;
       case "modeChanged":
+        state.availableModes = msg.modes;
         state.currentModeId = msg.modeId;
         updateModeBtn(msg.modeId);
         break;
@@ -19226,6 +19401,8 @@
       case "xaiNotification":
         break;
       case "sessionRemoved": {
+        composerDrafts.delete(msg.id);
+        setUiState({ composerDrafts: Object.fromEntries(composerDrafts) });
         if (!msg.id) break;
         const removed = state.sessions.find((s) => s.id === msg.id);
         state.sessions = state.sessions.filter((s) => s.id !== msg.id);
@@ -19600,6 +19777,7 @@
       const act = onbAction.dataset.act;
       if (LAUNCH_ACTS.includes(act)) markOnboardingLaunched(act, onbAction.dataset.provider);
       if (act === "runInstall") vscode.postMessage({ type: "runInstallCmd" });
+      else if (act === "installMuse") vscode.postMessage({ type: "runMuseInstallCmd" });
       else if (act === "installCodex") vscode.postMessage({ type: "installCodex" });
       else if (act === "cancelCodexInstall") vscode.postMessage({ type: "cancelCodexInstall" });
       else if (act === "runLogin") vscode.postMessage({ type: "runGrokLogin" });
@@ -19868,6 +20046,7 @@
     composerPreferredColumn = null;
     vscode.postMessage({ type: "composerFocus", focused: false });
   });
+  input.addEventListener("select", saveComposerDraft);
   input.addEventListener("pointerdown", () => { composerPreferredColumn = null; });
   input.addEventListener("input", () => {
     saveComposerDraft();
