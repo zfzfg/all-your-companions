@@ -7,7 +7,8 @@ are here to *use* it, [README.md](../README.md) is the right page.
 
 ```bash
 npm install
-npm run compile           # extension host + Muse adapter → out/
+npm run compile           # esbuild bundle (extension + agy-acp-adapter) + Muse adapter → out/
+npm run compile:modules   # unbundled tsc compilation → out-modules/ (for live-tests, telemetry-probe, smoke)
 npm run typecheck         # tsc over src/ and over the tests (tsconfig.test.json)
 npm run lint              # ESLint, correctness rules only (eslint.config.mjs)
 npm test                  # grok-free unit/DOM/fake-CLI suite

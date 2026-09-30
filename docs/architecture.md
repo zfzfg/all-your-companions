@@ -462,7 +462,14 @@ The sidebar has 7,605 physical lines and remains the composition root. Lazy coll
 
 Attachment staging/retention and pending promises/image handle maps belong to FileUploadHost. SessionCatalog owns presentation, pins, identity frames, metadata-write serialization, activity and sweep maps, and refresh timers. SessionStart owns the single startup serialization tail; TurnEdit owns cancel/send-race/limit/context recovery. New SessionMetadataHost and SidebarTelemetryHost own session type/delegation metadata and cached-only session-start reporting. SidebarViewHost owns webview/rail/settings setup, view handles, configuration watchers and the reaper timer.
 
-Dependency and operations groups have at most 25 declared and inherited properties, checked structurally. Mode IDs come from the backend hostModeSequence contract and are executed sequentially by AcpClient, with the existing setMode and reply-time Plan gate preserved. Native RPC capabilities remain distinct from local fallbacks; runtime probes and unsupported latches remain authoritative. The [provider inventory](provider-inventory.md) records 102 → 26 direct comparisons across the original 23 and current 26 files; 20 identity comparisons remain. Full acceptance still requires manual real-provider checks; W-09 and W-17–W-19 are separate.
+Dependency and operations groups have at most 25 declared and inherited properties, checked structurally. Mode IDs come from the backend hostModeSequence contract and are executed sequentially by AcpClient, with the existing setMode and reply-time Plan gate preserved. Native RPC capabilities remain distinct from local fallbacks; runtime probes and unsupported latches remain authoritative. The [provider inventory](provider-inventory.md) records 102 → 26 direct comparisons across the original 23 and current 26 files; 20 identity comparisons remain. W-15/W-16 have been accepted by user testing; W-17 is complete; W-18–W-19 remain separate.
+
+## W-17 Build pipeline and bundling
+
+The extension host build uses `esbuild` (`scripts/build.mjs`) to bundle `src/extension.ts` into `out/extension.js` and `src/agy-acp-adapter.ts` into `out/agy-acp-adapter.js` (Node platform, CommonJS format, Node 20 target, sourcemaps enabled).
+- **Externals**: `vscode`, `@agentclientprotocol/codex-acp`, `@agentclientprotocol/claude-agent-acp`, `@anthropic-ai/claude-agent-sdk`, `@muse-code/sdk`. Internal dependencies such as `ws` are bundled directly.
+- **Separate builds**: The Muse adapter continues to compile via `tsconfig.muse-adapter.json` to `out/muse-adapter/main.mjs`. Developer and test scripts (`live-tests.cjs`, `telemetry-probe.cjs`, `acp-smoke.mjs`, integration suite) compile unbundled modules to `out-modules/` via `tsconfig.unbundled.json` (`npm run compile:modules`).
+- **Markdown divider**: `media/chat.js` `renderMarkdown` parses standalone thematic breaks (`---`, `***`, `___`) into `<hr>` tags with theme-adaptive CSS (`--vscode-textSeparator-foreground`), preserving Setext heading syntax and table/fence immunity.
 
 ## Module map
 

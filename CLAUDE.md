@@ -40,7 +40,7 @@ you are deciding something, not on every turn.
 
 ```bash
 npm install
-npm test         # 6,273 passing tests (326 files; 4 existing skips), ~1 min, vitest — all binary-free (incl. happy-dom DOM tests + fake-CLI ACP integration tests)
+npm test         # 6,285 passing tests (326 files; 4 existing skips), ~1 min, vitest — all binary-free (incl. happy-dom DOM tests + fake-CLI ACP integration tests)
 npm run test:perf # opt-in session-history perf simulation (NOT in npm test/CI; see § History pagination)
 npm run test:integration # real VS Code Extension Host, 22 tests (~1 min). NOT part of `npm test`; CI runs it as a second required job.
 npm run ui:screens # screenshot harness: every companion surface × Dark/Light/HC → .screens/ui/<label>/index.html (Electron, no browser download; --only, --theme, --label)
@@ -51,7 +51,7 @@ npm run package  # → all-your-companions-<version>.vsix (`prepackage` deletes 
 
 For W-15/W-16 and subsequent maintainability work, run typecheck or compile plus focused behavior tests and lint for each cohesive block. Run the complete compile/typecheck/lint/unit/Electron gate at the milestone, and repeat affected checks after repairs. Do not add test skips or typecheck exclusions. Collaborator dependency and operations interfaces, including grouped state/actions and inherited members, stay at or under 25 properties.
 
-Provider capability questions use `provider-capabilities.ts`; backend modes use `AcpBackend.hostModeSequence`. CLI/auth/storage policies use `provider-cli.ts`, usage sources `provider-usage.ts`, and presentation `provider-ui.ts`. Run `node scripts/provider-inventory.cjs` to reject unreviewed direct provider branches. See [W-15/W-16 validation](docs/w15-w16-validation.md). W-09 DOM typing is complete (zero test excludes); W-17–W-19 remain separate work.
+Provider capability questions use `provider-capabilities.ts`; backend modes use `AcpBackend.hostModeSequence`. CLI/auth/storage policies use `provider-cli.ts`, usage sources `provider-usage.ts`, and presentation `provider-ui.ts`. Run `node scripts/provider-inventory.cjs` to reject unreviewed direct provider branches. See [W-15/W-16 validation](docs/w15-w16-validation.md). W-09 DOM typing is complete (zero test excludes); W-15/W-16 are accepted; W-17 esbuild bundling and unbundled pipeline is complete; W-18–W-19 remain separate work.
 
 ### Test taxonomy — three layers
 
