@@ -70,6 +70,32 @@ const companion = (over = {}) => ({
 // ------------------------------------------------------------ chat scenes --
 
 export const CHAT_SCENARIOS = {
+  "w18-shared-composer": {
+    run: async ({ send, page }) => {
+      await turn(send, "Shared helpers", "Divider\n\n---\n\nHeading\n---");
+      await send({ type: "commandsUpdate", commands: [
+        { name: "compact", description: "Compact conversation" },
+        { name: "design", description: "Design skill", _meta: { scope: "project", path: "/repo/SKILL.md" } },
+      ] });
+      await page.locator("#input").fill("Use /des");
+      await page.waitForFunction(() => document.querySelector("#slash-popover .slash-name")?.textContent.includes("design"));
+      await page.locator("#slash-popover .slash-item").first().click();
+      const picked = await page.locator("#input").inputValue();
+      if (picked !== "Use /design ") throw new Error("Skill completion changed: " + picked);
+      await send({ type: "chips", chips: [
+        { kind: "diagnostics", id: "diag", relPath: "Problems", scope: "workspace", severity: "error", count: 2, hidden: false },
+        { kind: "terminal", id: "term", relPath: "Terminal", label: "bash", bytes: 1024, hidden: false },
+      ] });
+      await send({ type: "queuedSends", items: ["First", "Second"], queued: [
+        { text: "First", chips: [] }, { text: "Second", chips: [] },
+      ] });
+      await page.waitForFunction(() => document.querySelector(".queued-text")?.textContent === "First\n\nSecond");
+      const okay = await page.evaluate(() => document.querySelector("#messages hr")
+        && [...document.querySelectorAll("#messages h2")].some(el => el.textContent === "Heading")
+        && document.body.textContent.includes("2 errors") && document.body.textContent.includes("Terminal: bash"));
+      if (!okay) throw new Error("Markdown/chip presentation changed");
+    },
+  },
   "session-type-picker": {
     run: async ({ send }) => {
       await send({ type: "sessionType", sessionId: "s-1", sessionType: "agent", locked: false });

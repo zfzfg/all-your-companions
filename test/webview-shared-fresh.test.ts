@@ -19,6 +19,7 @@ describe("generated webview shared helpers", () => {
     expect(helpers.filterCommands(commands, "test")).toEqual(filterCommands(commands, "test"));
     const chip = {kind: "terminal" as const, id: "t", hidden: false, relPath: "terminal", label: "bash", bytes: 1024};
     expect(helpers.contextChipLabel(chip)).toBe(contextChipLabel(chip));
+    expect(helpers.contextChipLabel({ relPath: "C:\\repo\\notes.md" })).toBe("notes.md");
     const entries = [{text: "one"}, {text: ""}, {text: "two"}];
     expect(helpers.queuedSendsText(entries)).toBe(queuedSendsText(entries));
   });

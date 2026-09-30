@@ -2098,5 +2098,5 @@ const WEBVIEW_MESSAGE_TYPE_MAP: Record<WebviewMsg["type"], true> = {
   openUpdateRelease: true, restartToUpdate: true,
 };
 
-export const HOST_MESSAGE_TYPES: readonly HostMsg["type"][] = Object.keys(HOST_MESSAGE_TYPE_MAP) as HostMsg["type"][];
-export const WEBVIEW_MESSAGE_TYPES: readonly WebviewMsg["type"][] = Object.keys(WEBVIEW_MESSAGE_TYPE_MAP) as WebviewMsg["type"][];
+export const HOST_MESSAGE_TYPES = Object.keys(HOST_MESSAGE_TYPE_MAP) as readonly HostMsg["type"][];
+export const WEBVIEW_MESSAGE_TYPES = Object.keys(WEBVIEW_MESSAGE_TYPE_MAP) as readonly WebviewMsg["type"][];

@@ -6,7 +6,7 @@
 // leaves PNGs plus a contact sheet behind for a person to look at. happy-dom
 // has no layout engine, so none of this is visible to `npm test`.
 //
-// The chat body is lifted out of getHtml() in src/sidebar.ts at run time, so
+// The chat body is lifted out of getHtml() in src/webview-html.ts at run time, so
 // the harness paints the markup that ships rather than a copy that can drift.
 //
 //   npm run ui:screens                        every scenario, every theme
@@ -40,8 +40,8 @@ const url = (p) => pathToFileURL(p).href;
 // ------------------------------------------------------------- chat page --
 
 function chatBody() {
-  const src = fs.readFileSync(path.join(root, "src", "sidebar.ts"), "utf8");
-  const fn = src.indexOf("private getHtml(webview: HostWebview)");
+  const src = fs.readFileSync(path.join(root, "src", "webview-html.ts"), "utf8");
+  const fn = src.indexOf("getHtml(webview: HostWebview)");
   const start = src.indexOf('<header class="top-bar">', fn);
   const end = src.indexOf("</footer>", start) + "</footer>".length;
   if (fn < 0 || start < 0 || end < start) throw new Error("could not find the chat body in getHtml()");
@@ -108,6 +108,8 @@ ${THEME_BOOT}
 </head><body class="settings-page">
 <script>document.body.classList.add(window.__themeKind);</script>
 <div id="settings-root"></div>
+<script src="${url(path.join(media, "generated/webview-shared.js"))}"></script>
+<script src="${url(path.join(media, "webview-helpers.js"))}"></script>
 <script src="${url(path.join(media, "settings.js"))}"></script>
 <script>
   window.__posted = [];
