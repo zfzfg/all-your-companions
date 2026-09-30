@@ -1,17 +1,4 @@
-/**
- * A warm-up failure that is not about credentials must not leave Claude
- * marked needs-login (#146).
- *
- * Codex learned this on 2026-08-17 — "leaving a stale needs-login standing made
- * Codex permanently unusable: it never cleared, so it stayed out of the model
- * picker and out of the connected confirmation, no matter how many times the
- * user signed in". Claude's catch had no equivalent branch, so the flag it set
- * once was the flag it kept.
- *
- * The failures that reach here in practice are precisely the non-credential
- * kind: an EPERM removing a scratch directory, or `session/new` answering
- * "Internal error".
- */
+/** Credential warnings survive technical failures and clear only after an authenticated warm-up. */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GrokSidebar } from "../src/sidebar";
 import { warmClaudeModelCache } from "../src/claude-model-cache";
@@ -45,16 +32,15 @@ beforeEach(() => {
 });
 
 describe("claude warm-up and the needs-login flag (#146)", () => {
-  it("clears a stale flag when the failure says nothing about credentials", async () => {
+  it("retains an unverified flag when a technical failure provides no credential evidence", async () => {
     const sidebar = makeSidebar();
     sidebar.providerNeedsLogin = { claude: true };
     probe.error = Object.assign(new Error("EPERM, Permission denied"), { code: "EPERM" });
 
     await expect(sidebar.warmConnectedClaudeModels()).resolves.toBe(false);
 
-    // The flag must not survive. Left standing, Claude stays out of the model
-    // picker and out of the connected confirmation however often you sign in.
-    expect(sidebar.providerNeedsLogin.claude).toBe(false);
+    // A technical error cannot prove successful authentication.
+    expect(sidebar.providerNeedsLogin.claude).toBe(true);
   });
 
   it("keeps saying needs-login when the failure IS about credentials", async () => {

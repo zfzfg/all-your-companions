@@ -14,8 +14,7 @@ phone and on a machine with no screen.
 It depends on where you press the button, and the difference is deliberate.
 
 **At the computer** — VS Code or Cursor — **Settings →
-Providers → Connect** opens a terminal there and runs the agent's own login
-command:
+Providers → Connect** first requests provider consent and checks existing authentication. Valid credentials are adopted without opening a terminal or browser. When authentication is missing, the login surface offers an explicit terminal action running the provider's own command:
 
 | Agent | Command | Credential lands in |
 |---|---|---|
@@ -32,8 +31,9 @@ not validity. Antigravity logout opens its TUI and asks the user to enter
 `/logout`; the extension keeps the account connected until confirmation.
 See [official Antigravity authentication](https://antigravity.google/docs/cli/install/).
 
-A terminal is the better affordance there, because the CLI opens your browser
-for you.
+Technical probe failures leave the account unverified; they never prove a successful login. Repeated Connect clicks share one check. Disconnect invalidates outstanding checks and their model results.
+
+Muse login and adapter processes use `TBH_CREDENTIAL_BACKEND=file` on Windows/Linux unless the user supplied a value. macOS retains Keychain behavior. See [Muse](muse.md).
 
 ## Historical upstream remote-login notes
 

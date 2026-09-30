@@ -206,5 +206,85 @@
     "category": "CLI-/Storage-Integration",
     "reason": "Read native Grok MCP configuration or provider-owned media; Grok-only catalog helpers select that specific identity.",
     "test": "voice-and-mcp.test.ts"
+  },
+  {
+    "file": "sidebar.ts",
+    "method": "displayMode",
+    "expr": "session.provider === \"muse\"",
+    "category": "Native Muse approval/process policy",
+    "reason": "Muse displays the last CLI-confirmed approval mode, independent of the host Plan gate.",
+    "test": "muse-session.test.ts, muse-backend.test.ts, provider-session.test.ts"
+  },
+  {
+    "file": "sidebar.ts",
+    "method": "autoApprovePendingPermissions",
+    "expr": "session.provider === \"muse\"",
+    "category": "Native Muse approval/process policy",
+    "reason": "Muse permission requests must retain CLI ownership; host YOLO cannot synthesize approval.",
+    "test": "muse-session.test.ts, muse-backend.test.ts, provider-session.test.ts"
+  },
+  {
+    "file": "provider-session.ts",
+    "method": "setMode",
+    "expr": "session.provider === \"muse\"",
+    "category": "Native Muse approval/process policy",
+    "reason": "Muse native mode changes require an accepted MSP response before persistence.",
+    "test": "muse-session.test.ts, muse-backend.test.ts, provider-session.test.ts"
+  },
+  {
+    "file": "provider-session.ts",
+    "method": "handlePermissionRequest",
+    "expr": "session.provider !== \"muse\"",
+    "category": "Native Muse approval/process policy",
+    "reason": "Muse never uses extension auto-accept as a fallback for its native approval policy.",
+    "test": "muse-session.test.ts, muse-backend.test.ts, provider-session.test.ts"
+  },
+  {
+    "file": "session-start.ts",
+    "method": "startSessionBody",
+    "expr": "session.provider === \"muse\"",
+    "category": "Native Muse approval/process policy",
+    "reason": "Capture Muse process posture and avoid applying generic host modes at startup.",
+    "test": "muse-session.test.ts, muse-backend.test.ts, provider-session.test.ts"
+  },
+  {
+    "file": "session-start.ts",
+    "method": "startSessionBody",
+    "expr": "session.provider !== \"muse\"",
+    "category": "Native Muse approval/process policy",
+    "reason": "Capture Muse process posture and avoid applying generic host modes at startup.",
+    "test": "muse-session.test.ts, muse-backend.test.ts, provider-session.test.ts"
+  },
+  {
+    "file": "session-start.ts",
+    "method": "spawnSessionProcess",
+    "expr": "session.provider === \"muse\"",
+    "category": "Native Muse approval/process policy",
+    "reason": "Pass the captured Muse posture to its dedicated adapter process.",
+    "test": "muse-session.test.ts, muse-backend.test.ts, provider-session.test.ts"
+  },
+  {
+    "file": "session-start.ts",
+    "method": "wireSessionListeners",
+    "expr": "session.provider === \"muse\"",
+    "category": "Native Muse approval/process policy",
+    "reason": "Publish native Muse mode evidence without enabling host Plan.",
+    "test": "muse-session.test.ts, muse-backend.test.ts, provider-session.test.ts"
+  },
+  {
+    "file": "session-start.ts",
+    "method": "loadOrResumeSession",
+    "expr": "session.provider !== \"muse\"",
+    "category": "Native Muse approval/process policy",
+    "reason": "The resumed Muse approval policy is authoritative; generic mode restoration is inappropriate.",
+    "test": "muse-session.test.ts, muse-backend.test.ts, provider-session.test.ts"
+  },
+  {
+    "file": "sidebar-inbound.ts",
+    "method": "tryHandle",
+    "expr": "provider === \"muse\"",
+    "category": "Native Muse approval/process policy",
+    "reason": "Muse login uses the same credential backend as its adapter on Windows/Linux.",
+    "test": "muse-session.test.ts, muse-backend.test.ts, provider-session.test.ts"
   }
 ]

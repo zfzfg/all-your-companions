@@ -351,7 +351,7 @@ export class ProviderSetup {
     this.deps.rearmAuthRecovery(provider);
   }
 
-  async warmConnectedCodexModels(requireProof = false): Promise<boolean> {
+  async warmConnectedCodexModels(_requireProof = false): Promise<boolean> {
     if (!this.hasProviderConsent("codex")) return false;
     const cliPath = this.locateProvider("codex");
     if (!cliPath) return false;
@@ -379,20 +379,12 @@ export class ProviderSetup {
       // but only when the failure IS about credentials.
       if (isCodexCredentialError(error)) {
         this.setProviderNeedsLogin("codex", true);
-      } else if (!requireProof) {
-        // Anything else says nothing about the sign-in, and leaving a stale
-        // needs-login standing made Codex permanently unusable: it never
-        // cleared, so it stayed out of the model picker and out of the
-        // "connected" confirmation, no matter how many times the user signed
-        // in. Observed as `Internal error` from session/new, which is not a
-        // credential failure at all.
-        this.setProviderNeedsLogin("codex", false);
       }
       return false;
     }
   }
 
-  async warmConnectedClaudeModels(requireProof = false): Promise<boolean> {
+  async warmConnectedClaudeModels(_requireProof = false): Promise<boolean> {
     if (!this.hasProviderConsent("claude")) return false;
     const cliPath = this.locateProvider("claude");
     if (!cliPath) return false;
@@ -417,19 +409,12 @@ export class ProviderSetup {
       this.host.appendLine(`[claude] model-cache warm-up failed: ${(error as Error).message}`);
       if (isClaudeCredentialError(error)) {
         this.setProviderNeedsLogin("claude", true);
-      } else if (!requireProof) {
-        // Anything else says nothing about the sign-in, and a stale needs-login
-        // left standing made Codex permanently unusable in exactly this way: it
-        // never cleared, so the account stayed out of the model picker and out
-        // of the "connected" confirmation however many times the user signed
-        // in. Claude had no such branch until #146.
-        this.setProviderNeedsLogin("claude", false);
       }
       return false;
     }
   }
 
-  async warmConnectedGeminiModels(requireProof = false): Promise<boolean> {
+  async warmConnectedGeminiModels(_requireProof = false): Promise<boolean> {
     if (!this.hasProviderConsent("gemini")) return false;
     const cliPath = this.locateProvider("gemini");
     if (!cliPath) return false;
@@ -455,8 +440,6 @@ export class ProviderSetup {
       this.host.appendLine(`[gemini] model-cache warm-up failed: ${(error as Error).message}`);
       if (isGeminiCredentialError(error)) {
         this.setProviderNeedsLogin("gemini", true);
-      } else if (!requireProof) {
-        this.setProviderNeedsLogin("gemini", false);
       }
       return false;
     }

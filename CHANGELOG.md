@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Check existing provider authentication before offering login, coalesce Connect checks, invalidate late results on Disconnect, and handle ACP spawn failures safely.
+- Preserve conversation drafts, selections and edited attachments through loading, focus changes and webview restoration using provisional draft identities.
+- Dispose old clients before provider reassignment, remember modes per provider, and identify session/approval/CLI-update startup waits.
+- Complete native Muse approval modes, sandbox/network/trust settings, confirmed installer, credential environments, usage windows, pending prompt/approval ownership and bounded session reopening.
+- Render six Markdown heading levels, bare links, GitHub PR chips and absolute paths with spaces; normalize native Codex children and Claude/Muse workflows into existing cards.
+- Update Grok 4.7 and Muse provider descriptions. Selective port provenance is recorded in [docs/upstream-4.14-port.md](docs/upstream-4.14-port.md).
+
 - Resolve context budgets by CLI access, model and session, with independent source/usage quality. Discover native Grok/Codex catalog changes, include GPT-6.1 Sol, and apply Codex's effective factor once.
 - Show unknown, estimated and stale limits honestly; remove generic Claude/Antigravity context defaults and preserve verified limits across ordinary updates. Reset context on model switches and forks.
 - Route all ACP prompts through a common budget preflight. Complete verified counts can block excess requests; incomplete estimates warn. Preserve blocked drafts and attachments through context recovery and failed compaction.

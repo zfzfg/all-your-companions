@@ -7,7 +7,7 @@
 [![VS Code](https://img.shields.io/badge/VS%20Code-Extension-007ACC?logo=visualstudiocode&logoColor=white)](https://code.visualstudio.com)
 [![Cursor](https://badgen.net/badge/Cursor/Extension/007ACC)](https://cursor.com)
 
-> **Unified GUI for AI Coding Companions** — Google Antigravity, Grok Build, OpenAI Codex, and Anthropic Claude Code.
+> **Unified GUI for AI Coding Companions** — Google Antigravity, Grok Build, OpenAI Codex, Anthropic Claude Code, and Meta Muse Code.
 >
 > **Maintainer:** Collin Lerche (zfzfg) | STERRA ([https://sterra.online](https://sterra.online))  
 > **Community Fork:** An independent community fork of *Grok Build for VS Code* (upstream v4.1.8 by Paweł Huryn), redesigned and expanded as a local-first multi-companion powerhouse.
@@ -28,8 +28,9 @@ By stripping away the remote-control overhead and dead relay pathways, we refocu
 ### 2. Four AI Giants on Equal Footing
 No companion is treated as a second-class citizen. All leading AI coding command-line interfaces sit on equal footing within a single, elegant sidebar:
 - **Google Antigravity CLI (`agy`)**: Full integration of Gemini 2.5 Pro, Flash, and Gemini 3. Features multimodal vision handling (pasted screenshots), server-side auto-compaction, Plan Mode review workflows, and zero-flicker background execution on Windows.
-- **xAI Grok Build (`grok`)**: Full support for Grok 4.6, SuperGrok, and xAI API with streaming reasoning traces.
+- **xAI Grok Build (`grok`)**: Full support for Grok 4.7, SuperGrok, and xAI API with streaming reasoning traces.
 - **OpenAI Codex CLI (`codex`)**: Direct ACP JSON-RPC bridge with token counting and compaction.
+- **Meta Muse Code (`muse`)**: Native approval modes, shell sandbox settings, account usage windows and native workflow cards. See [Muse setup](docs/muse.md).
 - **Anthropic Claude Code CLI (`claude`)**: Deep ACP integration with full terminal tooling, checkpointing, and permissions.
 
 Switch models or companion providers on the fly in any conversation — context carries forward seamlessly.
@@ -63,7 +64,7 @@ When any companion proposes an edit, hit **open diff →** to review the whole f
 <details>
 <summary><strong>Universal Multi-Companion Support</strong> — Antigravity (Gemini), Grok, Codex & Claude</summary>
 
-Connect any leading AI companion in **Settings → Providers**. Antigravity CLI (`agy`) brings Gemini 2.5/3 Pro & Flash with full streaming reasoning; Grok Build brings Grok 4.6; Codex and Claude Code run over ACP stdio. Switch companions or models anytime mid-thread without losing context.
+Connect any leading AI companion in **Settings → Providers**. Antigravity CLI (`agy`) brings Gemini 2.5/3 Pro & Flash with full streaming reasoning; Grok Build brings Grok 4.7; Codex and Claude Code run over ACP stdio. Change models supported by the current companion; start a new conversation to change companions after a turn.
 
 </details>
 
@@ -181,9 +182,10 @@ LaTeX in answers — inline `\(…\)`, display `\[…\]`, matrices, integrals �
 - **VS Code** 1.106+ (or a compatible editor on the same base, e.g. Cursor 3.x).
 - **At least one Companion CLI installed:**
   - **Google Antigravity CLI** (`agy` / `antigravity`) with Gemini access, OR
-  - **Grok Build CLI** (`grok`) with SuperGrok / X Premium+ or xAI API key, OR
+  - **Grok Build CLI** (`grok`) with an X or Grok account (free trial with usage limits), SuperGrok / X Premium+ or an xAI API key, OR
   - **OpenAI Codex CLI** (`codex`), OR
-  - **Anthropic Claude Code CLI** (`claude`).
+  - **Anthropic Claude Code CLI** (`claude`), OR
+  - **Meta Muse Code CLI** (`muse`).
 - **Voice control** (optional): requires [`ffmpeg`](https://ffmpeg.org) on PATH to record audio.
 
 ---
@@ -283,3 +285,5 @@ Fork maintained and evolved by Collin Lerche (zfzfg) | STERRA ([https://sterra.o
 
 Not affiliated with or endorsed by SpaceXAI, xAI, Google, Anthropic, or OpenAI. Grok and xAI are trademarks of xAI.
 
+
+Grok Build can be tried with any X or Grok account, subject to usage limits. Sustained use may require SuperGrok, X Premium+ or an xAI API key. This is not a promise of unlimited usage.

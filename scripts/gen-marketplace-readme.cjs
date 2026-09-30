@@ -23,12 +23,12 @@ const header = `# All your Companions - in one Place!
 
 [![License: FSL-1.1-MIT](https://img.shields.io/badge/License-FSL--1.1--MIT-blue.svg)](https://github.com/phuryn/grok-build-vscode/blob/main/LICENSE) ![Agents](https://img.shields.io/badge/Agents-Antigravity%20%C2%B7%20Grok%20%C2%B7%20Codex%20%C2%B7%20Claude-000000) [![VS Code](https://img.shields.io/badge/VS%20Code-Extension-007ACC?logo=visualstudiocode&logoColor=white)](https://code.visualstudio.com) [![Cursor](https://badgen.net/badge/Cursor/Extension/007ACC)](https://cursor.com)
 
-> **Unified GUI for AI Coding Companions** — Google Antigravity, Grok Build, OpenAI Codex, and Anthropic Claude Code.
+> **Unified GUI for AI Coding Companions** — Google Antigravity, Grok Build, OpenAI Codex, Anthropic Claude Code, and Meta Muse Code.
 >
 > **Maintainer:** Collin Lerche (zfzfg) | STERRA ([https://sterra.online](https://sterra.online))  
 > **Community Fork:** An independent community fork of *Grok Build for VS Code* (upstream v4.1.8 by Paweł Huryn), redesigned and expanded as a local-first multi-companion powerhouse.
 
-The unified, local-first GUI for your favorite AI coding companions: **Google Antigravity CLI** (Gemini 2.5/3), **Grok Build** (Grok 4.6), **OpenAI Codex**, and **Claude Code** — right inside your editor. Drop open files in as \`@\`-context, run **parallel sessions**, inspect **native diff previews** with **one-click revert**, keep **resumable chat history**, typeset **LaTeX & Mermaid diagrams**, and dictate by **voice**.
+The unified, local-first GUI for your favorite AI coding companions: **Google Antigravity CLI** (Gemini 2.5/3), **Grok Build** (Grok 4.7), **OpenAI Codex**, **Claude Code**, and **Muse Code** — right inside your editor. Drop open files in as \`@\`-context, run **parallel sessions**, inspect **native diff previews** with **one-click revert**, keep **resumable chat history**, typeset **LaTeX & Mermaid diagrams**, and dictate by **voice**.
 
 ---
 
@@ -72,7 +72,7 @@ const companionBlock = `## Companion apps
 All your Companions is completely standalone and local-first — no external relay servers or third-party cloud brokers required. It natively coordinates:
 
 - **Google Antigravity CLI (\`agy\`)** — Gemini 2.5 Pro/Flash and Gemini 3 with massive context, multimodal vision, and streaming reasoning traces.
-- **xAI Grok Build (\`grok\`)** — Grok 4.6, SuperGrok, and xAI API integration.
+- **xAI Grok Build (\`grok\`)** — Grok 4.7, SuperGrok, and xAI API integration.
 - **OpenAI Codex CLI (\`codex\`)** — High-speed ACP JSON-RPC bridge.
 - **Anthropic Claude Code CLI (\`claude\`)** — Full ACP terminal and session integration.
 

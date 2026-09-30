@@ -52,3 +52,7 @@ Settings → Connectors → On this computer uses the vendors' marks (Airtable, 
 | **Wiring** | `appendConnectorLogo` in [`media/settings.js`](../media/settings.js); sibling URLs of `settings.js`, same pattern as `file-icons/` |
 
 Marks are trademarks of their owners. Inclusion is identification only and does not imply endorsement.
+
+## Selective 4.11–4.14 port
+
+See [port provenance](upstream-4.14-port.md) for source commits and adaptations. Credits include Paweł Huryn, mateolafalce3@gmail.com, Michael (lafalce-assistant), and fiko942 for the preserved draft/attachment contributions.
