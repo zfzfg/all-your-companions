@@ -63,7 +63,7 @@ describe("who receives a rewound message", () => {
    */
   it("parks the text on its conversation rather than dropping it", () => {
     const body = methodBody("private restoreComposerFor(");
-    expect(body).toContain("this.rememberQueuedDraft(id");
+    expect(body).toContain("queuedDraft: parked");
   });
 
   /**

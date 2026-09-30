@@ -5375,6 +5375,84 @@
     }
   }
 
+  // Stored with the existing webview state so a reload retains every draft.
+  const composerDrafts = new Map(Object.entries(uiState().composerDrafts || {}));
+  let composerSessionId = uiState().composerSessionId || null;
+  let composerExpectedSessionId = null;
+  const pendingComposerDrafts = new Set();
+
+  function saveComposerDraft() {
+    if (!composerSessionId) return;
+    composerDrafts.set(composerSessionId, {
+      text: input.value, chips: explicitVisibleChips(state.chips),
+      start: input.selectionStart, end: input.selectionEnd,
+    });
+    setUiState({ composerDrafts: Object.fromEntries(composerDrafts), composerSessionId });
+  }
+
+  function switchComposerDraft(sessionId) {
+    if (!sessionId || composerSessionId === sessionId) return;
+    saveComposerDraft();
+    const draft = composerDrafts.get(sessionId);
+    if (composerSessionId) {
+      input.value = draft?.text || "";
+      state.chips = draft?.chips || [];
+      renderChips();
+    }
+    composerSessionId = sessionId;
+    input.selectionStart = draft?.start ?? input.value.length;
+    input.selectionEnd = draft?.end ?? input.value.length;
+    slashPopover.hidden = true;
+    hideMention();
+    renderInputHighlight();
+    saveComposerDraft();
+  }
+
+  function confirmComposerSession(sessionId) {
+    if (!sessionId) return;
+    if (pendingComposerDrafts.has(composerSessionId)) {
+      if (!state.hostCaps?.composerDraftSession && state.railExpectedIdentity?.kind === "new" && railIdentitySatisfies(sessionId)) bindComposerDraft(composerSessionId, sessionId);
+      return;
+    }
+    if (composerExpectedSessionId && composerExpectedSessionId !== sessionId) return;
+    switchComposerDraft(sessionId);
+    composerExpectedSessionId = null;
+  }
+
+  function bindComposerDraft(draftId, sessionId) {
+    if (!sessionId || !pendingComposerDrafts.delete(draftId)) return;
+    if (composerSessionId === draftId) {
+      composerSessionId = sessionId;
+      saveComposerDraft();
+    } else if (composerDrafts.has(draftId)) {
+      const draft = composerDrafts.get(draftId);
+      if (composerSessionId === sessionId) {
+        input.value = [draft.text, input.value].filter(Boolean).join("\n\n");
+        state.chips = [...new Map([...(draft.chips || []), ...state.chips].map(chip => [chip.id, chip])).values()];
+        renderChips();
+        renderInputHighlight();
+        saveComposerDraft();
+      } else composerDrafts.set(sessionId, draft);
+    }
+    composerDrafts.delete(draftId);
+    setUiState({ composerDrafts: Object.fromEntries(composerDrafts), composerSessionId });
+  }
+
+  if (composerSessionId) {
+    const draft = composerDrafts.get(composerSessionId);
+    if (draft) {
+      input.value = draft.text || "";
+      state.chips = draft.chips || [];
+      input.selectionStart = draft.start ?? input.value.length;
+      input.selectionEnd = draft.end ?? input.value.length;
+    }
+  }
+
+  function postNewSession(fields = {}) {
+    vscode.postMessage({ type: "newSession", ...fields,
+      ...(pendingComposerDrafts.has(composerSessionId) ? { draftId: composerSessionId } : {}) });
+  }
+
   /**
    * Replace any in-flight transition. One at a time; a new click bumps the
    * token so a late frame for the old one cannot complete or clear the new.
@@ -5407,6 +5485,15 @@
         // as confirmation of a conversation the host had not created yet.
         knownIds: railKnownSessionIds(),
       };
+    if (fields.kind === "new") {
+      const draftId = "draft:" + Date.now() + ":" + token;
+      pendingComposerDrafts.add(draftId);
+      switchComposerDraft(draftId);
+      composerExpectedSessionId = null;
+    } else {
+      composerExpectedSessionId = fields.sessionId;
+      switchComposerDraft(fields.sessionId);
+    }
     // Highlight without a veil would claim conversation X while Y is still on
     // screen and fully actionable. Pair them so the click is visibly owned.
     veilTranscriptForPendingOpen();
@@ -5455,6 +5542,8 @@
     if (!state.railTransition) return;
     clearRailTransitionTimer();
     state.railTransition = null;
+    composerExpectedSessionId = null;
+    if (state.activeSessionId) switchComposerDraft(state.activeSessionId);
     // historyReplay owns the veil while a transcript is materialising; leave
     // it up if we are mid-replay so aborting a superseded click cannot blank a
     // real load still in progress.
@@ -6507,7 +6596,7 @@
     // transcript must not grow an empty-state panel on top of it.
     startRailNewTransition(repoCwd, "creating", previousSessionId);
     resetForNewSession();
-    vscode.postMessage({ type: "newSession" });
+    postNewSession();
   }
 
   // History stays a dedicated control; New sits next to it in the top bar
@@ -10068,6 +10157,7 @@
     const el = document.createElement("div");
     el.className = `msg ${role}`;
     el._copyText = text || "";
+    el._chips = chips || [];
     // A steered (interjected) message rides inside the turn that was already
     // running — it is not its own prompt and has no rewind point, so it must be
     // excluded from the bubble→rewind-point mapping (see refreshUserRewindButtons).
@@ -16181,6 +16271,7 @@
     stopVoiceForManualSend();
     queueOutgoing(t, chips);
     input.value = "";
+    if (composerSessionId) { composerDrafts.delete(composerSessionId); setUiState({ composerDrafts: Object.fromEntries(composerDrafts) }); }
     renderInputHighlight(); // also flips the busy button back to Stop (empty composer)
     updateSlash();
     updateMention();
@@ -16245,6 +16336,7 @@
     // comes back via postChips) — the host snapshots its own copy on send.
     vscode.postMessage({ type: "send", text: sendText, ...(submissionId ? { submissionId } : {}) });
     input.value = "";
+    if (composerSessionId) { composerDrafts.delete(composerSessionId); setUiState({ composerDrafts: Object.fromEntries(composerDrafts) }); }
     renderInputHighlight();
     slashPopover.hidden = true;
     hideMention();
@@ -17956,13 +18048,29 @@
         forceScrollToBottom();
         break;
       }
+      case "composerDraftSession":
+        bindComposerDraft(msg.draftId, msg.sessionId);
+        break;
       case "restoreComposer": {
+        if (msg.sessionId && composerSessionId && msg.sessionId !== composerSessionId) {
+          const draft = composerDrafts.get(msg.sessionId) || { text: "", chips: [] };
+          composerDrafts.set(msg.sessionId, { ...draft,
+            text: [draft.text, msg.text].filter(Boolean).join("\n\n"),
+            chips: [...new Map([...draft.chips, ...(msg.chips || [])].map(chip => [chip.id, chip])).values()],
+          });
+          setUiState({ composerDrafts: Object.fromEntries(composerDrafts) });
+          break;
+        }
+        if (msg.chips?.length) {
+          state.chips = [...new Map([...state.chips, ...msg.chips].map(chip => [chip.id, chip])).values()];
+          renderChips();
+        }
         // Edit-and-resend (#56): the rewound message comes back so it can be
         // fixed and sent again. APPEND rather than overwrite — anything already
         // typed is the user's, and silently destroying it would be the same
         // class of bug as the one Edit exists to fix.
         const existing = input.value.trim();
-        input.value = existing ? existing + "\n\n" + (msg.text || "") : (msg.text || "");
+        input.value = msg.draft && existing.includes(msg.text || "") ? input.value : [existing, msg.text].filter(Boolean).join("\n\n");
         input.focus();
         updateSlash();
         updateMention();
@@ -17970,6 +18078,7 @@
         updateSendButton();
         // Caret to the end so typing continues the restored text.
         input.selectionStart = input.selectionEnd = input.value.length;
+        saveComposerDraft();
         break;
       }
       case "grokUpdateStatus":
@@ -18085,6 +18194,7 @@
           && (prev.repoCwd || "") === (next.repoCwd || ""));
         state.sessionName = next;
         // Host-confirmed identity only. Optimistic rail clicks never write here.
+        confirmComposerSession(msg.sessionId);
         state.activeSessionId = msg.sessionId;
         // May complete a resume (id match) or bind a new-session resolved id.
         noteRailTransitionSessionName(msg);
@@ -19159,6 +19269,7 @@
           // Still an identity frame for the rail transition — activeId is this
           // tab's, even when the popover is about to re-request a filtered page.
           if (msg.activeId !== undefined) {
+            confirmComposerSession(msg.activeId || null);
             state.activeSessionId = msg.activeId || null;
             noteRailTransitionSessions(msg, entries);
             noteHostIdentityKnown(msg.activeId || null);
@@ -19192,6 +19303,7 @@
           // noteHostIdentityKnown is deliberately NOT here — this handler's
           // noteRailTransitionSessions runs at the end (it needs the adopted
           // rows), and the latch has to be read after it. See below.
+          confirmComposerSession(msg.activeId || null);
           state.activeSessionId = msg.activeId || null;
           if (state.activeSessionId) {
             const activeEntry = entries.find((entry) => entry.id === state.activeSessionId)
@@ -19341,7 +19453,7 @@
             // the placeholder stays in creating rather than looking stuck on
             // a switch that already completed.
             noteRailTransitionRepos(msg);
-            vscode.postMessage({ type: "newSession" });
+            postNewSession();
           } else {
             noteRailTransitionRepos(msg);
           }
@@ -19584,12 +19696,16 @@
       // yields, and exactly what belongs back in the composer. NOT the rewind
       // result's `prompt_text` — that IS this message, but in raw wire form
       // (envelope + tags still attached).
-      vscode.postMessage({
+      const editMsg = {
         type: "editLastMessage",
         userBubbleIndex: idx,
         text: (msgEl && msgEl._copyText) || "",
         totalUserBubbles: visibleUserBubbleCount(),
-      });
+      };
+      if (msgEl && msgEl._chips && msgEl._chips.length) {
+        editMsg.chips = msgEl._chips;
+      }
+      vscode.postMessage(editMsg);
       return;
     }
     closePopovers();
@@ -19754,6 +19870,7 @@
   });
   input.addEventListener("pointerdown", () => { composerPreferredColumn = null; });
   input.addEventListener("input", () => {
+    saveComposerDraft();
     composerPreferredColumn = null;
     updateSlash();
     updateMention();

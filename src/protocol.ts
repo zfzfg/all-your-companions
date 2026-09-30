@@ -1327,7 +1327,8 @@ export type HostMsg =
   | { type: "findInSession" }
   /** Put text back in the composer (Edit-and-resend, #56). Posted after the
    *  rewind + reload so it survives the clearMessages/replay that follows. */
-  | { type: "restoreComposer"; text: string }
+  | { type: "composerDraftSession"; draftId: string; sessionId: string }
+  | { type: "restoreComposer"; text: string; chips?: ContextChip[]; sessionId?: string; draft?: boolean }
   /** Drop everything after the Nth visible user message (rewind/edit, P2-9).
    *  Replaces the old clearMessages + full reload, which blanked the panel to
    *  the welcome logo and re-rendered the whole conversation. */
@@ -1431,7 +1432,7 @@ export type WebviewMsg =
   // it is asking for — the VS Code rail's per-project "+". Optional and additive:
   // omitted, the host starts in its own scope exactly as before. The host
   // resolves it through the catalog and ignores anything unknown.
-  | { type: "newSession"; cwd?: string }
+  | { type: "newSession"; cwd?: string; draftId?: string }
   | { type: "cancel" }
   | { type: "pickModel" }
   | { type: "setMode"; modeId: "agent" | "plan" | "yolo" }
@@ -2013,7 +2014,7 @@ export type WebviewMsg =
   | { type: "rewindSession"; userBubbleIndex?: number; text?: string; totalUserBubbles?: number }
   /** Edit-and-resend (#56): rewind past this (latest) user message and hand its
    *  text back to the composer. `text` is the bubble's own cleaned copy text. */
-  | { type: "editLastMessage"; userBubbleIndex: number; text: string; totalUserBubbles?: number }
+  | { type: "editLastMessage"; userBubbleIndex: number; text: string; totalUserBubbles?: number; chips?: ContextChip[] }
   /** Reply to `uiConfirmRequest`. The confirm lives in the chat, so the
    *  webview that was shown the dialog is the one that answers it. */
   | { type: "uiConfirmAnswer"; id: string; ok: boolean }
@@ -2057,7 +2058,7 @@ const HOST_MESSAGE_TYPE_MAP: Record<HostMsg["type"], true> = {
   sessionContext: true, clearMessages: true, onboarding: true, error: true, hostNotice: true,
   xaiNotification: true, subagentUpdate: true, childStream: true, runProgress: true, commandOutput: true, expandCommandOutputs: true, steerByDefault: true, promptNav: true,
   soundNotifications: true, processingSound: true, readRepliesAloud: true, summarizeRepliesAloud: true, speechSummary: true, imageOriginal: true, moveComposerCaret: true, 
-  setAllToolDetails: true, focusInput: true, findInSession: true, restoreComposer: true, truncateMessages: true, uiConfirmRequest: true, uiConfirmResolved: true, subscriptionUsage: true,
+  setAllToolDetails: true, focusInput: true, findInSession: true, restoreComposer: true, composerDraftSession: true, truncateMessages: true, uiConfirmRequest: true, uiConfirmResolved: true, subscriptionUsage: true,
   sessions: true, sessionRemoved: true, repoSessions: true, pinnedSessions: true, repos: true, sessionDot: true, queuedSends: true, 
   steerUnavailable: true, feedbackAvailability: true, turnFeedbackAck: true, usage: true, providerCapabilities: true, planEntries: true, reviewCenter: true, crewRun: true, ruleFiles: true, permissionRules: true, agentRoles: true, workflowGenerator: true,
 };

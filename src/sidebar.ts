@@ -3702,8 +3702,9 @@ ${detail}`,
     text: string,
     totalUserBubbles?: number,
     session: Session = this.focused,
+    chips?: ContextChip[],
   ): Promise<void> {
-    return this.delegateSidebarMethod("editLastMessage", () => this.turnEdit.editLastMessage(userBubbleIndex, text, totalUserBubbles, session));
+    return this.delegateSidebarMethod("editLastMessage", () => this.turnEdit.editLastMessage(userBubbleIndex, text, totalUserBubbles, session, chips));
   }
 
   /**
@@ -3733,9 +3734,12 @@ ${detail}`,
   private restoreComposerFor(
     session: Session,
     text: string,
+    chips?: ContextChip[],
+    draft = false,
   ): void {
-    if (!text) return;
-    const message: HostMsg = { type: "restoreComposer", text };
+    if (!text && !chips?.length) return;
+    if (chips?.length) session.chips = [...new Map([...session.chips, ...chips].map(chip => [chip.id, chip])).values()];
+    const message: HostMsg = { type: "restoreComposer", text, sessionId: session.activeSessionId, ...(draft ? { draft: true } : {}), ...(chips?.length ? { chips } : {}) };
     if (this.focused === session) {
       // postLocal posts to the focused webview whatever it is displaying.
       this.postLocal(message);
@@ -3758,7 +3762,10 @@ ${detail}`,
     // ("anything already typed is the user's"); the store follows the same rule
     // rather than being the one place that silently drops a message.
     const parked = this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {})[id]?.queuedDraft;
-    void this.rememberQueuedDraft(id, parked ? `${parked}\n\n${text}` : text);
+    void this.updateSessionMeta(current => ({ ...current, [id]: { ...current[id],
+      queuedDraft: parked ? `${parked}\n\n${text}` : text,
+      queuedDraftChips: [...new Map([...(current[id]?.queuedDraftChips ?? []), ...(chips ?? [])].map(chip => [chip.id, chip])).values()],
+    } }));
   }
 
   /** See {@link editLastMessage} for why `session` is explicit. */
@@ -4887,15 +4894,16 @@ ${detail}`,
     if (!hasComposer || session.needsProvider) return;
     const id = session.activeSessionId;
     if (!id) return;
-    const draft = this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {})[id]?.queuedDraft;
-    if (!draft) return;
+    const meta = this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {})[id];
+    const draft = meta?.queuedDraft;
+    if (!draft && !meta?.queuedDraftChips?.length) return;
     void this.updateSessionMeta((current) => {
       const meta = current[id];
       if (!meta?.queuedDraft) return null;
-      const { queuedDraft: _restored, ...rest } = meta;
+      const { queuedDraft: _restored, queuedDraftChips: _chips, ...rest } = meta;
       return { ...current, [id]: rest };
     });
-    this.emit(session, { type: "restoreComposer", text: draft });
+    this.restoreComposerFor(session, draft ?? "", meta?.queuedDraftChips, true);
   }
 
   /** Restore a replacement's captured draft only after its provider start
@@ -7235,8 +7243,8 @@ ${detail}`,
   }
 
   /** Start a brand-new session, keeping the current one alive in the background. */
-  private async newFocusedSession(requestedCwd?: string): Promise<void> {
-    return this.delegateSidebarMethod("newFocusedSession", () => this.sessionCatalog.newFocusedSession(requestedCwd));
+  private async newFocusedSession(requestedCwd?: string, draftId?: string): Promise<void> {
+    return this.delegateSidebarMethod("newFocusedSession", () => this.sessionCatalog.newFocusedSession(requestedCwd, draftId));
   }
 
   /**

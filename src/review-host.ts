@@ -1,3 +1,4 @@
+import type { ContextChip } from "./context-chips";
 /** ReviewHost: GrokSidebar collaborators. Methods moved unchanged. */
 import type { Host } from "./host";
 import { Uri } from "./host";
@@ -44,7 +45,7 @@ export interface ReviewHostDeps {
   notifyUser(level: "info" | "warning" | "error", text: string): void;
   truncateSessionCardsAfterRewind(sessionId: string, surviving: number): Promise<void>;
   applyRewindToView(session: Session, surviving: number): void;
-  restoreComposerFor(session: Session, text: string): void;
+  restoreComposerFor(session: Session, text: string, chips?: ContextChip[]): void;
 }
 
 export class ReviewHost {
@@ -873,6 +874,7 @@ export class ReviewHost {
       bubbleText?: string;
       totalUserBubbles?: number;
       edit: boolean;
+      chips?: ContextChip[];
     },
   ): Promise<void> {
     const sid = session.activeSessionId;
@@ -1013,7 +1015,7 @@ export class ReviewHost {
     this.applyRewindToView(session, surviving);
     this.checkpointStore?.pruneAfter(sid, surviving);
     const restoredText = (opts.bubbleText ?? "").trim();
-    if (restoredText) this.restoreComposerFor(session, restoredText);
+    if (restoredText) this.restoreComposerFor(session, restoredText, opts.chips);
 
     if (failed.length) {
       this.notifyUser("error", `Rewound the conversation, but some files could not be restored:\n${failed.join("\n")}`);

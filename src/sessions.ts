@@ -1,3 +1,4 @@
+import type { ContextChip } from "./context-chips";
 import type { AcpProvider } from "./acp-backend";
 import * as nodeFs from "node:fs";
 import type { SessionTypeMeta } from "./session-type";
@@ -161,6 +162,7 @@ export interface SessionMetaOverride extends SessionTypeMeta {
    *  typed it. Restored into the composer the next time the conversation starts,
    *  and cleared in the same write so a reopen cannot append it twice. */
   queuedDraft?: string;
+  queuedDraftChips?: ContextChip[];
 }
 export type SessionMetaOverrides = Record<string, SessionMetaOverride>;
 

@@ -142,6 +142,7 @@ export function preferredPermissionAllowOption(
  * singletons it replaces 1:1).
  */
 export class Session {
+  composerDraftId?: string;
   /** Provider is fixed once the first user turn enters history, except an
    *  explicit limit-failover switch (AP-06) that the user confirmed. */
   provider: AcpProvider = "grok";

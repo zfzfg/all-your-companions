@@ -110,7 +110,7 @@ export interface TurnEditSteerOps {
 export interface TurnEditRewindOps {
   notifyUser(level: "info" | "warning" | "error", text: string): void;
   rewindFromClientCheckpoints(session: Session, opts: any): Promise<void>;
-  restoreComposerFor(session: Session, text: string): void;
+  restoreComposerFor(session: Session, text: string, chips?: ContextChip[]): void;
   checkWorkspaceGitStatus(cwd: string): Promise<any>;
   workspaceRoot(): string;
   confirmInChat(session: Session, opts: any): Promise<boolean>;
@@ -187,8 +187,8 @@ export class TurnEdit {
     this.deps.steerOps.notifyUser(level, text);
   }
 
-  private restoreComposerFor(session: Session, text: string): void {
-    this.deps.rewindOps.restoreComposerFor(session, text);
+  private restoreComposerFor(session: Session, text: string, chips?: ContextChip[]): void {
+    this.deps.rewindOps.restoreComposerFor(session, text, chips);
   }
 
   private sessionDisplayName(session: Session): string {
@@ -559,9 +559,10 @@ export class TurnEdit {
     text: string,
     totalUserBubbles?: number,
     session: Session = this.deps.getFocused(),
+    requestedChips?: ContextChip[],
   ): Promise<void> {
     const override = this.deps.getOverride?.<typeof this.editLastMessage>("editLastMessage");
-    if (override) return override(userBubbleIndex, text, totalUserBubbles, session);
+    if (override) return override(userBubbleIndex, text, totalUserBubbles, session, requestedChips);
 
     if (!session.client || !session.activeSessionId) {
       return void this.notifyUser("warning", "Start a session before editing a message.");
@@ -577,9 +578,12 @@ export class TurnEdit {
       );
     }
     const { client, gen, activeSessionId, userMessageCount } = session;
+    const sent = session.buffer.filter((message): message is Extract<HostMsg, { type: "userMessage" }> => message.type === "userMessage" && !message.steer)[userBubbleIndex];
+    const chips = sent?.chips?.filter(chip => !requestedChips || requestedChips.some(requested => requested.id === chip.id)) ?? [];
+
     if (providerCapability(session.provider, "nativeRewind").state !== "yes") {
       await this.deps.rewindOps.rewindFromClientCheckpoints(session, {
-        userBubbleIndex, bubbleText: text, totalUserBubbles, edit: true,
+        userBubbleIndex, bubbleText: text, totalUserBubbles, edit: true, chips,
       });
       return;
     }
@@ -587,7 +591,7 @@ export class TurnEdit {
       const points = await client.listRewindPoints();
       if (points === "unsupported") {
         await this.deps.rewindOps.rewindFromClientCheckpoints(session, {
-          userBubbleIndex, bubbleText: text, totalUserBubbles, edit: true,
+          userBubbleIndex, bubbleText: text, totalUserBubbles, edit: true, chips,
         });
         return;
       }
@@ -601,7 +605,7 @@ export class TurnEdit {
       }
       const target = resolveEditRewindTarget(points, userBubbleIndex);
       if (!target) {
-        this.restoreComposerFor(session, text);
+        this.restoreComposerFor(session, text, chips);
         return void this.notifyUser("info",
           "Grok has no restore point for that message, so it can't be rolled back. Its text is back in the composer.",
         );
@@ -633,7 +637,7 @@ export class TurnEdit {
       });
       if (result === "unsupported") {
         await this.deps.rewindOps.rewindFromClientCheckpoints(session, {
-          userBubbleIndex, bubbleText: text, totalUserBubbles, edit: true,
+          userBubbleIndex, bubbleText: text, totalUserBubbles, edit: true, chips,
         });
         return;
       }
@@ -650,7 +654,7 @@ export class TurnEdit {
       if (resumeId) await this.deps.rewindOps.truncateSessionCardsAfterRewind(resumeId, surviving);
       this.deps.rewindOps.applyRewindToView(session, surviving);
       if (resumeId) this.deps.checkpointStore?.pruneAfter(resumeId, surviving);
-      this.restoreComposerFor(session, text);
+      this.restoreComposerFor(session, text, chips);
       if (reportedFiles > 0) {
         this.notifyUser("info",
           "Message moved back to the composer. Files were rolled back — anything created after that point may still be on disk.",

@@ -397,7 +397,7 @@ export class SessionInboundRouter {
         await this.deps.composer.handleSend(msg.text, msg.bare === true, session, undefined, msg.submissionId);
         break;
       case "newSession":
-        await this.deps.sessions.newFocusedSession(msg.cwd);
+        await this.deps.sessions.newFocusedSession(msg.cwd, msg.draftId);
         break;
       case "cancel": {
         // Stop stops the ROLE when one is running for this thread (AP-10) —
@@ -501,7 +501,7 @@ export class SessionInboundRouter {
         break;
       }
       case "editLastMessage":
-        await this.deps.sessions.editLastMessage(msg.userBubbleIndex, msg.text, msg.totalUserBubbles, session);
+        await this.deps.sessions.editLastMessage(msg.userBubbleIndex, msg.text, msg.totalUserBubbles, session, msg.chips);
         break;
       case "refreshSubscriptionUsage":
         void this.deps.sessionSettings.refreshSubscriptionUsage(session);

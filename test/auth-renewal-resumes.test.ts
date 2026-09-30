@@ -87,7 +87,7 @@ function loginSidebar(needsLogin: Record<string, boolean>) {
   sidebar.host = { appendLine: vi.fn(), createTerminal: vi.fn(() => ({ show: vi.fn() })) };
   // Connect is where consent is stated, so the real setProviderConnected runs
   // here and needs somewhere to persist to (#171).
-  sidebar.providerConnectionState = {};
+  sidebar.providerConnectionState = { grok: true, codex: true, claude: true, gemini: true };
   sidebar.state = { get: (_key: string, fallback: unknown) => fallback, update: vi.fn(async () => {}) };
   sidebar.postProviderState = vi.fn();
   sidebar.invalidateSubscriptionUsage = vi.fn();

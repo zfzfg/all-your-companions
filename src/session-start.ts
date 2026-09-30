@@ -918,6 +918,10 @@ export class SessionStart {
           },
         }));
       }
+      if (session.composerDraftId && res.sessionId) {
+        this.deps.emit(session, { type: "composerDraftSession", draftId: session.composerDraftId, sessionId: res.sessionId });
+        session.composerDraftId = undefined;
+      }
       this.deps.emit(session, {
         type: "session",
         sessionId: res.sessionId,

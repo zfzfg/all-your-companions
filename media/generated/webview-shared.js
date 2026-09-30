@@ -150,6 +150,7 @@ var GrokWebviewShared = (() => {
     focusInput: true,
     findInSession: true,
     restoreComposer: true,
+    composerDraftSession: true,
     truncateMessages: true,
     uiConfirmRequest: true,
     uiConfirmResolved: true,

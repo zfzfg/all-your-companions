@@ -1443,9 +1443,9 @@ export class SessionCatalog {
     }
   }
 
-  async newFocusedSession(requestedCwd?: string): Promise<void> {
+  async newFocusedSession(requestedCwd?: string, draftId?: string): Promise<void> {
     const testOverride = this.deps.getOverride?.<typeof this.newFocusedSession>("newFocusedSession");
-    if (testOverride) return testOverride(requestedCwd);
+    if (testOverride) return testOverride(requestedCwd, draftId);
 
     const named = requestedCwd ? this.resolveLocalRepoTarget(requestedCwd) : undefined;
     if (requestedCwd && !named) {
@@ -1464,8 +1464,10 @@ export class SessionCatalog {
     this.parkFocused();
     const unused = this.deps.lifecycleOps.findUnusedEmptySession(targetCwd, leavingId);
     if (unused?.session?.client) {
+      if (draftId) this.deps.uiOps.postLocal({ type: "composerDraftSession", draftId, sessionId: unused.id });
       this.focusSession(unused.session);
     } else if (unused?.session) {
+      unused.session.composerDraftId = draftId;
       this.deps.setFocused(unused.session);
       this.deps.getPool().add(this.deps.getFocused());
       this.deps.uiOps.getWebview()?.postMessage({ type: "clearMessages" });
@@ -1474,6 +1476,7 @@ export class SessionCatalog {
       await this.openSession(unused.id, unused.cwd);
     } else {
       const fresh = this.deps.lifecycleOps.newLocalSession();
+      fresh.composerDraftId = draftId;
       this.deps.setFocused(fresh);
       this.deps.sessionOps.setSessionCwd(fresh, targetCwd, this.deps.repoOps.workspaceRoot());
       fresh.provider = this.deps.repoOps.defaultProviderForProject(targetCwd);
