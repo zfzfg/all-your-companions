@@ -636,7 +636,11 @@ export class AgyAcpAdapterServer {
     this.output = options.outputStream || process.stdout;
     this.spawnFn = options.spawnFn || ((cmd, args, opts) => spawn(cmd, args, opts));
     // Fake long-lived processes must not cause real binary probes in unit tests.
-    this.modelDiscovery = options.modelDiscovery ?? (!options.spawnFn ? () => new Promise<string>((resolve, reject) => {
+    // Protocol-only cases leave spawnFn unset; under Vitest those must not launch
+    // a real `agy models` either. A live CLI delays session/new past the reply
+    // the suite waits for, and the suite is binary-free.
+    const discoverLiveModels = !options.spawnFn && process.env.VITEST !== "true";
+    this.modelDiscovery = options.modelDiscovery ?? (discoverLiveModels ? () => new Promise<string>((resolve, reject) => {
       const proc = this.spawnFn(this.agyPath, ["models"], { cwd: this.cwd, env: this.env,
         stdio: ["pipe", "pipe", "pipe"], shell: grokCliNeedsShell(this.agyPath), windowsHide: true });
       let output = "";
