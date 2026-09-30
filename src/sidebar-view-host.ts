@@ -135,7 +135,7 @@ export class SidebarViewHost {
         this.deps.sidebarOps.state.museCliPath = undefined;
         this.deps.sidebarOps.actions.postProviderState();
       }
-      if (e.affectsConfiguration("grok.geminiCliPath")) {
+      if (e.affectsConfiguration("grok.geminiCliPath") || e.affectsConfiguration("companions.antigravityCliPath") || e.affectsConfiguration("companions.geminiCliPath")) {
         this.deps.sidebarOps.state.geminiCliPath = undefined;
         this.deps.sidebarOps.actions.postProviderState();
       }

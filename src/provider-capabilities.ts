@@ -298,19 +298,14 @@ export const PROVIDER_CAPABILITIES: Record<
       state: "no",
       reason: "Subagent delegation is not supported by Gemini.",
     },
-    // One provider id, two CLIs: Gemini CLI sends entries[], Antigravity sends
-    // prose (plan-entries.ts head comment). Resolved at runtime by whether a
-    // list has actually arrived; unresolved it stays a probe, because the
-    // wrong guess here writes a false sentence into every derived briefing.
+    // Antigravity sends plans as prose (plan-entries.ts head comment).
+    // Resolved at runtime by whether structured entries have actually arrived;
+    // unresolved it stays a probe.
     structuredPlan: {
       state: "probe",
-      reason: "Gemini CLI reports a step list; Antigravity reports plans as prose.",
+      reason: "Antigravity reports plans as prose unless structured plan entries are observed.",
     },
-    // Not covered by research/mcp-shapes.md (that probe ran grok/codex/claude
-    // only). Antigravity and Gemini CLI share this provider id and may differ,
-    // so the cell stays a probe until `research/probe-acp-mcp.cjs gemini` has
-    // run on this machine. A probe cell is spawnable (§6.3 rule 3 refuses only
-    // "no") but does not get the host `companions` server until it is proven.
+    // Whether Antigravity consumes host MCP servers over ACP.
     hostMcp: {
       state: "probe",
       reason: "Whether Antigravity consumes host MCP servers over ACP is unprobed — run research/probe-acp-mcp.cjs gemini.",
@@ -438,11 +433,8 @@ export function providerCapability(
     }
   }
 
-  // `gemini` is one provider id over two CLIs that differ here (Gemini CLI
-  // sends entries, Antigravity sends prose), so the static cell cannot answer.
-  // One list actually seen settles it; nothing seen leaves it a probe rather
-  // than guessing, because "has not planned yet" and "cannot report a plan"
-  // call for different briefings.
+  // Antigravity reports plans as prose unless structured plan entries are observed.
+  // One list actually seen settles it; nothing seen leaves it a probe.
   if (cap === "structuredPlan" && provider === "gemini" && runtime?.sawPlanEntries === true) {
     return { state: "yes" };
   }

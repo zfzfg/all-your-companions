@@ -38,11 +38,13 @@ function providerSpec(provider) {
         : {},
     },
     gemini: {
-      // Antigravity and Gemini CLI share the `gemini` provider id. Which one is
-      // on PATH decides what this probe measures — record that in the note.
-      command: process.env.GEMINI_BIN || (process.platform === "win32" ? "gemini.cmd" : "gemini"),
-      args: ["--experimental-acp"],
-      env: {},
+      // Antigravity CLI (agy) via adapter
+      command: process.execPath,
+      args: [path.join(REPO, "out/agy-acp-adapter.js")],
+      env: {
+        AGY_PATH: process.env.AGY_PATH || "agy",
+        ELECTRON_RUN_AS_NODE: "1",
+      },
     },
   };
   return specs[provider];

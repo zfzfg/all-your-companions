@@ -23,7 +23,7 @@ import { CODEX_ACP_ADAPTER_VERSION, CodexBackend, isCodexCredentialError } from 
 import { CODEX_MANAGED_VERSION, installManagedCodex } from "./codex-managed-installer";
 import { warmCodexModelCache } from "./codex-model-cache";
 import { GeminiBackend, isGeminiCredentialError } from "./gemini-backend";
-import { hasAntigravityCredentials, isAntigravityCli } from "./gemini-cli-locator";
+import { hasAntigravityCredentials } from "./gemini-cli-locator";
 import { warmGeminiModelCache } from "./gemini-model-cache";
 import type { Host, HostContext } from "./host";
 import { MuseBackend } from "./muse-backend";
@@ -158,9 +158,14 @@ export class ProviderSetup {
       this[policy.cacheKey] = undefined;
       return undefined;
     }
-    const cfg = this.host?.getConfiguration ? this.host.getConfiguration("grok") : undefined;
+    const companionsCfg = this.host?.getConfiguration ? this.host.getConfiguration("companions") : undefined;
+    const grokCfg = this.host?.getConfiguration ? this.host.getConfiguration("grok") : undefined;
+    const configuredPath = (policy.cacheKey === "geminiCliPath"
+      ? (companionsCfg?.get<string>("antigravityCliPath") || companionsCfg?.get<string>("geminiCliPath"))
+      : companionsCfg?.get<string>(policy.cacheKey))
+      ?? grokCfg?.get<string>(policy.cacheKey, "") ?? "";
     return this[policy.cacheKey] = policy.locate({
-      configuredPath: cfg?.get<string>(policy.cacheKey, "") ?? "",
+      configuredPath,
       managedStorageRoot: this.context?.globalStorageUri?.fsPath ?? "",
       arch: process.arch,
     });
@@ -421,9 +426,8 @@ export class ProviderSetup {
       });
       // The Antigravity adapter answers session/new from a static model list
       // without launching `agy`, so this warm-up proves the binary, not the
-      // account — it reported Connected while signed out. The legacy `gemini`
-      // CLI does open a real session, so it still speaks for itself.
-      const signedIn = !isAntigravityCli(cliPath) || hasAntigravityCredentials();
+      // account. Cached credentials or keyring indicate a signed-in account.
+      const signedIn = hasAntigravityCredentials();
       if (!signedIn) this.host.appendLine("[gemini] no cached Antigravity credentials found — start `agy` to sign in");
       this.setProviderNeedsLogin("gemini", !signedIn);
       return signedIn;

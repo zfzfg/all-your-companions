@@ -36,7 +36,6 @@ The final Muse regression prevents a no-op mode sequence from raising a Plan gat
 | Grok | Found under .grok/bin | Credential file exists; authentication and manual flows unverified |
 | Codex | Found in the Codex app installation | Credential file exists; authentication and manual flows unverified |
 | Claude | Not found | Open prerequisite |
-| Gemini CLI | Separate CLI not found | Open prerequisite |
 | Antigravity | Found under .gemini/bin/agy.exe | Windows keyring target present; token validity and streaming unverified |
 | Muse | Not found | Open prerequisite |
 
@@ -46,6 +45,6 @@ Credential-file presence is no validity claim. Manual sidebar/rail, provider ses
 
 The first installed W-15/W-16 build failed on `ready`: the state host's appPurpose callback re-entered the sidebar wrapper indefinitely. A regression test reproduced the exact RangeError before repair. The callback was removed; the state host reads persisted state itself and still honors dynamically injected overrides. The boundary test now builds a real initialState frame through production wiring, and the Electron smoke explicitly awaits the real ready handler so caught asynchronous view errors cannot hide startup rejection.
 
-The local Antigravity CLI help does not expose `auth login`. Sign-in now starts its interactive TUI without arguments, as specified by [Google](https://antigravity.google/docs/cli/install/); [Gemini CLI](https://github.com/google-gemini/gemini-cli#-authentication-options) uses the same startup flow. Antigravity logout opens the TUI with instructions for `/logout` and keeps state connected until completion is observed. Windows credential detection recognizes the exact `gemini:antigravity` keyring target from bounded `cmdkey /list` metadata, without reading or logging secrets. Legacy files and Gemini API-key fallback are preserved; injected filesystem tests remain isolated from machine credentials. Ten regression tests were added; the focused repair gate passed 91 tests in six files.
+The local Antigravity CLI help does not expose `auth login`. Sign-in now starts its interactive TUI without arguments, as specified by [Google](https://antigravity.google/docs/cli/install/). Antigravity logout opens the TUI with instructions for `/logout` and keeps state connected until completion is observed. Windows credential detection recognizes the exact `gemini:antigravity` keyring target from bounded `cmdkey /list` metadata, without reading or logging secrets. Legacy files and Gemini API-key fallback are preserved; injected filesystem tests remain isolated from machine credentials. Ten regression tests were added; the focused repair gate passed 91 tests in six files.
 
 The reported GitHub CLI failure was a stale process PATH. GitHub CLI 2.101.0 exists at `C:\Program Files\GitHub CLI\gh.exe` and resolves after reading the current machine/user PATH. No additional installation or account login was performed. Restart VS Code completely to inherit that environment. The user's initial Grok/Antigravity startup checks failed; repaired-build acceptance remains pending rather than being recorded as a manual pass.

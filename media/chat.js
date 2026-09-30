@@ -9828,7 +9828,7 @@
               `<span class="onb-agent-mark">${providerLogoMarkup("claude")}</span><span><strong>Claude Code</strong><small>Claude Code CLI</small></span>` +
             `</button>` +
             `<button class="onb-agent-tile onb-action" type="button" data-act="connectProvider" data-provider="gemini">` +
-              `<span class="onb-agent-mark">${providerLogoMarkup("gemini")}</span><span><strong>Gemini</strong><small>Antigravity CLI</small></span>` +
+              `<span class="onb-agent-mark">${providerLogoMarkup("gemini")}</span><span><strong>Gemini</strong><small>Antigravity CLI (agy)</small></span>` +
             `</button>` +
             `<button class="onb-agent-tile onb-action" type="button" data-act="connectProvider" data-provider="muse">` +
               `<span class="onb-agent-mark">${providerLogoMarkup("muse")}</span><span><strong>Muse Code</strong><small>Meta Muse CLI</small></span>` +
@@ -9911,7 +9911,7 @@
         : "curl -fsSL https://antigravity.google/cli/install.sh | bash";
       onb.innerHTML =
         `<div class="onb">` +
-          `<p class="onb-heading">Install Google Antigravity (Gemini) CLI</p>` +
+          `<p class="onb-heading">Install Google Antigravity CLI (agy)</p>` +
           `<p class="onb-desc">Install Google's official Antigravity CLI (<code>agy</code>), then re-check:</p>` +
           `<div class="onb-cmd"><code>${installCmd}</code><button class="onb-copy" type="button" title="Copy" data-cmd="${installCmd}">${ICON.copy}</button></div>` +
           `<button class="onb-action" type="button" data-act="recheckProvider" data-provider="gemini">Re-check</button>` +
@@ -9937,10 +9937,10 @@
       if (ver) setWelcomeStatus("Finish signing in", false);
       onb.innerHTML =
         `<div class="onb">` +
-          `<p class="onb-heading">Sign in with Gemini</p>` +
-          `<p class="onb-desc">Sign in with the Gemini CLI in your terminal, then connect here.</p>` +
-          `<button class="onb-action onb-secondary" type="button" data-act="connectProvider" data-provider="gemini">Open terminal &amp; run <code>gemini auth login</code></button>` +
-          `<button class="onb-action" type="button" data-act="recheckProvider" data-provider="gemini">Done - connect Gemini</button>` +
+          `<p class="onb-heading">Sign in to Google Antigravity</p>` +
+          `<p class="onb-desc">Sign in with the Antigravity CLI (<code>agy</code>) in your terminal, then connect here.</p>` +
+          `<button class="onb-action onb-secondary" type="button" data-act="connectProvider" data-provider="gemini">Open terminal &amp; run <code>agy</code></button>` +
+          `<button class="onb-action" type="button" data-act="recheckProvider" data-provider="gemini">Done - connect Antigravity</button>` +
         `</div>`;
     } else if (mode === "auth-required") {
       if (ver) setWelcomeStatus("Authentication required", false);

@@ -17,7 +17,7 @@ function sidebarWith(connections: Record<string, boolean>) {
 }
 
 describe("stored connection consent at the host boundary (#171)", () => {
-  it.each(["C:/Users/dev/.gemini/bin/agy.exe", "/usr/bin/gemini"])("opens interactive Gemini sign-in without unsupported auth arguments for %s", async (cliPath) => {
+  it.each(["C:/Users/dev/.gemini/bin/agy.exe", "/usr/local/bin/agy"])("opens interactive Antigravity sign-in without unsupported auth arguments for %s", async (cliPath) => {
     const sidebar = sidebarWith({});
     sidebar.focused = new Session();
     sidebar.pool = new Set([sidebar.focused]);

@@ -13,19 +13,7 @@ import {
   parseAgyModelsOutput,
 } from "../src/gemini-backend";
 
-describe("Gemini spawn", () => {
-  it("spawns the gemini CLI with --acp flag for legacy gemini", () => {
-    const backend = new GeminiBackend();
-    const spec = backend.spawn({
-      cliPath: "gemini",
-      cwd: "C:\\repo",
-      env: { KEEP_ME: "yes" },
-    });
-    expect(spec.command).toBe("gemini");
-    expect(spec.args).toEqual(["--acp"]);
-    expect(spec.env).toMatchObject({ KEEP_ME: "yes" });
-  });
-
+describe("Antigravity spawn", () => {
   it("spawns AgyAcpAdapter via node when Antigravity agy binary is provided", () => {
     const backend = new GeminiBackend({ adapterPath: "/fake/agy-acp-adapter.js" });
     const spec = backend.spawn({
@@ -42,15 +30,20 @@ describe("Gemini spawn", () => {
     });
   });
 
-  it("supports custom args if specified for legacy gemini", () => {
-    const backend = new GeminiBackend({ args: ["--acp", "--verbose"] });
+  it("spawns AgyAcpAdapter via node when bare agy binary is provided", () => {
+    const backend = new GeminiBackend({ adapterPath: "/fake/agy-acp-adapter.js" });
     const spec = backend.spawn({
-      cliPath: "/usr/local/bin/gemini",
+      cliPath: "agy",
       cwd: "/repo",
       env: {},
     });
-    expect(spec.command).toBe("/usr/local/bin/gemini");
-    expect(spec.args).toEqual(["--acp", "--verbose"]);
+    expect(spec.command).toBe(process.execPath);
+    expect(spec.args).toEqual(["/fake/agy-acp-adapter.js"]);
+    expect(spec.env).toMatchObject({
+      AGY_PATH: "agy",
+      AGY_CWD: "/repo",
+      ELECTRON_RUN_AS_NODE: "1",
+    });
   });
 });
 

@@ -2,7 +2,6 @@ import { hostModeSequence, type HostMode } from "./provider-modes";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { grokCliNeedsShell } from "./cli-process";
-import { isAntigravityCli } from "./gemini-cli-locator";
 import type {
   AcpBackend,
   BackendConfigState,
@@ -433,7 +432,7 @@ import { providerCapability } from "./provider-capabilities";
 
 export class GeminiBackend implements AcpBackend {
   readonly provider = "gemini" as const;
-  readonly processName = "Gemini ACP";
+  readonly processName = "Antigravity ACP";
   readonly usesClientPlanGate = providerCapability("gemini", "clientPlanGate").state === "yes";
 
   constructor(private readonly options: GeminiBackendOptions = {}) {}
@@ -444,27 +443,15 @@ export class GeminiBackend implements AcpBackend {
 
   spawn(options: BackendSpawnOptions): BackendSpawnSpec {
     const cliPath = options.cliPath;
-    if (isAntigravityCli(cliPath)) {
-      const command = this.options.nodePath || process.execPath;
-      return {
-        command,
-        args: [this.adapterPath()],
-        env: {
-          ...options.env,
-          AGY_PATH: cliPath,
-          AGY_CWD: options.cwd || "",
-          ELECTRON_RUN_AS_NODE: "1",
-        },
-        shell: grokCliNeedsShell(command),
-      };
-    }
-    const command = cliPath;
-    const args = this.options.args ?? ["--acp"];
+    const command = this.options.nodePath || process.execPath;
     return {
       command,
-      args,
+      args: [this.adapterPath()],
       env: {
         ...options.env,
+        AGY_PATH: cliPath,
+        AGY_CWD: options.cwd || "",
+        ELECTRON_RUN_AS_NODE: "1",
       },
       shell: grokCliNeedsShell(command),
     };
@@ -501,7 +488,7 @@ export class GeminiBackend implements AcpBackend {
     return { method: "session/set_mode", params: { sessionId, modeId } };
   }
 
-  // Neither Antigravity's adapter nor Gemini CLI takes a mid-turn correction.
+  // Antigravity's adapter does not take a mid-turn correction.
   steeringCapabilities() {
     return { supported: false, acceptsContent: false };
   }

@@ -1067,7 +1067,7 @@ same card over a local pipe — see § ACP surfaces implemented.
 
 | `feedback` | yes* (`probe`: `grok.thumbsFeedback`) | no | no | no |
 | `subagents` | yes (`subagentUpdate` rail) | no | no | no |
-| `structuredPlan` | no (prose) | yes (`entries[]`) | yes (`entries[]`) | probe (Gemini CLI lists; Antigravity prose) |
+| `structuredPlan` | no (prose) | yes (`entries[]`) | yes (`entries[]`) | probe (Antigravity prose unless entries arrive) |
 | `hostMcp` | yes (`research/mcp-shapes.md`) | yes (`research/mcp-shapes.md`) | yes (`research/mcp-shapes.md`, AP-05 rides it) | probe (`research/probe-acp-mcp.cjs gemini`) |
 | `companionSubagentTarget` | yes | yes | yes | yes |
 | `delegationShim` | no (host MCP works) | no (host MCP works) | no (host MCP works) | probe (follows `hostMcp`) |

@@ -198,9 +198,7 @@ describe("structuredPlan (AP-11) — does this companion report a step list at a
   });
 
   it("stays a probe for gemini until a list is actually seen", () => {
-    // One provider id, two CLIs: Gemini CLI sends entries, Antigravity sends
-    // prose. Guessing either way writes a false sentence into every briefing
-    // derived from such a session.
+    // Antigravity sends plans as prose unless structured plan entries are observed.
     expect(providerCapability("gemini", "structuredPlan").state).toBe("probe");
     expect(providerCapability("gemini", "structuredPlan", { sawPlanEntries: false }).state).toBe("probe");
     expect(providerCapability("gemini", "structuredPlan", { sawPlanEntries: true }).state).toBe("yes");

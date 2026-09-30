@@ -201,7 +201,7 @@ export class CliUpdateHost {
         this.deps.postProviderState();
         return version;
       } catch (error) {
-        this.deps.host.appendLine(`gemini --version failed: ${(error as Error).message}`);
+        this.deps.host.appendLine(`agy --version failed: ${(error as Error).message}`);
         this.deps.postProviderState();
         return "";
       }

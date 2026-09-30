@@ -435,12 +435,12 @@
         "companions.antigravityCliPath": {
           "type": "string",
           "default": "",
-          "description": "Path to the Google Antigravity CLI (`agy` / `antigravity`). Empty = auto-discover on PATH."
+          "description": "Path to the Google Antigravity CLI (`agy`). Empty = auto-discover on PATH."
         },
         "companions.geminiCliPath": {
           "type": "string",
           "default": "",
-          "description": "Path to the Google Gemini CLI (`agy` / `gemini`). Empty = auto-discover on PATH."
+          "description": "Path to the Google Antigravity CLI (`agy`). Empty = auto-discover on PATH."
         },
         "companions.museCliPath": {
           "type": "string",
@@ -937,7 +937,7 @@
         "grok.geminiCliPath": {
           "type": "string",
           "default": "",
-          "description": "Path to the Google Antigravity or Gemini CLI (`agy` / `gemini`). Empty = auto-discover on PATH, then well-known user-bin locations. Authentication stays in Google's own CLI."
+          "description": "Path to the Google Antigravity CLI (`agy`). Empty = auto-discover on PATH, then well-known user-bin locations. Authentication stays in Google's own CLI."
         },
         "grok.defaultModel": {
           "type": "string",

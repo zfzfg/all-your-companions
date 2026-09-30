@@ -42,10 +42,10 @@ export const PROVIDER_CLI: Record<AcpProvider, ProviderCliPolicy> = {
     credentialFiles: () => [], // Claude's keychain cannot be inferred from a file.
   },
   gemini: {
-    // Both Gemini CLI and Antigravity sign in from their interactive startup.
-    cacheKey: "geminiCliPath", versionProbe: "probeGeminiVersion", credentialProbe: "warmConnectedGeminiModels", environment: "inherited", loginArgs: [], logoutArgs: ["auth", "logout"],
-    interactiveLogout: (cliPath) => isAntigravityCli(cliPath) ? "/logout" : undefined,
-    locate: (options) => locateGeminiCli(options), // Gemini CLI and Antigravity use the same locator.
+    // Antigravity signs in from its interactive startup (`agy`).
+    cacheKey: "geminiCliPath", versionProbe: "probeGeminiVersion", credentialProbe: "warmConnectedGeminiModels", environment: "inherited", loginArgs: [], logoutArgs: [],
+    interactiveLogout: () => "/logout",
+    locate: (options) => locateGeminiCli(options), // Locates the Antigravity CLI (agy)
     credentialFiles: () => {
       const home = process.env.USERPROFILE || process.env.HOME || os.homedir();
       return [path.join(home, ".gemini", "oauth.json"), path.join(home, ".gemini", "settings.json")];

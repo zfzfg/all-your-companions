@@ -19,8 +19,7 @@
  *    project-rules, fetched 2026-09-08 — so project-scope `AGENTS.md` lists
  *    both `codex` and `grok`. Claude Code explicitly does **not**: "Claude
  *    Code reads CLAUDE.md, not AGENTS.md" — code.claude.com/docs/en/memory,
- *    fetched 2026-09-08. Gemini CLI's default context filename is `GEMINI.md`;
- *    nothing documents it also reading `AGENTS.md` by default.
+ *    fetched 2026-09-08. Antigravity's default context filename is `GEMINI.md`.
  *  - **CLAUDE.md** — Claude Code's own project (`./CLAUDE.md` or
  *    `./.claude/CLAUDE.md`) and user (`~/.claude/CLAUDE.md`) memory files,
  *    same source as above. The SAME Grok Build project-rules doc lists
@@ -29,15 +28,10 @@
  *    both `claude` and `grok`; the *global* `~/.claude/CLAUDE.md` row stays
  *    `claude`-only because Grok's own doc only claims the project-tree walk,
  *    never the user's `~/.claude/`.
- *  - **GEMINI.md** — Gemini CLI's hierarchical context file: global
- *    `~/.gemini/GEMINI.md`, project root `./GEMINI.md` —
- *    geminicli.com/docs/cli/gemini-md/, fetched 2026-09-08. Not among the
+ *  - **GEMINI.md** — Antigravity (`agy`) hierarchical context file: global
+ *    `~/.gemini/GEMINI.md`, project root `./GEMINI.md`. Not among the
  *    filenames Grok Build's own docs enumerate, and no other provider
- *    documents reading it, so it stays `gemini`-only. This codebase's
- *    `"gemini"` provider id also stands in for Antigravity (`agy`), which
- *    shares the `.gemini` home directory here (see gemini-cli-locator.ts) —
- *    Antigravity's own `GEMINI.md` support is not independently confirmed,
- *    but there is no separate provider id to hang that uncertainty on.
+ *    documents reading it, so it stays `gemini`-only.
  *  - **`.grok/`** — Grok Build's own project (`.grok/config.toml`, confirmed
  *    in this repo by grok-config.ts) and global (`~/.grok/config.toml`,
  *    `resolveGrokHome` in sessions.ts) directory; xAI's own docs additionally
@@ -52,7 +46,7 @@
  *    project `.claude/rules/` "for compatibility" per its own docs, so the
  *    PROJECT row lists `claude` and `grok`; nothing documents Grok reading
  *    the user's global `~/.claude/`, so that row stays `claude`-only.
- *  - **`.gemini/`** — Gemini CLI / Antigravity's own settings directory
+ *  - **`.gemini/`** — Antigravity's own settings directory
  *    (`oauth_creds.json`, `settings.json` under `~/.gemini`, confirmed in
  *    this repo by gemini-cli-locator.ts).
  *

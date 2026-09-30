@@ -25,81 +25,75 @@ function fakeFs(files: string[] | Record<string, string>): GeminiLocatorFs {
 
 describe("locateGeminiCli", () => {
   it("uses a valid configured path before PATH or well-known locations", () => {
-    const configured = "C:\\custom\\gemini.exe";
+    const configured = "C:\\custom\\agy.exe";
     const result = locateGeminiCli({
       configuredPath: configured,
       platform: "win32",
       fs: fakeFs([configured]),
-      which: () => "C:\\path\\gemini.cmd",
+      which: () => "C:\\path\\agy.cmd",
     });
     expect(result).toBe(configured);
   });
 
   it("returns undefined for an invalid configured path without falling through", () => {
     const result = locateGeminiCli({
-      configuredPath: "C:\\nonexistent\\gemini.exe",
+      configuredPath: "C:\\nonexistent\\agy.exe",
       platform: "win32",
       fs: fakeFs([]),
-      which: () => "C:\\path\\gemini.cmd",
+      which: () => "C:\\path\\agy.cmd",
     });
     expect(result).toBeUndefined();
   });
 
-  it("prefers agy on PATH over legacy gemini on PATH", () => {
+  it("locates agy on PATH when present", () => {
     const agyPath = "C:\\tools\\agy.exe";
-    const geminiPath = "C:\\tools\\gemini.exe";
     const result = locateGeminiCli({
       platform: "win32",
-      fs: fakeFs([agyPath, geminiPath]),
-      which: (name) => {
-        if (name === "agy.exe") return agyPath;
-        if (name === "gemini.exe") return geminiPath;
-        return undefined;
-      },
+      fs: fakeFs([agyPath]),
+      which: (name) => (name === "agy.exe" ? agyPath : undefined),
     });
     expect(result).toBe(agyPath);
   });
 
-  it("prefers well-known agy.exe over legacy gemini.exe in ~/.gemini/bin", () => {
+  it("locates well-known agy.exe in ~/.gemini/bin", () => {
     const home = "C:\\Users\\Developer";
     const agyBin = "C:\\Users\\Developer\\.gemini\\bin\\agy.exe";
-    const geminiBin = "C:\\Users\\Developer\\.gemini\\bin\\gemini.exe";
     const result = locateGeminiCli({
       platform: "win32",
       home,
-      fs: fakeFs([agyBin, geminiBin]),
+      fs: fakeFs([agyBin]),
       which: () => undefined,
       env: { USERPROFILE: home },
     });
     expect(result).toBe(agyBin);
   });
 
-  it("finds gemini on PATH when no configured path is provided", () => {
-    const onPath = "C:\\tools\\gemini.exe";
+  it("ignores legacy gemini binaries on PATH", () => {
+    const geminiPath = "C:\\tools\\gemini.exe";
     const result = locateGeminiCli({
       platform: "win32",
-      fs: fakeFs([onPath]),
-      which: (name) => (name === "gemini.exe" ? onPath : undefined),
+      fs: fakeFs([geminiPath]),
+      which: (name) => (name === "gemini.exe" ? geminiPath : undefined),
     });
-    expect(result).toBe(onPath);
+    expect(result).toBeUndefined();
   });
 
-  it("falls back to well-known directories if not on PATH (win32)", () => {
+  it("ignores legacy gemini in well-known directories", () => {
     const home = "C:\\Users\\Developer";
-    const wellKnown = "C:\\Users\\Developer\\.gemini\\bin\\gemini.exe";
+    const geminiBin = "C:\\Users\\Developer\\.gemini\\bin\\gemini.exe";
     const result = locateGeminiCli({
       platform: "win32",
       home,
-      fs: fakeFs([wellKnown]),
+      fs: fakeFs([geminiBin]),
       which: () => undefined,
       env: { USERPROFILE: home },
     });
-    expect(result).toBe(wellKnown);
+    expect(result).toBeUndefined();
   });
 
-  it("falls back to well-known directories on POSIX", () => {
+  it("falls back to well-known agy on POSIX", () => {
     const home = "/home/dev";
-    const wellKnown = "/home/dev/.gemini/bin/gemini";
+    const wellKnown = "/home/dev/.gemini/bin/agy";
     const result = locateGeminiCli({
       platform: "linux",
       home,
@@ -110,7 +104,7 @@ describe("locateGeminiCli", () => {
     expect(result).toBe(wellKnown);
   });
 
-  it("returns undefined if gemini is not found anywhere", () => {
+  it("returns undefined if agy is not found anywhere", () => {
     const result = locateGeminiCli({
       platform: "linux",
       home: "/home/dev",

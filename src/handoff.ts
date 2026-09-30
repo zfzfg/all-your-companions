@@ -51,10 +51,8 @@ export interface ThreadContext {
   /**
    * Whether this companion reports structured plan entries at all (AP-01).
    *
-   * Three states, not two, because `gemini` is one provider id over two CLIs
-   * that differ: Gemini CLI sends a step list, Antigravity sends prose. A
-   * boolean would have to pick one of them to lie about, and the lie would be
-   * written into every derived briefing as though it were a fact.
+   * Three states, not two, because Antigravity sends prose unless
+   * structured plan entries have been observed.
    */
   structuredPlan: "yes" | "no" | "unknown";
   /** AP-09 snapshot paths — paths, never diffs. Turn scope for a second

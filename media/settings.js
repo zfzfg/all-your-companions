@@ -618,7 +618,7 @@
       category: "providers",
       logo: "gemini",
       provider: "gemini",
-      title: "Gemini CLI",
+      title: "Antigravity CLI (agy)",
       vendor: "Google",
       description: "",
       kind: "action",
@@ -928,7 +928,7 @@
     {
       id: "aboutGeminiCli",
       category: "about",
-      title: "Gemini / Antigravity CLI",
+      title: "Antigravity CLI (agy)",
       kind: "value",
       visible: (s) => !!geminiProvider(s),
       get: (s) => {

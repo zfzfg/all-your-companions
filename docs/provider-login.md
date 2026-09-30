@@ -22,8 +22,7 @@ command:
 | Grok Build | `grok login` | `~/.grok/auth.json` |
 | Codex | `codex login` | `~/.codex/auth.json` |
 | Claude Code | `claude auth login` | `~/.claude/` (or the OS keychain) |
-| Gemini CLI | `gemini` (interactive startup) | CLI-owned Google credentials |
-| Antigravity (Gemini variant) | `agy` (interactive startup) | OS keyring; legacy OAuth files remain recognized |
+| Antigravity | `agy` (interactive startup) | OS keyring; legacy OAuth files remain recognized |
 | Muse | `muse login` | `~/.config/muse/auth.json` |
 
 Antigravity authenticates during startup; it does not provide `auth login`.
@@ -31,8 +30,7 @@ Windows credential detection reads only `cmdkey /list` target metadata for
 `gemini:antigravity`, never a password or token. A cached entry proves presence,
 not validity. Antigravity logout opens its TUI and asks the user to enter
 `/logout`; the extension keeps the account connected until confirmation.
-See [official Antigravity authentication](https://antigravity.google/docs/cli/install/)
-and [Gemini CLI authentication](https://github.com/google-gemini/gemini-cli#-authentication-options).
+See [official Antigravity authentication](https://antigravity.google/docs/cli/install/).
 
 A terminal is the better affordance there, because the CLI opens your browser
 for you.

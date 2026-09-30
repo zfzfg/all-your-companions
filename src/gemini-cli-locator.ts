@@ -154,32 +154,6 @@ function wellKnownAgyBins(
   ];
 }
 
-/** Known Gemini CLI binary locations (legacy) */
-function wellKnownGeminiBins(
-  home: string,
-  env: NodeJS.ProcessEnv,
-  platform: NodeJS.Platform,
-): string[] {
-  const p = platform === "win32" ? path.win32 : path.posix;
-  if (platform === "win32") {
-    const localAppData = env.LOCALAPPDATA || p.join(home, "AppData", "Local");
-    const appData = env.APPDATA || p.join(home, "AppData", "Roaming");
-    return [
-      p.join(home, ".gemini", "bin", "gemini.exe"),
-      p.join(home, ".gemini", "bin", "gemini.cmd"),
-      p.join(localAppData, "Programs", "gemini", "gemini.exe"),
-      p.join(appData, "npm", "gemini.cmd"),
-      p.join(home, ".local", "bin", "gemini.exe"),
-    ];
-  }
-  return [
-    p.join(home, ".gemini", "bin", "gemini"),
-    p.join(home, ".local", "bin", "gemini"),
-    "/usr/local/bin/gemini",
-    "/opt/homebrew/bin/gemini",
-  ];
-}
-
 export function locateGeminiCli(options: GeminiLocatorOptions = {}): string | undefined {
   const platform = options.platform ?? process.platform;
   const fs = options.fs ?? defaultFs;
@@ -192,7 +166,7 @@ export function locateGeminiCli(options: GeminiLocatorOptions = {}): string | un
   const which = options.which ?? ((candidate) => findCliOnPath(candidate, env, platform, options.fs?.isFile));
   const home = options.home || (platform === "win32" ? env.USERPROFILE : env.HOME) || homedir();
 
-  // 1. Prefer Antigravity CLI (agy) on PATH
+  // 1. Antigravity CLI (agy) on PATH
   const agyNames = platform === "win32" ? ["agy.exe", "agy.cmd", "agy"] : ["agy"];
   for (const name of agyNames) {
     const found = which(name);
@@ -204,23 +178,11 @@ export function locateGeminiCli(options: GeminiLocatorOptions = {}): string | un
     if (fs.isFile(candidate)) return candidate;
   }
 
-  // 3. Fallback to legacy gemini on PATH
-  const geminiNames = platform === "win32" ? ["gemini.exe", "gemini.cmd", "gemini"] : ["gemini"];
-  for (const name of geminiNames) {
-    const found = which(name);
-    if (found && fs.isFile(found)) return found;
-  }
-
-  // 4. Legacy gemini in well-known locations
-  for (const candidate of wellKnownGeminiBins(home, env, platform)) {
-    if (fs.isFile(candidate)) return candidate;
-  }
-
   return undefined;
 }
 
-export function parseGeminiVersionOutput(output: string): string {
+export function parseAgyVersionOutput(output: string): string {
   return /(?:^|\s)v?(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)(?:\s|$)/.exec(output.trim())?.[1] ?? "";
 }
 
-export const parseAgyVersionOutput = parseGeminiVersionOutput;
+export const parseGeminiVersionOutput = parseAgyVersionOutput;

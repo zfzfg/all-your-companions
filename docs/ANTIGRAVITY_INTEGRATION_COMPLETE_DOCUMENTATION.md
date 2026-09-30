@@ -288,7 +288,7 @@ When launched with `--input-format stream-json --output-format stream-json`, `ag
   "grok.geminiCliPath": {
     "type": "string",
     "default": "",
-    "description": "Path to the Google Antigravity CLI (`agy.exe`) or Gemini CLI (`gemini`). Empty = auto-discover on PATH and ~/.gemini/bin."
+    "description": "Path to the Google Antigravity CLI (`agy`). Empty = auto-discover on PATH and ~/.gemini/bin."
   }
   ```
 
