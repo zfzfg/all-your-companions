@@ -17,6 +17,33 @@ function sidebarWith(connections: Record<string, boolean>) {
 }
 
 describe("stored connection consent at the host boundary (#171)", () => {
+  it.each(["C:/Users/dev/.gemini/bin/agy.exe", "/usr/bin/gemini"])("opens interactive Gemini sign-in without unsupported auth arguments for %s", async (cliPath) => {
+    const sidebar = sidebarWith({});
+    sidebar.focused = new Session();
+    sidebar.pool = new Set([sidebar.focused]);
+    sidebar.workspaceRoot = () => "/repo";
+    sidebar.providerNeedsLogin = {};
+    sidebar.post = vi.fn();
+    sidebar.watchProviderLogin = vi.fn();
+    sidebar.locateProvider = () => cliPath;
+    sidebar.setProviderConnected = vi.fn(async () => {});
+    await sidebar.onMessage({ type: "runGrokLogin", provider: "gemini" });
+    expect(sidebar.host.createTerminal).toHaveBeenCalledWith(expect.objectContaining({ shellPath: cliPath, shellArgs: [] }));
+    expect(sidebar.setProviderConnected).toHaveBeenCalledWith("gemini", true);
+    expect(sidebar.watchProviderLogin).toHaveBeenCalledWith("gemini");
+  });
+  it("keeps Antigravity connected until interactive logout is observed", async () => {
+    const sidebar = sidebarWith({ gemini: true });
+    sidebar.locateProvider = () => "C:/Users/dev/.gemini/bin/agy.exe";
+    sidebar.host.showWarningMessage = vi.fn(async () => "Sign Out");
+    sidebar.host.showErrorMessage = vi.fn();
+    sidebar.finishProviderLogout = vi.fn();
+    await sidebar.logout("gemini");
+    expect(sidebar.host.createTerminal).toHaveBeenCalledWith(expect.objectContaining({ shellArgs: [] }));
+    expect(sidebar.host.showErrorMessage).toHaveBeenCalledWith(expect.stringContaining("Enter /logout"));
+    expect(sidebar.finishProviderLogout).not.toHaveBeenCalled();
+    expect(sidebar.providerConnectionState.gemini).toBe(true);
+  });
   it.each(["grok", "codex", "claude", "gemini"])("never probes a %s that is installed but not connected", async (provider) => {
     const sidebar = sidebarWith({});
     const spawn = vi.fn();

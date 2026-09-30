@@ -5,7 +5,7 @@ import type { AcpProvider } from "./acp-backend";
 import { locateGrokCli } from "./cli-locator";
 import { locateCodexCli, resolveCodexHome } from "./codex-cli-locator";
 import { locateClaudeCli } from "./claude-cli-locator";
-import { locateGeminiCli } from "./gemini-cli-locator";
+import { isAntigravityCli, locateGeminiCli } from "./gemini-cli-locator";
 import { locateMuseCli } from "./muse-cli-locator";
 import { resolveGrokHome } from "./sessions";
 import { CODEX_MANAGED_VERSION } from "./codex-managed-installer";
@@ -17,6 +17,7 @@ export interface ProviderCliPolicy {
   readonly environment: "grok" | "inherited";
   readonly loginArgs: string[];
   readonly logoutArgs: string[];
+  interactiveLogout?(cliPath: string): string | undefined;
   readonly update?: { provider: "codex" | "claude"; packageName: string; managed: boolean; targetVersion?: string };
   locate(options: { configuredPath: string; managedStorageRoot: string; arch: string }): string | undefined;
   credentialFiles(): readonly string[];
@@ -41,7 +42,9 @@ export const PROVIDER_CLI: Record<AcpProvider, ProviderCliPolicy> = {
     credentialFiles: () => [], // Claude's keychain cannot be inferred from a file.
   },
   gemini: {
-    cacheKey: "geminiCliPath", versionProbe: "probeGeminiVersion", credentialProbe: "warmConnectedGeminiModels", environment: "inherited", loginArgs: ["auth", "login"], logoutArgs: ["auth", "logout"],
+    // Both Gemini CLI and Antigravity sign in from their interactive startup.
+    cacheKey: "geminiCliPath", versionProbe: "probeGeminiVersion", credentialProbe: "warmConnectedGeminiModels", environment: "inherited", loginArgs: [], logoutArgs: ["auth", "logout"],
+    interactiveLogout: (cliPath) => isAntigravityCli(cliPath) ? "/logout" : undefined,
     locate: (options) => locateGeminiCli(options), // Gemini CLI and Antigravity use the same locator.
     credentialFiles: () => {
       const home = process.env.USERPROFILE || process.env.HOME || os.homedir();

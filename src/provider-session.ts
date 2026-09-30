@@ -1062,6 +1062,15 @@ public modelsForSession(session: Session, ownModels: readonly any[], currentMode
         "Sign Out",
       );
       if (choice !== "Sign Out") return;
+      const logoutInput = PROVIDER_CLI[provider].interactiveLogout?.(cliPath);
+      if (logoutInput) {
+        this.deps.sidebarOps.host.createTerminal({ name: `${name} Logout`, shellPath: cliPath, shellArgs: [] }).show();
+        // TUI readiness and completion are not observable. Do not inject a
+        // slash command before it is ready or claim unobserved sign-out.
+        fail(`${name} sign-out opened in a terminal. Enter ${logoutInput} there, then re-check the connection. The account remains connected until sign-out is confirmed.`);
+        this.deps.sidebarOps.postProviderState();
+        return;
+      }
       const logoutArgs = [...PROVIDER_CLI[provider].logoutArgs];
       try {
         await execGrokCli(cliPath, logoutArgs, { timeout: 30_000, windowsHide: true });

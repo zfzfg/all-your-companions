@@ -458,7 +458,7 @@ The full pedagogical write-up lives in
 
 ## W-15/W-16 ownership and provider policy
 
-The sidebar has 7,606 physical lines and remains the composition root. Lazy collaborator getters and injectable state aliases stay available. Thin methods use a delegation guard so a call-through override can enter its production wrapper once. Callback bindings resolve overridden methods at invocation time. Disposal uses existing instances; reading absent view handles does not construct the view host.
+The sidebar has 7,605 physical lines and remains the composition root. Lazy collaborator getters and injectable state aliases stay available. Thin methods use a delegation guard so a call-through override can enter its production wrapper once. Callback bindings resolve overridden methods at invocation time. SidebarStateHost reads appPurpose directly from persisted state; no callback routes that implementation back into the sidebar. Disposal uses existing instances; reading absent view handles does not construct the view host.
 
 Attachment staging/retention and pending promises/image handle maps belong to FileUploadHost. SessionCatalog owns presentation, pins, identity frames, metadata-write serialization, activity and sweep maps, and refresh timers. SessionStart owns the single startup serialization tail; TurnEdit owns cancel/send-race/limit/context recovery. New SessionMetadataHost and SidebarTelemetryHost own session type/delegation metadata and cached-only session-start reporting. SidebarViewHost owns webview/rail/settings setup, view handles, configuration watchers and the reaper timer.
 

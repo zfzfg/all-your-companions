@@ -4,8 +4,8 @@ Status: code and automatic gates verified. **Final W-15/W-16 acceptance is still
 
 | Measure | Before | Current |
 |---|---:|---:|
-| sidebar.ts, committed entry d62a22e | 13,376 lines | 7,606 lines |
-| sidebar.ts, preserved working entry f4332b3 | 9,320 lines | 7,606 lines |
+| sidebar.ts, committed entry d62a22e | 13,376 lines | 7,605 lines |
+| sidebar.ts, preserved working entry f4332b3 | 9,320 lines | 7,605 lines |
 | WorkflowStageRunnerDeps | 26 | 23 |
 | SessionStartLifecycleOps | 35 | 7 lifecycle + 10 usage + 18 events |
 | InboundSessionOps | 39 | 22 lifecycle + 8 settings + 9 worktree |
@@ -15,14 +15,14 @@ Status: code and automatic gates verified. **Final W-15/W-16 acceptance is still
 | Session identity comparisons | 20 | 20 |
 | Router string cases | 157 unique | same 157 unique |
 
-The extra view-host extraction leaves 394 lines below the hard 8,000-line limit and 194 below the 7,800 planning reserve. Behavior and implementation comments moved with responsibilities; contract summaries stay on wrappers. There is one owner for attachment maps/promises, startup tails, catalog write serialization and refresh/sweep state. Public/test methods and injected state remain compatible.
+The extra view-host extraction leaves 395 lines below the hard 8,000-line limit and 195 below the 7,800 planning reserve. Behavior and implementation comments moved with responsibilities; contract summaries stay on wrappers. There is one owner for attachment maps/promises, startup tails, catalog write serialization and refresh/sweep state. Public/test methods and injected state remain compatible.
 
 ## Automatic gates
 
 - npm run compile: pass (including Muse adapter).
 - npm run typecheck: pass (production plus test tsconfigs).
 - npm run lint: pass.
-- npm test: 326 files, 6,263 passing tests, 4 existing skips unchanged.
+- npm test: 326 files, 6,273 passing tests, 4 existing skips unchanged.
 - npm run test:integration: 22/22 pass, real VS Code 1.139.1 with hermetic fake ACP.
 - No additional skips or excludes. Existing W-09 DOM typecheck exclusions remain explicitly open.
 - node scripts/provider-inventory.cjs: 102 → 26; every remaining branch has a reason and tests in [the inventory](provider-inventory.md).
@@ -37,7 +37,15 @@ The final Muse regression prevents a no-op mode sequence from raising a Plan gat
 | Codex | Found in the Codex app installation | Credential file exists; authentication and manual flows unverified |
 | Claude | Not found | Open prerequisite |
 | Gemini CLI | Separate CLI not found | Open prerequisite |
-| Antigravity | Found under .gemini/bin/agy.exe | Authentication unverified |
+| Antigravity | Found under .gemini/bin/agy.exe | Windows keyring target present; token validity and streaming unverified |
 | Muse | Not found | Open prerequisite |
 
 Credential-file presence is no validity claim. Manual sidebar/rail, provider sessions and streaming, permission/review/rewind, Crew gates, subagent relay, saved settings, worktree lifecycle and composer/attachment checks are pending. Automated DOM/fake-ACP tests do not substitute for this acceptance. Packaging backup, exact VSIX size/hash, installation and any subsequently reported manual results are recorded in the workspace PLAN/implementation/handoff documents after the local package step.
+
+## Repair after manual startup feedback
+
+The first installed W-15/W-16 build failed on `ready`: the state host's appPurpose callback re-entered the sidebar wrapper indefinitely. A regression test reproduced the exact RangeError before repair. The callback was removed; the state host reads persisted state itself and still honors dynamically injected overrides. The boundary test now builds a real initialState frame through production wiring, and the Electron smoke explicitly awaits the real ready handler so caught asynchronous view errors cannot hide startup rejection.
+
+The local Antigravity CLI help does not expose `auth login`. Sign-in now starts its interactive TUI without arguments, as specified by [Google](https://antigravity.google/docs/cli/install/); [Gemini CLI](https://github.com/google-gemini/gemini-cli#-authentication-options) uses the same startup flow. Antigravity logout opens the TUI with instructions for `/logout` and keeps state connected until completion is observed. Windows credential detection recognizes the exact `gemini:antigravity` keyring target from bounded `cmdkey /list` metadata, without reading or logging secrets. Legacy files and Gemini API-key fallback are preserved; injected filesystem tests remain isolated from machine credentials. Ten regression tests were added; the focused repair gate passed 91 tests in six files.
+
+The reported GitHub CLI failure was a stale process PATH. GitHub CLI 2.101.0 exists at `C:\Program Files\GitHub CLI\gh.exe` and resolves after reading the current machine/user PATH. No additional installation or account login was performed. Restart VS Code completely to inherit that environment. The user's initial Grok/Antigravity startup checks failed; repaired-build acceptance remains pending rather than being recorded as a manual pass.

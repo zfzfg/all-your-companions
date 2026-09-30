@@ -424,7 +424,7 @@ export class ProviderSetup {
       // account — it reported Connected while signed out. The legacy `gemini`
       // CLI does open a real session, so it still speaks for itself.
       const signedIn = !isAntigravityCli(cliPath) || hasAntigravityCredentials();
-      if (!signedIn) this.host.appendLine("[gemini] no Antigravity credentials found — run `agy auth login`");
+      if (!signedIn) this.host.appendLine("[gemini] no cached Antigravity credentials found — start `agy` to sign in");
       this.setProviderNeedsLogin("gemini", !signedIn);
       return signedIn;
     } catch (error) {

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import ts from "typescript";
 import { fileURLToPath } from "node:url";
 import { GrokSidebar } from "../src/sidebar";
+import { Session } from "../src/session";
 
 const modules = readdirSync(new URL("../src/", import.meta.url)).filter((name) =>
   /(?:-host|sidebar-inbound|session-start|session-catalog|provider-session|provider-setup|agent-authoring|turn-edit|voice-and-mcp|project-folders|routine-scheduler|implicit-context|workflow-stage-runner|webview-html)\.ts$/.test(name),
@@ -28,6 +29,21 @@ describe("sidebar collaborator boundaries", () => {
 
 
 describe("sidebar delegation lifetime", () => {
+  it("builds the ready frame through production wiring without recursing through appPurpose", () => {
+    const sidebar = Object.create(GrokSidebar.prototype) as any;
+    const values = new Map([["grok.appPurpose", "knowledge"]]);
+    sidebar.host = { getConfiguration: () => ({ get: (_key: string, fallback: unknown) => fallback }) };
+    sidebar.state = { get: (key: string) => values.get(key) };
+    sidebar.context = { extensionVersion: "0.2.0" };
+    sidebar.focused = new Session();
+    sidebar.workspaceRoot = () => "/workspace";
+    sidebar.canAddProjectFolder = () => false;
+    expect(sidebar.buildInitialStateMsg()).toMatchObject({ type: "initialState", appPurpose: "knowledge" });
+    values.set("grok.appPurpose", "coding");
+    expect(sidebar.buildInitialStateMsg().appPurpose).toBe("coding");
+    sidebar.appPurpose = () => "knowledge";
+    expect(sidebar.buildInitialStateMsg().appPurpose).toBe("knowledge");
+  });
   it("does not construct unused collaborators while disposing a cold sidebar", () => {
     const sidebar = Object.create(GrokSidebar.prototype) as any;
     sidebar.host = { setContext: vi.fn() };

@@ -51,7 +51,6 @@ export interface SidebarStateHostDeps {
   postSessionsList(): void;
   postSessionName(session: Session): void;
   registerFullImage(path: string): string;
-  appPurpose?: () => AppPurpose;
   getOverride?<T extends (...args: any[]) => any>(name: string): T | undefined;
 }
 
@@ -66,7 +65,6 @@ export class SidebarStateHost {
   public appPurpose(): AppPurpose {
     const override = this.deps.getOverride?.<() => AppPurpose>("appPurpose");
     if (override) return override();
-    if (this.deps.appPurpose) return this.deps.appPurpose();
     return parseAppPurpose(this.deps.state.get<string>(APP_PURPOSE_KEY));
   }
 

@@ -70,6 +70,12 @@ suite("grok-build extension smoke", () => {
 // registration, which contributes no focus command).
     await vscode.commands.executeCommand("companions.chat.focus");
     await new Promise((r) => setTimeout(r, 2000)); // let the webview resolve + post
+    // Await the actual ready handler, rather than assuming an async
+    // webview error would reject the focus command (the view catches it).
+    const api = await vscode.extensions.getExtension(EXT_ID)!.activate();
+    const hooks = api?.__test;
+    assert.ok(hooks, "test hooks missing");
+    await hooks.fromLocal({ type: "ready" });
     // A second, lightweight command that touches the sidebar without needing grok.
     await vscode.commands.executeCommand("grok.showLogs");
     assert.ok(true, "webview resolved without throwing");

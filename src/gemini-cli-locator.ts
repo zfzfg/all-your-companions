@@ -2,6 +2,7 @@ import { existsSync, statSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import * as path from "node:path";
 import { findCliOnPath } from "./cli-path";
+import { spawnSync } from "node:child_process";
 
 export interface GeminiLocatorFs {
   exists(path: string): boolean;
@@ -16,6 +17,7 @@ export interface GeminiLocatorOptions {
   home?: string;
   fs?: GeminiLocatorFs;
   which?: (name: string) => string | undefined;
+  keyringCredentials?: () => boolean;
 }
 
 const defaultFs: GeminiLocatorFs = {
@@ -58,7 +60,8 @@ export function isAntigravityCli(cliPath: string): boolean {
  * The ACP adapter answers `session/new` from a static model list without ever
  * launching `agy`, so a successful model warm-up says the binary is installed
  * and nothing at all about the account. This file is the cheap evidence there
- * is one, and it is what `agy auth login` writes.
+ * is one in older installations. Current Antigravity also uses the OS
+ * keyring; presence is evidence of cached credentials, not token validity.
  */
 export function antigravityCredentialPaths(
   home: string,
@@ -96,6 +99,10 @@ export function hasAntigravityCredentials(options: GeminiLocatorOptions = {}): b
     return true;
   }
 
+  // Injected filesystems must not inherit the developer machine's sign-in state.
+  const keyringCredentials = options.keyringCredentials ?? (options.fs ? () => false : hasAntigravityWindowsKeyringCredentials);
+  if (keyringCredentials()) return true;
+
   if (!env.GEMINI_API_KEY?.trim()) return false;
   for (const file of antigravitySettingsPaths(home, env)) {
     const raw = fsImpl.readText?.(file);
@@ -105,6 +112,20 @@ export function hasAntigravityCredentials(options: GeminiLocatorOptions = {}): b
     } catch {}
   }
   return false;
+}
+
+/** cmdkey lists target metadata, never the stored credential/token. */
+export function antigravityWindowsKeyringTargetPresent(listing: string): boolean {
+  return /^\s*[^\r\n:]+:\s*(?:LegacyGeneric:target=)?gemini:antigravity\s*$/im.test(listing);
+}
+
+export function hasAntigravityWindowsKeyringCredentials(platform: NodeJS.Platform = process.platform, run = spawnSync): boolean {
+  if (platform !== "win32") return false;
+  try {
+    const binary = path.join(process.env.SystemRoot || "C:\\Windows", "System32", "cmdkey.exe");
+    const result = run(binary, ["/list"], { encoding: "utf8", windowsHide: true, timeout: 3_000, maxBuffer: 1024 * 1024 });
+    return !result.error && result.status === 0 && antigravityWindowsKeyringTargetPresent(result.stdout);
+  } catch { return false; }
 }
 
 /** Known Antigravity CLI binary locations (modern official standard) */

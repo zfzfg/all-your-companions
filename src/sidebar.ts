@@ -1446,7 +1446,6 @@ export class GrokSidebar {
       postSessionsList: () => self.postSessionsList(),
       postSessionName: (session) => self.postSessionName(session),
       registerFullImage: (path) => self.registerFullImage(path),
-      appPurpose: () => self.appPurpose(),
       getOverride: (name: string) => self.sidebarTestOverride(name)
     });
   }

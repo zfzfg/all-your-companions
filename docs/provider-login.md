@@ -1,8 +1,9 @@
 # Signing agents in
 
-Grok Build drives three command-line agents, and it never holds their
-credentials. Each one signs you in itself, stores its own token in its own
-directory, and talks to its own vendor. The extension's job is to start the
+All your Companions drives five providers through their command-line agents,
+and it never holds their credentials. Each agent signs you in itself, stores
+its own token in its directory or the OS keyring, and talks to its vendor.
+The extension's job is to start the
 right command in the right place.
 
 That matters more than it sounds, because it decides what is possible from a
@@ -12,7 +13,7 @@ phone and on a machine with no screen.
 
 It depends on where you press the button, and the difference is deliberate.
 
-**At the computer** — VS Code, Cursor, or the desktop app — **Settings →
+**At the computer** — VS Code or Cursor — **Settings →
 Providers → Connect** opens a terminal there and runs the agent's own login
 command:
 
@@ -21,9 +22,25 @@ command:
 | Grok Build | `grok login` | `~/.grok/auth.json` |
 | Codex | `codex login` | `~/.codex/auth.json` |
 | Claude Code | `claude auth login` | `~/.claude/` (or the OS keychain) |
+| Gemini CLI | `gemini` (interactive startup) | CLI-owned Google credentials |
+| Antigravity (Gemini variant) | `agy` (interactive startup) | OS keyring; legacy OAuth files remain recognized |
+| Muse | `muse login` | `~/.config/muse/auth.json` |
+
+Antigravity authenticates during startup; it does not provide `auth login`.
+Windows credential detection reads only `cmdkey /list` target metadata for
+`gemini:antigravity`, never a password or token. A cached entry proves presence,
+not validity. Antigravity logout opens its TUI and asks the user to enter
+`/logout`; the extension keeps the account connected until confirmation.
+See [official Antigravity authentication](https://antigravity.google/docs/cli/install/)
+and [Gemini CLI authentication](https://github.com/google-gemini/gemini-cli#-authentication-options).
 
 A terminal is the better affordance there, because the CLI opens your browser
 for you.
+
+## Historical upstream remote-login notes
+
+The fork has no remote relay or desktop client. The following remote-flow notes
+describe upstream history; remaining documentation cleanup belongs to W-18.
 
 **From a phone or browser**, there is no terminal to look at, so the same button
 runs the agent's **headless device-code flow** instead and shows you the URL and

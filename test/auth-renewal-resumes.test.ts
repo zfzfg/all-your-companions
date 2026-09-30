@@ -106,7 +106,7 @@ describe("signing in from a conversation that is being refused", () => {
     const { sidebar } = loginSidebar({});
     await sidebar.onMessage({ type: "runGrokLogin", provider });
     expect(sidebar.host.createTerminal).toHaveBeenCalledWith(expect.objectContaining({
-      shellArgs: provider === "claude" || provider === "gemini" ? ["auth", "login"] : ["login"],
+      shellArgs: provider === "gemini" ? [] : provider === "claude" ? ["auth", "login"] : ["login"],
     }));
     expect(sidebar.startDeviceLogin).not.toHaveBeenCalled();
   });

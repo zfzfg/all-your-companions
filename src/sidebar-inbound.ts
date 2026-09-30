@@ -1525,7 +1525,7 @@ export class ProjectInboundRouter {
         // Pressing Connect / Sign in IS the consent, recorded before any CLI
         // runs (#171). Everything after may now execute this agent's binary.
         await this.deps.providers.setProviderConnected(provider, true);
-        // Official CLI owns login. For Claude and Gemini this is `auth login`.
+        // The CLI owns login; Gemini/Antigravity authenticate on interactive startup.
         const loginArgs = [...PROVIDER_CLI[provider].loginArgs];
         const term = this.deps.host.createTerminal({
           name: `${providerDisplayName(provider)} Login`,

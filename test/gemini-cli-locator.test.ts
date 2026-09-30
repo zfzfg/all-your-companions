@@ -1,7 +1,9 @@
 import * as path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   antigravitySettingsPaths,
+  antigravityWindowsKeyringTargetPresent,
+  hasAntigravityWindowsKeyringCredentials,
   hasAntigravityCredentials,
   isAntigravityCli,
   locateGeminiCli,
@@ -160,12 +162,17 @@ describe("hasAntigravityCredentials", () => {
   const home = path.join("C:", "Users", "dev");
   const gemini = path.join(home, ".gemini");
 
-  it("finds the account agy auth login wrote", () => {
+  it("finds a legacy cached account file", () => {
     expect(hasAntigravityCredentials({
       home,
       env: {},
       fs: fakeFs([path.join(gemini, "oauth_creds.json")]),
     })).toBe(true);
+  });
+
+  it("recognizes keyring presence without requiring a legacy OAuth file", () => {
+    expect(hasAntigravityCredentials({ home, env: {}, fs: fakeFs([]), keyringCredentials: () => true })).toBe(true);
+    expect(hasAntigravityCredentials({ home, env: {}, fs: fakeFs([]), keyringCredentials: () => false })).toBe(false);
   });
 
   it("also accepts the CLI-scoped copy", () => {
@@ -244,6 +251,32 @@ describe("hasAntigravityCredentials", () => {
       env: { GEMINI_API_KEY: "   " },
       fs: fakeFs({ [settingsPath]: JSON.stringify({ modelProvider: "gemini" }) }),
     })).toBe(false);
+  });
+});
+
+describe("Antigravity Windows keyring metadata", () => {
+  it("matches the exact target with localized labels, excluding other accounts", () => {
+    expect(antigravityWindowsKeyringTargetPresent("Target: LegacyGeneric:target=gemini:antigravity\r\nType: Generic")).toBe(true);
+    expect(antigravityWindowsKeyringTargetPresent("Ziel: LegacyGeneric:target=gemini:antigravity\r\nTyp: Generisch")).toBe(true);
+    expect(antigravityWindowsKeyringTargetPresent("Target: LegacyGeneric:target=gemini:antigravity-other")).toBe(false);
+    expect(antigravityWindowsKeyringTargetPresent("Target: LegacyGeneric:target=other\r\nUser: antigravity")).toBe(false);
+  });
+  it("reads metadata with a bounded hidden command and never requests a token", () => {
+    const run = vi.fn(() => ({ status: 0, stdout: "Target: LegacyGeneric:target=gemini:antigravity" }));
+    expect(hasAntigravityWindowsKeyringCredentials("win32", run as any)).toBe(true);
+    expect(run).toHaveBeenCalledWith(expect.stringMatching(/cmdkey\.exe$/), ["/list"], expect.objectContaining({ windowsHide: true, timeout: 3_000, encoding: "utf8" }));
+  });
+  it("treats missing tools, process failures and timeouts as unverified credentials", () => {
+    for (const result of [{ status: 1, stdout: "Target: LegacyGeneric:target=gemini:antigravity" }, { status: 0, stdout: "" }, { status: null, error: new Error("timeout"), stdout: "" }]) {
+      expect(hasAntigravityWindowsKeyringCredentials("win32", vi.fn(() => result) as any)).toBe(false);
+    }
+    expect(hasAntigravityWindowsKeyringCredentials("win32", vi.fn(() => { throw new Error("spawn"); }) as any)).toBe(false);
+  });
+  it("does not launch the Windows metadata command on other platforms", () => {
+    const run = vi.fn();
+    expect(hasAntigravityWindowsKeyringCredentials("linux", run)).toBe(false);
+    expect(hasAntigravityWindowsKeyringCredentials("darwin", run)).toBe(false);
+    expect(run).not.toHaveBeenCalled();
   });
 });
 
