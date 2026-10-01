@@ -7,7 +7,8 @@ export const CONTEXT_RUNTIMES: Record<AcpProvider, ContextRuntime> = {
   codex: { product: "codex", executable: "codex", adapterVersion: manifest.dependencies["@agentclientprotocol/codex-acp"] },
   claude: { product: "claude-code", executable: "claude", adapterVersion: manifest.dependencies["@agentclientprotocol/claude-agent-acp"] },
   gemini: { product: "antigravity", executable: "agy", adapterVersion: manifest.version },
-  muse: { product: "muse-code", executable: "muse", adapterVersion: manifest.dependencies["@muse-code/sdk"] },
+  muse: { product: "muse-code", executable: "muse", adapterVersion: manifest.version,
+    sdkVersion: manifest.dependencies["@muse-code/sdk"] },
 };
 
 /** Provider-specific parsers supply semantics; arbitrary vendor fields never do. */

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Preserve native Grok context-window selection and confirmation while distinguishing the active window from an optional effective input budget.
+- Resolve context by exact model identities and native aliases; remove numeric API-limit special cases and unverified static capacities.
+- Track independent context occupancy semantics, provenance and lifecycle revisions; invalidate compact/resume history and retain fresh native decreases and zero.
+- Keep Codex/Claude request or cumulative usage and Antigravity billing separate from current context; preserve Muse MSP resume snapshots and subscription separation.
+- Show estimates as text and draw percentage rings only from matching fresh native data; keep supported compact available when occupancy is unknown.
+
 - Render nested blockquotes and block content inside quotes and GitHub alerts using Wayne Adams's recursive renderer approach; make quote borders follow text direction and high-contrast colors.
 
 ## [0.3.0] - 2026-09-30

@@ -559,10 +559,11 @@ export function contextUsedFromUpdateEnvelope(meta: unknown): number | null {
 }
 
 /**
- * Adapter occupancy is the prompt actually sent this call: uncached input plus
+ * Adapter prompt-size estimate: uncached input plus
  * cache read and cache write. Those three partitions are disjoint on both
  * Claude and Codex. `usage.totalTokens` / `usage_update.used` add output and
- * are a billing sum, not conversation occupancy.
+ * are a billing sum, not current session occupancy. This helper alone never
+ * establishes current-context semantics or a native session measurement.
  *
  * When the parts are missing, `totalTokens - outputTokens` is the same
  * quantity (verified against Claude 0.69.0 and a live Codex 5.6 turn).

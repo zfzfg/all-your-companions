@@ -16,6 +16,7 @@ export interface ContextRuntime {
   executable?: string;
   cliVersion?: string;
   adapterVersion?: string;
+  sdkVersion?: string;
   protocolVersion?: string;
 }
 
