@@ -133,7 +133,7 @@ ${THEME_BOOT}
 
 const initialState = {
   type: "initialState",
-  effort: "", cwd: "/repo", useCtrlEnter: false, extVersion: "0.3.0",
+  effort: "", cwd: "/repo", useCtrlEnter: false, extVersion: "0.3.1",
   showThinking: false, expandCommandOutputs: false, steerByDefault: false,
   soundNotifications: false, processingSound: false, readRepliesAloud: false,
   appPurpose: "coding", hostKind: "extension", hostName: "Harness",

@@ -2,7 +2,7 @@
   "name": "all-your-companions",
   "displayName": "All your Companions - in one Place!",
   "description": "Local-first sidebar for five AI coding companions: Google Antigravity, Grok Build, OpenAI Codex, Claude Code, and Meta Muse Code. Parallel sessions, crews, native diff review, worktrees, and voice. Community fork of Grok Build for VS Code by Pawe\u0142 Huryn.",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "publisher": "zfzfg",
   "author": {
     "name": "Collin Lerche (zfzfg) | STERRA",

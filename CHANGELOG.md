@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.3.1] - 2026-10-01
+
 - Preserve native Grok context-window selection and confirmation while distinguishing the active window from an optional effective input budget.
 - Resolve context by exact model identities and native aliases; remove numeric API-limit special cases and unverified static capacities.
 - Track independent context occupancy semantics, provenance and lifecycle revisions; invalidate compact/resume history and retain fresh native decreases and zero.

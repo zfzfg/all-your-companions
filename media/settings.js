@@ -116,7 +116,7 @@
   const GITHUB_ISSUE_FEATURE_URL = GITHUB_REPO_URL + "/issues/new?labels=enhancement";
   const SUPPORT_MAILTO = "mailto:collinlerche@gmail.com";
   const ABOUT_DISCLAIMER =
-    "All your Companions v0.3.0 · Community-built · FSL-1.1-MIT | " +
+    "All your Companions v0.3.1 · Community-built · FSL-1.1-MIT | " +
     "Forked from Grok Build for VS Code (v4.1.8) by Paweł Huryn. " +
     "Maintained by Collin Lerche (zfzfg) | STERRA (https://sterra.online). " +
     "Local-first sidebar for Google Antigravity, Grok Build, OpenAI Codex, Claude Code, and Meta Muse Code. " +
