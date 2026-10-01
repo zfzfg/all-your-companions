@@ -100,7 +100,8 @@ export class Projection {
 
   accept(method: string, params: Record<string, any>): void {
     if (method === "session/contextUsage") {
-      this.emit({ sessionUpdate: "usage_update", used: params.usedTokens, size: params.windowTokens });
+      this.emit({ sessionUpdate: "usage_update", used: params.usedTokens, size: params.windowTokens,
+        _meta: { contextSource: "msp-session-context", viewCursor: params.viewCursor, pressure: params.pressure } });
       return;
     }
     if (method === "item/delta") {

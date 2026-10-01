@@ -179,10 +179,18 @@ export class MuseSession {
       this.sessionId = session.sessionId;
       this.approvalMode = session.approvalMode?.mode ?? this.approvalMode;
       this.assertSandbox(this.approvalMode);
-      return { sessionId: session.sessionId, models: await this.models(session.modelId), ...this.modes(session.approvalMode?.mode) };
+      return { sessionId: session.sessionId, models: await this.models(session.modelId),
+        _meta: { contextRuntime: this.contextRuntime() }, ...this.modes(session.approvalMode?.mode) };
     } finally { this.creating = false; }
   }
 
+
+  private contextRuntime() {
+    const init = this.msp?.initializeResult;
+    return { product: "muse-code", executable: "muse",
+      cliVersion: init?.serverInfo.version,
+      protocolVersion: init?.schema?.version === undefined ? undefined : String(init.schema.version) };
+  }
 
   async models(currentModelId?: string) {
     const catalog = await this.connection().request("model/list", {});
@@ -348,7 +356,10 @@ export class MuseSession {
         for (const approval of (pending.approvals as any[] ?? [])) this.approvals.accept("approval/requested", approval);
       }
       await this.updates;
-      return { _meta: { models: await this.models(resumed.modelId) }, ...this.modes(this.approvalMode) };
+      const context = history?.snapshot?.state?.contextUsage;
+      return { _meta: { models: await this.models(resumed.modelId), contextRuntime: this.contextRuntime(),
+        ...(context ? { contextSnapshot: { sessionUpdate: "usage_update", used: context.usedTokens, size: context.windowTokens,
+          _meta: { contextSource: "msp-session-context" } } } : {}) }, ...this.modes(this.approvalMode) };
     } catch (error) {
       this.sessionId = undefined;
       this.projection.clear();

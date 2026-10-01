@@ -31,6 +31,9 @@ export class MuseBackend implements AcpBackend<"muse"> {
   normalizeUpdate(update: any, meta: any) {
     if (update?.sessionUpdate === "session_info_update" && update._meta?.["muse/workflow"]) return { workflowUpdate: update._meta["muse/workflow"] };
     if (update?.sessionUpdate === "usage_update") return { update,
+      contextObservation: { usageSemantics: "current-context" as const, used: contextUsed(update.used),
+        limits: { activeWindow: contextTokens(update.size), contextWindow: contextTokens(update.size) },
+        usageQuality: "verified" as const, limitQuality: "verified" as const, native: update },
       meta, contextUsed: contextUsed(update.used), contextWindow: contextTokens(update.size), contextQuality: "verified" as const };
     return { update, meta };
   }

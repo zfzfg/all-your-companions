@@ -55,8 +55,21 @@ it("reports Muse's exact context occupancy, including decreases and zero", () =>
   const client = new AcpClient({ cliPath: "/unused", cwd: "/workspace", backend: new MuseBackend(), log: () => {} });
   const seen: any[] = [];
   client.on("contextUsage", (...args) => seen.push(args));
-  for (const used of [250, 100, 0]) (client as any).handleSessionUpdate({ sessionUpdate: "usage_update", used, size: 1007997 });
+  client.sessionId = "muse-session";
+  for (const used of [250, 100, 0]) (client as any).handleSessionUpdate({ sessionUpdate: "usage_update", used, size: 1007997 }, undefined, "muse-session");
   expect(seen).toEqual([[250, 1007997], [100, 1007997], [0, 1007997]]);
+});
+
+it("adopts the native resume snapshot after initializing the loaded model", async () => {
+  const client = new AcpClient({ cliPath: "/unused", cwd: "/workspace", backend: new MuseBackend(), log: () => {} });
+  (client as any).request = async () => ({ _meta: {
+    models: { currentModelId: "m", availableModels: [{ modelId: "m", name: "Muse", _meta: { totalContextTokens: 1000 } }] },
+    contextRuntime: { product: "muse-code", cliVersion: "fixture", protocolVersion: "1" },
+    contextSnapshot: { sessionUpdate: "usage_update", used: 50, size: 1000 },
+  } });
+  await client.loadSession("resumed");
+  expect(client.contextBudget).toMatchObject({ used: 50, usageSemantics: "current-context", sessionId: "resumed",
+    runtime: { cliVersion: "fixture", protocolVersion: "1" } });
 });
 
 it("keeps explicit credential backends and macOS Keychain behavior", () => {
