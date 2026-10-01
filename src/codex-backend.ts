@@ -99,7 +99,8 @@ export function normalizeCodexPromptResult(result: any): any {
     ...result,
     _meta: {
       ...(result?._meta ?? {}),
-      // Donut occupancy, not the billed sum the adapter puts in usage.totalTokens.
+      contextUsageSemantics: "last-request",
+      // Last request input partitions; this is not a current session snapshot.
       totalTokens: adapterContextOccupancy(normalizedUsage) ?? finiteNumber(usage.totalTokens),
       inputTokens: finiteNumber(usage.inputTokens),
       outputTokens: finiteNumber(usage.outputTokens),
@@ -173,6 +174,8 @@ export function normalizeCodexUpdate(update: any, meta?: any): BackendUpdate {
       contextWindow: size,
       contextQuality: "verified",
       usageUpdateUsed: used,
+      contextObservation: { usageSemantics: "last-request", used, usageQuality: "unknown",
+        limits: { effectiveContextTokens: size, reserveIncluded: true }, limitQuality: "verified", native: update },
     };
   }
   if (update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update") {

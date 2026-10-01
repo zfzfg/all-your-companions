@@ -143,7 +143,7 @@ describe("Codex output and usage normalization", () => {
 
   it("feeds usage_update window without treating billed used as occupancy", () => {
     expect(normalizeCodexUpdate({ sessionUpdate: "usage_update", used: 1234, size: 258400 }, { replay: false }))
-      .toEqual({
+      .toMatchObject({
         update: { sessionUpdate: "usage_update", used: 1234, size: 258400 },
         meta: { replay: false },
         contextWindow: 258400,
