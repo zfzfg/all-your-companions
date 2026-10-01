@@ -2168,53 +2168,44 @@
       }).format(usd);
     };
 
-    const used = state.usedTokens || 0;
-    const pct = state.contextWindow > 0 ? Math.round((used / state.contextWindow) * 100) : undefined;
     const observation = state.contextObservation;
-    const approximate = observation && (observation.limitQuality !== "verified" || observation.usageQuality !== "verified");
-    info(
-      "Context used",
-      state.contextWindow > 0 ? `${approximate ? "≈ " : ""}${tok(used)} / ${tok(state.contextWindow)} (${pct}%)`
-        : `${tok(used)} tokens — limit unknown`,
-    );
+    const used = observation && typeof observation.used === "number" ? observation.used : undefined;
+    const native = hasNativeContextRatio();
+    const pct = native ? Math.round(used / state.contextWindow * 100) : undefined;
+    info("Context used", used === undefined ? "Unknown" : native
+      ? `${tok(used)} / ${tok(state.contextWindow)} (${pct}%)${used > state.contextWindow ? " — exceeds reported capacity" : ""}`
+      : `≈ ${tok(used)} tokens${observation.usageStale || observation.stale ? " (stale)" : " (estimated)"}`);
 
-    // Compact sits directly under the context line — it is the action ON that
-    // number, so it belongs to it, not stranded below the billing sections.
-    // Every popover row is a DIV: a <button> here drags in native chrome
-    // (background + border) that reads as a stray box in the popover.
     const act = document.createElement("div");
-    if (state.activeProvider === "gemini") {
-      const isHighUsage = pct >= 80 || used >= state.contextWindow;
-      act.className = "toolbar-popover-item context-compact auto-managed";
-      act.textContent = isHighUsage
-        ? "Context probably compacted automatically by now"
-        : "Context managed automatically by Antigravity";
-      act.title = "Antigravity automatically summarizes and compresses long sessions in the background. No manual compaction needed — keep chatting normally.";
-    } else {
-      act.className = "toolbar-popover-item popover-action context-compact" + (used ? "" : " disabled");
-      act.textContent = "Compact conversation";
-      act.title = used ? "Summarize the conversation so far to free up context" : "Nothing to compact yet";
-      if (used) {
-        act.onclick = (e) => {
-          e.stopPropagation();
-          vscode.postMessage({ type: "send", text: "/compact", bare: true });
-          closePopovers();
-        };
-      }
-    }
+    const compact = state.providerCapabilities && state.providerCapabilities.manualCompact;
+    const canCompact = compact && compact.state === "yes";
+    act.className = "toolbar-popover-item context-compact" + (canCompact ? " popover-action" : " disabled");
+    act.textContent = canCompact ? "Compact conversation" : "Manual compaction unavailable";
+    act.title = canCompact ? "Ask the CLI to compact this conversation" : "This session does not advertise manual compaction";
+    if (canCompact) act.onclick = (e) => {
+      e.stopPropagation();
+      vscode.postMessage({ type: "send", text: "/compact", bare: true });
+      closePopovers();
+    };
     contextPopover.appendChild(act);
 
     appendContextWindowChoices(contextPopover);
-    info(state.contextWindowSelection?.sizes.length > 1 ? "Configured context window" : "Actual context limit", state.contextWindow > 0 ? `${tok(state.contextWindow)} tokens` : "Unknown");
+    const activeGrokWindow = state.activeProvider === "grok" && state.contextWindowSelection?.selectedSize;
+    const limits = observation?.limits || {};
+    info(activeGrokWindow ? "Active Grok context window" : "Native context capacity",
+      activeGrokWindow ? `${tok(activeGrokWindow)} tokens` : state.contextWindow > 0 ? `${tok(state.contextWindow)} tokens` : "Unknown");
+    if (limits.modelMaximum) info("Catalog maximum", `${tok(limits.modelMaximum)} tokens`);
+    if (limits.configuredWindow && !activeGrokWindow) info("Configured window", `${tok(limits.configuredWindow)} tokens`);
+    if (limits.activeWindow && !activeGrokWindow) info("Confirmed active window", `${tok(limits.activeWindow)} tokens`);
+    info("Effective input budget", limits.effectiveContextTokens || limits.inputTokenLimit
+      ? `${tok(limits.effectiveContextTokens || limits.inputTokenLimit)} tokens` : "Unknown");
+    if (limits.autoCompactAtTokens) info("Auto-compact threshold", `${tok(limits.autoCompactAtTokens)} tokens`);
+    if (used !== undefined) info("Usage source", `${observation.usageSource || observation.source || "unknown"}${observation.usageStale ? " (stale)" : ""}`);
     if (observation) {
       info("Limit source", `${observation.source || "unknown"}${observation.stale ? " (stale)" : ""}`);
       if (observation.observedAt > 0) {
         const timeLabel = observation.source === "catalog" ? "Catalog updated" : "Observed";
         info(timeLabel, new Date(observation.observedAt).toLocaleString());
-      }
-      if (observation.documentedLimits) {
-        const apiLimit = observation.documentedLimits.inputTokenLimit || observation.documentedLimits.contextWindow;
-        if (apiLimit) info("Public API maximum", `${tok(apiLimit)} tokens`);
       }
       if (observation.limits && observation.limits.contextWindow && observation.limits.contextWindow !== state.contextWindow) {
         info("Model window", tok(observation.limits.contextWindow));
@@ -16157,11 +16148,34 @@
     mark.setAttribute("data-threshold", String(threshold));
   }
 
+  function rememberUnclassifiedContext(used) {
+    if (!Number.isSafeInteger(used) || used < 0) return;
+    const o = state.contextObservation;
+    // Legacy host frames and historical counters are estimates, not snapshots.
+    if (o?.usageQuality === "verified" || o?.usageStale) return;
+    state.contextObservation = { ...(o || {}), provider: state.activeProvider,
+      sessionId: state.contextSelectionSessionId, modelId: state.currentModelId,
+      source: o?.source || "adapter", usageSource: "adapter", usageSemantics: "estimated-context",
+      usageQuality: "estimated", used, limits: o?.limits || { contextWindow: state.contextWindow } };
+  }
+
+  function hasNativeContextRatio() {
+    const o = state.contextObservation;
+    if (!o || o.stale || o.usageStale || o.usageSemantics !== "current-context"
+        || o.usageQuality !== "verified" || typeof o.used !== "number" || !(state.contextWindow > 0)) return false;
+    if (o.provider !== state.activeProvider || !o.sessionId || o.sessionId !== state.contextSelectionSessionId || o.modelId !== state.currentModelId) return false;
+    const selected = state.contextWindowSelection;
+    const confirmedGrok = state.activeProvider === "grok" && selected?.selectedSize === state.contextWindow
+      && selected.sessionId === o.sessionId && selected.modelId === o.modelId && selected.generation === o.generation;
+    return o.limitQuality === "verified" || !!confirmedGrok
+      || (state.activeProvider === "grok" && o.limits?.activeWindow === state.contextWindow);
+  }
+
   function updateDonut(used) {
     // Remember the last usage so a later redraw (e.g. the context window changing
     // when the model switches) keeps the same "used" and just rescales the max.
     if (used != null) state.usedTokens = used;
-    used = state.usedTokens || 0;
+    used = state.contextObservation?.used ?? state.usedTokens ?? 0;
     const max = state.contextWindow;
     const pct = max > 0 ? Math.min(100, Math.round((used / max) * 100)) : 0;
     const circumference = 2 * Math.PI * 6; // must match the donut circles' r in getHtml
@@ -16179,15 +16193,19 @@
     donutArc.setAttribute("stroke", color);
     paintDonutThresholdMark(max > 0 ? threshold : undefined);
     const observation = state.contextObservation;
-    const approximate = observation && (observation.limitQuality !== "verified" || observation.usageQuality !== "verified");
-    donutLabel.textContent = max > 0 ? `${approximate ? "≈ " : ""}${toK(used)}/${toK(max)}` : `${toK(used)}/?`;
-    const isGeminiAutoCompacted = state.activeProvider === "gemini" && used >= max;
-    const usageDetail = isGeminiAutoCompacted
-      ? `${used.toLocaleString()} / ${max.toLocaleString()} tokens (automatically compressed in background by Antigravity)`
-      : max > 0 ? `${approximate ? "≈ " : ""}${used.toLocaleString()} / ${max.toLocaleString()} tokens${observation && observation.stale ? " (stale)" : ""}`
-        : `${used.toLocaleString()} tokens — limit unknown`;
+    const measured = observation && typeof observation.used === "number" ? observation.used : undefined;
+    const native = hasNativeContextRatio();
+    donutEl.classList.toggle("context-text-only", !native);
+    donutArc.style.display = native ? "" : "none";
+    if (donutArc.parentNode?.style) donutArc.parentNode.style.display = native ? "" : "none";
+    paintDonutThresholdMark(native ? threshold : undefined);
+    donutLabel.textContent = measured === undefined ? "Context ?" : native
+      ? `${toK(measured)}/${toK(max)}` : `≈ ${toK(measured)}`;
+    const usageDetail = measured === undefined ? "Current context occupancy unknown" : native
+      ? `${measured.toLocaleString()} / ${max.toLocaleString()} tokens${measured > max ? " — exceeds reported capacity" : ""}`
+      : `Estimated context: ${measured.toLocaleString()} tokens${observation.usageStale || observation.stale ? " (stale)" : ""}`;
     donutLabel.title = usageDetail;
-    donutEl.title = `Context usage — ${usageDetail}`;
+    donutEl.title = usageDetail;
     // Occupancy can move without a contextUsage frame (promptComplete,
     // modelChanged). Re-paint, then re-fetch session/info while the popover
     // is open so the group stays and catches up instead of vanishing.
@@ -18422,7 +18440,7 @@
         const m = state.availableModels.find((x) => modelsMatch(x.modelId, msg.currentModelId) && (!x.provider || x.provider === state.activeProvider));
         if (msg.preserveContext && state.contextObservation && modelsMatch(state.contextObservation.modelId, msg.currentModelId)) {
           const limits = state.contextObservation.limits || {};
-          state.contextWindow = limits.effectiveContextTokens || limits.inputTokenLimit || limits.contextWindow;
+          state.contextWindow = limits.effectiveContextTokens || limits.inputTokenLimit || limits.activeWindow || limits.configuredWindow || limits.contextWindow;
         } else if (m?.totalContextTokens) {
           state.contextWindow = m.totalContextTokens;
         } else {
@@ -18491,7 +18509,7 @@
         const m = state.availableModels.find((x) => modelsMatch(x.modelId, msg.modelId) && (!x.provider || x.provider === state.activeProvider));
         if (state.contextObservation && modelsMatch(state.contextObservation.modelId, msg.modelId)) {
           const limits = state.contextObservation.limits || {};
-          state.contextWindow = limits.effectiveContextTokens || limits.inputTokenLimit || limits.contextWindow;
+          state.contextWindow = limits.effectiveContextTokens || limits.inputTokenLimit || limits.activeWindow || limits.configuredWindow || limits.contextWindow;
         } else if (m && m.totalContextTokens) {
           state.contextWindow = m.totalContextTokens;
         } else {
@@ -19152,7 +19170,8 @@
         // real value — the CLI doesn't recompute the count until the NEXT
         // turn ends (research/signals-refresh-probe.cjs), which then updates
         // it via its own meta or the host's contextUsage read.
-        if (msg.meta?.totalTokens != null) updateDonut(msg.meta.totalTokens);
+        if (msg.meta?.totalTokens != null && !msg.meta.contextUsageSemantics) rememberUnclassifiedContext(msg.meta.totalTokens);
+        if (msg.meta?.totalTokens != null && (!msg.meta.contextUsageSemantics || msg.meta.contextUsageSemantics === "current-context")) updateDonut(msg.meta.totalTokens);
         break;
       case "subscriptionUsage":
         state.subscriptionUsageKnown = true;
@@ -19173,8 +19192,9 @@
         }
         if (msg.context) {
           state.contextObservation = msg.context;
+          state.usedTokens = msg.context.used;
           const limits = msg.context.limits || {};
-          state.contextWindow = limits.effectiveContextTokens || limits.inputTokenLimit || limits.contextWindow;
+          state.contextWindow = limits.effectiveContextTokens || limits.inputTokenLimit || limits.activeWindow || limits.configuredWindow || limits.contextWindow;
         }
         // Host-authoritative occupancy: grok's signals.json / live envelope,
         // or the remembered adapter prompt size. A window-only frame updates
@@ -19195,7 +19215,8 @@
             state.contextWindow = msg.window;
           }
         }
-        if (msg.used != null) updateDonut(msg.used);
+        if (!msg.context && msg.used != null) rememberUnclassifiedContext(msg.used);
+        if (msg.used != null && (!msg.context || msg.context.used !== undefined)) updateDonut(msg.used);
         else updateDonut();
         break;
       case "expandCommandOutputs":

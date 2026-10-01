@@ -201,12 +201,16 @@ describe("host wiring (K-01, K-02, K-04)", () => {
 describe("webview (K-03, K-04, K-06)", () => {
   it("marks the ring, uses the threshold for the colour and names it in the popover", () => {
     const { window, doc } = bootWebview();
-    dispatch(window, { type: "contextUsage", used: 460000, window: 500000, autoCompactThresholdPercent: 95, compactionCount: 2 });
+    dispatch(window, { type: "session", sessionId: "s", provider: "grok", currentModelId: "m" });
+    const context = { provider: "grok" as const, access: "a", modelId: "m", sessionId: "s", generation: 1,
+      source: "session" as const, observedAt: 1, limitQuality: "verified" as const, usageQuality: "verified" as const,
+      usageSemantics: "current-context" as const, limits: { contextWindow: 500000 }, used: 460000 };
+    dispatch(window, { type: "contextUsage", context, used: 460000, window: 500000, autoCompactThresholdPercent: 95, compactionCount: 2 });
     const mark = doc.querySelector(".donut-threshold-mark");
     expect(mark?.getAttribute("data-threshold")).toBe("95");
     expect(doc.getElementById("donut-arc")!.getAttribute("stroke")).toContain("yellow");
     // a used-only frame keeps the threshold
-    dispatch(window, { type: "contextUsage", used: 480000 });
+    dispatch(window, { type: "contextUsage", context: { ...context, used: 480000 }, used: 480000 });
     expect(doc.getElementById("donut-arc")!.getAttribute("stroke")).toContain("red");
     click(window, doc.getElementById("donut")!);
     const text = doc.getElementById("context-popover")!.textContent!;

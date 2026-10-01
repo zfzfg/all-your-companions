@@ -617,6 +617,7 @@ describe("context popover respects the app purpose", () => {
     const h = bootWebview();
     dispatch(h.window, { type: "initialState", appPurpose: "knowledge", capabilities: {} } as never);
 
+    dispatch(h.window, { type: "providerCapabilities", provider: "grok", capabilities: { manualCompact: { state: "yes" } } } as never);
     const pop = openDonut(h);
     const text = pop.textContent || "";
 

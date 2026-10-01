@@ -1,0 +1,8 @@
+{
+  "evidence": "Schema and shipped adapter source inspected locally; not a live capture",
+  "versions": { "codex": "1.11.0", "claude": "0.76.0", "muse": "1.3.0" },
+  "codex": { "sessionUpdate": "usage_update", "used": 110, "size": 258400 },
+  "claude": { "sessionUpdate": "usage_update", "used": 37475, "size": 200000 },
+  "muse": { "sessionUpdate": "usage_update", "used": 0, "size": 1007997 },
+  "antigravity": { "sessionUpdate": "usage_update", "used": 2400 }
+}

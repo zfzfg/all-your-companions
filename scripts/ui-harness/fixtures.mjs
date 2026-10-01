@@ -72,10 +72,29 @@ const companion = (over = {}) => ({
 const contextSelection = { sessionId: "context-demo", modelId: "grok-4.7", generation: 1, sizes: [256000, 500000], defaultSize: 256000, selectedSize: 500000, available: true, changing: false };
 const contextDemo = async (send) => {
   await send({ type: "session", sessionId: "context-demo", provider: "grok", currentModelId: "grok-4.7", models: [{ modelId: "grok-4.7", name: "Grok 4.7", totalContextTokens: 500000, contextWindowSizes: [256000, 500000] }] });
+  await send({ type: "providerCapabilities", provider: "grok", capabilities: { manualCompact: { state: "yes" } } });
   await send({ type: "contextWindowSelection", selection: contextSelection });
-  await send({ type: "contextUsage", used: 300000, window: 500000 });
+  await send({ type: "contextUsage", used: 300000, window: 500000, context: {
+    provider: "grok", access: "fixture", sessionId: "context-demo", modelId: "grok-4.7", generation: 1,
+    source: "session", observedAt: Date.now(), limitQuality: "estimated", usageQuality: "verified",
+    usageSemantics: "current-context", used: 300000, limits: { activeWindow: 500000, configuredWindow: 500000, contextWindow: 500000 }
+  } });
 };
 export const CHAT_SCENARIOS = {
+  "context-estimated": { run: async ({ send, page }) => {
+    await contextDemo(send);
+    await send({ type: "contextUsage", context: { provider: "grok", access: "fixture", sessionId: "context-demo", modelId: "grok-4.7", generation: 1,
+      source: "adapter", observedAt: Date.now(), limitQuality: "estimated", usageQuality: "estimated", usageSemantics: "estimated-context",
+      used: 300000, limits: { activeWindow: 500000, contextWindow: 500000 } } });
+    await page.click("#donut");
+  } },
+  "context-unknown": { run: async ({ send, page }) => {
+    await contextDemo(send);
+    await send({ type: "contextUsage", context: { provider: "grok", access: "fixture", sessionId: "context-demo", modelId: "grok-4.7", generation: 1,
+      source: "session", observedAt: Date.now(), limitQuality: "estimated", usageQuality: "unknown", usageStale: true,
+      limits: { activeWindow: 500000, contextWindow: 500000 } } });
+    await page.click("#donut");
+  } },
   "context-window-popup": { height: 950, run: async ({ send, page }) => { await contextDemo(send); await page.click("#donut"); } },
   "context-window-model": { run: async ({ send }) => { await contextDemo(send); await send({ type: "contextWindowSelection", selection: contextSelection, openPicker: true }); } },
   "context-window-pending": { run: async ({ send }) => { await contextDemo(send); await send({ type: "contextWindowSelection", selection: { ...contextSelection, changing: true }, openPicker: true }); } },

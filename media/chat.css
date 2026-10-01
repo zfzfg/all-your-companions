@@ -3967,6 +3967,15 @@ textarea#input {
 }
 .context-donut:hover { background: var(--vscode-toolbar-hoverBackground); }
 
+/* Text replaces the ring for estimates/unknowns, including narrow sidebars. */
+.context-donut.context-text-only #donut-label {
+  display: inline;
+  max-width: 76px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ---- slash popover ---- */
 
 .slash-popover {

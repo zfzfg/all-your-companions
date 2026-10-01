@@ -165,10 +165,10 @@ describe("CLI Budget and Compaction Integration", () => {
     });
 
     it("rejects delayed model updates that do not match the current model ID", () => {
-      expect(modelsMatch("grok-4.6", "grok-4-6")).toBe(true);
+      expect(modelsMatch("grok-4.6", "grok-4-6")).toBe(false);
       expect(modelsMatch("grok-4.6", "grok-4.6")).toBe(true);
       expect(modelsMatch("grok-4.6", "grok-4.7")).toBe(false);
-      expect(modelsMatch("grok-4.7", "grok-4-7")).toBe(true);
+      expect(modelsMatch("grok-4.7", "grok-4-7")).toBe(false);
     });
   });
 
@@ -192,7 +192,7 @@ describe("CLI Budget and Compaction Integration", () => {
   });
 
   describe("4. Popover display requirements", () => {
-    it("renders Actual context limit, Limit source, Catalog updated, and Public API maximum", () => {
+    it("renders Native context capacity, Limit source, Catalog updated, and Public API maximum", () => {
       const { window, doc } = bootWebview();
       dispatch(window, { type: "initialState", appPurpose: "coding", capabilities: {} } as never);
       dispatch(window, {
@@ -224,13 +224,13 @@ describe("CLI Budget and Compaction Integration", () => {
       click(window, doc.getElementById("donut")!);
       const text = doc.getElementById("context-popover")!.textContent!;
 
-      expect(text).toContain("Actual context limit");
-      expect(text).toMatch(/Actual context limit\s*256[.,]000 tokens/);
+      expect(text).toContain("Native context capacity");
+      expect(text).toMatch(/Native context capacity\s*256[.,]000 tokens/);
       expect(text).toContain("Limit source");
       expect(text).toContain("catalog");
       expect(text).toContain("Catalog updated");
       expect(text).not.toContain("Measured"); // Catalog entries must NEVER be called "Measured"
-      expect(text).toMatch(/Public API maximum\s*500[.,]000 tokens/);
+      expect(text).not.toContain("Public API maximum");
       expect(text).toContain("Auto-compacts at 80%");
       expect(text).toContain("(native CLI threshold)");
       expect(text).not.toContain("companions.grok.autoCompactThresholdPercent");
@@ -253,8 +253,8 @@ describe("CLI Budget and Compaction Integration", () => {
       click(window, doc.getElementById("donut")!);
       const text = doc.getElementById("context-popover")!.textContent!;
 
-      expect(text).toContain("Actual context limit");
-      expect(text).toMatch(/Actual context limit\s*Unknown/);
+      expect(text).toContain("Native context capacity");
+      expect(text).toMatch(/Native context capacity\s*Unknown/);
     });
 
     it("displays user-set threshold transparently with via GROK_AUTO_COMPACT_THRESHOLD_PERCENT", () => {
