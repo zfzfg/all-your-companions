@@ -176,7 +176,8 @@ export class UsageHost {
 
   public adapterTurnOccupancy(session: Session, meta: PromptResultMeta): number | undefined {
     if (!usageIsRealMeasurement(meta) || session.adapterCompactThisTurn
-      || meta.contextUsageSemantics === "unknown") return undefined;
+      || meta.contextUsageSemantics === "unknown"
+      || (meta.contextUsageSemantics === "turn-cumulative" && !session.adapterTurnCallUsed?.length)) return undefined;
     return occupancyFromAdapterTurn(adapterContextOccupancy(meta.usage), session.adapterTurnCallUsed);
   }
 

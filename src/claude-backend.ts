@@ -127,7 +127,8 @@ export function normalizeClaudePromptResult(result: any): any {
     ...result,
     _meta: {
       ...(result?._meta ?? {}),
-      // Donut occupancy, not the billed sum the adapter puts in usage.totalTokens.
+      contextUsageSemantics: "turn-cumulative",
+      // Accumulated adapter usage is not a current session snapshot.
       totalTokens: adapterContextOccupancy(normalizedUsage) ?? finiteNumber(usage.totalTokens),
       inputTokens: finiteNumber(usage.inputTokens),
       outputTokens: finiteNumber(usage.outputTokens),
@@ -320,6 +321,8 @@ export function normalizeClaudeUpdate(
       contextWindow: size,
       contextQuality: update._meta?.contextWindowAuthoritative === true ? "verified" : "estimated",
       usageUpdateUsed: used,
+      contextObservation: { usageSemantics: "last-request", used, usageQuality: "unknown",
+        limits: { contextWindow: size }, limitQuality: "estimated", native: update },
     };
   }
   if (update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update") {
