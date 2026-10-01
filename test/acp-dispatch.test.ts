@@ -899,7 +899,7 @@ describe("credential vs entitlement classification (#58 — a missing subscripti
 describe("resolveModelId (grok's versioned set_model id vs availableModels)", () => {
   const models = [
     { modelId: "grok-composer-2.5-fast" },
-    { modelId: "grok-build" },
+    { modelId: "grok-build", resolvedModelId: "grok-build-0.1" },
   ];
 
   it("maps the versioned id grok echoes back onto the availableModels base id", () => {
@@ -916,8 +916,8 @@ describe("resolveModelId (grok's versioned set_model id vs availableModels)", ()
     expect(resolveModelId("some-other-model", models)).toBe("some-other-model");
   });
 
-  it("prefers the most specific base id when models share a prefix", () => {
-    const colliding = [{ modelId: "grok-build" }, { modelId: "grok-build-mini" }];
+  it("uses explicit native aliases when models share a prefix", () => {
+    const colliding = [{ modelId: "grok-build", resolvedModelId: "grok-build-0.1" }, { modelId: "grok-build-mini", resolvedModelId: "grok-build-mini-0.1" }];
     expect(resolveModelId("grok-build-mini-0.1", colliding)).toBe("grok-build-mini");
     expect(resolveModelId("grok-build-0.1", colliding)).toBe("grok-build");
   });

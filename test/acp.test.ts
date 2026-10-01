@@ -78,6 +78,7 @@ describe("a request to a process that is gone", () => {
 describe("AcpClient notification metadata", () => {
   it("emits the live context count from the session/update envelope", () => {
     const { client } = clientWithFakeProc();
+    client.sessionId = "native-session";
     const seen: number[] = [];
     client.on("contextUsage", (used) => seen.push(used));
 
@@ -86,6 +87,7 @@ describe("AcpClient notification metadata", () => {
         jsonrpc: "2.0",
         method: "session/update",
         params: {
+          sessionId: "native-session",
           update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "x" } },
           _meta: { totalTokens },
         },
@@ -97,6 +99,7 @@ describe("AcpClient notification metadata", () => {
 
   it("emits the adapter usage_update window even when the live model id is missing or unmatched", () => {
     const { client } = clientWithFakeProc({ backend: new ClaudeBackend() });
+    client.sessionId = "native-session";
     const seen: Array<{ used?: number; window?: number }> = [];
     const billed: number[] = [];
     client.on("contextUsage", (used, window) => seen.push({ used, window }));
@@ -105,7 +108,7 @@ describe("AcpClient notification metadata", () => {
     (client as any).onLine(JSON.stringify({
       jsonrpc: "2.0",
       method: "session/update",
-      params: { update: { sessionUpdate: "usage_update", used: 35671, size: 1000000 } },
+      params: { sessionId: "native-session", update: { sessionUpdate: "usage_update", used: 35671, size: 1000000 } },
     }));
     expect(seen).toEqual([{ used: undefined, window: 1000000 }]);
     expect(billed).toEqual([35671]);
@@ -115,7 +118,7 @@ describe("AcpClient notification metadata", () => {
     (client as any).onLine(JSON.stringify({
       jsonrpc: "2.0",
       method: "session/update",
-      params: { update: { sessionUpdate: "usage_update", used: 35709, size: 1000000 } },
+      params: { sessionId: "native-session", update: { sessionUpdate: "usage_update", used: 35709, size: 1000000 } },
     }));
     expect(seen[1]).toEqual({ used: undefined, window: 1000000 });
     expect((client as any).availableModels[0].totalContextTokens).toBeUndefined();
@@ -124,7 +127,7 @@ describe("AcpClient notification metadata", () => {
     (client as any).onLine(JSON.stringify({
       jsonrpc: "2.0",
       method: "session/update",
-      params: { update: { sessionUpdate: "usage_update", used: 35709, size: 1000000 } },
+      params: { sessionId: "native-session", update: { sessionUpdate: "usage_update", used: 35709, size: 1000000 } },
     }));
     expect((client as any).availableModels[0].totalContextTokens).toBe(1000000);
   });

@@ -101,6 +101,7 @@ export function mergeContextObservation(previous: ContextObservation | undefined
     || (previous.revision && next.revision && Object.keys(previous.revision).some(key =>
       previous.revision![key as keyof ContextRevision] !== next.revision![key as keyof ContextRevision]))) return next;
   const rank = (o: ContextObservation) => o.stale ? 0
+    : o.source === "session" && o.limits.activeWindow ? 4
     : o.limitQuality !== "verified" ? 1 : o.source === "session" ? 4 : o.source === "catalog" ? 3 : 2;
   const prevWindow = effectiveContextWindow(previous.limits);
   const nextWindow = effectiveContextWindow(next.limits);
@@ -108,6 +109,7 @@ export function mergeContextObservation(previous: ContextObservation | undefined
   const nextIsApiMax = next.source === "documented";
   const isEnlargement = previous.limitQuality === "verified" && previous.source === "catalog"
     && next.source === "session" && next.limitQuality !== "verified"
+    && !next.limits.activeWindow
     && (nextWindow ?? 0) > (prevWindow ?? 0);
   const keepLimit = (nextWindow === undefined)
     || (nextIsApiMax && prevWindow !== undefined && !prevIsApiMax)
@@ -118,7 +120,10 @@ export function mergeContextObservation(previous: ContextObservation | undefined
     || (previous.usageObservedAt ?? 0) > (next.usageObservedAt ?? next.observedAt)
     || (previous.usageQuality === "verified" && next.usageQuality === "estimated"
       && (next.usageObservedAt ?? next.observedAt) <= (previous.usageObservedAt ?? previous.observedAt)) ? previous : next;
-  return { ...limit, resolvedModelId: next.resolvedModelId ?? previous.resolvedModelId,
+  return { ...limit, limits: { ...limit.limits,
+    modelMaximum: next.limits.modelMaximum ?? previous.limits.modelMaximum,
+    autoCompactAtTokens: limit.limits.autoCompactAtTokens ?? previous.limits.autoCompactAtTokens },
+    resolvedModelId: next.resolvedModelId ?? previous.resolvedModelId,
     used: usage.used, usageQuality: usage.usageQuality, usageObservedAt: usage.usageObservedAt,
     usageSource: usage.usageSource ?? usage.source, usageSemantics: usage.usageSemantics,
     usageStale: usage.usageStale ?? usage.stale };

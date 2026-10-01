@@ -1365,15 +1365,8 @@ export function promptErrorText(err: unknown): string {
  */
 export function resolveModelId(
   id: string | undefined,
-  availableModels: { modelId: string }[] | undefined,
+  availableModels: { modelId: string; resolvedModelId?: string }[] | undefined,
 ): string | undefined {
-  if (!id || !availableModels?.length) return id;
-  if (availableModels.some((m) => m.modelId === id)) return id;
-  let best: string | undefined;
-  for (const m of availableModels) {
-    if (id.startsWith(m.modelId) || m.modelId.startsWith(id)) {
-      if (!best || m.modelId.length > best.length) best = m.modelId;
-    }
-  }
-  return best ?? id;
+  if (!id) return id;
+  return availableModels?.find(model => model.modelId === id || model.resolvedModelId === id)?.modelId ?? id;
 }
