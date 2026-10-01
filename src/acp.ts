@@ -1,3 +1,4 @@
+import { contextWindowSizes, type ContextWindowSelection } from "./context-selection";
 import { supportsSessionDeletion } from "./acp-backend";
 import { ContextCatalogReader, modelsMatch, type ContextCatalogSnapshot } from "./context-catalog";
 import {
@@ -134,6 +135,7 @@ export interface ModelInfo {
   description?: string;
   totalContextTokens?: number;
   contextLimits?: ModelContextLimits;
+  contextWindowSizes?: number[];
   contextQuality?: "verified" | "estimated" | "unknown";
   contextStale?: boolean;
   supportsReasoningEffort?: boolean;
@@ -334,14 +336,89 @@ export class AcpClient extends EventEmitter {
   private catalogSignature?: string;
   private catalogAddedModels = new Set<string>();
 
+  private nativeContextWindowSizes = new Map<string, number[]>();
+  private selectedContextWindow?: number;
+  private contextWindowChanging = false;
+
   get contextBudget(): ContextObservation | undefined { return this.contextObservation; }
+
+  private nativeModelContextSizes(model: any): number[] | undefined {
+    if (this.provider !== "grok") return undefined;
+    const sizes = contextWindowSizes(model._meta?.contextWindows);
+    if (sizes.length) this.nativeContextWindowSizes.set(model.modelId, sizes);
+    return sizes.length ? sizes : contextWindowSizes(undefined, model._meta?.totalContextTokens);
+  }
+
+  get contextWindowSelection(): ContextWindowSelection {
+    const model = this.availableModels.find(m => m.modelId === this.currentModelId);
+    const sizes = model?.contextWindowSizes ?? [];
+    const version = this.opts.grokVersionVerified && parseGrokVersion(this.opts.grokVersion ?? "");
+    const nativeRpc = !!version && compareVersionTuple(version, [1, 0, 46]) >= 0;
+    const advertised = this.availableCommands.some(c => c.name === "context-window");
+    const available = this.provider === "grok" && !!this.sessionId && sizes.length > 1 && (nativeRpc || advertised);
+    return { sessionId: this.sessionId ?? "", modelId: this.currentModelId, generation: this.contextGeneration,
+      sizes, defaultSize: sizes[0], selectedSize: this.selectedContextWindow, available,
+      changing: this.contextWindowChanging,
+      reason: available ? undefined : "This CLI session does not expose native context-window selection." };
+  }
+
+  private publishContextWindowSelection(): void {
+    this.emit("contextWindowSelection", this.contextWindowSelection);
+  }
+
+  async setContextWindow(size: number, expected: Pick<ContextWindowSelection, "sessionId" | "modelId" | "generation">): Promise<void> {
+    const current = this.contextWindowSelection;
+    if (expected.sessionId !== current.sessionId || expected.modelId !== current.modelId || expected.generation !== current.generation)
+      throw new Error("The context selection belongs to an older session or model. Please choose again.");
+    if (!current.available || !current.sizes.includes(size)) throw new Error(current.reason ?? "This model does not offer that context size.");
+    if (this.contextWindowChanging || [...this.pending.values()].some(p => p.isPrompt || p.method === "session/set_model" || p.method === "session/set_config_option")) throw new Error("Wait for the current turn or context change to finish.");
+    const previous = this.contextObservation;
+    const previousSize = this.selectedContextWindow;
+    this.contextWindowChanging = true;
+    this.contextGeneration++;
+    this.contextObservation = undefined;
+    this.publishContextWindowSelection();
+    const generation = this.contextGeneration;
+    try {
+      if (this.availableCommands.some(c => c.name === "context-window")) {
+        await this.request("session/prompt", { sessionId: current.sessionId, prompt: [{ type: "text", text: `/context-window ${size}` }] });
+      } else {
+        // Native Windows CLI 1.0.46: measured set_model override + session/info confirmation.
+        const result = await this.request("session/set_model", { sessionId: current.sessionId, modelId: current.modelId,
+          _meta: { contextWindow: size, ...(this.currentReasoningEffort ? { reasoningEffort: this.currentReasoningEffort } : {}) } });
+        if (!this.backend.modelSetSucceeded(result)) throw new Error("The CLI rejected the context-window change.");
+      }
+      const raw = await this.request("_x.ai/session/info", { sessionId: current.sessionId });
+      const info = parseSessionInfoRpcResult(raw);
+      if (generation !== this.contextGeneration || current.sessionId !== this.sessionId || current.modelId !== this.currentModelId)
+        throw new Error("The session changed before the context-window update was confirmed.");
+      if (!info || info.window !== size) throw new Error("The CLI did not confirm the requested context window. Refresh the session before trying again.");
+      this.selectedContextWindow = size;
+      this.observeContext({ source: "session", limitQuality: "estimated", usageQuality: "verified", used: info.used,
+        generation, limits: { contextWindow: size, autoCompactThresholdPercent: info.autoCompactThresholdPercent } });
+    } catch (error) {
+      if (generation === this.contextGeneration) {
+        this.selectedContextWindow = previousSize;
+        this.contextObservation = previous ? { ...previous, generation, stale: true } : undefined;
+        this.lastContextWindow = previous && effectiveContextWindow(previous.limits);
+        this.lastContextUsed = previous?.used;
+        this.emit("contextBudget", this.contextObservation ?? { reset: true });
+      }
+      throw error;
+    } finally {
+      this.contextWindowChanging = false;
+      this.publishContextWindowSelection();
+    }
+  }
 
   private resetContextBudget(): void {
     this.contextGeneration++;
     this.lastContextUsed = undefined;
     this.lastContextWindow = undefined;
     this.contextObservation = undefined;
+    this.selectedContextWindow = undefined;
     this.seedContextBudget();
+    this.publishContextWindowSelection();
     this.emit("contextBudget", { ...(this.contextBudget ?? {}), reset: true });
   }
 
@@ -364,10 +441,11 @@ export class AcpClient extends EventEmitter {
       for (const row of snapshot.models) {
         const existing = this.availableModels.find(model => modelsMatch(model.modelId, row.modelId));
         if (!existing) {
-          this.availableModels.push({ modelId: row.modelId, name: row.name, contextLimits: row.limits,
+          this.availableModels.push({ modelId: row.modelId, name: row.name, contextLimits: row.limits, contextWindowSizes: row.contextWindowSizes,
             totalContextTokens: effectiveContextWindow(row.limits), contextQuality: snapshot.stale ? "estimated" : "verified" });
           this.catalogAddedModels.add(row.modelId);
         } else {
+          existing.contextWindowSizes = this.nativeContextWindowSizes.get(existing.modelId) ?? row.contextWindowSizes ?? existing.contextWindowSizes;
           existing.contextLimits = row.limits;
           existing.totalContextTokens = effectiveContextWindow(row.limits);
           existing.contextQuality = snapshot.stale ? "estimated" : "verified";
@@ -378,9 +456,9 @@ export class AcpClient extends EventEmitter {
       modelsMatch(entry.modelId, this.currentModelId) ||
       modelsMatch(entry.resolvedModelId, this.currentModelId)
     );
-    if (!snapshot || !row) return;
+    if (!snapshot || !row || this.contextWindowChanging) return;
     const model = this.availableModels.find(entry => modelsMatch(entry.modelId, this.currentModelId));
-    this.observeContext({ limits: row.limits, source: "catalog", limitQuality: "verified",
+    if (!this.selectedContextWindow) this.observeContext({ limits: row.limits, source: "catalog", limitQuality: "verified",
       observedAt: snapshot.observedAt, stale: snapshot.stale, resolvedModelId: row.resolvedModelId });
     if (model && this.contextObservation) {
       model.contextLimits = this.contextObservation.limits;
@@ -403,13 +481,15 @@ export class AcpClient extends EventEmitter {
     this.lastContextWindow = effectiveContextWindow(this.contextObservation.limits);
     this.lastContextUsed = this.contextObservation.used;
     this.emit("contextBudget", this.contextObservation);
+    this.publishContextWindowSelection();
   }
 
   async refreshContextCatalog(): Promise<void> { await this.contextCatalog?.refresh(); }
 
   private async checkPromptContext(prompt: readonly PromptContentBlock[]): Promise<void> {
+    if (this.contextWindowChanging) throw new Error("Wait for the context-window change to finish.");
     // Native slash commands must be dispatchable even when the context is full.
-    if (prompt.length === 1 && prompt[0].type === "text" && /^\/(?:compact|session-info|clear)(?:\s|$)/.test(prompt[0].text)) return;
+    if (prompt.length === 1 && prompt[0].type === "text" && /^\/(?:compact|session-info|clear|context-window)(?:\s|$)/.test(prompt[0].text)) return;
     await this.contextCatalog?.refresh();
     if (!this.contextObservation) this.seedContextBudget();
     const generation = this.contextGeneration;
@@ -523,16 +603,19 @@ export class AcpClient extends EventEmitter {
         for (const row of snapshot.models) {
           const model = this.availableModels.find(model => modelsMatch(model.modelId, row.modelId));
           if (!model) {
-            this.availableModels.push({ modelId: row.modelId, name: row.name, contextLimits: row.limits,
+            this.availableModels.push({ modelId: row.modelId, name: row.name, contextLimits: row.limits, contextWindowSizes: row.contextWindowSizes,
               totalContextTokens: effectiveContextWindow(row.limits), contextQuality: snapshot.stale ? "estimated" : "verified" });
             this.catalogAddedModels.add(row.modelId);
           } else {
-            model.contextLimits = row.limits;
-            model.totalContextTokens = effectiveContextWindow(row.limits);
-            model.contextQuality = snapshot.stale ? "estimated" : "verified";
+            model.contextWindowSizes = this.nativeContextWindowSizes.get(model.modelId) ?? row.contextWindowSizes ?? model.contextWindowSizes;
+            model.contextLimits = model.modelId === this.currentModelId && this.selectedContextWindow ? this.contextObservation?.limits : row.limits;
+            model.totalContextTokens = model.modelId === this.currentModelId && this.selectedContextWindow ? this.selectedContextWindow : effectiveContextWindow(row.limits);
+            model.contextQuality = model.modelId === this.currentModelId && this.selectedContextWindow
+              ? this.contextObservation?.limitQuality ?? "estimated" : (snapshot.stale ? "estimated" : "verified");
           }
         }
         this.emit("modelsCatalogChanged");
+        this.publishContextWindowSelection();
       }
     }, this.opts.log, `${this.opts.cliPath}:${this.opts.grokVersion ?? this.backend.processName}`);
     this.contextCatalog.start();
@@ -664,11 +747,13 @@ export class AcpClient extends EventEmitter {
     });
     const res = this.backend.normalizeSessionResponse(raw);
     this.sessionId = res.sessionId;
+    this.nativeContextWindowSizes.clear();
     this.availableModels = (res.models?.availableModels ?? []).map((m: any) => ({
       modelId: m.modelId,
       name: m.name,
       description: m.description,
       totalContextTokens: contextTokens(m._meta?.totalContextTokens),
+      contextWindowSizes: this.nativeModelContextSizes(m),
       contextLimits: m._meta?.contextLimits ? validContextLimits(m._meta.contextLimits) : undefined,
       contextQuality: m._meta?.contextQuality ?? MODEL_CONTEXT_QUALITY[this.provider],
       supportsReasoningEffort: m._meta?.supportsReasoningEffort === true,
@@ -731,6 +816,7 @@ export class AcpClient extends EventEmitter {
         this.opts.log(`[acp] Failed to set reasoning effort to ${this.opts.effort}: ${(err as Error).message}.`);
       }
     }
+    if (this.contextWindowSelection.sizes.length > 1) { try { await this.getSessionInfo(); } catch { /* Selection stays unconfirmed. */ } }
     return { sessionId: res.sessionId };
   }
 
@@ -754,6 +840,7 @@ export class AcpClient extends EventEmitter {
         name: m.name,
         description: m.description,
         totalContextTokens: contextTokens(m._meta?.totalContextTokens),
+      contextWindowSizes: this.nativeModelContextSizes(m),
         contextLimits: m._meta?.contextLimits ? validContextLimits(m._meta.contextLimits) : undefined,
         contextQuality: m._meta?.contextQuality ?? MODEL_CONTEXT_QUALITY[this.provider],
         supportsReasoningEffort: m._meta?.supportsReasoningEffort === true,
@@ -781,10 +868,12 @@ export class AcpClient extends EventEmitter {
         this.opts.log(`[acp] Failed to set model to ${modelId}: ${(err as Error).message}. Keeping ${this.currentModelId}.`);
       }
     }
+    if (this.contextWindowSelection.sizes.length > 1) { try { await this.getSessionInfo(); } catch { /* Resume stays unconfirmed. */ } }
     return { sessionId };
   }
 
   async setModel(modelId: string): Promise<void> {
+    if (this.contextWindowChanging) throw new Error("Wait for the context-window change to finish.");
     if (!this.sessionId) throw new Error("no session");
     if ([...this.pending.values()].some(request => request.isPrompt)) throw new Error("Wait for the current turn before changing model.");
     // Carry the live effort override through a compatible switch — a bare
@@ -826,6 +915,7 @@ export class AcpClient extends EventEmitter {
       }
       this.resetContextBudget();
       this.emit("modelChanged", this.currentModelId);
+      if (this.contextWindowSelection.sizes.length > 1) { try { await this.getSessionInfo(); } catch { /* Native confirmation remains unknown. */ } }
     }
   }
 
@@ -853,6 +943,7 @@ export class AcpClient extends EventEmitter {
    *  response, so an optimistic post-response write would clobber the true value
    *  on a build that resolved the effort differently. */
   async setReasoningEffort(level: string): Promise<boolean> {
+    if (this.contextWindowChanging) throw new Error("Wait for the context-window change to finish.");
     if (!this.sessionId) throw new Error("no session");
     if (!level) return false; // "" = unset → cannot be expressed as an override
     const call = this.backend.setReasoningEffort(this.sessionId, this.currentModelId, level);
@@ -924,6 +1015,9 @@ export class AcpClient extends EventEmitter {
 
   async prompt(textOrBlocks: string | PromptContentBlock[]): Promise<PromptResultMeta> {
     if (!this.sessionId) throw new Error("no session");
+    const firstText = typeof textOrBlocks === "string" ? textOrBlocks : textOrBlocks[0]?.type === "text" ? textOrBlocks[0].text : "";
+    if (/^\/context-window(?:\s|$)/i.test(firstText) && !this.availableCommands.some(c => c.name === "context-window"))
+      throw new Error("Use the native context-window selection; this CLI does not advertise the slash command over ACP.");
     const prompt: PromptContentBlock[] =
       typeof textOrBlocks === "string"
         ? [{ type: "text", text: textOrBlocks }]
@@ -1211,6 +1305,7 @@ export class AcpClient extends EventEmitter {
    * prompt scrape.
    */
   async getSessionInfo(): Promise<SessionInfoContext | "unsupported"> {
+    if (this.contextWindowChanging) throw new Error("Context-window change in progress; retry the session-info refresh.");
     if (!this.sessionId) throw new Error("no session");
     if (this.provider !== "grok" && this.provider !== "gemini") return "unsupported";
     try {
@@ -1223,10 +1318,15 @@ export class AcpClient extends EventEmitter {
       const verifiedLimit = this.contextObservation?.limitQuality === "verified"
         ? effectiveContextWindow(this.contextObservation.limits)
         : undefined;
-      const effectiveWindow = isAuthoritative ? parsed.window : (verifiedLimit ?? parsed.window);
+      const effectiveWindow = isAuthoritative || this.provider === "grok" ? parsed.window : (verifiedLimit ?? parsed.window);
+      if (generation !== this.contextGeneration || sessionId !== this.sessionId) throw new Error("Session context changed during refresh; retry session-info.");
+      if (this.provider === "grok" && this.contextWindowSelection.sizes.length > 1) {
+        if (this.selectedContextWindow !== parsed.window) this.contextObservation = undefined;
+        this.selectedContextWindow = parsed.window;
+      }
       this.observeContext({
         source: "session",
-        limitQuality: isAuthoritative ? "verified" : (verifiedLimit ? "verified" : "estimated"),
+        limitQuality: isAuthoritative ? "verified" : (this.provider === "grok" && this.selectedContextWindow ? "estimated" : (verifiedLimit ? "verified" : "estimated")),
         usageQuality: MODEL_CONTEXT_QUALITY[this.provider],
         generation,
         sessionId,
@@ -1578,6 +1678,8 @@ export class AcpClient extends EventEmitter {
     const foreign = this.loadingChildSessionIds
       ? typeof sessionId === "string" && this.loadingChildSessionIds.has(sessionId)
       : isForeignSessionUpdate(sessionId, this.sessionId);
+    const updateGeneration = meta?.generation ?? u?._meta?.generation;
+    if (typeof updateGeneration === "number" && updateGeneration !== this.contextGeneration) return;
     const normalized = this.backend.normalizeUpdate(u, meta);
     if (!foreign && normalized.notice) this.emit("notice", normalized.notice);
     if (!foreign && normalized.workflowUpdate) this.emit("workflowUpdate", normalized.workflowUpdate);
@@ -1670,6 +1772,7 @@ export class AcpClient extends EventEmitter {
       // autocomplete and the dispatch gate at the single ingestion point (#31).
       this.availableCommands = filterAdvertisedCommands(r.commands);
       this.emit("commandsUpdate", this.availableCommands);
+      this.publishContextWindowSelection();
       return;
     }
     if (r.event === "taskBackgrounded") { this.emit("taskBackgrounded", r.payload); return; }

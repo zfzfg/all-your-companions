@@ -90,3 +90,40 @@ describe("SidebarInbound", () => {
     expect(h.handleSend).not.toHaveBeenCalled();
   });
 });
+
+
+describe("context-window inbound routing", () => {
+  it("does not change model-switch behavior for another provider", async () => {
+    const switchModel = vi.fn(async () => {});
+    const h = harness({ sessionSettings: { switchModel } as any });
+    h.focused.provider = "codex";
+    h.focused.turnToken = {};
+    h.focused.client = { currentModelId: "old" } as any;
+    await h.inbound.dispatch({ type: "setModel", modelId: "new", provider: "codex" });
+    expect(switchModel).toHaveBeenCalledWith("new", h.focused, "codex");
+  });
+
+  it("answers both numeric forms without consuming a normal send", async () => {
+    const notifyUser = vi.fn();
+    const h = harness({ providers: { notifyUser } as any });
+    const setContextWindow = vi.fn(async () => {});
+    h.focused.client = { contextWindowSelection: { sessionId: "s", modelId: "m", generation: 1 }, setContextWindow } as any;
+    await h.inbound.dispatch({ type: "send", text: "/context-window 500k" });
+    await h.inbound.dispatch({ type: "send", text: "/context-window 256000" });
+    expect(setContextWindow.mock.calls.map((c: any[]) => c[0])).toEqual([500000, 256000]);
+    expect(h.handleSend).not.toHaveBeenCalled();
+  });
+  it("opens the picker for the bare command and refuses changes during a turn", async () => {
+    const post = vi.fn(); const notifyUser = vi.fn();
+    const h = harness({ post, providers: { notifyUser } as any });
+    const setContextWindow = vi.fn();
+    h.focused.client = { contextWindowSelection: { sessionId: "s", modelId: "m", generation: 1 }, setContextWindow } as any;
+    await h.inbound.dispatch({ type: "send", text: "/context-window" });
+    expect(post.mock.calls[0][0].openPicker).toBe(true);
+    h.focused.turnToken = {};
+    await h.inbound.dispatch({ type: "send", text: "/context-window 500k" });
+    expect(setContextWindow).not.toHaveBeenCalled();
+    expect(notifyUser).toHaveBeenCalled();
+    expect(h.handleSend).not.toHaveBeenCalled();
+  });
+});

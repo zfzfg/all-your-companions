@@ -958,6 +958,7 @@ export class SessionStart {
         worktree: !!session.worktree,
         provider: session.provider,
       });
+      this.deps.emit(session, { type: "contextWindowSelection", selection: client.contextWindowSelection });
       if (providerCapability(session.provider, "feedback").state === "yes") {
         const metaEnabled = parseFeedbackEnabledMeta(res);
         if (metaEnabled !== undefined) session.feedbackMetaEnabled = metaEnabled;
@@ -987,6 +988,12 @@ export class SessionStart {
       this.deps.emit(session, { type: "session", sessionId: client.sessionId,
         models: this.deps.providerOps.modelsForSession(session, client.availableModels, client.currentModelId),
         currentModelId: client.currentModelId, provider: session.provider, worktree: !!session.worktree, preserveContext: true });
+      this.deps.emit(session, { type: "contextWindowSelection", selection: client.contextWindowSelection });
+    });
+
+    client.on("contextWindowSelection", (selection) => {
+      if (gen !== session.gen) return;
+      this.deps.emit(session, { type: "contextWindowSelection", selection });
     });
 
     client.on("contextBudget", (context: ContextObservation & { reset?: boolean }) => {
@@ -1046,6 +1053,7 @@ export class SessionStart {
     client.on("commandsUpdate", (cmds) => {
       if (gen !== session.gen) return;
       const merged = [...cmds];
+      if (session.provider === "grok" && !merged.some(c => c.name === "context-window")) merged.push({ name: "context-window", description: "Choose the native context window for this session (e.g. 500k)" });
       for (const hostCmd of EXTENSION_HOST_SLASH_COMMANDS) {
         if (!merged.some((c) => c.name === hostCmd.name)) {
           merged.push(hostCmd);

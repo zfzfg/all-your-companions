@@ -1,3 +1,4 @@
+import { parseContextWindowSize, type ContextWindowSelection } from "./context-selection";
 import { museInstallCommand } from "./muse-install";
 import { withMuseCredentialBackend } from "./muse-backend";
 import { museSettings, configWriteTarget } from "./mode-prefs";
@@ -13,7 +14,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { Session } from "./session";
-import { pendingPermissionOptions } from "./session";
+import { turnIsInFlight, pendingPermissionOptions } from "./session";
 import { shouldRehydrateOnWebviewReady, type Host, type HostContext } from "./host";
 import type { HostMsg, WebviewMsg } from "./protocol";
 import type { AcpProvider } from "./acp-backend";
@@ -314,6 +315,17 @@ export interface SidebarInboundDeps {
 
 export class SessionInboundRouter {
   constructor(private readonly deps: SidebarInboundDeps) {}
+  private async changeContextWindow(session: Session, size: number, expected: Pick<ContextWindowSelection, "sessionId" | "modelId" | "generation"> | undefined = session.client?.contextWindowSelection): Promise<void> {
+    const client = session.client;
+    if (!client || !expected) return;
+    if (session.priming || turnIsInFlight(session)) {
+      this.deps.providers.notifyUser("warning", "Wait for the current turn to finish before changing the context window.");
+      return;
+    }
+    try { await client.setContextWindow(size, expected); }
+    catch (error) { this.deps.providers.notifyUser("error", `Failed to change context window: ${(error as Error).message}`); }
+  }
+
   async tryHandle(msg: WebviewMsg, session: Session, _attachmentOwner: AttachmentOwner, _messageCwd: string): Promise<boolean> {
     switch (msg.type) {
       case "ready": {
@@ -370,7 +382,22 @@ export class SessionInboundRouter {
         this.deps.postLocal({ type: "imageOriginal", fullId: msg.fullId, requestId: msg.requestId, src });
         break;
       }
+      case "setContextWindow":
+        await this.changeContextWindow(session, msg.size, msg);
+        break;
       case "send":
+        if (/^\/context-window(?:\s|$)/i.test(msg.text)) {
+          const argument = msg.text.replace(/^\/context-window/i, "").trim();
+          if (!argument) {
+            if (session.client) this.deps.post({ type: "contextWindowSelection", selection: session.client.contextWindowSelection, openPicker: true });
+          } else {
+            const size = parseContextWindowSize(argument);
+            if (size === undefined) this.deps.providers.notifyUser("error", "Use /context-window 500k or a whole token count offered by the model.");
+            else await this.changeContextWindow(session, size);
+          }
+          break;
+        }
+
         // `/agent` is answered by the HOST and never reaches a CLI (AP-10).
         // Ahead of the queued-send bookkeeping on purpose: a role run is not a
         // turn on this session, so it must not consume a queued-send dispatch.
@@ -554,6 +581,7 @@ export class SessionInboundRouter {
         await this.deps.composer.answerLimitOffer(session, msg);
         break;
       case "setModel":
+        if (session.provider === "grok" && (turnIsInFlight(session) || session.client?.contextWindowSelection.changing)) break;
         await this.deps.sessionSettings.switchModel(
           msg.modelId,
           session,
@@ -561,6 +589,7 @@ export class SessionInboundRouter {
             ? msg.provider
             : this.deps.providers.providerForRequestedModel(msg.modelId, session.provider),
         );
+        if (session.client?.currentModelId === msg.modelId) this.deps.post({ type: "contextWindowSelection", selection: session.client.contextWindowSelection, openPicker: true });
         break;
       case "setEffort": {
         if (session.priming) break; // ignore changes fired mid-session-start (see switchModel)

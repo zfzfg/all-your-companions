@@ -1,3 +1,4 @@
+import type { ContextWindowSelection } from "./context-selection";
 import type { ModeId, MuseSettings } from "./mode-prefs";
 // Single source of truth for the host <-> webview message contract.
 //
@@ -835,6 +836,7 @@ export type HostMsg =
   // another project's name, it presents one project's conversation as another's.
   // Optional and additive: a client that never sees it keeps its old fallback.
   | { type: "sessionName"; sessionId: string; name: string; cwd: string; repoCwd?: string }
+  | { type: "contextWindowSelection"; selection: ContextWindowSelection; openPicker?: boolean }
   | { type: "modelChanged"; modelId: string }
   // AP-15. `locked` is the whole point: the webview swaps the segmented
   // control for a read-only badge, and the host refuses a switch either way.
@@ -1577,6 +1579,7 @@ export type WebviewMsg =
         notes?: string;
       };
     }
+  | { type: "setContextWindow"; sessionId: string; modelId: string; generation: number; size: number }
   | { type: "setConfigOption"; configId: string; value: unknown }
   | { type: "removeChip"; id: string }
   | { type: "toggleChip"; id: string }
@@ -2055,7 +2058,7 @@ const HOST_MESSAGE_TYPE_MAP: Record<HostMsg["type"], true> = {
   compactSummary: true,
   nearFullPrompt: true,
   initialState: true, moveViewHint: true, welcomeTips: true, projectSetup: true, githubState: true, githubRepos: true, providerState: true, mcpServers: true, mcpConnectors: true, routines: true, codexInstallProgress: true, planModeAvailability: true, showThinking: true, appPurpose: true, fontScale: true, grokUpdateStatus: true, updateAvailable: true, updateReady: true, telemetryEnabled: true, thumbsFeedback: true,
-  initialized: true, cliUpdating: true, session: true, sessionName: true, modelChanged: true,
+  contextWindowSelection: true, initialized: true, cliUpdating: true, session: true, sessionName: true, modelChanged: true,
   startupStatus: true, modeChanged: true, museSettings: true, sessionType: true, companionSubagent: true, subagentTray: true, workflowRun: true, workflowList: true, openModePopover: true, voiceState: true, voiceConfigured: true,
   voicePartial: true, voiceSubmit: true, voiceTranscript: true, voiceError: true,
   chips: true, commandsUpdate: true, mentionResults: true, userMessage: true, agentStart: true,
@@ -2083,7 +2086,7 @@ const WEBVIEW_MESSAGE_TYPE_MAP: Record<WebviewMsg["type"], true> = {
   contextOverflowAnswer: true,
   continueInFreshSession: true,
   ready: true, send: true, newSession: true, cancel: true, pickModel: true,
-  setMode: true, setSessionType: true, setSubagentsEnabled: true, subagentRosterSave: true, subagentRoutingSave: true, setCrewStageSubagents: true, companionSubagentAction: true, workflowStart: true, workflowGateAction: true, openCrewWithGoal: true, setConfigOption: true, removeChip: true, toggleChip: true, openFile: true, showInFolder: true, openUrl: true,
+  setContextWindow: true, setMode: true, setSessionType: true, setSubagentsEnabled: true, subagentRosterSave: true, subagentRoutingSave: true, setCrewStageSubagents: true, companionSubagentAction: true, workflowStart: true, workflowGateAction: true, openCrewWithGoal: true, setConfigOption: true, removeChip: true, toggleChip: true, openFile: true, showInFolder: true, openUrl: true,
   openText: true, openDiff: true, revertToolEdit: true, reviewRevertFile: true, reviewRevertAll: true, exportExpr: true, setEffort: true, openGlobalConfig: true,
   addProjectFolder: true, removeProjectFolder: true, createProject: true, cloneProject: true, setupGithubCli: true, listGithubRepos: true, githubSignOut: true, githubLoginWithToken: true,
   openProjectConfig: true, listRuleFiles: true, openRuleFile: true, appendRuleFile: true,

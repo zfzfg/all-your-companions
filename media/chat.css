@@ -6485,3 +6485,8 @@ select option {
 .pr-open-repo { opacity: .8; }
 .native-workflow-roster { margin: 8px; }
 .native-workflow-step { margin: 6px 0; }
+
+/* Native context choices share the popover rows and retain a keyboard focus cue. */
+.context-window-choice[aria-disabled="true"] { color: var(--vscode-disabledForeground, var(--vscode-descriptionForeground)); opacity: .6; cursor: default; }
+.context-window-choice[aria-disabled="true"]:hover { background: transparent; }
+.context-window-choice:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }

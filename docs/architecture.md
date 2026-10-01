@@ -918,6 +918,12 @@ the steady-state fix.
   and its `#input-highlight` send-phrase mirror are both `dir="auto"` with
   matching `plaintext` so the overlay stays byte-aligned per line.
 
+## Native context-window selection
+
+Grok model metadata carries `contextWindowSizes`, populated from native ACP `_meta.contextWindows` and the sanitized catalog. `AcpClient.contextWindowSelection` keeps offered sizes, the native default, confirmed session size, generation and changing status separate from context-budget observations. The host routes `/context-window` and `setContextWindow` through the same identity-checked operation; neither consumes composer attachments or drafts. Model selection opens context choices after confirmation, then returns to reasoning effort.
+
+A live-verified Grok CLI >=1.0.46 uses the measured `session/set_model` `_meta.contextWindow` override; an explicitly advertised ACP slash command uses a bare native prompt instead. Native session-info confirms changes and resume state. Changes invalidate the prior budget generation, and catalog refreshes preserve the confirmed selection. Native compaction owns reductions below occupancy. Configured size is not a verified server allowance. Protocol evidence, compatibility and validation: [context budgets](../research/context-budgets.md#native-grok-context-selection).
+
 ## Subsystem notes
 
 Largely the same files as § Module map above, answering a different question.

@@ -1,3 +1,4 @@
+import { contextWindowSizes } from "./context-selection";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
@@ -11,6 +12,7 @@ export interface ContextCatalogModel {
   resolvedModelId?: string;
   name: string;
   limits: ModelContextLimits;
+  contextWindowSizes?: number[];
 }
 export interface ContextCatalogSnapshot {
   models: ContextCatalogModel[];
@@ -37,7 +39,8 @@ export const CATALOG_PARSERS: Partial<Record<AcpProvider, CatalogParser>> = {
     if (!info || info.hidden === true) return [];
     return [{ modelId: id, resolvedModelId: typeof info.model === "string" ? info.model : id,
       name: typeof info.name === "string" ? info.name : id,
-      limits: validContextLimits({ contextWindow: info.context_window,
+      contextWindowSizes: contextWindowSizes(info.context_windows, info.context_window),
+      limits: validContextLimits({ contextWindow: contextWindowSizes(info.context_windows, info.context_window)[0],
         outputReserve: info.max_completion_tokens, autoCompactThresholdPercent: info.auto_compact_threshold_percent }) }];
   }),
   codex: raw => (Array.isArray(raw?.models) ? raw.models : []).flatMap((row: any) => {

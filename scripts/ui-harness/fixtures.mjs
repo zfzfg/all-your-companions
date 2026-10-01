@@ -69,7 +69,16 @@ const companion = (over = {}) => ({
 
 // ------------------------------------------------------------ chat scenes --
 
+const contextSelection = { sessionId: "context-demo", modelId: "grok-4.7", generation: 1, sizes: [256000, 500000], defaultSize: 256000, selectedSize: 500000, available: true, changing: false };
+const contextDemo = async (send) => {
+  await send({ type: "session", sessionId: "context-demo", provider: "grok", currentModelId: "grok-4.7", models: [{ modelId: "grok-4.7", name: "Grok 4.7", totalContextTokens: 500000, contextWindowSizes: [256000, 500000] }] });
+  await send({ type: "contextWindowSelection", selection: contextSelection });
+  await send({ type: "contextUsage", used: 300000, window: 500000 });
+};
 export const CHAT_SCENARIOS = {
+  "context-window-popup": { height: 950, run: async ({ send, page }) => { await contextDemo(send); await page.click("#donut"); } },
+  "context-window-model": { run: async ({ send }) => { await contextDemo(send); await send({ type: "contextWindowSelection", selection: contextSelection, openPicker: true }); } },
+  "context-window-pending": { run: async ({ send }) => { await contextDemo(send); await send({ type: "contextWindowSelection", selection: { ...contextSelection, changing: true }, openPicker: true }); } },
   "upstream-native-workflow-markdown": {
     run: async ({ send }) => {
       await turn(send, "Review with native delegation", "#### Review results\n\nhttps://github.com/example/project/pull/42\n\n[Read file](<C:/Program Files/Project/read me.md:12>)\n\n**https://example.com/review**");

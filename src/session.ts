@@ -1007,6 +1007,7 @@ export function sessionUiSnapshot(
   chips: ContextChip[] = session.chips,
 ): HostMsg[] {
   const messages: HostMsg[] = [];
+  if (session.client) messages.push({ type: "contextWindowSelection", selection: session.client.contextWindowSelection });
   messages.push({ type: "subscriptionUsage", windows: session.subscriptionUsage?.snapshot() ?? [] });
   if (session.client?.currentModelId) {
     messages.push({ type: "modelChanged", modelId: session.client.currentModelId });

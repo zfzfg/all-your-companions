@@ -311,6 +311,8 @@
     effort: "",
     cwd: "",
     contextWindow: undefined,
+    contextWindowSelection: undefined,
+    contextSelectionSessionId: undefined,
     contextObservation: undefined,
     thresholdSource: undefined,
     usedTokens: 0,
@@ -2202,7 +2204,8 @@
     }
     contextPopover.appendChild(act);
 
-    info("Actual context limit", state.contextWindow > 0 ? `${tok(state.contextWindow)} tokens` : "Unknown");
+    appendContextWindowChoices(contextPopover);
+    info(state.contextWindowSelection?.sizes.length > 1 ? "Configured context window" : "Actual context limit", state.contextWindow > 0 ? `${tok(state.contextWindow)} tokens` : "Unknown");
     if (observation) {
       info("Limit source", `${observation.source || "unknown"}${observation.stale ? " (stale)" : ""}`);
       if (observation.observedAt > 0) {
@@ -3497,6 +3500,61 @@
     });
   }
 
+  function appendContextWindowChoices(parent) {
+    const selection = state.contextWindowSelection;
+    if (state.activeProvider !== "grok" || !selection) return;
+    const heading = document.createElement("div");
+    heading.className = "popover-section";
+    heading.textContent = "Context window · tokens";
+    parent.appendChild(heading);
+    if (!selection.available) {
+      const note = document.createElement("div");
+      note.className = "popover-fineprint";
+      note.textContent = selection.reason || "Native selection is unavailable in this session.";
+      parent.appendChild(note);
+      return;
+    }
+    const locked = state.busy || selection.changing;
+    selection.sizes.forEach((size) => {
+      const row = document.createElement("div");
+      row.className = "toolbar-popover-item context-window-choice" + (locked ? " disabled" : "") + (size === selection.selectedSize ? " active" : "");
+      row.setAttribute("role", "button");
+      row.tabIndex = locked ? -1 : 0;
+      row.setAttribute("aria-disabled", String(locked));
+      row.textContent = Number(size).toLocaleString() + (size === selection.defaultSize ? " · CLI default" : "") + (size === selection.selectedSize ? " ✓" : "");
+      row.title = size < state.usedTokens ? "Choosing this smaller window may start native auto-compaction." : "Applies to this session; server access limits still apply.";
+      if (size < state.usedTokens) row.textContent += " · may compact";
+      const choose = () => {
+        if (state.busy || state.contextWindowSelection?.changing) return;
+        vscode.postMessage({ type: "setContextWindow", sessionId: selection.sessionId, modelId: selection.modelId, generation: selection.generation, size });
+      };
+      row.onclick = (event) => { event.stopPropagation(); if (!locked) choose(); };
+      row.onkeydown = (event) => {
+        if (event.key === "Enter" || event.key === " ") { event.preventDefault(); if (!locked) choose(); }
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          event.preventDefault();
+          const rows = [...parent.querySelectorAll(".context-window-choice")];
+          rows[(rows.indexOf(row) + (event.key === "ArrowDown" ? 1 : rows.length - 1)) % rows.length].focus();
+        }
+      };
+      parent.appendChild(row);
+    });
+    const note = document.createElement("div");
+    note.className = "popover-fineprint";
+    note.textContent = selection.changing ? "Waiting for native confirmation…" : "Session setting; offered sizes do not guarantee server allowance.";
+    parent.appendChild(note);
+  }
+
+  function renderContextWindowPicker() {
+    state.gearView = "contextWindow";
+    gearPopover.innerHTML = "";
+    addGearItem('<span class="popover-back">← Model</span>', renderModelPicker);
+    appendContextWindowChoices(gearPopover);
+    addGearItem("Continue to reasoning effort →", renderGearMain);
+    positionGearPopover(activeGearButton());
+    gearPopover.hidden = false;
+  }
+
   function renderModelPicker() {
     state.gearView = "model";
     gearPopover.innerHTML = "";
@@ -3550,11 +3608,13 @@
       el.title = m.modelId;
       el.onclick = (e) => {
         e.stopPropagation();
+        if (modelProvider === "grok" && (state.busy || state.contextWindowSelection?.changing)) return;
         const message = { type: "setModel", modelId: m.modelId };
         if (state.providersKnown && m.provider) message.provider = m.provider;
         vscode.postMessage(message);
         closePopovers();
       };
+      if (modelProvider === "grok" && (state.busy || state.contextWindowSelection?.changing)) el.classList.add("disabled");
       gearPopover.appendChild(el);
     };
     const addManageProvidersRow = () => {
@@ -16352,6 +16412,11 @@
   // ---------- send ----------
 
   function updateSendButton() {
+    if (state.contextControlsBusy !== state.busy) {
+      state.contextControlsBusy = state.busy;
+      if (!contextPopover.hidden) renderContextPopover();
+      if (!gearPopover.hidden && state.gearView === "contextWindow") renderContextWindowPicker();
+    }
     // Four states:
     //  - idle (!busy): send icon, enabled, click → send the typed message.
     //  - busy + locked: spinner icon, disabled, no click action. Used for
@@ -16436,6 +16501,11 @@
 
   function sendOrStop() {
     if (state.onboardingMode === "no-project") return;
+    if (/^\/context-window(?:\s|$)/i.test(input.value.trim())) {
+      vscode.postMessage({ type: "send", text: input.value.trim(), bare: true });
+      return;
+    }
+    if (state.contextWindowSelection?.changing) return;
     if (state.busy) {
       // Typed text signals send-intent — queue it; text present never cancels.
       if (queueFromComposer()) return;
@@ -16724,6 +16794,11 @@
   // ("grok send"), whose composer is cleared separately so the mic can keep
   // listening for the next utterance.
   function submitMessage(text) {
+    if (/^\/context-window(?:\s|$)/i.test((text || "").trim())) {
+      vscode.postMessage({ type: "send", text: (text || "").trim(), bare: true });
+      return;
+    }
+    if (state.contextWindowSelection?.changing) return;
     const t = (text || "").trim();
     if (!t) return;
     state.busy = true;
@@ -18321,7 +18396,20 @@
         if (!welcomeHoldActive()) setWelcomeStatus("Updating Grok Build CLI", true);
         break;
       }
+      case "contextWindowSelection": {
+        const selection = msg.selection;
+        if (state.contextSelectionSessionId && selection.sessionId !== state.contextSelectionSessionId) break;
+        if (state.contextWindowSelection?.sessionId === selection.sessionId && state.contextWindowSelection?.modelId === selection.modelId && state.contextWindowSelection.generation > selection.generation) break;
+        state.contextWindowSelection = selection;
+        if (msg.openPicker && state.activeProvider === "grok") renderContextWindowPicker();
+        else if (!gearPopover.hidden && state.gearView === "contextWindow") renderContextWindowPicker();
+        if (!contextPopover.hidden) renderContextPopover();
+        break;
+      }
       case "session": {
+        if (state.contextSelectionSessionId !== msg.sessionId) state.contextWindowSelection = undefined;
+        state.contextSelectionSessionId = msg.sessionId;
+
         if (!msg.preserveContext) state.subscriptionWindows = [];
         if (!contextPopover.hidden) renderContextPopover();
         state.currentModelId = msg.currentModelId;
@@ -19320,6 +19408,8 @@
         // omitted) the button shows a stop icon and clicks cancel the in-flight
         // CLI work.
         state.busy = !!msg.value;
+        if (!contextPopover.hidden) renderContextPopover();
+        if (!gearPopover.hidden && state.gearView === "contextWindow") renderContextWindowPicker();
         state.busyLocked = !!msg.locked;
         if (!state.busy && !state.replaying) {
           state.repoSwitchPending = false;
@@ -19335,7 +19425,7 @@
           }
         }
         // Refresh the gear popover's model/effort lock state if it's open.
-        if (!gearPopover.hidden) renderGearMain();
+        if (!gearPopover.hidden && state.gearView !== "contextWindow") renderGearMain();
         break;
       case "summarizing": {
         clearWelcome();

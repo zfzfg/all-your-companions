@@ -91,6 +91,8 @@ function storedSessionDir(cwd, sessionId) {
 // SAME provider on DIFFERENT models as separate processes, and the only way a
 // test can prove they did not blend is for each reply to name its own model.
 let activeModelId = "fake-model";
+let activeContextWindow = 256000;
+let activeContextUsed = Number(process.env.FAKE_CONTEXT_USED) || 16017;
 
 function sessionHandle(sessionId) {
   return {
@@ -104,6 +106,7 @@ function sessionHandle(sessionId) {
         modelId: "fake-model",
         name: "Fake",
         _meta: {
+          ...(process.env.FAKE_CONTEXT_WINDOWS ? { contextWindows: [256000, 500000], totalContextTokens: activeContextWindow } : {}),
           supportsReasoningEffort: true,
           reasoningEffort: "high",
           reasoningEfforts: [{ value: "high" }, { value: "medium" }, { value: "low" }],
@@ -242,6 +245,16 @@ rl.on("line", async (line) => {
       return respondOk(id, sessionHandle(sid));
     }
     case "session/set_model": {
+      if (process.env.FAKE_CONTEXT_WINDOWS && params._meta?.contextWindow) {
+        const size = params._meta.contextWindow;
+        if (process.env.FAKE_CONTEXT_ERROR || ![256000, 500000].includes(size)) return send({ jsonrpc: "2.0", id, error: { code: -32602, message: "context window rejected" } });
+        if (!process.env.FAKE_CONTEXT_UNCONFIRMED) activeContextWindow = size;
+        if (size < activeContextUsed) {
+          notify("_x.ai/session_notification", { sessionId: sessions.id, update: { sessionUpdate: "auto_compact_started" } });
+          activeContextUsed = 10000;
+          notify("_x.ai/session_notification", { sessionId: sessions.id, update: { sessionUpdate: "auto_compact_completed", tokens_after: activeContextUsed } });
+        }
+      }
       // Echo the received _meta so a test can assert the client sent
       // reasoningEffort on a live effort switch.
       process.stderr.write(`SET_MODEL: ${JSON.stringify({ modelId: params.modelId, _meta: params._meta })}\n`);
@@ -264,8 +277,8 @@ rl.on("line", async (line) => {
       return respondOk(id, {
         sessionId: sessions.id,
         context: {
-          used: 16017,
-          total: 512000,
+          used: process.env.FAKE_CONTEXT_WINDOWS ? activeContextUsed : 16017,
+          total: process.env.FAKE_CONTEXT_WINDOWS ? activeContextWindow : 512000,
           systemPromptTokens: 1039,
           toolDefinitionsTokens: 812,
           messageTokens: 12166,

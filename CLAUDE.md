@@ -19,6 +19,8 @@ State the rule, name the function / constant / config-key an agent would grep fo
 
 **Grok CLI compatibility.** The extension updates the CLI once per extension upgrade (`maybeUpdateCliOnUpgrade`), then probes `grok --version` each start (`resolvePlanModeAvailability`) to decide whether Plan mode is offered. A live, verified-old CLI latches Plan off for that session; an unreadable probe disables it but stays **re-checkable**, so picking Plan retries without a restart. The floor is `GROK_REQUIRED_VERSION`; known-broken Windows startup ranges are handled by `isStdioBrokenGrokVersion` / `maybePinBrokenCli`. Which versions, and why: [research/stdio-eof-regression.md](research/stdio-eof-regression.md) and [CHANGELOG.md](CHANGELOG.md) — deliberately not repeated here, per the editing discipline above.
 
+Grok context-window choices use `AcpClient.contextWindowSelection` and the identity-checked `setContextWindow` control. The model picker and context popup follow confirmed native session state; `/context-window` is host-routed. See [context budgets](research/context-budgets.md#native-grok-context-selection).
+
 ## Where the detail lives
 
 This file is rules and orientation. Reference material that used to live here
