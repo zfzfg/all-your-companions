@@ -345,6 +345,7 @@ export interface PromptUsage {
 }
 
 export interface PromptResultMeta {
+  contextUsageSemantics?: import("./context-budget").ContextUsageSemantics;
   totalTokens?: number;
   inputTokens?: number;
   outputTokens?: number;
@@ -388,6 +389,7 @@ export function extractPromptUsage(meta: any): PromptUsage | undefined {
 export function extractPromptMeta(result: any): PromptResultMeta {
   const m = result?._meta ?? {};
   return {
+    ...(m.contextUsageSemantics ? { contextUsageSemantics: m.contextUsageSemantics } : {}),
     totalTokens: m.totalTokens,
     inputTokens: m.inputTokens,
     outputTokens: m.outputTokens,
@@ -585,7 +587,8 @@ export function adapterContextOccupancy(usage: {
   const cacheWrite = num(usage.cachedWriteTokens) ?? 0;
   if (input !== undefined) return input + cacheRead + cacheWrite;
   if (billed !== undefined && output !== undefined) return Math.max(0, billed - output);
-  return billed;
+  // An undifferentiated billing total is not a prompt-size estimate.
+  return undefined;
 }
 
 function positiveTokens(value: unknown): number | undefined {

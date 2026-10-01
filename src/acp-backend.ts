@@ -66,6 +66,7 @@ export interface BackendConfigState {
 }
 
 export interface BackendUpdate {
+  contextObservation?: import("./native-context-observation").NativeContextObservation;
   workflowUpdate?: any;
   notice?: string;
   update?: any;

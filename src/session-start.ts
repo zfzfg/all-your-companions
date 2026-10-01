@@ -1282,6 +1282,10 @@ export class SessionStart {
       }
       if (session.compactUsageArmed) {
         session.compactUsageArmed = false;
+        // Older Claude adapters synthesize zero when post_tokens is absent.
+        if (used === 0) return;
+        // Older Claude adapters synthesize zero when post_tokens is absent.
+        if (used === 0) return;
         this.deps.usageOps.rememberAdapterContext(session, {
           occupancy: used,
           compacted: true,

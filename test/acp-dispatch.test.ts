@@ -469,7 +469,7 @@ describe("adapterContextOccupancy", () => {
 
   it("falls back to billed minus output when input is absent", () => {
     expect(adapterContextOccupancy({ totalTokens: 18820, outputTokens: 21 })).toBe(18799);
-    expect(adapterContextOccupancy({ totalTokens: 90 })).toBe(90);
+    expect(adapterContextOccupancy({ totalTokens: 90 })).toBeUndefined();
     expect(adapterContextOccupancy(undefined)).toBeUndefined();
   });
 });

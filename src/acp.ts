@@ -3,7 +3,7 @@ import { supportsSessionDeletion } from "./acp-backend";
 import { ContextCatalogReader, modelsMatch, type ContextCatalogSnapshot } from "./context-catalog";
 import {
   ContextBudgetExceededError, DOCUMENTED_CONTEXT, checkContextBudget, contextTokens, contextUsed,
-  effectiveContextWindow, estimateContextPrompt, mergeContextObservation, validContextLimits,
+  effectiveContextWindow, estimateContextPrompt, mergeContextObservation, validContextLimits, invalidateContextUsage,
   type ContextObservation, type ContextPromptCount, type ModelContextLimits,
 } from "./context-budget";
 import { ChildProcessWithoutNullStreams, spawn } from "node:child_process";
@@ -329,6 +329,7 @@ export class AcpClient extends EventEmitter {
   private lastContextUsed?: number;
   private lastContextWindow?: number;
   private contextGeneration = 0;
+  private contextRevision = { process: 0, session: 0, model: 0, compaction: 0 };
   private contextObservation?: ContextObservation;
   private contextCatalog?: ContextCatalogReader;
   private catalogSnapshot?: ContextCatalogSnapshot;
@@ -341,6 +342,15 @@ export class AcpClient extends EventEmitter {
   private contextWindowChanging = false;
 
   get contextBudget(): ContextObservation | undefined { return this.contextObservation; }
+
+  clearContextUsage(compacting = false): void {
+    if (compacting) this.contextRevision.compaction++;
+    this.lastContextUsed = undefined;
+    if (this.contextObservation) {
+      this.contextObservation = { ...invalidateContextUsage(this.contextObservation), revision: { ...this.contextRevision } };
+      this.emit("contextBudget", this.contextObservation);
+    }
+  }
 
   private nativeModelContextSizes(model: any): number[] | undefined {
     if (this.provider !== "grok") return undefined;
@@ -395,7 +405,7 @@ export class AcpClient extends EventEmitter {
       if (!info || info.window !== size) throw new Error("The CLI did not confirm the requested context window. Refresh the session before trying again.");
       this.selectedContextWindow = size;
       this.observeContext({ source: "session", limitQuality: "estimated", usageQuality: "verified", used: info.used,
-        generation, limits: { contextWindow: size, autoCompactThresholdPercent: info.autoCompactThresholdPercent } });
+        generation, limits: { contextWindow: size, configuredWindow: size, activeWindow: size, autoCompactThresholdPercent: info.autoCompactThresholdPercent } });
     } catch (error) {
       if (generation === this.contextGeneration) {
         this.selectedContextWindow = previousSize;
@@ -413,6 +423,7 @@ export class AcpClient extends EventEmitter {
 
   private resetContextBudget(): void {
     this.contextGeneration++;
+    this.contextRevision.model++;
     this.lastContextUsed = undefined;
     this.lastContextWindow = undefined;
     this.contextObservation = undefined;
@@ -472,10 +483,17 @@ export class AcpClient extends EventEmitter {
     if (input.generation !== undefined && input.generation !== this.contextGeneration) return;
     if (input.sessionId && input.sessionId !== this.sessionId) return;
     if (input.modelId && input.modelId !== this.currentModelId) return;
+    if (input.revision && Object.keys(this.contextRevision).some(key =>
+      input.revision![key as keyof typeof this.contextRevision] !== this.contextRevision[key as keyof typeof this.contextRevision])) return;
     const incoming: ContextObservation = { provider: this.provider, access: this.catalogSnapshot?.access ?? this.provider,
       modelId: this.currentModelId, sessionId: this.sessionId, generation: this.contextGeneration,
       documentedLimits: DOCUMENTED_CONTEXT[this.provider]?.[this.currentModelId ?? ""],
-      observedAt: Date.now(), usageQuality: "unknown", ...input };
+      revision: { ...this.contextRevision }, observedAt: Date.now(), usageQuality: "unknown", ...input };
+    if (incoming.used !== undefined) {
+      incoming.usageSemantics ??= incoming.usageQuality === "verified" ? "current-context" : "estimated-context";
+      incoming.usageSource ??= incoming.source;
+      incoming.usageStale ??= incoming.stale ?? false;
+    }
     if (incoming.used !== undefined) incoming.usageObservedAt ??= Date.now();
     this.contextObservation = mergeContextObservation(this.contextObservation, incoming);
     this.lastContextWindow = effectiveContextWindow(this.contextObservation.limits);
@@ -581,6 +599,7 @@ export class AcpClient extends EventEmitter {
   }
 
   async start(): Promise<void> {
+    this.contextRevision.process++;
     this.contextCatalog = new ContextCatalogReader(this.provider, this.opts.env ?? process.env, snapshot => {
       const signature = JSON.stringify(snapshot);
       const catalogChanged = signature !== this.catalogSignature;
@@ -656,7 +675,8 @@ export class AcpClient extends EventEmitter {
     });
 
     this.rl = createInterface({ input: this.proc.stdout });
-    this.rl.on("line", (line) => this.onLine(line));
+    const processRevision = this.contextRevision.process;
+    this.rl.on("line", (line) => { if (processRevision === this.contextRevision.process) this.onLine(line); });
 
     // Without an `error` listener, an async write failure on the stdin pipe
     // (EPIPE / ERR_STREAM_DESTROYED after the CLI exits) becomes an uncaught
@@ -676,6 +696,7 @@ export class AcpClient extends EventEmitter {
       this.emit("stderr", text);
     });
     this.proc.on("exit", (code) => {
+      if (processRevision !== this.contextRevision.process) return;
       this.opts.log(`${this.backend.processName} exited with code ${code}`);
       // Drop the process handle so later writes are skipped rather than hitting
       // a destroyed pipe (`this.proc?` alone stays truthy after exit).
@@ -686,6 +707,7 @@ export class AcpClient extends EventEmitter {
     // a final successful interject response must be parsed before exit recovery
     // decides whether its user text still needs to be reclaimed.
     this.proc.on("close", (code) => {
+      if (processRevision !== this.contextRevision.process) return;
       const stderrSummary = !isInitialized && earlyStderr.length > 0 ? `: ${earlyStderr.join("").trim()}` : "";
       for (const [id, p] of this.pending) {
         this.pending.delete(id);
@@ -695,6 +717,7 @@ export class AcpClient extends EventEmitter {
       this.emit("exit", code);
     });
     this.proc.on("error", (err) => {
+      if (processRevision !== this.contextRevision.process) return;
       this.opts.log(`spawn error: ${err.message}`);
       if (this.listenerCount("error") > 0) this.emit("error", err);
     });
@@ -747,6 +770,7 @@ export class AcpClient extends EventEmitter {
     });
     const res = this.backend.normalizeSessionResponse(raw);
     this.sessionId = res.sessionId;
+    this.contextRevision.session++;
     this.nativeContextWindowSizes.clear();
     this.availableModels = (res.models?.availableModels ?? []).map((m: any) => ({
       modelId: m.modelId,
@@ -834,6 +858,7 @@ export class AcpClient extends EventEmitter {
     } finally { this.loadingChildSessionIds = undefined; }
     const res = this.backend.normalizeSessionResponse(raw);
     this.sessionId = sessionId;
+    this.contextRevision.session++;
     if (res?.models?.availableModels) {
       this.availableModels = res.models.availableModels.map((m: any) => ({
         modelId: m.modelId,
@@ -1333,6 +1358,7 @@ export class AcpClient extends EventEmitter {
         used: parsed.used,
         limits: {
           contextWindow: effectiveWindow,
+          ...(this.provider === "grok" ? { configuredWindow: parsed.window, activeWindow: parsed.window } : {}),
           autoCompactThresholdPercent: parsed.autoCompactThresholdPercent ?? this.contextObservation?.limits.autoCompactThresholdPercent,
         },
       });
@@ -1680,6 +1706,8 @@ export class AcpClient extends EventEmitter {
       : isForeignSessionUpdate(sessionId, this.sessionId);
     const updateGeneration = meta?.generation ?? u?._meta?.generation;
     if (typeof updateGeneration === "number" && updateGeneration !== this.contextGeneration) return;
+    const contextIdentityKnown = !!this.sessionId && (sessionId === this.sessionId
+      || (typeof updateGeneration === "number" && updateGeneration === this.contextGeneration));
     const normalized = this.backend.normalizeUpdate(u, meta);
     if (!foreign && normalized.notice) this.emit("notice", normalized.notice);
     if (!foreign && normalized.workflowUpdate) this.emit("workflowUpdate", normalized.workflowUpdate);
@@ -1696,7 +1724,7 @@ export class AcpClient extends EventEmitter {
         this.currentSessionTitle = normalized.sessionTitle;
         this.emit("sessionTitle", normalized.sessionTitle);
       }
-      if (!staleModel && contextTokens(normalized.contextWindow) !== undefined) {
+      if (contextIdentityKnown && !staleModel && contextTokens(normalized.contextWindow) !== undefined) {
         this.observeContext({ source: "session", limitQuality: normalized.contextQuality ?? "estimated",
           limits: { contextWindow: normalized.contextWindow, reserveIncluded: SESSION_CONTEXT_RESERVE[this.provider] } });
         // Claude's live id is often an alias (`opus[1m]`) that is not the
@@ -1715,7 +1743,7 @@ export class AcpClient extends EventEmitter {
       u = normalized.update;
       meta = normalized.meta;
     }
-    if (!foreign && !staleModel) {
+    if (!foreign && contextIdentityKnown && !staleModel) {
       // Ordinary adapter usage_update.used is billed per call (includes
       // output) and is not occupancy by itself. Compact's getContextUsage
       // is the exception — sidebar adopts it only after a compact
@@ -1725,10 +1753,12 @@ export class AcpClient extends EventEmitter {
         this.emit("adapterUsageUpdate", normalized.usageUpdateUsed, this.lastContextWindow);
       }
       // A backend that reports occupancy directly (Muse) wins over the envelope.
-      const used = contextUsed(normalized.contextUsed ?? contextUsedFromUpdateEnvelope(meta));
+      const native = normalized.contextObservation;
+      const used = contextUsed(native?.usageSemantics === "current-context" ? native.used
+        : this.provider === "grok" ? contextUsedFromUpdateEnvelope(meta) : undefined);
       const usedChanged = used !== undefined && used !== this.lastContextUsed;
       if (usedChanged) this.observeContext({ source: "session", limitQuality: "unknown",
-        usageQuality: normalized.contextQuality ?? MODEL_CONTEXT_QUALITY[this.provider], used,
+        usageQuality: native?.usageQuality ?? MODEL_CONTEXT_QUALITY[this.provider], usageSemantics: "current-context", used,
         limits: {} });
       if (usedChanged || normalized.contextWindow !== undefined) {
         this.emit("contextUsage", this.lastContextUsed, this.lastContextWindow);
@@ -1975,7 +2005,7 @@ export class AcpClient extends EventEmitter {
         // `currentReasoningEffort` in sync with reality so a later model switch
         // carries the real value, not an optimistic one.
         const upd = params?.update as { sessionUpdate?: unknown; reasoning_effort?: unknown; model_id?: unknown } | undefined;
-        if (upd?.sessionUpdate === "model_changed") {
+        if (upd?.sessionUpdate === "model_changed" && !isForeignSessionUpdate(params?.sessionId, this.sessionId)) {
           this.currentReasoningEffort =
             typeof upd.reasoning_effort === "string" && upd.reasoning_effort ? upd.reasoning_effort : undefined;
           // Keep the model id in sync too — a server-side model change would
@@ -1995,10 +2025,8 @@ export class AcpClient extends EventEmitter {
         if (!isForeignSessionUpdate(params?.sessionId, this.sessionId)) {
           const used = contextUsedFromCompactNotification(upd);
           if (used !== null) this.observeContext({ source: "session", limitQuality: "unknown", limits: {}, used, usageQuality: "verified" });
-          else if (upd?.sessionUpdate === "auto_compact_started" && this.contextObservation) {
-            this.contextObservation = { ...this.contextObservation, usageQuality: "unknown" };
-            this.emit("contextBudget", this.contextObservation);
-          }
+          else if (upd?.sessionUpdate === "auto_compact_started") this.clearContextUsage(true);
+          else if (upd?.sessionUpdate === "auto_compact_completed") this.clearContextUsage();
           this.emit("xaiNotification", params?.update, params?.sessionId);
         }
         if (id != null) this.respondOk(id, {});

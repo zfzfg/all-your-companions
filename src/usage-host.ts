@@ -1,3 +1,4 @@
+import { historicalContextObservation } from "./context-budget";
 import { PROVIDER_USAGE } from "./provider-usage";
 import { PROVIDER_CLI } from "./provider-cli";
 /**
@@ -167,13 +168,15 @@ export class UsageHost {
       this.rememberAdapterContext(session, { compactFailed: true });
       return;
     }
+    session.client?.clearContextUsage?.(signal === "started");
     session.adapterCompactThisTurn = true;
     session.compactUsageArmed = signal === "completed";
     this.rememberAdapterContext(session, { compacted: true });
   }
 
   public adapterTurnOccupancy(session: Session, meta: PromptResultMeta): number | undefined {
-    if (!usageIsRealMeasurement(meta) || session.adapterCompactThisTurn) return undefined;
+    if (!usageIsRealMeasurement(meta) || session.adapterCompactThisTurn
+      || meta.contextUsageSemantics === "unknown") return undefined;
     return occupancyFromAdapterTurn(adapterContextOccupancy(meta.usage), session.adapterTurnCallUsed);
   }
 
@@ -191,7 +194,8 @@ export class UsageHost {
       // Adapter turn occupancy is an estimate unless the native session reports it.
       if (!(current?.usageQuality === "verified" && current.used === next.contextUsed)) {
         session.client?.observeContext?.({ source: "adapter", limitQuality: "unknown", limits: {},
-          used: next.contextUsed, usageQuality: event.authoritative ? "verified" : "estimated" });
+          used: next.contextUsed, usageQuality: event.authoritative ? "verified" : "estimated",
+          usageSemantics: event.authoritative ? "current-context" : "estimated-context" });
       }
     }
     next.contextObservation = session.client?.contextBudget ?? next.contextObservation;
@@ -201,6 +205,7 @@ export class UsageHost {
       this.deps.emit(session, {
         type: "contextUsage",
         used: usage.used,
+        context: session.client?.contextBudget,
         ...(usage.window ? { window: usage.window } : {}),
       });
     } else if (next.contextWindow) {
@@ -220,7 +225,7 @@ export class UsageHost {
           type: "contextUsage",
           used: usage.used,
           ...(usage.window ? { window: usage.window } : {}),
-          context: session.client?.contextBudget ?? (stored?.contextObservation ? { ...stored.contextObservation, stale: true } : {
+          context: session.client?.contextBudget ?? (stored?.contextObservation ? historicalContextObservation(stored.contextObservation) : {
             provider: session.provider, access: "historical", sessionId: id, generation: 0, source: "persisted",
             observedAt: 0, stale: true, limitQuality: "estimated", usageQuality: "estimated", limits: { contextWindow: usage.window }, used: usage.used,
           }),

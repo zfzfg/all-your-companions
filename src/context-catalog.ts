@@ -33,7 +33,7 @@ export const CATALOG_PARSERS: Partial<Record<AcpProvider, CatalogParser>> = {
     return [{ modelId: id, resolvedModelId: typeof info.model === "string" ? info.model : id,
       name: typeof info.name === "string" ? info.name : id,
       contextWindowSizes: contextWindowSizes(info.context_windows, info.context_window),
-      limits: validContextLimits({ contextWindow: contextWindowSizes(info.context_windows, info.context_window)[0],
+      limits: validContextLimits({ modelMaximum: Math.max(...contextWindowSizes(info.context_windows, info.context_window)), contextWindow: contextWindowSizes(info.context_windows, info.context_window)[0],
         outputReserve: info.max_completion_tokens, autoCompactThresholdPercent: info.auto_compact_threshold_percent }) }];
   }),
   codex: raw => (Array.isArray(raw?.models) ? raw.models : []).flatMap((row: any) => {
@@ -43,7 +43,7 @@ export const CATALOG_PARSERS: Partial<Record<AcpProvider, CatalogParser>> = {
     const effective = window && typeof percent === "number" && Number.isFinite(percent) && percent > 0 && percent <= 100
       ? Math.floor(window * percent / 100) : undefined;
     return [{ modelId: row.slug, resolvedModelId: row.slug, name: row.display_name ?? row.slug,
-      limits: validContextLimits({ contextWindow: window, effectiveContextTokens: effective,
+      limits: validContextLimits({ modelMaximum: window, contextWindow: window, effectiveContextTokens: effective,
         // The CLI effective factor reserves its own headroom. Do not apply it again.
         reserveIncluded: effective !== undefined }) }];
   }),

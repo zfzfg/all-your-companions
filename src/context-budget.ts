@@ -4,8 +4,26 @@ import type { PromptContentBlock } from "./acp-types";
 export type ContextQuality = "verified" | "estimated" | "unknown";
 export type ContextSource = "session" | "catalog" | "documented" | "adapter" | "persisted";
 export const CONTEXT_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+export type ContextUsageSemantics = "current-context" | "estimated-context" | "last-request" | "turn-cumulative" | "session-cumulative" | "billing" | "subscription" | "unknown";
+export interface ContextRevision {
+  process: number;
+  session: number;
+  model: number;
+  compaction: number;
+}
+export interface ContextRuntime {
+  product: string;
+  executable?: string;
+  cliVersion?: string;
+  adapterVersion?: string;
+  protocolVersion?: string;
+}
 
 export interface ModelContextLimits {
+  modelMaximum?: number;
+  configuredWindow?: number;
+  activeWindow?: number;
+  autoCompactAtTokens?: number;
   contextWindow?: number;
   inputTokenLimit?: number;
   outputTokenLimit?: number;
@@ -27,6 +45,11 @@ export interface ContextObservation {
   source: ContextSource;
   observedAt: number;
   usageObservedAt?: number;
+  usageSource?: ContextSource;
+  usageSemantics?: ContextUsageSemantics;
+  usageStale?: boolean;
+  revision?: ContextRevision;
+  runtime?: ContextRuntime;
   limitQuality: ContextQuality;
   usageQuality: ContextQuality;
   stale?: boolean;
@@ -43,10 +66,15 @@ export function contextUsed(value: unknown): number | undefined {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 }
 export function effectiveContextWindow(limits: ModelContextLimits): number | undefined {
-  return contextTokens(limits.effectiveContextTokens) ?? contextTokens(limits.inputTokenLimit) ?? contextTokens(limits.contextWindow);
+  return contextTokens(limits.effectiveContextTokens) ?? contextTokens(limits.inputTokenLimit)
+    ?? contextTokens(limits.activeWindow) ?? contextTokens(limits.configuredWindow) ?? contextTokens(limits.contextWindow);
 }
 export function validContextLimits(raw: ModelContextLimits): ModelContextLimits {
   return {
+    modelMaximum: contextTokens(raw.modelMaximum),
+    configuredWindow: contextTokens(raw.configuredWindow),
+    activeWindow: contextTokens(raw.activeWindow),
+    autoCompactAtTokens: contextTokens(raw.autoCompactAtTokens),
     contextWindow: contextTokens(raw.contextWindow),
     inputTokenLimit: contextTokens(raw.inputTokenLimit),
     outputTokenLimit: contextTokens(raw.outputTokenLimit),
@@ -66,8 +94,12 @@ export const DOCUMENTED_CONTEXT: Partial<Record<AcpProvider, Record<string, Mode
 /** Independent priority for usage and limit: catalog refresh must not erase usage. */
 export function mergeContextObservation(previous: ContextObservation | undefined, incoming: ContextObservation): ContextObservation {
   const next = { ...incoming, limits: validContextLimits(incoming.limits), used: contextUsed(incoming.used) };
+  if (next.usageSemantics && next.usageSemantics !== "current-context" && next.usageSemantics !== "estimated-context") next.used = undefined;
+  if (next.source === "documented") next.limits = {};
   if (!previous || previous.generation !== next.generation || previous.access !== next.access
-    || previous.sessionId !== next.sessionId || previous.modelId !== next.modelId) return next;
+    || previous.sessionId !== next.sessionId || previous.modelId !== next.modelId
+    || (previous.revision && next.revision && Object.keys(previous.revision).some(key =>
+      previous.revision![key as keyof ContextRevision] !== next.revision![key as keyof ContextRevision]))) return next;
   const rank = (o: ContextObservation) => o.stale ? 0
     : o.limitQuality !== "verified" ? 1 : o.source === "session" ? 4 : o.source === "catalog" ? 3 : 2;
   const prevWindow = effectiveContextWindow(previous.limits);
@@ -86,7 +118,20 @@ export function mergeContextObservation(previous: ContextObservation | undefined
     || (previous.usageObservedAt ?? 0) > (next.usageObservedAt ?? next.observedAt)
     || (previous.usageQuality === "verified" && next.usageQuality === "estimated"
       && (next.usageObservedAt ?? next.observedAt) <= (previous.usageObservedAt ?? previous.observedAt)) ? previous : next;
-  return { ...limit, used: usage.used, usageQuality: usage.usageQuality, usageObservedAt: usage.usageObservedAt };
+  return { ...limit, resolvedModelId: next.resolvedModelId ?? previous.resolvedModelId,
+    used: usage.used, usageQuality: usage.usageQuality, usageObservedAt: usage.usageObservedAt,
+    usageSource: usage.usageSource ?? usage.source, usageSemantics: usage.usageSemantics,
+    usageStale: usage.usageStale ?? usage.stale };
+}
+
+/** Invalidations are explicit; a missing count in a catalog event is not one. */
+export function invalidateContextUsage(observation: ContextObservation): ContextObservation {
+  return { ...observation, used: undefined, usageQuality: "unknown", usageSemantics: "unknown", usageStale: true };
+}
+
+export function historicalContextObservation(observation: ContextObservation): ContextObservation {
+  return { ...observation, stale: true, usageStale: true, usageQuality: "estimated",
+    usageSemantics: "estimated-context" };
 }
 
 export interface ContextPromptCount {
@@ -113,7 +158,7 @@ export function estimateContextPrompt(prompt: readonly PromptContentBlock[]): Co
 }
 
 export function checkContextBudget(observation: ContextObservation | undefined, count: ContextPromptCount): ContextBudgetDecision {
-  const window = observation && effectiveContextWindow(observation.limits);
+  const window = observation?.source !== "documented" && observation ? effectiveContextWindow(observation.limits) : undefined;
   if (!window || contextUsed(count.tokens) === undefined) return { action: "warn", reason: "unknown", quality: "unknown" };
   const limits = observation!.limits;
   const reserve = limits.inputTokenLimit || limits.reserveIncluded ? 0 : limits.outputReserve;
