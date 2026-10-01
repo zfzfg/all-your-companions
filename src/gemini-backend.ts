@@ -31,18 +31,18 @@ function selectOptions(option: any): any[] {
 }
 
 export function contextWindowForModel(modelId: string): number | undefined {
-  return DEFAULT_GEMINI_MODELS.find(model => model.modelId === modelId)?._meta.totalContextTokens;
+  void modelId;
+  return undefined;
 }
 
 export const DEFAULT_GEMINI_MODELS = [
   {
     modelId: "gemini-3.8-flash",
     name: "Gemini 3.8 Flash",
-    description: "Google's newest frontier workhorse for long-horizon coding and autonomous agentic workflows (1M context, 64K output)",
+    description: "Google's newest frontier workhorse for long-horizon coding and autonomous agentic workflows",
     _meta: {
       supportsReasoningEffort: true,
       reasoningEfforts: [{ value: "low" }, { value: "medium" }, { value: "high" }],
-      totalContextTokens: 1048576,
     },
   },
   {
@@ -52,7 +52,6 @@ export const DEFAULT_GEMINI_MODELS = [
     _meta: {
       supportsReasoningEffort: true,
       reasoningEfforts: [{ value: "low" }, { value: "medium" }, { value: "high" }],
-      totalContextTokens: 1048576,
     },
   },
   {
@@ -62,7 +61,6 @@ export const DEFAULT_GEMINI_MODELS = [
     _meta: {
       supportsReasoningEffort: true,
       reasoningEfforts: [{ value: "low" }, { value: "medium" }, { value: "high" }],
-      totalContextTokens: 1048576,
     },
   },
   {
@@ -72,7 +70,6 @@ export const DEFAULT_GEMINI_MODELS = [
     _meta: {
       supportsReasoningEffort: true,
       reasoningEfforts: [{ value: "low" }, { value: "high" }],
-      totalContextTokens: 1048576,
     },
   },
   {
@@ -81,7 +78,6 @@ export const DEFAULT_GEMINI_MODELS = [
     description: "Anthropic frontier reasoning and refactoring model via Antigravity",
     _meta: {
       supportsReasoningEffort: false,
-      totalContextTokens: 200000,
     },
   },
   {
@@ -90,7 +86,6 @@ export const DEFAULT_GEMINI_MODELS = [
     description: "Anthropic flagship model for holistic system architecture via Antigravity",
     _meta: {
       supportsReasoningEffort: false,
-      totalContextTokens: 200000,
     },
   },
   {
@@ -99,7 +94,6 @@ export const DEFAULT_GEMINI_MODELS = [
     description: "Open-weight frontier model hosted via Antigravity",
     _meta: {
       supportsReasoningEffort: false,
-      totalContextTokens: 131072,
     },
   },
 ];
@@ -209,8 +203,7 @@ export function modelsFromGeminiConfigOptions(configOptions: any): { currentMode
     availableModels: selectOptions(model).flatMap((entry) => {
       const modelId = typeof entry?.value === "string" ? entry.value : "";
       if (!modelId) return [];
-      const matched = DEFAULT_GEMINI_MODELS.find((m) => m.modelId === modelId);
-      const totalContextTokens = matched?._meta?.totalContextTokens ?? contextWindowForModel(modelId);
+      const totalContextTokens = contextWindowForModel(modelId);
       return [{
         modelId,
         name: typeof entry?.name === "string" && entry.name.trim() ? entry.name : modelId,

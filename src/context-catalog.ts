@@ -21,15 +21,8 @@ export interface ContextCatalogSnapshot {
   access: string;
 }
 export function modelsMatch(a?: string, b?: string): boolean {
-  if (!a || !b) return false;
-  if (a === b) return true;
-  const normA = a.replace(/-/g, ".");
-  const normB = b.replace(/-/g, ".");
-  if (normA === normB) return true;
-  const dashA = a.replace(/\./g, "-");
-  const dashB = b.replace(/\./g, "-");
-  if (dashA === dashB) return true;
-  return a.startsWith(b) || b.startsWith(a);
+  // Alias resolution belongs to the access-scoped native catalog, not spelling.
+  return !!a && !!b && a === b;
 }
 
 type CatalogParser = (raw: any) => ContextCatalogModel[];

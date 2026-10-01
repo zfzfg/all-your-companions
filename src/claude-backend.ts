@@ -4,7 +4,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import packageManifest from "../package.json";
-import { DOCUMENTED_CONTEXT, contextTokens } from "./context-budget";
+import { contextTokens } from "./context-budget";
 import { grokCliNeedsShell } from "./cli-process";
 import type {
   AcpBackend,
@@ -57,7 +57,8 @@ function selectOptions(option: any): any[] {
 }
 
 export function contextWindowForClaudeModel(modelId?: string, _name?: string, _description?: string): number | undefined {
-  return DOCUMENTED_CONTEXT.claude?.[modelId ?? ""]?.contextWindow;
+  void modelId;
+  return undefined;
 }
 
 /** Canonical 6-level reasoning effort ladder for Claude Code. */

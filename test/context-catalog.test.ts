@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ContextCatalogReader, type ContextCatalogSnapshot } from "../src/context-catalog";
+import { ContextCatalogReader, modelsMatch, type ContextCatalogSnapshot } from "../src/context-catalog";
 
 const roots: string[] = [];
 const readers: ContextCatalogReader[] = [];
@@ -25,6 +25,12 @@ function setup() {
 }
 
 describe("catalog file lifecycle", () => {
+  it("matches exact model ids without guessing aliases or newer generations", () => {
+    expect(modelsMatch("model-1", "model-1")).toBe(true);
+    for (const id of ["model-1-new", "model.1", "provider/model-1", "MODEL-1"]) {
+      expect(modelsMatch("model-1", id)).toBe(false);
+    }
+  });
   it("refreshes native metadata and retains stale data after async read/parse failure", async () => {
     const { reader, updates, file, write, log } = setup();
     write("grok-4.7", 256000);

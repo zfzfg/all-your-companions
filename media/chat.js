@@ -16126,10 +16126,7 @@
   // ---------- donut ----------
 
   function modelsMatch(a, b) {
-    if (!a || !b) return false;
-    if (a === b) return true;
-    const norm = (id) => String(id).toLowerCase().replace(/[\._]/g, "-").replace(/^(?:xai\/|anthropic\/|openai\/|google\/)/, "");
-    return norm(a) === norm(b);
+    return !!a && !!b && a === b;
   }
 
   function defaultContextWindowForProvider(_provider) {

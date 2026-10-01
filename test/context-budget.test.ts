@@ -14,6 +14,12 @@ function observation(overrides: Partial<ContextObservation> = {}): ContextObserv
 }
 
 describe("context source resolution", () => {
+  it("accepts a real native 500000 window and preserves it over catalog refresh", () => {
+    const live = observation({ source: "session", limits: { contextWindow: 500000 } });
+    const resolved = mergeContextObservation(observation(), live);
+    expect(resolved.limits.contextWindow).toBe(500000);
+    expect(mergeContextObservation(resolved, observation()).limits.contextWindow).toBe(500000);
+  });
   it("ignores older usage independently of the limit source", () => {
     const previous = observation({ usageObservedAt: now, used: 100 });
     const incoming = observation({ usageObservedAt: now - 1, used: 900 });
@@ -86,7 +92,7 @@ describe("provider fallbacks", () => {
     expect(contextWindowForClaudeModel("future", "Model [1M]")).toBeUndefined();
     expect(contextWindowForModel("gemini-future")).toBeUndefined();
     expect(contextWindowForModel("claude-future")).toBeUndefined();
-    expect(contextWindowForModel("claude-sonnet-4-6")).toBe(200000);
+    expect(contextWindowForModel("claude-sonnet-4-6")).toBeUndefined();
   });
   it("ordinary Antigravity events never override a known window", () => {
     expect(normalizeGeminiUpdate({ sessionUpdate: "tool_call", content: [] }, {}).contextWindow).toBeUndefined();

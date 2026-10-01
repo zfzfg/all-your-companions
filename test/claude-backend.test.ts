@@ -95,19 +95,19 @@ describe("Claude session model mapping", () => {
         supportsReasoningEffort: true,
         reasoningEffort: "high",
         reasoningEfforts: [{ value: "low" }, { value: "high" }],
-        totalContextTokens: 1000000,
+        totalContextTokens: undefined,
       },
     });
   });
 
-  it("resolves model context windows for current and legacy Claude models", () => {
-    expect(contextWindowForClaudeModel("claude-sonnet-5")).toBe(1000000);
-    expect(contextWindowForClaudeModel("claude-opus-5")).toBe(1000000);
-    expect(contextWindowForClaudeModel("claude-fable-5-1")).toBe(1000000);
+  it("does not infer CLI capacities from public model names", () => {
+    expect(contextWindowForClaudeModel("claude-sonnet-5")).toBeUndefined();
+    expect(contextWindowForClaudeModel("claude-opus-5")).toBeUndefined();
+    expect(contextWindowForClaudeModel("claude-fable-5-1")).toBeUndefined();
     expect(contextWindowForClaudeModel("sonnet", "Claude Sonnet 5")).toBeUndefined();
     expect(contextWindowForClaudeModel("custom-model", "Model [1M]")).toBeUndefined();
-    expect(contextWindowForClaudeModel("claude-haiku-4-5")).toBe(200000);
-    expect(contextWindowForClaudeModel("claude-3-5-sonnet")).toBe(200000);
+    expect(contextWindowForClaudeModel("claude-haiku-4-5")).toBeUndefined();
+    expect(contextWindowForClaudeModel("claude-3-5-sonnet")).toBeUndefined();
   });
 
   it("fills models on session/new so the picker is not empty", () => {

@@ -59,27 +59,9 @@ export function validContextLimits(raw: ModelContextLimits): ModelContextLimits 
   };
 }
 
-/** Public API capabilities, not promises about a CLI subscription or router. */
-export const DOCUMENTED_CONTEXT: Partial<Record<AcpProvider, Record<string, ModelContextLimits>>> = {
-  grok: { "grok-4.7": { contextWindow: 500000 }, "grok-4.6": { contextWindow: 500000 } },
-  codex: {
-    "gpt-6.1-sol": { contextWindow: 1050000, outputTokenLimit: 128000 },
-    "gpt-6-sol": { contextWindow: 1050000, outputTokenLimit: 128000 },
-    "gpt-5.6-sol": { contextWindow: 1050000, outputTokenLimit: 128000 },
-    "gpt-oss-120b": { contextWindow: 131072 },
-  },
-  claude: {
-    "claude-fable-5-1": { contextWindow: 1000000, outputTokenLimit: 128000 },
-    "claude-opus-5-5": { contextWindow: 1000000, outputTokenLimit: 128000 },
-    "claude-sonnet-5-5": { contextWindow: 1000000, outputTokenLimit: 128000 },
-    "claude-sonnet-5": { contextWindow: 1000000 },
-    "claude-opus-5": { contextWindow: 1000000 },
-    "claude-opus-4-6": { contextWindow: 1000000 },
-    "claude-sonnet-4-6": { contextWindow: 1000000 },
-    "claude-haiku-4-5": { contextWindow: 200000, outputTokenLimit: 64000 },
-    "claude-3-5-sonnet": { contextWindow: 200000 },
-  },
-};
+/** No public API reference is shipped without versioned source evidence.
+ * Native catalogs and sessions are the authority for CLI capacities. */
+export const DOCUMENTED_CONTEXT: Partial<Record<AcpProvider, Record<string, ModelContextLimits>>> = {};
 
 /** Independent priority for usage and limit: catalog refresh must not erase usage. */
 export function mergeContextObservation(previous: ContextObservation | undefined, incoming: ContextObservation): ContextObservation {
@@ -90,8 +72,8 @@ export function mergeContextObservation(previous: ContextObservation | undefined
     : o.limitQuality !== "verified" ? 1 : o.source === "session" ? 4 : o.source === "catalog" ? 3 : 2;
   const prevWindow = effectiveContextWindow(previous.limits);
   const nextWindow = effectiveContextWindow(next.limits);
-  const prevIsApiMax = prevWindow === 500000 || previous.source === "documented";
-  const nextIsApiMax = nextWindow === 500000 || next.source === "documented";
+  const prevIsApiMax = previous.source === "documented";
+  const nextIsApiMax = next.source === "documented";
   const isEnlargement = previous.limitQuality === "verified" && previous.source === "catalog"
     && next.source === "session" && next.limitQuality !== "verified"
     && (nextWindow ?? 0) > (prevWindow ?? 0);
