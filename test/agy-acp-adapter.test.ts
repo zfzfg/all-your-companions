@@ -240,9 +240,9 @@ describe("AgyAcpAdapterServer", () => {
     const usageNotifications = messages.filter((m) => m.method === "session/update" && m.params?.update?.sessionUpdate === "usage_update");
     expect(usageNotifications.length).toBeGreaterThanOrEqual(2);
     expect(usageNotifications[0].params.update.used).toBe(110);
-    expect(usageNotifications[0].params.update.size).toBe(1048576);
+    expect(usageNotifications[0].params.update.size).toBeUndefined();
     expect(usageNotifications[1].params.update.used).toBe(125);
-    expect(usageNotifications[1].params.update.size).toBe(1048576);
+    expect(usageNotifications[1].params.update.size).toBeUndefined();
 
     const promptRes = messages.find((m) => m.id === 6);
     expect(promptRes).toBeDefined();
@@ -2684,7 +2684,7 @@ describe("AgyAcpAdapterServer", () => {
       fs.rmSync(customGeminiHome, { recursive: true, force: true });
     });
 
-    it("answers _x.ai/session/info with context window and token usage", async () => {
+    it("does not present stream-json billing totals as session context", async () => {
       const input = new PassThrough();
       const output = new PassThrough();
       const server = new AgyAcpAdapterServer({
@@ -2705,8 +2705,7 @@ describe("AgyAcpAdapterServer", () => {
       await new Promise((r) => setTimeout(r, 10));
 
       expect(responses).toHaveLength(1);
-      expect(responses[0].result.context.total).toBe(1048576);
-      expect(responses[0].result.context.used).toBe(0);
+      expect(responses[0].error.code).toBe(-32601);
 
       // Verify that switching to a model with a 200k window (e.g. claude-sonnet-4-6) dynamically updates total
       input.write(JSON.stringify({
@@ -2722,7 +2721,7 @@ describe("AgyAcpAdapterServer", () => {
 
       const info203 = responses.find((r) => r.id === 203);
       expect(info203).toBeDefined();
-      expect(info203.result.context.total).toBe(200000);
+      expect(info203.error.code).toBe(-32601);
 
       server.dispose();
     });

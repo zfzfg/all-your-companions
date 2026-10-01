@@ -12,7 +12,6 @@ import type {
   BackendSpawnSpec,
   BackendUpdate,
 } from "./acp-backend";
-import { adapterContextOccupancy } from "./acp-dispatch";
 import { contentHasDiff, mergeDiffIntoContent, synthesizeEditDiff, type AcpDiffBlock } from "./diff-synthesize";
 
 const PERMISSION_TITLE_LIMIT = 80;
@@ -251,7 +250,8 @@ export function normalizeGeminiPromptResult(result: any): any {
     ...result,
     _meta: {
       ...(result?._meta ?? {}),
-      occupancyFromAdapterTurn: adapterContextOccupancy(normalizedUsage),
+      contextUsageSemantics: "unknown",
+      occupancyFromAdapterTurn: undefined,
       totalTokens: normalizedUsage.totalTokens,
       inputTokens: normalizedUsage.inputTokens,
       outputTokens: normalizedUsage.outputTokens,
@@ -332,6 +332,7 @@ export function normalizeGeminiUpdate(update: any, meta: any): BackendUpdate {
       contextWindow: size,
       contextQuality: update?._meta?.contextWindowAuthoritative === true ? "verified" : "estimated",
       usageUpdateUsed: typeof update?.used === "number" ? update.used : undefined,
+      contextObservation: { usageSemantics: "unknown", usageQuality: "unknown", native: update },
     };
   }
   if (update?.sessionUpdate === "tool_call" || update?.sessionUpdate === "tool_call_update") {

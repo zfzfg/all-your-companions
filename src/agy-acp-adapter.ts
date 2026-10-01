@@ -1600,23 +1600,8 @@ export class AgyAcpAdapterServer {
 
       case "_x.ai/session/info":
       case "x.ai/session/info": {
-        const windowSize = this.modelContextWindow(this.currentModelId);
-        if (windowSize === undefined) {
-          this.sendError(id, -32601, "Context limit unknown for this model");
-          break;
-        }
-        const used = this.lastUsage.totalTokens || 0;
-        this.sendResponse(id, {
-          _meta: { contextWindowAuthoritative: this.discoveredModels?.find(model => model.modelId === this.currentModelId)?._meta.contextQuality === "verified" },
-          context: {
-            used,
-            total: windowSize,
-            systemPromptTokens: 0,
-            toolDefinitionsTokens: 0,
-            messageTokens: used,
-            freeTokens: Math.max(0, windowSize - used),
-          },
-        });
+        // stream-json usage is not an active-context snapshot.
+        this.sendError(id, -32601, "Antigravity does not expose a verified session context snapshot");
         break;
       }
 
