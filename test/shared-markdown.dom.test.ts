@@ -304,3 +304,102 @@ describe("reviewed upstream Markdown additions", () => {
     expect(render("`C:/Program Files/Project/read me.md:12`")).toContain('class="file-ref-link"');
   });
 });
+
+describe("blockquotes", () => {
+  it("separates quotes on an unmarked blank line so a following alert is recognized", () => {
+    const html = render("> quote\n\n> [!NOTE]\n> note\n");
+    expect(html).toBe('<blockquote>quote</blockquote><div class="md-alert md-alert-note"><div class="md-alert-title">NOTE</div><div class="md-alert-body">note</div></div>');
+    expect(render("> one\n\n> two\n")).toBe("<blockquote>one</blockquote><blockquote>two</blockquote>");
+  });
+
+  it("preserves dividers, setext headings and image markup inside quotes", () => {
+    const html = render("> Section\n> ---\n>\n> ![Diagram](images/flow.png)\n>\n> * * *\n");
+    expect(html).toContain("<blockquote><h2>Section</h2>");
+    expect(html).toContain('<img class="md-image" src="images/flow.png" alt="Diagram" loading="lazy" />');
+    expect(html).toContain("<hr></blockquote>");
+  });
+
+  it("keeps GitHub alert types and renders block content in their bodies", () => {
+    for (const kind of ["NOTE", "TIP", "IMPORTANT", "WARNING", "CAUTION"]) {
+      const html = render(`> [!${kind}]\n> ## Title\n>\n> - first\n> - second\n>\n> > nested\n`);
+      expect(html).toContain(`class="md-alert md-alert-${kind.toLowerCase()}"`);
+      expect(html).toContain(`<div class="md-alert-title">${kind}</div>`);
+      expect(html).toContain('<div class="md-alert-body"><h2>Title</h2><ul><li>first</li><li>second</li></ul><blockquote>nested</blockquote></div>');
+    }
+  });
+
+  it("renders tables inside alerts and alerts inside a nested quote", () => {
+    const html = render("> outer\n>\n> > [!NOTE]\n> > | A | B |\n> > | --- | --- |\n> > | 1 | 2 |\n");
+    expect(html).toContain('<blockquote>outer<div class="md-alert md-alert-note">');
+    expect(html).toContain("<table>");
+    expect(html).toContain("<td>1</td>");
+    expect(html).not.toContain("&gt;");
+    expect(html).not.toContain(String.fromCharCode(0));
+  });
+
+  it("escapes untrusted quote content and bounds nesting depth", () => {
+    expect(render('> <img src=x onerror="alert(1)">\n')).not.toContain("<img");
+    const deep = render("> ".repeat(100) + "text\n");
+    expect(deep.match(/<blockquote>/g)).toHaveLength(12);
+    expect(deep).toContain("text");
+    expect(deep).toContain("&gt;");
+  });
+
+  it("treats an unknown alert marker as ordinary quoted text", () => {
+    expect(render("> [!UNKNOWN]\n> text\n")).toBe("<blockquote>[!UNKNOWN]<br>text</blockquote>");
+  });
+
+  it("renders a quote line as a blockquote and drops the marker", () => {
+    const html = render("> The best way to predict the future is to invent it.\n");
+    expect(html).toBe("<blockquote>The best way to predict the future is to invent it.</blockquote>");
+  });
+
+  it("ends the quote when the next line is ordinary text", () => {
+    const html = render("before\n\n> quoted\n\nafter\n");
+    expect(html).toContain("<blockquote>quoted</blockquote>");
+    expect(html.indexOf("before")).toBeLessThan(html.indexOf("<blockquote>"));
+    expect(html.indexOf("after")).toBeGreaterThan(html.indexOf("</blockquote>"));
+  });
+
+  it("joins consecutive quote lines and breaks on an empty marker line", () => {
+    const html = render("> one\n> two\n>\n> three\n");
+    expect(html).toBe("<blockquote>one<br>two<br><br>three</blockquote>");
+  });
+
+  it("nests a second level and keeps the outer lines", () => {
+    const html = render("> outer\n>\n> > inner\n>\n> back\n");
+    expect(html.match(/<blockquote>/g)).toHaveLength(2);
+    expect(html).toContain("<blockquote>inner</blockquote>");
+    expect(html).toContain("outer");
+    expect(html).toContain("back");
+    expect(html).not.toContain("&gt;");
+  });
+
+  it("keeps inline markdown, lists, headings, and tables inside a quote", () => {
+    expect(render("> **bold** and `code`\n")).toBe(
+      "<blockquote><strong>bold</strong> and <code>code</code></blockquote>",
+    );
+    expect(render("> - a\n> - b\n")).toBe("<blockquote><ul><li>a</li><li>b</li></ul></blockquote>");
+    expect(render("> ## Title\n")).toBe("<blockquote><h2>Title</h2></blockquote>");
+    const table = render("> | a | b |\n> | --- | --- |\n> | 1 | 2 |\n");
+    expect(table.startsWith("<blockquote>")).toBe(true);
+    expect(table).toContain("<table>");
+    expect(table).toContain("<th>a</th>");
+    expect(table).toContain("<td>1</td>");
+    expect(table).not.toContain("&gt;");
+  });
+
+  it("does not treat a greater-than mid-line, or one inside a fence, as a quote", () => {
+    const mid = render("a > b\n");
+    expect(mid).not.toContain("<blockquote>");
+    expect(mid).toContain("a &gt; b");
+    const fenced = render("```\n> not a quote\n```\n");
+    expect(fenced).not.toContain("<blockquote>");
+    expect(fenced).toContain("&gt; not a quote");
+  });
+
+  it("renders a quote from a CRLF message the same as LF", () => {
+    expect(render("> one\r\n> two\r\n")).toBe(render("> one\n> two\n"));
+  });
+
+});

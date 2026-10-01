@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Render nested blockquotes and block content inside quotes and GitHub alerts using Wayne Adams's recursive renderer approach; make quote borders follow text direction and high-contrast colors.
+
 ## [0.3.0] - 2026-09-30
 
 - Check existing provider authentication before offering login, coalesce Connect checks, invalidate late results on Disconnect, and handle ACP spawn failures safely.

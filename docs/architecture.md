@@ -460,6 +460,7 @@ The extension host build uses `esbuild` (`scripts/build.mjs`) to bundle `src/ext
 - **Externals**: `vscode`, `@agentclientprotocol/codex-acp`, `@agentclientprotocol/claude-agent-acp`, `@anthropic-ai/claude-agent-sdk`, `@muse-code/sdk`. Internal dependencies such as `ws` are bundled directly.
 - **Separate builds**: The Muse adapter continues to compile via `tsconfig.muse-adapter.json` to `out/muse-adapter/main.mjs`. Developer and test scripts (`live-tests.cjs`, `telemetry-probe.cjs`, `acp-smoke.mjs`, integration suite) compile unbundled modules to `out-modules/` via `tsconfig.unbundled.json` (`npm run compile:modules`).
 - **Markdown divider**: `media/chat.js` `renderMarkdown` parses standalone thematic breaks (`---`, `***`, `___`) into `<hr>` tags with theme-adaptive CSS (`--vscode-textSeparator-foreground`), preserving Setext heading syntax and table/fence immunity.
+- **Markdown quotes and alerts**: `renderMarkdown` uses a depth-limited recursive `renderBlocks` pass for nested blockquotes and GitHub alerts. Each quoted body reuses the table, list, heading and divider rules; code and math placeholders stay protected. Quote borders use `border-inline-start` and a forced-colors fallback.
 
 ## Module map
 
@@ -906,7 +907,7 @@ the steady-state fix.
   has no `eval`/`new Function`; its inline styles are covered by `style-src`).
 - **RTL content renders per-block, the chrome never mirrors.** `applyAutoDir`
   (chat.js) stamps `dir="auto"` on every block element `renderMarkdown` emits
-  (ul/ol/li, h1–h3, td/th) after each `innerHTML` render site; loose paragraph
+  (blockquote, alert bodies, ul/ol/li, h1–h6, td/th) after each `innerHTML` render site; loose paragraph
   text — which `renderMarkdown` emits bare with `<br>` breaks, never `<p>` — is
   covered by `unicode-bidi: plaintext` on the prose containers in chat.css
   (`.msg .body`, `.thinking-body`, `.plan-body`, `.subagent-result`,
