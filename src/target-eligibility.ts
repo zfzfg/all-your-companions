@@ -166,6 +166,12 @@ export interface EligibilityInput {
   routing?: readonly RoutingRule[];
 }
 
+/** A draft targets the next turn; the previous turn's veto/counts do not apply. */
+export function composerTargetInput(input: EligibilityInput): EligibilityInput {
+  return { ...input, forbiddenThisTurn: false,
+    limits: { ...input.limits, running: 0, thisTurn: 0 } };
+}
+
 /** Refusal codes (§6.13). Every one of them is user-visible somewhere. */
 export type RefusalCode =
   | "subagents-disabled"

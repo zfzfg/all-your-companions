@@ -6,6 +6,7 @@ import { SubagentHost, type SubagentHostDeps } from "../src/subagent-host";
 import { Session } from "../src/session";
 import type { HostMsg } from "../src/protocol";
 import { PausableDeadline } from "../src/child-watch";
+import { makeSubagentChip } from "../src/context-chips";
 
 function makeSubagentHost(overrides: Partial<SubagentHostDeps> = {}) {
   const memento: Record<string, unknown> = {};
@@ -93,6 +94,41 @@ function makeSubagentHost(overrides: Partial<SubagentHostDeps> = {}) {
 }
 
 describe("SubagentHost (W-15 Schritt D3)", () => {
+  it("adds named subagent models once, and rechecks availability before send", () => {
+    const { host, parent, memento, emitted } = makeSubagentHost();
+    memento["grok.providerModelCache"] = { codex: { models: [{ modelId: "a", name: "Model A" }, { modelId: "b", name: "Model B" }] } };
+    host.addSubagentChip(parent, "codex", "a");
+    host.addSubagentChip(parent, "codex", "a");
+    host.addSubagentChip(parent, "codex", "b");
+    expect(parent.chips).toEqual([makeSubagentChip("codex", "a", "Model A"), makeSubagentChip("codex", "b", "Model B")]);
+    expect(host.applyTurnDirectives(parent, "Investigate", parent.chips).block).toContain('model="b"');
+    memento["grok.providerModelCache"] = { codex: { models: [] } };
+    expect(() => host.applyTurnDirectives(parent, "Investigate", parent.chips)).toThrow();
+    expect(parent.chips).toHaveLength(2);
+    host.addSubagentChip(parent, "codex", "missing");
+    expect(emitted.at(-1)?.msg.type).toBe("hostNotice");
+  });
+
+  it("rejects roster exclusions and disabled delegation at attachment time", () => {
+    const { host, parent, memento, emitted } = makeSubagentHost({
+      companionsSetting: (key, fallback) => (key === "subagents.roster" ? { codex: { allowedModels: ["b"] } } : fallback) as any,
+    });
+    memento["grok.providerModelCache"] = { codex: { models: [{ modelId: "a" }, { modelId: "b" }] } };
+    host.addSubagentChip(parent, "codex", "a");
+    expect(parent.chips).toEqual([]);
+    expect(emitted.at(-1)?.msg).toMatchObject({ type: "hostNotice", text: expect.stringContaining("allow-list") });
+    parent.delegationOverride = { enabled: false, spawnPolicy: "auto" };
+    host.addSubagentChip(parent, "codex", "b");
+    expect(parent.chips).toEqual([]);
+    expect(emitted.at(-1)?.msg).toMatchObject({ type: "hostNotice", text: expect.stringContaining("turned off") });
+  });
+
+  it("matches the explicitly selected model when multiple directives share a provider", () => {
+    const { host, parent } = makeSubagentHost();
+    parent.subagentDirectives = [{ id: "d1", strength: "must", provider: "codex", model: "a" }, { id: "d2", strength: "must", provider: "codex", model: "b" }];
+    expect(host.directiveForSpawn(parent, { provider: "codex", model: "b", task: "Inspect", wait: "none" })).toMatchObject({ id: "d2" });
+  });
+
   it("instantiates cleanly with empty registry and maps", () => {
     const { host } = makeSubagentHost();
     expect(host.subagents).toBeDefined();

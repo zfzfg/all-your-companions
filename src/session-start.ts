@@ -101,6 +101,7 @@ import {
   type FileChip
 } from "./chips";
 import { isFileChip, type ContextChip } from "./context-chips";
+import { parseSubagentMentions } from "./subagent-directives";
 import { explicitVisibleChips, type QueuedSendEntry } from "./queued-send";
 import {
   buildPromptWithImages,
@@ -192,7 +193,7 @@ export interface SessionStartTurnAndSendOps {
   readonly pendingAttach: Set<Promise<unknown>>;
   readImageChip(chip: FileChip, session: Session, gen: number): Promise<PromptImageInput | "gone" | "failed">;
   contextChipPayloads(chips: ContextChip[]): any;
-  applyTurnDirectives(session: Session, text: string): { text: string; block?: string };
+  applyTurnDirectives(session: Session, text: string, chips?: readonly ContextChip[]): { text: string; block?: string };
   retainUploadedFilesForSession(session: Session, chips: ContextChip[]): Promise<void>;
   refreshImplicitChip(force?: boolean): void;
   postChips(session: Session): void;
@@ -1657,8 +1658,17 @@ export class SessionStart {
       extName: (p: string) => path.extname(p),
       contextChipPayload: this.deps.turnAndSendOps.contextChipPayloads(chips),
     };
-    const directives = this.deps.turnAndSendOps.applyTurnDirectives(session, text);
+    let directives: { text: string; block?: string };
+    try {
+      directives = this.deps.turnAndSendOps.applyTurnDirectives(session, text, chips);
+    } catch (error) {
+      this.deps.emit(session, { type: "hostNotice", level: "warning", text: (error as Error).message });
+      this.deps.emit(session, { type: "setBusy", value: false });
+      if (!queuedSendCommit) this.deps.emit(session, { type: "restoreComposer", text, chips, sessionId: session.activeSessionId ?? session.composerDraftId, draft: true });
+      return;
+    }
     const directiveText = directives.text;
+    if (contributions) contributions = contributions.map(contribution => ({ ...contribution, text: parseSubagentMentions(contribution.text).text }));
     const { blocks: promptBlocks } = contributions
       ? buildQueuedPromptWithImages(contributions, implicitChips, promptDeps, slashCommand != null)
       : buildPromptWithImages(directiveText, chips, images, promptDeps, slashCommand != null);

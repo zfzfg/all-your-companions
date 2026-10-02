@@ -2,9 +2,9 @@
  * AP-16 §6.8 — telling the main agent which subagent to use, per message.
  *
  * The user types `@subagent:gemini/<model> effort:low` or `@role:inspector` in
- * the composer; the webview turns it into a chip as soon as it is typed; the
- * host serialises the chips into one block appended to the prompt, and peels
- * that block back into chips when the session is restored.
+ * the composer, or attaches provider/model chips through the + menu. The host
+ * merges both into one block appended to the prompt; replay displays model
+ * directives as attachments with provider icons and model names.
  *
  * Pure logic module adhering to Recipe R7: no vscode, no filesystem, no clock.
  *
@@ -22,6 +22,23 @@
 import { ACP_PROVIDERS, type AcpProvider } from "./acp-backend";
 import type { EffortLevel } from "./acp-types";
 import { EFFORT_ORDER, isPermissionProfile, type PermissionProfile } from "./target-eligibility";
+import { isSubagentChip, type ContextChip } from "./context-chips";
+
+export function composerSubagentDirectives(text: string, chips: readonly ContextChip[] = []): ParsedComposerText {
+  const parsed = parseSubagentMentions(text);
+  const attached = chips.filter(isSubagentChip).filter(chip => !chip.hidden);
+  if (attached.length && parsed.directives.some(directive => directive.strength === "forbid")) {
+    throw new Error("Remove the subagent attachments or @subagent:none before sending.");
+  }
+  for (const chip of attached) {
+    const existing = parsed.directives.find(directive => directive.provider === chip.provider && directive.model === chip.model);
+    if (existing) existing.modelName ??= chip.modelName;
+    else {
+      parsed.directives.push({ id: `d${parsed.directives.length + 1}`, strength: "must", provider: chip.provider, model: chip.model, modelName: chip.modelName });
+    }
+  }
+  return parsed;
+}
 
 /** How hard a directive binds. `forbid` is the composer's "no subagents". */
 export type DirectiveStrength = "must" | "prefer" | "forbid";
@@ -32,6 +49,8 @@ export interface SubagentDirective {
   strength: DirectiveStrength;
   provider?: AcpProvider;
   model?: string;
+  /** Presentation snapshot for restored attachments; never used for routing. */
+  modelName?: string;
   effort?: EffortLevel;
   profile?: PermissionProfile;
   /** A named role, used as a template for tone and scope. */
@@ -165,6 +184,7 @@ export function renderDirectiveBlock(directives: readonly SubagentDirective[]): 
       `strength="${directive.strength}"`,
       ...(directive.provider ? [`provider="${directive.provider}"`] : []),
       ...(directive.model ? [`model="${escapeAttribute(directive.model)}"`] : []),
+      ...(directive.modelName ? [`modelName="${escapeAttribute(directive.modelName)}"`] : []),
       ...(directive.effort ? [`effort="${directive.effort}"`] : []),
       ...(directive.profile ? [`profile="${directive.profile}"`] : []),
       ...(directive.role ? [`role="${escapeAttribute(directive.role)}"`] : []),
@@ -207,7 +227,7 @@ export function peelDirectiveBlock(prompt: string): PeeledDirectives {
   if (!block) return { directives: [], text: prompt ?? "", forbid: false };
 
   const directives: SubagentDirective[] = [];
-  for (const entry of block[1].matchAll(/<directive\s([^>/]*?)(?:\/>|>([\s\S]*?)<\/directive>)/g)) {
+  for (const entry of block[1].matchAll(/<directive\s([^>]*?)(?:\/>|>([\s\S]*?)<\/directive>)/g)) {
     const attributes = new Map<string, string>();
     for (const attribute of entry[1].matchAll(/(\w+)="([^"]*)"/g)) {
       attributes.set(attribute[1], unescapeAttribute(attribute[2]));
@@ -224,6 +244,7 @@ export function peelDirectiveBlock(prompt: string): PeeledDirectives {
       strength: strength === "prefer" || strength === "forbid" ? strength : "must",
       ...(provider && isProvider(provider) ? { provider } : {}),
       ...(attributes.get("model") ? { model: attributes.get("model")! } : {}),
+      ...(attributes.get("modelName") ? { modelName: attributes.get("modelName")! } : {}),
       ...(effort && isEffort(effort) ? { effort } : {}),
       ...(profile && isPermissionProfile(profile) ? { profile } : {}),
       ...(attributes.get("role") ? { role: attributes.get("role")! } : {}),

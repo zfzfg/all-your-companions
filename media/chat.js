@@ -1199,7 +1199,7 @@
 
   // ---------- markdown ----------
 
-  const { formatWaitElapsed, planEntriesProgress, formatReviewHeadline, looksLikeFileRef, formatRelativeTime, modelPickerLabel, modelDisplayName, nextMicState, trailingSendPhrase, buildQuestionAnswers, isFreeTextOptionLabel, isSubagentToolCall, subagentLabel, cleanSubagentOutput, parseSubagentTaskResult, shouldStickToBottom, stickThresholdPx, splitMath, stripUnsupportedTex, toolFailureText, isMediaGenToolCall, mediaGenZeroRetentionHint, TOOL_LABEL_MAX, middleElide, isAdvertisedSkill, getSlashQuery, applySlashPick, filterCommands, appendHighlightedText, commandProgramLabel, commandTextPreview, extractToolResultOutput, commandOutputWasCancelled, commandOutputTruncationNote, computeLineDiff, parseAttachmentContext, parseSelectionBlocks, parseImageTags, parseContextBlocks, contextChipLabel, contextChipTitle, isKnownHostMessage, composerHasSendIntent, explicitVisibleChips, normalizeQueuedSends, queuedSendsText, queuedSendsChips, contextOverheadTokens, nextContextBreakdown, contextBreakdownIsCurrent, createPendingOverlay, getMentionQuery, applyMentionPick, orderPermissionOptions, defaultPermissionIndex, shouldFocusPermissionCard, isTypeThroughKey, isInterjectionText, stripInterjectionEnvelope, spokenTextFromMarkdown, wireFullscreenSafeReclamp, distributeSidePanelWidths, chatZoomFactor, unzoomClientPx, exportSessionMarkdown, exportSessionFilename, isExportableSessionEvent, replayedUserBubbleVerdict, truncateExportEvents, flattenHistoryMessages, splitHistoryWindow, countHistoryReplayCounters, partitionHistoryCards } = globalThis.GrokWebviewHelpers;
+  const { formatWaitElapsed, planEntriesProgress, formatReviewHeadline, looksLikeFileRef, formatRelativeTime, modelPickerLabel, modelDisplayName, nextMicState, trailingSendPhrase, buildQuestionAnswers, isFreeTextOptionLabel, isSubagentToolCall, subagentLabel, cleanSubagentOutput, parseSubagentTaskResult, shouldStickToBottom, stickThresholdPx, splitMath, stripUnsupportedTex, toolFailureText, isMediaGenToolCall, mediaGenZeroRetentionHint, TOOL_LABEL_MAX, middleElide, isAdvertisedSkill, getSlashQuery, applySlashPick, filterCommands, appendHighlightedText, commandProgramLabel, commandTextPreview, extractToolResultOutput, commandOutputWasCancelled, commandOutputTruncationNote, computeLineDiff, parseAttachmentContext, parseSelectionBlocks, parseImageTags, parseContextBlocks, parseSubagentAttachments, contextChipLabel, contextChipTitle, isKnownHostMessage, composerHasSendIntent, explicitVisibleChips, normalizeQueuedSends, queuedSendsText, queuedSendsChips, contextOverheadTokens, nextContextBreakdown, contextBreakdownIsCurrent, createPendingOverlay, getMentionQuery, applyMentionPick, orderPermissionOptions, defaultPermissionIndex, shouldFocusPermissionCard, isTypeThroughKey, isInterjectionText, stripInterjectionEnvelope, spokenTextFromMarkdown, wireFullscreenSafeReclamp, distributeSidePanelWidths, chatZoomFactor, unzoomClientPx, exportSessionMarkdown, exportSessionFilename, isExportableSessionEvent, replayedUserBubbleVerdict, truncateExportEvents, flattenHistoryMessages, splitHistoryWindow, countHistoryReplayCounters, partitionHistoryCards } = globalThis.GrokWebviewHelpers;
 
   function escapeAttr(s) {
     return String(s == null ? "" : s)
@@ -2098,6 +2098,7 @@
     modePopover.hidden = true;
     gearPopover.hidden = true;
     addPopover.hidden = true;
+    addBtn.setAttribute("aria-expanded", "false");
     historyPopover.hidden = true;
     contextPopover.hidden = true;
   }
@@ -4146,6 +4147,57 @@
     modePopover.hidden = false;
   }
 
+  function prepareAddPopover(view) {
+    addPopover.dataset.view = view;
+    addPopover.setAttribute("role", "menu");
+    for (const row of addPopover.querySelectorAll(".toolbar-popover-item")) {
+      row.setAttribute("role", "menuitem");
+      row.tabIndex = -1;
+    }
+    positionPopover(addPopover, addBtn);
+    addPopover.hidden = false;
+    addBtn.setAttribute("aria-expanded", "true");
+    addPopover.querySelector('[role="menuitem"]')?.focus();
+  }
+
+  function renderSubagentModelPicker() {
+    addPopover.textContent = "";
+    const back = h("div", { class: "toolbar-popover-item" }, "← Add context");
+    back.onclick = () => { addPopover.hidden = true; openAddPopover(); };
+    addPopover.appendChild(back);
+    addPopover.appendChild(h("div", { class: "popover-section" }, "Subagent models"));
+    const enabled = state.delegation?.value && state.delegation.value !== "off";
+    let count = 0;
+    if (enabled) {
+      for (const target of state.delegation.targets || []) {
+        if (!target.eligible || providerNeedsLogin(target.provider) || !target.models?.length) continue;
+        addPopover.appendChild(h("div", { class: "popover-section model-provider-heading" }, target.name));
+        for (const model of target.models) {
+          const selected = state.chips.some(chip => chip.kind === "subagent" && chip.provider === target.provider && chip.model === model.id);
+          const label = model.label || model.id;
+          const row = h("div", { class: "toolbar-popover-item model-picker-row" + (selected ? " active" : "") });
+          row.innerHTML = `<span class="gear-lead"><span class="provider-glyph provider-${providerLogoId(target.provider)}">${providerLogoMarkup(target.provider)}</span><span class="model-picker-name">${escapeHtml(label)}</span></span>` + (selected ? '<span class="popover-check">✓</span>' : "");
+          row.title = target.name + " · " + model.id;
+          row.onclick = () => {
+            if (!selected) vscode.postMessage({ type: "addSubagentChip", provider: target.provider, model: model.id });
+            closePopovers();
+            input.focus();
+          };
+          addPopover.appendChild(row);
+          count += 1;
+        }
+      }
+    }
+    if (!count) addPopover.appendChild(h("div", { class: "popover-fineprint" }, enabled
+      ? "No connected subagent models are available. Check providers and allowed models in Settings."
+      : "Subagents are disabled for this session. Enable delegation to attach a model."));
+    if (state.delegation?.needsRestart) addPopover.appendChild(h("div", { class: "popover-fineprint" }, "Restart this session to enable subagent delegation."));
+    const settings = h("div", { class: "toolbar-popover-item" }, "Agents & Crew settings…");
+    settings.onclick = () => { closePopovers(); openSettingsCategory("agents"); };
+    addPopover.appendChild(settings);
+    prepareAddPopover("subagent");
+  }
+
   function openAddPopover() {
     if (!addPopover.hidden) { closePopovers(); return; }
     closePopovers();
@@ -4177,8 +4229,15 @@
       };
       addPopover.appendChild(row);
     }
-    positionPopover(addPopover, addBtn);
-    addPopover.hidden = false;
+    const subagent = h("div", { class: "toolbar-popover-item" });
+    subagent.innerHTML = `<span class="add-item-icon">${ICON.bot}</span><span>Add subagent</span>`;
+    subagent.onclick = (event) => {
+      event.stopPropagation();
+      renderSubagentModelPicker();
+      vscode.postMessage({ type: "refreshSubagentModels" });
+    };
+    addPopover.appendChild(subagent);
+    prepareAddPopover("sources");
   }
 
   // Dashboard dot in the history dropdown. Gray (the `none` default) at rest; the
@@ -10326,6 +10385,11 @@
   function makeMsgChipTag(pathStr, chip) {
     const tag = document.createElement("span");
     tag.className = "msg-chip";
+    if (chip?.kind === "subagent") {
+      tag.innerHTML = `<span class="provider-glyph provider-${providerLogoId(chip.provider)}">${providerLogoMarkup(chip.provider)}</span><span>${escapeHtml(contextChipLabel(chip))}</span>`;
+      tag.title = providerDisplayName(chip.provider) + " · " + chip.model + " — Subagent for this message";
+      return tag;
+    }
     if (chip && (chip.kind === "diagnostics" || chip.kind === "terminal")) {
       const icon = chip.kind === "terminal" ? ICON.terminalChip : ICON.diagnostics;
       tag.insertAdjacentHTML("beforeend", icon + `<span>${escapeHtml(contextChipLabel(chip))}</span>`);
@@ -14412,7 +14476,8 @@
     // the exact leading/trailing shapes we produce, so a look-alike string in the
     // middle of the user's own words stays put. The stripped body is also what
     // the copy button yields: the user's words, not the context plumbing.
-    const parsed = parseAttachmentContext(displayRaw);
+    const subagentAttachments = parseSubagentAttachments(displayRaw);
+    const parsed = parseAttachmentContext(subagentAttachments.body);
     const selBlocks = parseSelectionBlocks(parsed.body);
     // Diagnostics / terminal blocks sit right after the selection snippets, so
     // they are peeled in the order they were written. Without this the restored
@@ -14427,6 +14492,11 @@
     const msgEl = state.activeUserEl.closest(".msg");
     if (msgEl) msgEl._copyText = imageTags.body;
     const chipTags = [
+      ...subagentAttachments.chips.map(chip => {
+        const catalogModel = state.availableModels.find(model => model.provider === chip.provider && model.modelId === chip.model);
+        if (catalogModel) chip.modelName = modelPickerLabel(catalogModel) || chip.model;
+        return makeMsgChipTag(chip.relPath, chip);
+      }),
       ...parsed.files.map((f) => makeMsgChipTag(f)),
       ...selBlocks.selections.map((s) =>
         makeMsgChipTag(s.path, { selectionStart: s.start, selectionEnd: s.end })),
@@ -16165,13 +16235,17 @@
    *  Clicking the body opens the source it stands for. */
   function makeContextChipRow(chip) {
     const el = document.createElement("div");
-    el.className = "attachment attachment-source";
+    el.className = chip.kind === "subagent" ? "attachment attachment-subagent" : "attachment attachment-source";
     el.title = contextChipTitle(chip);
-    el.innerHTML = chip.kind === "terminal" ? ICON.terminalChip : ICON.diagnostics;
+    el.innerHTML = chip.kind === "subagent"
+      ? `<span class="provider-glyph provider-${providerLogoId(chip.provider)}">${providerLogoMarkup(chip.provider)}</span>`
+      : chip.kind === "terminal" ? ICON.terminalChip : ICON.diagnostics;
+    if (chip.kind === "subagent") el.title = providerDisplayName(chip.provider) + " · " + chip.model + " — Subagent for this message";
     const span = document.createElement("span");
     span.textContent = contextChipLabel(chip);
     el.appendChild(span);
     el.onclick = () => {
+      if (chip.kind === "subagent") return;
       // The panel the chip stands for. Host-local: the webview asks, the host
       // opens it.
       vscode.postMessage({ type: "openContextChipSource", source: chip.kind === "terminal" ? "terminal" : "problems" });
@@ -16180,6 +16254,7 @@
     rm.type = "button";
     rm.className = "attachment-remove";
     rm.title = "Remove";
+    rm.setAttribute("aria-label", "Remove " + contextChipLabel(chip));
     rm.textContent = "×";
     rm.onclick = (e) => {
       e.stopPropagation();
@@ -16198,7 +16273,7 @@
       // pixels, so none of the file logic below applies to them. They are always
       // explicit attachments — there is no ambient "problems of the file you are
       // looking at" chip — so they only ever appear in the attachments row.
-      if (chip.kind === "diagnostics" || chip.kind === "terminal") {
+      if (chip.kind === "diagnostics" || chip.kind === "terminal" || chip.kind === "subagent") {
         attachmentsEl.appendChild(makeContextChipRow(chip));
         continue;
       }
@@ -19138,6 +19213,7 @@
       case "sessionDelegation":
         state.delegation = msg.value ? msg : null;
         renderDelegationSwitch();
+        if (!addPopover.hidden && addPopover.dataset.view === "subagent") renderSubagentModelPicker();
         break;
       case "subagentApproval":
         addSubagentApprovalCard(msg);
@@ -20034,6 +20110,29 @@
   gearPopover.addEventListener("click", (e) => e.stopPropagation());
   contextPopover.addEventListener("click", (e) => e.stopPropagation());
   addPopover.addEventListener("click", (e) => e.stopPropagation());
+  addPopover.addEventListener("keydown", (event) => {
+    const rows = [...addPopover.querySelectorAll('[role="menuitem"]')];
+    const index = rows.indexOf(document.activeElement);
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      rows[(index + (event.key === "ArrowDown" ? 1 : rows.length - 1)) % rows.length]?.focus();
+    } else if (event.key === "Home" || event.key === "End") {
+      event.preventDefault();
+      rows[event.key === "Home" ? 0 : rows.length - 1]?.focus();
+    } else if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      rows[index]?.click();
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      closePopovers();
+      addBtn.focus();
+    } else if (event.key === "ArrowLeft" && addPopover.dataset.view === "subagent") {
+      event.preventDefault();
+      addPopover.hidden = true;
+      openAddPopover();
+    }
+    event.stopPropagation();
+  });
   historyPopover.addEventListener("click", (e) => e.stopPropagation());
   document.addEventListener("click", (e) => {
     // Math / mermaid export actions (Copy source, Download as PNG/SVG, Open as PNG).

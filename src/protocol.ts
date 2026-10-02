@@ -1103,7 +1103,7 @@ export type HostMsg =
       type: "sessionDelegation";
       value: "off" | "ask" | "auto" | "read-only-auto" | null;
       needsRestart?: boolean;
-      targets?: Array<{ provider: AcpProvider; name: string; eligible: boolean; reason?: string; models?: Array<{ id: string; efforts?: string[] }> }>;
+      targets?: Array<{ provider: AcpProvider; name: string; eligible: boolean; reason?: string; models?: Array<{ id: string; label?: string; efforts?: string[] }> }>;
       roles?: Array<{ name: string; whenToUse: string }>;
     }
   // S-02: a subagent spawn waits for approval; the request is editable.
@@ -1975,6 +1975,8 @@ export type WebviewMsg =
    * all, and reads the content itself only when the turn is sent.
    */
   | { type: "addContextChip"; source: ContextSourceId }
+  | { type: "addSubagentChip"; provider: AcpProvider; model: string }
+  | { type: "refreshSubagentModels" }
   /** Clicking a diagnostics / terminal chip: bring the panel it stands for on
    *  screen. Host-local. */
   | { type: "openContextChipSource"; source: ContextSourceId }
@@ -2101,7 +2103,7 @@ const WEBVIEW_MESSAGE_TYPE_MAP: Record<WebviewMsg["type"], true> = {
   listSessions: true, listRepoSessions: true, selectRepo: true, toggleRepoPin: true, toggleSessionPin: true,
   setRepoArchived: true, setRepoColor: true,
   openAgentArtifact: true, openCrewSession: true, stopCrew: true, requestHandoff: true, resumeSession: true, renameSession: true, deleteSession: true,
-  clearAllSessions: true, pickFile: true, mentionQuery: true, addMentionFile: true, addContextChip: true, openContextChipSource: true,
+  clearAllSessions: true, pickFile: true, mentionQuery: true, addMentionFile: true, addContextChip: true, addSubagentChip: true, refreshSubagentModels: true, openContextChipSource: true,
   
   pasteImage: true, voiceStart: true,
   voiceStop: true, setVoiceBackend: true, configureOpenAiVoice: true, 

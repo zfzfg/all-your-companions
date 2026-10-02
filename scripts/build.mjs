@@ -43,7 +43,7 @@ const sharedOptions = {
 // Browser builds cannot externalize host dependencies. Audit every bundled input.
 function assertBrowserInputs(result) {
   const allowed = new Set(["src/webview-shared.ts", "src/protocol.ts", "src/slash-filter.ts",
-    "src/shared/context-chip.ts", "src/shared/queued-send.ts"]);
+    "src/shared/context-chip.ts", "src/shared/queued-send.ts", "src/shared/subagent-chip.ts"]);
   for (const input of Object.keys(result.metafile.inputs)) {
     if (!allowed.has(input)) throw new Error("Unexpected browser dependency: " + input);
   }

@@ -43,7 +43,7 @@ import type { Host, HostContext } from "./host";
 import { AcpClient } from "./acp";
 import type { AcpProvider } from "./acp-backend";
 import { isImageChip, consumeChips, type FileChip } from "./chips";
-import { isFileChip, type ContextChip, type ContextChipPayload } from "./context-chips";
+import { isFileChip, isSubagentChip, type ContextChip, type ContextChipPayload } from "./context-chips";
 import type { HostMsg } from "./protocol";
 import {
   Session,
@@ -314,6 +314,12 @@ export class TurnEdit {
         else this.deps.steerOps.postChips(session);
       }
     };
+
+    if (contributions.some(item => item.chips.some(isSubagentChip))) {
+      putBackOnQueue();
+      this.notifyUser("warning", "Messages with subagent selections are queued for the next turn.");
+      return;
+    }
 
     const client = session.client;
     const gen = session.gen;

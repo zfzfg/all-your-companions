@@ -9,6 +9,7 @@ import {
   type SessionStartDeps,
 } from "../src/session-start";
 import { Session } from "../src/session";
+import { makeSubagentChip } from "../src/context-chips";
 
 function makeStart() {
   const lines: string[] = [];
@@ -78,6 +79,23 @@ eventOps: {
 }
 
 describe("SessionStart", () => {
+  it("restores the text and attachments when subagent validation refuses a send", async () => {
+    const h = makeStart();
+    h.session.client = { sessionId: "session-1", availableCommands: [], prompt: vi.fn() } as any;
+    h.session.activeSessionId = "session-1";
+    h.session.chips = [makeSubagentChip("codex", "a")];
+    Object.assign(h.deps.turnAndSendOps, {
+      turnInFlight: () => false, pendingAttach: new Set(), contextChipPayloads: () => undefined,
+      applyTurnDirectives: () => { throw new Error("Model no longer available"); },
+    });
+    await h.start.handleSend("Investigate", false, h.session);
+    expect(h.emitted).toContainEqual({ type: "hostNotice", level: "warning", text: "Model no longer available" });
+    expect(h.emitted).toContainEqual({ type: "setBusy", value: false });
+    expect(h.emitted).toContainEqual({ type: "restoreComposer", text: "Investigate", chips: h.session.chips, sessionId: "session-1", draft: true });
+    expect(h.session.client?.prompt).not.toHaveBeenCalled();
+    expect(h.session.chips).toHaveLength(1);
+  });
+
   it("keeps the context interface at or under 25 members", () => {
     const { deps } = makeStart();
     expect(Object.keys(deps).length).toBeLessThanOrEqual(25);

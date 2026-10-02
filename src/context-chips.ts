@@ -28,6 +28,26 @@
  */
 
 import type { FileChip } from "./chips";
+import type { AcpProvider } from "./acp-backend";
+
+export interface SubagentChip {
+  kind: "subagent";
+  id: string;
+  provider: AcpProvider;
+  model: string;
+  modelName: string;
+  relPath: string;
+  hidden: boolean;
+}
+
+export function makeSubagentChip(provider: AcpProvider, model: string, modelName = model): SubagentChip {
+  return { kind: "subagent", id: `subagent:${provider}:${model}`, provider, model, modelName,
+    relPath: modelName, hidden: false };
+}
+
+export function isSubagentChip(chip: ContextChip): chip is SubagentChip {
+  return chip.kind === "subagent";
+}
 
 // ── The union ────────────────────────────────────────────────────────────────
 
@@ -87,7 +107,8 @@ export interface TerminalChip {
 export type ContextChip =
   | ({ kind?: "file" } & FileChip)
   | DiagnosticsChip
-  | TerminalChip;
+  | TerminalChip
+  | SubagentChip;
 
 export function isFileChip(chip: ContextChip): chip is { kind?: "file" } & FileChip {
   return chip.kind === undefined || chip.kind === "file";
@@ -159,11 +180,12 @@ export function makeTerminalChip(opts: { label: string; bytes: number }): Termin
 // ── Label / icon derivation ──────────────────────────────────────────────────
 
 /** Which glyph a chip shows. Mirrors the `ICON` keys in media/chat.js. */
-export type ContextChipIcon = "file" | "image" | "diagnostics" | "terminal";
+export type ContextChipIcon = "file" | "image" | "diagnostics" | "terminal" | "subagent";
 
 export function contextChipIcon(chip: ContextChip): ContextChipIcon {
   if (isDiagnosticsChip(chip)) return "diagnostics";
   if (isTerminalChip(chip)) return "terminal";
+  if (isSubagentChip(chip)) return "subagent";
   return chip.imageIndex != null ? "image" : "file";
 }
 

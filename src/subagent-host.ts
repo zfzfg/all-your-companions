@@ -3,6 +3,7 @@
  * child relay, turn-hold, child-watch, and directives (W-15 Schritt D3).
  */
 import { randomUUID } from "node:crypto";
+import { isSubagentChip, makeSubagentChip, type ContextChip } from "./context-chips";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { type EffortLevel, type PermissionRequest } from "./acp";
@@ -92,13 +93,14 @@ import {
 import { type SessionMetaOverrides } from "./sessions";
 import {
   type SubagentDirective,
-  parseSubagentMentions,
+  composerSubagentDirectives,
   renderDirectiveBlock,
   unfollowedDirectives,
 } from "./subagent-directives";
 import {
   isEffortLevel,
   listEligibleTargets,
+  composerTargetInput,
   resolveTarget,
   PERMISSION_PROFILES,
   type EligibilityInput,
@@ -900,7 +902,7 @@ export class SubagentHost {
       roster[provider] = {
         enabled: entry.enabled !== false,
         allowedModels: Array.isArray(entry.allowedModels)
-          ? entry.allowedModels.filter((id): id is string => typeof id === "string" && !id.trim())
+          ? entry.allowedModels.filter((id): id is string => typeof id === "string" && !!id.trim()).map(id => id.trim())
           : [],
         ...(str(entry.defaultModel) ? { defaultModel: str(entry.defaultModel) } : {}),
         ...(candidateDefaultEffort ? { defaultEffort: candidateDefaultEffort } : {}),
@@ -1842,11 +1844,44 @@ export class SubagentHost {
     this.deps.lifecycleOps.postSessionName(session);
   }
 
-  public applyTurnDirectives(session: Session, text: string): { text: string; block: string } {
-    const override = this.getOverride<typeof this.applyTurnDirectives>("applyTurnDirectives");
-    if (override) return override(session, text);
+  public addSubagentChip(session: Session, provider: AcpProvider, model: string): void {
+    const input = this.composerEligibilityInput(session);
+    const verdict = resolveTarget({ provider, model, profile: "read-only" }, input);
+    if (!verdict.ok) {
+      this.deps.emit(session, { type: "hostNotice", level: "warning", text: verdict.message });
+      return;
+    }
+    const entry = input.models(provider).models.find(entry => entry.id === model);
+    if (!entry) {
+      this.deps.emit(session, { type: "hostNotice", level: "warning", text: "This subagent model is no longer available. Choose a model from the list." });
+      return;
+    }
+    if (!session.chips.some(chip => isSubagentChip(chip) && chip.provider === provider && chip.model === model)) {
+      session.chips.push(makeSubagentChip(provider, model, entry.label));
+    }
+    this.deps.emit(session, { type: "chips", chips: session.chips });
+  }
 
-    const parsed = parseSubagentMentions(text);
+  private composerEligibilityInput(session: Session): EligibilityInput {
+    return composerTargetInput(this.eligibilityInput(session, this.currentTurnId(session)));
+  }
+
+  public applyTurnDirectives(session: Session, text: string, chips: readonly ContextChip[] = []): { text: string; block: string } {
+    const override = this.getOverride<typeof this.applyTurnDirectives>("applyTurnDirectives");
+    if (override) return override(session, text, chips);
+
+    const parsed = composerSubagentDirectives(text, chips);
+    const attached = chips.filter(isSubagentChip).filter(chip => !chip.hidden);
+    if (attached.length) {
+      const input = this.composerEligibilityInput(session);
+      for (const chip of attached) {
+        const verdict = resolveTarget({ provider: chip.provider, model: chip.model, profile: "read-only" }, input);
+        if (!verdict.ok) throw new Error(verdict.message);
+        if (!input.models(chip.provider).models.some(model => model.id === chip.model)) {
+          throw new Error(`Subagent model ${chip.model} is no longer available. Remove it or choose another model.`);
+        }
+      }
+    }
     session.subagentDirectives = parsed.directives.length ? parsed.directives : undefined;
     session.subagentsForbiddenThisTurn = parsed.directives.some((d) => d.strength === "forbid");
     const block = renderDirectiveBlock(parsed.directives);
@@ -1862,14 +1897,17 @@ export class SubagentHost {
   public directiveForSpawn(session: Session, args: SpawnArguments): SubagentDirective | undefined {
     const directives = session.subagentDirectives ?? [];
     if (!directives.length) return undefined;
+    const used = new Set(this.subagents.all().filter(record => record.parentSessionId === session.activeSessionId
+      && record.spawnedInTurn === this.currentTurnId(session) && record.status !== "refused").map(record => record.directiveId));
+    const candidates = [...directives.filter(directive => !used.has(directive.id)), ...directives.filter(directive => used.has(directive.id))];
     if (args.provider || args.role) {
-      return directives.find(
+      return candidates.find(
         (directive) =>
-          (args.provider && directive.provider === args.provider)
+          (args.provider && directive.provider === args.provider && (!args.model || !directive.model || directive.model === args.model))
           || (args.role && directive.role === args.role),
       );
     }
-    return directives.find((directive) => directive.strength === "must");
+    return candidates.find((directive) => directive.strength === "must" && (!args.model || !directive.model || directive.model === args.model));
   }
 
   public reportUnfollowedDirectives(session: Session, turnId: string): void {

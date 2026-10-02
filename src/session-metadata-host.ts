@@ -1,4 +1,4 @@
-import { listEligibleTargets, type EligibilityInput } from "./target-eligibility";
+import { composerTargetInput, listEligibleTargets, resolveTarget, type EligibilityInput } from "./target-eligibility";
 import {
   applySessionTypeSwitch,
   defaultSessionTypeFromSetting,
@@ -234,16 +234,18 @@ export class SessionMetadataHost {
     const enabled = session.delegationOverride?.enabled ?? meta?.subagentsEnabled ?? this.deps.sidebarOps.subagentsEnabledGlobally();
     const policy = session.delegationOverride?.spawnPolicy ?? meta?.spawnPolicy ?? this.deps.sidebarOps.companionsSetting<string>("subagents.spawnPolicy", "auto");
     const value = !enabled ? "off" : policy === "ask" ? "ask" : policy === "auto-read-only" ? "read-only-auto" : "auto";
-    let targets: Array<{ provider: AcpProvider; name: string; eligible: boolean; reason?: string; models?: Array<{ id: string; efforts?: string[] }> }> = [];
+    let targets: Array<{ provider: AcpProvider; name: string; eligible: boolean; reason?: string; models?: Array<{ id: string; label?: string; efforts?: string[] }> }> = [];
     let roles: Array<{ name: string; whenToUse: string }> = [];
     try {
-      const listing = listEligibleTargets(this.deps.sidebarOps.eligibilityInput(session, this.deps.sidebarOps.currentTurnId(session)), { includeIneligible: true, expand: "all" });
+      const input = composerTargetInput(this.deps.sidebarOps.eligibilityInput(session, this.deps.sidebarOps.currentTurnId(session)));
+      const listing = listEligibleTargets(input, { includeIneligible: true, expand: "all" });
       targets = [
         ...listing.targets.map((t) => ({
           provider: t.provider,
           name: t.displayName,
           eligible: true,
-          ...(t.models ? { models: t.models.map((m) => ({ id: m.id, ...(m.efforts ? { efforts: m.efforts } : {}) })) } : {})
+          ...(t.models ? { models: t.models.filter(m => resolveTarget({ provider: t.provider, model: m.id, profile: "read-only" }, input).ok)
+            .map((m) => ({ id: m.id, ...(m.label ? { label: m.label } : {}), ...(m.efforts ? { efforts: m.efforts } : {}) })) } : {})
         })),
         ...listing.ineligible.map((row) => ({ provider: row.provider, name: providerDisplayName(row.provider), eligible: false, reason: row.message })),
       ];

@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { makeExplicitChip, makeImageChip, makeImplicitChip } from "../src/chips";
+import { makeSubagentChip } from "../src/context-chips";
 import type { HostMsg } from "../src/protocol";
 import { enqueueQueuedSend } from "../src/queued-send";
 import { Session } from "../src/session";
@@ -65,6 +66,16 @@ function attachClient(sidebar: any, opts?: { honorContent?: boolean; result?: "o
 }
 
 describe("steerSend carries attachments", () => {
+  it("keeps subagent attachments queued for their own turn instead of dropping their directives", async () => {
+    const sidebar = makeSidebar();
+    const { session, calls } = attachClient(sidebar);
+    const chip = makeSubagentChip("codex", "review", "Review model");
+    session.chips = [chip];
+    await sidebar.steerSend("Inspect", session, [chip]);
+    expect(calls).toEqual([]);
+    expect(session.queuedSends).toEqual([{ text: "Inspect", chips: [chip] }]);
+    expect(session.chips).toEqual([]);
+  });
   const dirs: string[] = [];
   afterEach(() => {
     for (const dir of dirs) {

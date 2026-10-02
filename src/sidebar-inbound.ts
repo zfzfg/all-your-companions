@@ -218,6 +218,8 @@ export interface InboundAuthoringOps {
   setCompanionsSetting(...args: any[]): any;
 }
 export interface InboundSubagentOps {
+  refreshSubagentModels(session: Session): void;
+  addSubagentChip(session: Session, provider: AcpProvider, model: string): void;
   answerSubagentApproval(...args: any[]): any;
   cancelSubagent(...args: any[]): any;
   childOverviewAction(...args: any[]): any;
@@ -1170,6 +1172,16 @@ export class ToolingInboundRouter {
       }
       case "addContextChip":
         this.deps.composer.addContextSourceChip(msg.source, attachmentOwner);
+        break;
+      case "addSubagentChip": {
+        const owner = attachmentOwner();
+        if (owner && isAcpProvider(msg.provider) && typeof msg.model === "string" && msg.model) {
+          this.deps.children.addSubagentChip(owner, msg.provider, msg.model);
+        }
+        break;
+      }
+      case "refreshSubagentModels":
+        this.deps.children.refreshSubagentModels(session);
         break;
       case "openContextChipSource":
         await this.deps.host.revealContextSource(msg.source);

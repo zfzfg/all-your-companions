@@ -81,6 +81,23 @@ const contextDemo = async (send) => {
   } });
 };
 export const CHAT_SCENARIOS = {
+  "subagent-attachment-picker": { run: async ({ send, page }) => {
+    await send({ type: "sessionDelegation", value: "auto", targets: [
+      { provider: "codex", name: "Codex", eligible: true, models: [{ id: "example-review", label: "Review model" }, { id: "example-fast", label: "Fast model" }] },
+      { provider: "claude", name: "Claude", eligible: true, models: [{ id: "example-inspect", label: "Inspection model" }] },
+    ] });
+    await page.click("#add-btn");
+    await page.getByRole("menuitem", { name: "Add subagent", exact: true }).click();
+  } },
+  "subagent-attachments": { run: async ({ send }) => {
+    const chips = [
+      { kind: "subagent", id: "subagent:codex:example-review", provider: "codex", model: "example-review", modelName: "Review model", relPath: "Review model", hidden: false },
+      { kind: "subagent", id: "subagent:claude:example-inspect", provider: "claude", model: "example-inspect", modelName: "Inspection model", relPath: "Inspection model", hidden: false },
+      { kind: "terminal", id: "terminal:sample", label: "Shell", relPath: "Terminal output", bytes: 42, hidden: false },
+    ];
+    await send({ type: "chips", chips });
+    await send({ type: "userMessage", text: "Investigate the failing build using these subagents.", chips });
+  } },
   "codex-context-model": { run: async ({ send }) => {
     await send({ type: "initialState", effort: "high" });
     await send({ type: "session", provider: "codex", sessionId: "codex-demo", currentModelId: "gpt-test", models: [{ modelId: "gpt-test", name: "GPT Test", totalContextTokens: 400000 }] });

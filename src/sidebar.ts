@@ -1355,6 +1355,8 @@ export class GrokSidebar {
         setCompanionsSetting: (...args: any[]) => (self as any).setCompanionsSetting(...args)
       },
       children: {
+        refreshSubagentModels: session => self.postSessionDelegation(session),
+        addSubagentChip: (session, provider, model) => self.subagentHost.addSubagentChip(session, provider, model),
         answerSubagentApproval: (...args: any[]) => (self as any).answerSubagentApproval(...args),
         cancelSubagent: (...args: any[]) => (self as any).cancelSubagent(...args),
         childOverviewAction: (...args: any[]) => (self as any).childOverviewAction(...args),
@@ -4524,8 +4526,8 @@ ${detail}`,
     this.delegateSidebarMethod("releaseTurnHold", () => this.subagentHost.releaseTurnHold(session));
   }
 
-  public applyTurnDirectives(session: Session, text: string): { text: string; block: string } {
-    return this.delegateSidebarMethod("applyTurnDirectives", () => this.subagentHost.applyTurnDirectives(session, text));
+  public applyTurnDirectives(session: Session, text: string, chips: readonly ContextChip[] = []): { text: string; block: string } {
+    return this.delegateSidebarMethod("applyTurnDirectives", () => this.subagentHost.applyTurnDirectives(session, text, chips));
   }
 
   private directiveForSpawn(session: Session, args: SpawnArguments): SubagentDirective | undefined {

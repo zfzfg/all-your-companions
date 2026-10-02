@@ -264,6 +264,7 @@ describe("the + popover offers the same two sources", () => {
       "Upload from computer",
       "Problems (errors & warnings)",
       "Terminal output",
+      "Add subagent",
     ]);
   });
 

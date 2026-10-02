@@ -42,3 +42,4 @@ export function queuedSendsChips(entries: readonly QueueView[] = []): ContextChi
   for (const entry of entries) if (Array.isArray(entry.chips)) chips.push(...entry.chips);
   return chips;
 }
+export { parseSubagentAttachments } from "./shared/subagent-chip";

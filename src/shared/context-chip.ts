@@ -2,10 +2,11 @@
 export interface ChipView {
 kind?: string; relPath?: string; originRelPath?: string; path?: string;
 count?: number; severity?: string; scope?: string; label?: string; bytes?: number;
+provider?: string; model?: string; modelName?: string;
 }
 function contextChipKind(chip: ChipView | null | undefined) {
   const kind = chip && chip.kind;
-  return kind === "diagnostics" || kind === "terminal" ? kind : "file";
+  return kind === "diagnostics" || kind === "terminal" || kind === "subagent" ? kind : "file";
 }
 
 function chipBasename(p: string | undefined) {
@@ -34,6 +35,7 @@ export function formatChipBytes(bytes: number | undefined) {
  *  adds the `:12-40` range suffix, which only files have. */
 export function contextChipLabel(chip: ChipView) {
   const kind = contextChipKind(chip);
+  if (kind === "subagent") return chip.modelName || chip.model || "Subagent";
   if (kind === "diagnostics") {
     const head = chipPlural(chip.count || 0, chipSeverityNoun(chip.severity));
     return chip.scope === "file" && chip.path ? head + " in " + chipBasename(chip.path) : head;
@@ -45,6 +47,7 @@ export function contextChipLabel(chip: ChipView) {
 /** The chip's hover text. */
 export function contextChipTitle(chip: ChipView) {
   const kind = contextChipKind(chip);
+  if (kind === "subagent") return `${chip.provider} · ${chip.model} — Subagent for this message`;
   if (kind === "diagnostics") {
     const where = chip.scope === "file" && chip.path ? chip.path : "the whole workspace";
     return chipPlural(chip.count || 0, chipSeverityNoun(chip.severity))
@@ -56,4 +59,3 @@ export function contextChipTitle(chip: ChipView) {
   }
   return (chip && (chip.originRelPath || chip.path)) || "";
 }
-
