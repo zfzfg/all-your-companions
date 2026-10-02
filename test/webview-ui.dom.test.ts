@@ -988,7 +988,7 @@ describe("context donut (token usage)", () => {
     // Cold-restore buffered order: `session` (resets the donut to 0) → replay →
     // `contextUsage` (the host reads signals.json after loadSession returns).
     const { window, doc } = boot();
-    expect($(doc, "donut-label").textContent).toBe("Context ?");
+    expect($(doc, "donut-label").textContent).toBe("100K context");
     dispatch(window, { type: "contextUsage", used: 44123, window: 100000 });
     expect($(doc, "donut-label").textContent).toBe("≈ 44K");
   });
@@ -1021,7 +1021,7 @@ describe("context donut (token usage)", () => {
       currentModelId: "grok-build",
       models: [{ modelId: "grok-build", name: "Grok Build", totalContextTokens: 512000 }],
     });
-    expect($(doc, "donut-label").textContent).toBe("Context ?");
+    expect($(doc, "donut-label").textContent).toBe("512K context");
 
     dispatch(window, {
       type: "session",
@@ -1030,7 +1030,8 @@ describe("context donut (token usage)", () => {
       currentModelId: "claude-sonnet-5",
       models: [{ modelId: "claude-sonnet-5", name: "Claude Sonnet 5" }],
     });
-    expect($(doc, "donut-label").textContent).toBe("Context ?");
+    expect($(doc, "donut-label").textContent).toBe("");
+    expect($(doc, "donut").hidden).toBe(true);
   });
 });
 

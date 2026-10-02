@@ -194,10 +194,10 @@ describe("delegation in the composer (S-02, S-03) and the overview (E-01)", () =
       { provider: "codex", name: "Codex", eligible: true, models: [{ id: "gpt-5" }] },
       { provider: "gemini", name: "Gemini", eligible: false, reason: "not signed in" },
     ] } as never);
-    const sw = doc.getElementById("delegation-switch") as HTMLSelectElement;
-    expect(sw.value).toBe("auto");
-    sw.value = "ask";
-    sw.dispatchEvent(new (window as any).Event("change"));
+    const sw = doc.getElementById("delegation-switch") as HTMLButtonElement;
+    expect(sw.textContent).toBe("Auto");
+    click(window, sw);
+    click(window, doc.querySelector('#subagents-popover [data-value="ask"]')!);
     expect(posted.find((p: any) => p.type === "setSessionDelegation")).toMatchObject({ value: "ask" });
     const input = doc.getElementById("input") as HTMLTextAreaElement;
     input.value = "@subagent:";

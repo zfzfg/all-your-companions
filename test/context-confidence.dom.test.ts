@@ -11,6 +11,27 @@ function setup() {
   return h;
 }
 describe("native versus estimated context presentation", () => {
+  it("hides unknown context, shows capacity, and clears old data across models and providers", () => {
+    const h = setup();
+    const donut = h.doc.getElementById("donut")!;
+    expect(donut.hidden).toBe(true);
+    dispatch(h.window, { type: "session", sessionId: "s", provider: "grok", currentModelId: "m",
+      models: [{ modelId: "m", name: "Known", totalContextTokens: 500000 }, { modelId: "unknown", name: "Unknown" }] });
+    expect(donut.hidden).toBe(false);
+    expect(h.doc.getElementById("donut-label")!.textContent).toBe("500K context");
+    expect(h.doc.getElementById("donut-arc")!.style.display).toBe("none");
+    click(h.window, donut);
+    dispatch(h.window, { type: "modelChanged", modelId: "unknown" });
+    expect(donut.hidden).toBe(true); expect(h.doc.getElementById("context-popover")!.hidden).toBe(true);
+    dispatch(h.window, { type: "modelChanged", modelId: "m" });
+    expect(h.doc.getElementById("donut-label")!.textContent).toBe("500K context");
+    dispatch(h.window, { type: "contextUsage", used: 0 });
+    expect(h.doc.getElementById("donut-label")!.textContent).toBe("≈ 0K");
+    dispatch(h.window, { type: "clearMessages" });
+    expect(donut.hidden).toBe(true);
+    dispatch(h.window, { type: "session", sessionId: "other", provider: "claude", currentModelId: "unknown", models: [], preserveContext: true });
+    expect(donut.hidden).toBe(true); expect(h.doc.getElementById("donut-label")!.textContent).toBe("");
+  });
   it("draws native ratios, including zero and occupancy above capacity", () => {
     const h = setup();
     for (const used of [80, 0, 110]) {
@@ -44,7 +65,7 @@ describe("native versus estimated context presentation", () => {
     dispatch(h.window, { type: "contextUsage", context, used: 80 });
     dispatch(h.window, { type: "contextUsage", context: { ...context, used: undefined, usageStale: true, usageQuality: "unknown" } });
     dispatch(h.window, { type: "providerCapabilities", provider: "grok", capabilities: { manualCompact: { state: "yes" } } } as never);
-    expect(h.doc.getElementById("donut-label")!.textContent).toBe("Context ?");
+    expect(h.doc.getElementById("donut-label")!.textContent).toBe("0K context");
     click(h.window, h.doc.getElementById("donut")!);
     click(h.window, h.doc.querySelector(".context-compact")!);
     expect(h.posted.at(-1)).toEqual({ type: "send", text: "/compact", bare: true });

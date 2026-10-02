@@ -6447,26 +6447,50 @@ button.cx-rail-toggle:hover { background: var(--cx-hover); }
 .companion-activity { margin-left: 0; }
 
 /* S-02 / S-03 / S-04 */
-.delegation-switch {
-  max-width: 13em;
-  background-color: var(--vscode-dropdown-background, var(--vscode-input-background, #252526));
-  color: var(--vscode-dropdown-foreground, var(--vscode-foreground, #cccccc));
-  border: 1px solid var(--vscode-dropdown-border, var(--vscode-editorWidget-border, #3c3c3c));
-  border-radius: 6px;
-  padding: 0 6px;
-  font-family: inherit;
-  font-size: 11px;
-  cursor: pointer;
-  outline: none;
+.subagents-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
 }
-.delegation-switch:hover {
+.subagents-switch svg { width: 16px; height: 16px; flex: none; }
+#subagents-popover { max-width: min(300px, 100%); }
+#subagents-popover button { width: 100%; border: 0; background: transparent; text-align: left; }
+#subagents-popover button:hover { background: var(--vscode-list-hoverBackground); }
+#subagents-popover button.active { background: var(--vscode-list-activeSelectionBackground); }
+#subagents-popover button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -2px; }
+#subagents-popover .popover-fineprint { white-space: normal; }
+.context-donut[hidden], #welcome-version[hidden], .startup-strip[hidden], .workflow-stepper[hidden] { display: none; }
+.startup-strip { padding: 6px var(--pad); color: var(--vscode-descriptionForeground); font-size: 12px; }
+.workflow-stepper { display: flex; overflow-x: auto; padding: 12px 4px 8px; gap: 0; }
+.workflow-process-step { position: relative; display: flex; flex: 1 0 74px; min-width: 0; flex-direction: column; align-items: center; gap: 6px; padding: 0 5px; border: 0; background: transparent; font: inherit; color: var(--vscode-descriptionForeground); }
+button.workflow-process-step { cursor: pointer; }
+.workflow-process-step::before { content: ""; position: absolute; top: 6px; left: calc(-50% + 9px); right: calc(50% + 9px); height: 2px; background: var(--vscode-editorWidget-border); }
+.workflow-process-step[data-track="none"]::before { display: none; }
+.workflow-process-step[data-track="done"]::before { background: var(--vscode-charts-green); }
+.workflow-process-ring { width: 14px; height: 14px; box-sizing: border-box; border: 2px solid var(--vscode-descriptionForeground); border-radius: 50%; flex: none; }
+.workflow-process-step[data-state="done"] .workflow-process-ring { background: var(--vscode-charts-green); border-color: var(--vscode-charts-green); }
+.workflow-process-step[data-state="failed"] .workflow-process-ring { border-color: var(--vscode-errorForeground); }
+.workflow-process-step[data-state="cancelled"] .workflow-process-ring { border-style: dashed; }
+.workflow-process-step[data-state="paused"] .workflow-process-ring { border-color: var(--vscode-charts-yellow); }
+.workflow-process-step[aria-current="step"] { color: var(--vscode-foreground); font-weight: 600; }
+.workflow-process-step[aria-current="step"] .workflow-process-ring { box-shadow: 0 0 0 3px color-mix(in srgb, var(--vscode-focusBorder) 30%, transparent); }
+.workflow-process-step:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+.workflow-process-label { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.88em; }
+.workflow-group { border-top: 1px solid var(--vscode-editorWidget-border); padding: 6px 0; }
+.workflow-group summary { cursor: pointer; overflow-wrap: anywhere; }
+.workflow-group-state, .workflow-group-count { color: var(--vscode-descriptionForeground); font-size: 0.88em; }
+.workflow-agent { display: block; width: 100%; padding: 5px 8px; border: 0; background: transparent; color: var(--vscode-foreground); font: inherit; text-align: left; overflow-wrap: anywhere; }
+button.workflow-agent { cursor: pointer; }
+button.workflow-agent:hover { background: var(--vscode-list-hoverBackground); }
+button.workflow-agent:focus-visible { outline: 1px solid var(--vscode-focusBorder); }
+.subagents-switch:hover {
   background-color: var(--vscode-toolbar-hoverBackground, #2d2d2d);
 }
-.delegation-switch:focus-visible {
+.subagents-switch:focus-visible {
   outline: 1px solid var(--vscode-focusBorder, #007fd4);
   border-color: var(--vscode-focusBorder, #007fd4);
 }
-.delegation-switch option,
 .cx-select option,
 select option {
   background-color: var(--vscode-dropdown-background, #252526);
@@ -6499,3 +6523,5 @@ select option {
 .context-window-choice[aria-disabled="true"] { color: var(--vscode-disabledForeground, var(--vscode-descriptionForeground)); opacity: .6; cursor: default; }
 .context-window-choice[aria-disabled="true"]:hover { background: transparent; }
 .context-window-choice:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+
+.cx-rail.is-collapsed .workflow-stepper { display: none; }

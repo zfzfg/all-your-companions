@@ -81,6 +81,25 @@ const contextDemo = async (send) => {
   } });
 };
 export const CHAT_SCENARIOS = {
+  "subagents-menu": { run: async ({ send, page }) => {
+    await send({ type: "sessionType", sessionId: "s", sessionType: "agent", locked: true });
+    await send({ type: "sessionDelegation", value: "auto", needsRestart: true });
+    await page.click("#delegation-switch");
+  } },
+  "subagents-toolbar": { run: async ({ send }) => {
+    await send({ type: "sessionType", sessionId: "s", sessionType: "agent", locked: true });
+    await send({ type: "sessionDelegation", value: "read-only-auto" });
+  } },
+  "context-capacity": { run: async ({ send }) => {
+    await send({ type: "session", sessionId: "capacity", provider: "grok", currentModelId: "known",
+      models: [{ modelId: "known", name: "Known model", totalContextTokens: 500000 }] });
+  } },
+  "context-hidden": { run: async ({ send }) => {
+    await send({ type: "session", sessionId: "unknown", provider: "claude", currentModelId: "unknown", models: [] });
+  } },
+  "startup-strip": { run: async ({ send }) => {
+    await send({ type: "startupStatus", generation: 1, sequence: 1, stage: "consent" });
+  } },
   "context-estimated": { run: async ({ send, page }) => {
     await contextDemo(send);
     await send({ type: "contextUsage", context: { provider: "grok", access: "fixture", sessionId: "context-demo", modelId: "grok-4.7", generation: 1,
@@ -200,11 +219,15 @@ export const CHAT_SCENARIOS = {
           status: "running",
           subtitle: "Crew · Implement running (2/4)",
           stages: [
-            { id: "plan", title: "Plan", status: "done", ordinal: 1 },
-            { id: "implement", title: "Implement", status: "running", ordinal: 2 },
+            { id: "plan", title: "Plan", status: "done", ordinal: 1, sessionId: "planner", meta: "Codex · 2m · 10k tokens" },
+            { id: "implement", title: "Implement", status: "running", ordinal: 2, sessionId: "implementer" },
             { id: "review", title: "Review", status: "pending", ordinal: 3 },
             { id: "fix", title: "Fix", status: "pending", ordinal: 4 },
           ],
+          table: [{ ordinal: 1, stageId: "plan", title: "Plan", role: "Planner", target: "Codex", status: "done", files: 0,
+            sessionId: "planner", duration: "2m", tokens: "10k" },
+          { ordinal: 2, stageId: "implement", title: "Implement", role: "Implementer", target: "Claude", status: "running", files: 2,
+            sessionId: "implementer", duration: "45s", tokens: "8k" }],
         }),
       });
     },

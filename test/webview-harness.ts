@@ -48,6 +48,7 @@ export const BODY = `
     </div>
   </main>
   <footer class="composer">
+    <div id="startup-strip" role="status" hidden></div>
     <button id="scroll-bottom-btn" class="scroll-bottom-btn"></button>
     <div id="cx-dock" class="cx-dock">
       <section id="crew-empty" class="cx-rail cx-crew-start" hidden>
@@ -108,11 +109,12 @@ export const BODY = `
       </div>
       <button id="add-btn"></button>
       <button id="gear-btn"></button>
-      <div id="donut"><svg><circle id="donut-arc"/></svg><span id="donut-label"></span></div>
+      <div id="donut" hidden><svg><circle id="donut-arc"/></svg><span id="donut-label"></span></div>
       <div id="chips"></div>
       <button id="mode-btn"></button>
       <button id="send-btn"></button>
     </div>
+    <div id="subagents-popover" role="menu" hidden></div>
     <div id="mode-popover" hidden></div>
     <div id="gear-popover" hidden></div>
     <div id="add-popover" hidden></div>

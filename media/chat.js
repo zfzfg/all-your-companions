@@ -185,6 +185,7 @@
   const slashPopover = $("slash-popover");
   const mentionPopover = $("mention-popover");
   const modePopover = $("mode-popover");
+  const subagentsPopover = $("subagents-popover");
   const gearPopover = $("gear-popover");
   const addPopover = $("add-popover");
   const historyPopover = $("history-popover");
@@ -2092,6 +2093,8 @@
   // ---------- popovers ----------
 
   function closePopovers() {
+    subagentsPopover.hidden = true;
+    document.getElementById("delegation-switch")?.setAttribute("aria-expanded", "false");
     modePopover.hidden = true;
     gearPopover.hidden = true;
     addPopover.hidden = true;
@@ -7627,6 +7630,8 @@
   function setWelcomeStatus(text, busy) {
     const ver = $("welcome-version");
     if (!ver) return;
+    ver.hidden = !!state.startupStatus && !state.onboardingMode
+      && (!text || /^(Starting|Connecting|Connected|Waiting for approval|Waiting for CLI update)/.test(text));
     ver.classList.toggle("welcome-status-busy", !!busy);
     ver.dataset.status = busy ? text : "";
     if (!busy) {
@@ -9616,6 +9621,7 @@
     renderWorkflowGate(state.workflowRun);
     if (!crewRunEl) return;
     if (!state.workflowRun) {
+      crewRunEl.querySelector(".workflow-stepper")?.remove();
       const extras = crewRunEl.querySelector(".crew-run-extras");
       if (extras) extras.remove();
       renderCrewRun();
@@ -9632,10 +9638,13 @@
     }
     if (!crewRunList) return;
     crewRunList.textContent = "";
+    let stepper = crewRunEl.querySelector(".workflow-stepper");
+    if (!stepper) { stepper = h("div", { class: "workflow-stepper" }); crewRunList.before(stepper); }
     stages.forEach((stage, i) => {
       const status = STEP_STATUS[stage.status] || STAGE_STATUS[stage.status] || "pending";
       const current = stage.id === run.currentStageId;
       const li = h("li", { class: "cx-step crew-step crew-step-" + status + (current ? " is-current" : "") });
+      li.dataset.stageId = stage.id;
       const row = h(stage.sessionId ? "button" : "span", {
         class: "cx-row" + (stage.sessionId ? " cx-row--button crew-step-open" : ""),
         ...(stage.sessionId ? { type: "button", title: "Open this stage's session" } : {}),
@@ -9651,6 +9660,19 @@
         row.onclick = () => vscode.postMessage({ type: "openCrewSession", sessionId: stage.sessionId });
       }
       li.appendChild(row);
+      const entries = (run.table || []).filter((entry) => entry.stageId === stage.id);
+      if (entries.length) {
+        const group = workflowGroup(stage.id, stage.title || stage.id, status, run.runId);
+        group.querySelector("summary").appendChild(h("span", { class: "workflow-group-count" },
+          ` · ${entries.length} ${entries.length === 1 ? "run" : "runs"}${stage.meta ? " · " + stage.meta : ""}`));
+        for (const entry of entries) {
+          const agent = h(entry.sessionId ? "button" : "div", { class: "workflow-agent", ...(entry.sessionId ? { type: "button" } : {}) },
+            [entry.role, entry.target, entry.status, entry.duration, entry.tokens].filter(Boolean).join(" · "));
+          if (entry.sessionId) agent.onclick = () => vscode.postMessage({ type: "openCrewSession", sessionId: entry.sessionId });
+          group.appendChild(agent);
+        }
+        li.appendChild(group);
+      }
       if (current && run.status === "running" && run.runId) {
         const block = activityBlock(run.runId + ":" + stage.id, "crew-activity");
         if (block) li.appendChild(block);
@@ -9672,6 +9694,8 @@
       }
       crewRunList.appendChild(li);
     });
+    renderWorkflowStepper(stepper, stages.map((s) => ({ ...s, state: s.status })), run.currentStageId,
+      (id) => Array.from(crewRunList.children).find((li) => li.dataset.stageId === id && li.querySelector(".workflow-group")));
     const extras = crewRailExtras();
     if (!extras) return;
     extras.textContent = "";
@@ -9770,6 +9794,17 @@
   }
 
   function resetForNewSession() {
+    state.contextObservation = undefined;
+    state.contextWindow = undefined;
+    state.contextBreakdown = undefined;
+    state.contextWindowSelection = undefined;
+    state.contextSelectionSessionId = undefined;
+    state.usedTokens = undefined;
+    updateDonut();
+    state.delegation = null;
+    renderDelegationSwitch();
+    state.startupStatus = undefined;
+    $("startup-strip").hidden = true;
     stopProcessingCue();
     cancelPendingSpeech();
     markTranscriptPendingClear();
@@ -13569,14 +13604,29 @@
       const phases = update.phases || el._workflowPhases || [];
       const agents = update.agents || el._workflowAgents || [];
       el._workflowPhases = phases; el._workflowAgents = agents;
+      el._workflowCurrentPhase = update.currentPhaseId || update.currentPhase || el._workflowCurrentPhase;
       let roster = el.querySelector(".native-workflow-roster");
-      if (!roster) { roster = document.createElement("details"); roster.className = "native-workflow-roster"; el.appendChild(roster); }
-      const wasOpen = roster.open;
-      roster.hidden = !phases.length && !agents.length && !update.detail;
-      roster.innerHTML = `<summary>${escapeHtml(phases.slice(0, 3).map(p => p.title).join(" · ") || "Native workflow details")}</summary>`
-        + phases.map(p => `<div class="native-workflow-step"><strong>${escapeHtml(p.title)}</strong> ${escapeHtml(p.state || "")}<div>${agents.filter(a => a.phase === p.id || a.phase === p.title).map(a => escapeHtml(a.label) + " · " + escapeHtml(a.state || "")).join("<br>")}</div></div>`).join("")
-        + agents.filter(a => !phases.some(p => a.phase === p.id || a.phase === p.title)).map(a => `<div>${escapeHtml(a.label)} · ${escapeHtml(a.state || "")}</div>`).join("");
-      roster.open = wasOpen;
+      if (!roster) { roster = h("div", { class: "native-workflow-roster" }); el.appendChild(roster); }
+      roster.textContent = "";
+      roster.hidden = !phases.length && !agents.length;
+      for (const phase of [...phases, ...(agents.some(a => !phases.some(p => a.phase === p.id || a.phase === p.title))
+        ? [{ id: "unassigned", title: "Other agents" }] : [])]) {
+        const id = phase.id || phase.title;
+        const children = agents.filter(a => id === "unassigned"
+          ? !phases.some(p => a.phase === p.id || a.phase === p.title) : a.phase === id || a.phase === phase.title);
+        if (!children.length) continue;
+        const group = workflowGroup(id, phase.title, phase.state, update.id);
+        const tokens = children.filter(a => typeof a.tokensUsed === "number").reduce((sum, a) => sum + a.tokensUsed, 0);
+        group.querySelector("summary").appendChild(h("span", { class: "workflow-group-count" },
+          ` · ${children.length} ${children.length === 1 ? "agent" : "agents"}${tokens > 0 ? " · " + toK(tokens) + " tokens" : ""}`));
+        for (const agent of children) group.appendChild(h("div", { class: "workflow-agent" },
+          `${agent.label} · ${agent.state || "pending"}${typeof agent.tokensUsed === "number" ? " · " + toK(agent.tokensUsed) + " tokens" : ""}`));
+        roster.appendChild(group);
+      }
+      let stepper = el.querySelector(".workflow-stepper");
+      if (!stepper) { stepper = h("div", { class: "workflow-stepper" }); roster.before(stepper); }
+      renderWorkflowStepper(stepper, phases, el._workflowCurrentPhase,
+        id => Array.from(roster.children).find(g => g.dataset.phaseId === id));
       el.querySelector(".run-progress-kind").textContent = "Native workflow";
       if (update.launchOnly) phaseEl.textContent = "· launched in background";
       const actions = el.querySelector(".run-progress-actions");
@@ -13678,25 +13728,115 @@
   // may be live). Finalize that bubble first so the notice sits BETWEEN prior
   // content and what follows — otherwise later answer tokens reuse the pre-notice
   // bubble and render ABOVE the notice. Text arrives as markdown (italic).
-  // S-03: "Delegation: Off / Ask / Auto / Read-only auto" next to the mode button.
+  // The host remains authoritative for the conversation's subagent policy.
   const DELEGATION_WORDS = { off: "Off", ask: "Ask", auto: "Auto", "read-only-auto": "Read-only auto" };
+  const SUBAGENTS_ICON = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="6" rx="1.5"/><path d="M12 8v4M5 16v-4h14v4"/><rect x="2" y="16" width="6" height="6" rx="1.5"/><rect x="16" y="16" width="6" height="6" rx="1.5"/></svg>';
+  function openSubagentsPopover() {
+    const button = document.getElementById("delegation-switch");
+    if (!button || !state.delegation) return;
+    if (!subagentsPopover.hidden) { closePopovers(); button.focus(); return; }
+    closePopovers();
+    subagentsPopover.textContent = "";
+    subagentsPopover.appendChild(h("div", { class: "popover-section" }, "Subagents"));
+    for (const [value, label] of Object.entries(DELEGATION_WORDS)) {
+      const active = value === state.delegation.value;
+      const item = h("button", { type: "button", class: "toolbar-popover-item" + (active ? " active" : ""),
+        role: "menuitemradio", "aria-checked": String(active), dataset: { value } },
+        h("span", {}, label), active ? h("span", { class: "popover-check", "aria-hidden": "true" }, "✓") : null);
+      item.onclick = () => {
+        vscode.postMessage({ type: "setSessionDelegation", value });
+        closePopovers(); button.focus();
+      };
+      subagentsPopover.appendChild(item);
+    }
+    if (state.delegation.needsRestart) subagentsPopover.appendChild(h("div", { class: "popover-fineprint" },
+      "Turned on after this conversation started: subagents are offered from its next start."));
+    positionPopover(subagentsPopover, button);
+    subagentsPopover.hidden = false;
+    button.setAttribute("aria-expanded", "true");
+    subagentsPopover.querySelector('[aria-checked="true"]')?.focus();
+  }
+
+  function workflowState(value) {
+    if (/^(done|complete|completed|success|skipped)$/.test(value || "")) return "done";
+    if (/fail|error/.test(value || "")) return "failed";
+    if (/cancel|stop|abort/.test(value || "")) return "cancelled";
+    if (/paus|needs-you|at-gate/.test(value || "")) return "paused";
+    if (/^(running|active|in_progress)$/.test(value || "")) return "active";
+    return "pending";
+  }
+
+  // Process rings and per-step groups follow Paweł Huryn's upstream workflow design.
+  function renderWorkflowStepper(host, phases, current, findGroup) {
+    host.textContent = "";
+    host.hidden = !phases.length;
+    host.setAttribute("aria-label", "Workflow steps");
+    for (const [i, phase] of phases.entries()) {
+      const id = phase.id || phase.title;
+      const status = workflowState(phase.state);
+      const active = current === id || current === phase.title || status === "active";
+      const group = findGroup(id);
+      const step = h(group ? "button" : "span", { class: "workflow-process-step", dataset: { state: status },
+        ...(group ? { type: "button" } : {}), ...(active ? { "aria-current": "step" } : {}),
+        title: `${phase.title}: ${active && status === "pending" ? "current" : status}` },
+        h("span", { class: "workflow-process-ring", "aria-hidden": "true" }),
+        h("span", { class: "workflow-process-label" }, phase.title));
+      if (group) step.onclick = () => {
+        const details = group.matches("details") ? group : group.querySelector("details");
+        if (details) details.open = true;
+        group.scrollIntoView?.({ block: "nearest" });
+      };
+      step.dataset.track = i === 0 ? "none" : workflowState(phases[i - 1].state) === "done" ? "done" : "pending";
+      host.appendChild(step);
+    }
+  }
+
+  function workflowGroup(id, title, status, runId) {
+    const key = `${runId}:${id}`;
+    const remembered = uiState().workflowGroups || {};
+    const group = h("details", { class: "workflow-group", dataset: { phaseId: id },
+      open: (remembered[key] ?? !["done", "cancelled"].includes(workflowState(status))) || undefined },
+      h("summary", {}, h("span", {}, title), h("span", { class: "workflow-group-state" }, " · " + (status || "pending"))));
+    group.querySelector("summary").addEventListener("click", () => requestAnimationFrame(() => {
+      setUiState({ workflowGroups: { ...(uiState().workflowGroups || {}), [key]: group.open } });
+    }));
+    return group;
+  }
+  subagentsPopover.addEventListener("click", (e) => e.stopPropagation());
+  document.addEventListener("keydown", (e) => {
+    if (subagentsPopover.hidden) return;
+    const items = Array.from(subagentsPopover.querySelectorAll('[role="menuitemradio"]'));
+    if (e.key === "Escape" || e.key === "Tab") {
+      closePopovers();
+      if (e.key === "Escape") { e.preventDefault(); document.getElementById("delegation-switch")?.focus(); }
+    } else if (["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) {
+      e.preventDefault();
+      const i = items.indexOf(document.activeElement);
+      const next = e.key === "Home" ? 0 : e.key === "End" ? items.length - 1
+        : (i + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+      items[next]?.focus();
+    }
+  });
   function renderDelegationSwitch() {
     let sel = document.getElementById("delegation-switch");
     const d = state.delegation;
     if (!d || state.sessionType !== "agent") {
       if (sel) sel.remove();
+      subagentsPopover.hidden = true;
       return;
     }
     if (!sel) {
-      sel = h("select", { id: "delegation-switch", class: "toolbar-btn delegation-switch", "aria-label": "Delegation for this conversation",
-        title: "Companion subagents for this conversation" },
-        Object.entries(DELEGATION_WORDS).map(([v, label]) => h("option", { value: v }, "Delegation: " + label)));
-      sel.onchange = () => vscode.postMessage({ type: "setSessionDelegation", value: sel.value });
+      sel = h("button", { id: "delegation-switch", type: "button", class: "toolbar-btn subagents-switch",
+        "aria-haspopup": "menu", "aria-controls": "subagents-popover", "aria-expanded": "false" });
+      sel.onclick = (e) => { e.stopPropagation(); openSubagentsPopover(); };
+      sel.onkeydown = (e) => { if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); e.stopPropagation(); openSubagentsPopover(); } };
       const anchor = document.getElementById("mode-btn");
       if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(sel, anchor);
       else return;
     }
-    sel.value = d.value;
+    sel.innerHTML = SUBAGENTS_ICON + `<span>${escapeHtml(DELEGATION_WORDS[d.value] || "Auto")}</span>`;
+    sel.setAttribute("aria-label", "Subagents: " + (DELEGATION_WORDS[d.value] || "Auto"));
+    if (!subagentsPopover.hidden) { subagentsPopover.hidden = true; openSubagentsPopover(); }
     sel.title = d.needsRestart
       ? "Turned on after this conversation started: subagents are offered from its next start."
       : "Companion subagents for this conversation";
@@ -16199,9 +16339,11 @@
     donutArc.style.display = native ? "" : "none";
     if (donutArc.parentNode?.style) donutArc.parentNode.style.display = native ? "" : "none";
     paintDonutThresholdMark(native ? threshold : undefined);
-    donutLabel.textContent = measured === undefined ? "Context ?" : native
+    donutEl.hidden = measured === undefined && !(max > 0);
+    if (donutEl.hidden) contextPopover.hidden = true;
+    donutLabel.textContent = measured === undefined ? (max > 0 ? `${toK(max)} context` : "") : native
       ? `${toK(measured)}/${toK(max)}` : `≈ ${toK(measured)}`;
-    const usageDetail = measured === undefined ? "Current context occupancy unknown" : native
+    const usageDetail = measured === undefined ? (max > 0 ? `${max.toLocaleString()} tokens capacity; current occupancy unknown` : "") : native
       ? `${measured.toLocaleString()} / ${max.toLocaleString()} tokens${measured > max ? " — exceeds reported capacity" : ""}`
       : `Estimated context: ${measured.toLocaleString()} tokens${observation.usageStale || observation.stale ? " (stale)" : ""}`;
     donutLabel.title = usageDetail;
@@ -18302,6 +18444,9 @@
         const prior = state.startupStatus;
         if (prior && prior.key === key && (msg.generation < prior.generation || (msg.generation === prior.generation && msg.sequence <= prior.sequence))) break;
         state.startupStatus = { ...msg, key };
+        const strip = $("startup-strip");
+        strip.hidden = !msg.stage;
+        strip.textContent = msg.stage === "consent" ? "Waiting for approval" : msg.stage === "cli-update" ? "Waiting for CLI update" : "Starting conversation";
         if (msg.stage) setWelcomeStatus(msg.stage === "consent" ? "Waiting for approval" : msg.stage === "cli-update" ? "Waiting for CLI update" : "Starting conversation", true);
         else {  if (!state.busy) setWelcomeStatus("", false); }
         break;
@@ -18416,12 +18561,26 @@
         if (state.contextSelectionSessionId && selection.sessionId !== state.contextSelectionSessionId) break;
         if (state.contextWindowSelection?.sessionId === selection.sessionId && state.contextWindowSelection?.modelId === selection.modelId && state.contextWindowSelection.generation > selection.generation) break;
         state.contextWindowSelection = selection;
+        if (state.activeProvider === "grok" && selection.modelId === state.currentModelId && selection.selectedSize > 0) {
+          state.contextWindow = selection.selectedSize;
+          updateDonut();
+        }
         if (msg.openPicker && state.activeProvider === "grok") renderContextWindowPicker();
         else if (!gearPopover.hidden && state.gearView === "contextWindow") renderContextWindowPicker();
         if (!contextPopover.hidden) renderContextPopover();
         break;
       }
       case "session": {
+        if (state.contextSelectionSessionId !== msg.sessionId) {
+          state.delegation = null;
+          renderDelegationSwitch();
+          if (state.startupStatus?.sessionId && state.startupStatus.sessionId !== msg.sessionId) {
+            state.startupStatus = undefined;
+            $("startup-strip").hidden = true;
+          }
+        }
+        const preserveContext = !!msg.preserveContext && state.contextSelectionSessionId === msg.sessionId
+          && state.currentModelId === msg.currentModelId && state.activeProvider === (msg.provider || "grok");
         if (state.contextSelectionSessionId !== msg.sessionId) state.contextWindowSelection = undefined;
         state.contextSelectionSessionId = msg.sessionId;
 
@@ -18438,7 +18597,7 @@
         state.availableModels = msg.models || [];
         renderProviderSignInCard();
         const m = state.availableModels.find((x) => modelsMatch(x.modelId, msg.currentModelId) && (!x.provider || x.provider === state.activeProvider));
-        if (msg.preserveContext && state.contextObservation && modelsMatch(state.contextObservation.modelId, msg.currentModelId)) {
+        if (preserveContext && state.contextObservation && modelsMatch(state.contextObservation.modelId, msg.currentModelId)) {
           const limits = state.contextObservation.limits || {};
           state.contextWindow = limits.effectiveContextTokens || limits.inputTokenLimit || limits.activeWindow || limits.configuredWindow || limits.contextWindow;
         } else if (m?.totalContextTokens) {
@@ -18446,12 +18605,12 @@
         } else {
           state.contextWindow = defaultContextWindowForProvider(state.activeProvider);
         }
-        if (!msg.preserveContext) {
+        if (!preserveContext) {
           state.contextBreakdown = null;
           state.contextObservation = m ? { modelId: m.modelId, source: "adapter", limitQuality: m.contextQuality || "estimated",
             usageQuality: "unknown", limits: m.contextLimits || { contextWindow: m.totalContextTokens } } : undefined;
         }
-        updateDonut(msg.preserveContext ? undefined : 0);
+        updateDonut(preserveContext ? undefined : 0);
         break;
       }
       case "sessionName": {
@@ -18532,6 +18691,7 @@
         state.sessionTypeLocked = !!msg.locked;
         state.sessionTypeId = msg.sessionId || "";
         renderSessionType();
+        renderDelegationSwitch();
         // The composer speaks for the session type too, so a pre-lock switch
         // has to be visible in more than the header.
         syncProviderVoice();

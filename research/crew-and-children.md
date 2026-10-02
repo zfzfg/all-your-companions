@@ -2,6 +2,8 @@
 
 How the host keeps every hidden child (crew stage, companion subagent, Grok's
 own subagent) observable and answerable, and how a Crew run is steered.
+
+The Crew rail renders a horizontally scrollable process stepper and recorded agents/runs grouped under their stage. Completed groups fold by default; stage-session buttons, activity, stall actions, gates and the artifact table retain their existing routes. Group disclosure is local UI state. The startup strip above the composer owns host `startupStatus` messages; the welcome panel suppresses duplicate start/connection text while retaining onboarding and error messages.
 Implements the crew/subagent improvement plan (F-01…F-23, X/C/S/E/K packages).
 
 ## Questions reach the person (X-01)

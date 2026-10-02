@@ -8,7 +8,9 @@ it("keeps native workflow controls absent and associates reported agents with st
       phases: [ { id: "a", title: "Inspect" }, { id: "b", title: "Review" }, { id: "c", title: "Verify" }, { id: "d", title: "Finish" } ], agents: [{ label: "Reviewer", phase: "b", state: "paused" }] } });
     const card = h.doc.querySelector(".run-progress-card")!;
     expect(card.textContent).toContain("Native workflow");
-    expect(card.querySelector("summary")?.textContent).toBe("Inspect · Review · Verify");
+    expect(card.querySelector(".workflow-stepper")?.textContent).toBe("InspectReviewVerifyFinish");
+    expect(card.querySelectorAll(".workflow-stepper button")).toHaveLength(1);
+    expect(card.querySelector("summary")?.textContent).toContain("Review");
     expect(card.querySelector(".native-workflow-roster")?.textContent).toContain("Reviewer · paused");
     expect(card.querySelector(".blink-dots")).toBeNull();
     expect(card.querySelector(".run-progress-actions")?.hasAttribute("hidden")).toBe(true);

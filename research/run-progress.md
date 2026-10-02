@@ -46,7 +46,7 @@ From CLI binary symbols (0.2.111) + session_notification family:
 | `media/chat.js` | Upsert teal progress cards; Pause/Resume/Stop → `workflowControl` → `/workflow …` |
 
 Cards are buffered on the session like subagent rows, so a warm re-focus
-replays them. No nested inspector for child agents (same non-goal as subagents).
+replays them. Native workflow cards show connected process rings and agents grouped by their reported phase. Completed groups fold by default; steps without a group are status markers. Pause/Resume/Stop keep their existing host messages. The process/group presentation is adapted from [Paweł Huryn's upstream workflow design](https://github.com/phuryn/grok-build-vscode/commit/54df5f4); the fork's implementation uses its existing native and Crew view data. No nested inspector for child agents (same non-goal as subagents).
 
 ## Probes
 

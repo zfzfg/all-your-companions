@@ -461,6 +461,7 @@ ${fileShellOpen}
   </main>
 
   <footer class="composer">
+    <div id="startup-strip" class="startup-strip" role="status" hidden></div>
     <button id="scroll-bottom-btn" class="scroll-bottom-btn" type="button" title="Scroll to bottom"></button>
     <!-- The dock: every companion panel that pins above the composer shares
          one bounded, scrollable column, so four of them open at once cannot
@@ -560,12 +561,12 @@ ${fileShellOpen}
         <div class="toolbar-left">
           <button id="add-btn" class="icon-btn" title="Add context"></button>
           <button id="gear-btn" class="icon-btn" title="Settings"></button>
-          <div class="context-donut" id="donut" title="Context usage">
+          <div class="context-donut" id="donut" title="Context usage" hidden>
             <svg width="16" height="16" viewBox="0 0 16 16">
               <circle cx="8" cy="8" r="6" fill="none" stroke="var(--vscode-editorWidget-border,#444)" stroke-width="3"/>
               <circle id="donut-arc" cx="8" cy="8" r="6" fill="none" stroke="var(--vscode-charts-green,#4ec9b0)" stroke-width="3" stroke-dasharray="0 999" transform="rotate(-90 8 8)"/>
             </svg>
-            <span id="donut-label" class="small muted">0%</span>
+            <span id="donut-label" class="small muted"></span>
           </div>
           <div id="chips"></div>
         </div>
@@ -575,6 +576,7 @@ ${fileShellOpen}
         </div>
       </div>
     </div>
+    <div id="subagents-popover" class="toolbar-popover" role="menu" aria-label="Subagents" hidden></div>
     <div id="mode-popover" class="toolbar-popover" hidden></div>
     <div id="gear-popover" class="toolbar-popover gear-popover" hidden></div>
     <div id="add-popover" class="toolbar-popover" hidden></div>
