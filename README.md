@@ -35,11 +35,20 @@ No companion is treated as a second-class citizen. All five coding command-line 
 
 Switch models or companion providers on the fly in any conversation — context carries forward seamlessly.
 
+Antigravity uses the installed `agy` CLI through our ACP adapter. Its tools run
+server-side with native permissions bypassed; per-tool approval cards are not an
+Antigravity enforcement boundary. Review the applicable
+[Google Antigravity terms](https://antigravity.google/terms) for your account before
+connecting through a third-party client. Admission and idle watchdog are optional,
+off by default, and configured under `companions.antigravity.*`; they are local
+operating controls, not Google account limits. See
+[Antigravity settings and compatibility](research/agy-acp-stability.md).
+
 ### 3. Universal Diff Inspection & Single-Edit Revert
 Every AI provider proposes code edits differently, but **All your Companions** unifies them under one cohesive, safety-first review system:
 - **Universal Diff Synthesis:** Synthesizes authoritative whole-file diffs across **all five companions** (even Google Antigravity, which emits only raw parameters on the wire).
 - **Native VS Code Diff Preview:** When any companion proposes an edit, click **Open diff →** to inspect full-file changes directly in VS Code's native side-by-side diff editor before granting permission.
-- **Full Control:** Choose *Allow once*, *Always allow for this session*, or *Reject*. Changes hit your disk **only after your explicit approval**.
+- **Full Control:** Choose *Allow once*, *Always allow for this session*, or *Reject*. Providers that emit permission requests wait for your approval; Antigravity executes tools server-side.
 - **One-Click Revert (`revert edit ↶`):** Revert any completed edit directly from the card in chat across Antigravity, Grok, Codex, Claude, and Muse.
 
 ---

@@ -165,6 +165,12 @@ LaTeX in answers — inline `\(…\)`, display `\[…\]`, matrices, integrals �
 
 **2. Open Companions and sign in.** Press `Ctrl/Cmd+;`. The sidebar walks you through choosing your companion and getting started in one click.
 
+Antigravity uses the installed `agy` CLI. Tools execute server-side with native
+permissions bypassed. Review the applicable
+[Google Antigravity terms](https://antigravity.google/terms) for your account before
+using a third-party client. Optional admission and idle watchdog settings under
+`companions.antigravity.*` default to off and do not enforce Google account limits.
+
 Companions opens in the **Secondary Side Bar** (right side, next to other AI tools). Prefer it elsewhere? Gear → **Config & debug** → **Move view** relocates it to the Panel or Primary Side Bar in one click.
 
 > Prefer the terminal, building from source, or installing into several IDEs at once? See the project [INSTALL docs](https://github.com/phuryn/grok-build-vscode/blob/main/docs/INSTALL.md).
@@ -175,7 +181,7 @@ Companions opens in the **Secondary Side Bar** (right side, next to other AI too
 
 1. **Open** Companions: `Ctrl/Cmd+;` (or Command Palette: **Companions: Open**).
 2. **Type a prompt** and press **Enter**. Your companion streams its response and displays live reasoning traces.
-3. **Approve actions.** Preview file edits with the native VS Code diff editor, then *Allow once*, *Always allow*, or *Reject*.
+3. **Review actions.** Preview file edits with the native VS Code diff editor. Providers that emit permission requests offer *Allow once*, *Always allow*, or *Reject*; Antigravity executes tools server-side.
 4. **Pick your mode** (Agent / Plan / Auto accept) and **model** from the bottom toolbar.
 5. **Resume anytime** — the clock icon lists past sessions.
 

@@ -35,26 +35,44 @@ sidebar host ──► AcpClient ──► GrokBackend   ──► grok agent st
                          ├────► CodexBackend  ──► node codex-acp (CODEX_PATH=codex)
                          ├────► ClaudeBackend ──► node claude-agent-acp
                          │                        (CLAUDE_CODE_EXECUTABLE=claude)
-                         └────► GeminiBackend ──► gemini --acp  (native)
-                                            └───► node agy-acp-adapter.js (Antigravity/agy)
+                         ├────► GeminiBackend ──► node agy-acp-adapter.js ──► agy stream-json
+                         └────► MuseBackend ──► node muse-acp-adapter.js
        ▲                         │
        └── established internal events ◄── Codex wire normalization
 ```
 
-`GeminiBackend.spawn` starts the native `gemini --acp` CLI unless the located
-binary is Antigravity (`isAntigravityCli`), in which case it instead spawns
-`src/agy-acp-adapter.ts` under Node (`AGY_PATH`, `ELECTRON_RUN_AS_NODE=1`) —
-a bespoke ACP-over-stdio bridge in front of `agy`'s own `--input-format
-stream-json` protocol, not a real ACP agent. The UI label stays "Gemini"
-either way; provider identity is `gemini` in both cases. Antigravity has no
-`session/request_permission` (writes run through, `--dangerously-skip-permissions`
-under Auto accept) and its tool steps carry only raw parameters, so
-[src/diff-synthesize.ts](../src/diff-synthesize.ts) builds the same
-`{type:"diff"}` block Grok/Codex send natively — `agy-acp-adapter.ts` does
-this for its own live tool_call/tool_call_update pairs and (best-effort,
-docs/UNIVERSAL_DIFF_SUPPORT_PLAN.md § 4.6) its `session/load` transcript
-replay; `claude-backend.ts` / `gemini-backend.ts` normalizers do it for
-Claude and native `gemini --acp` tool calls that arrive without one.
+`GeminiBackend.spawn` always starts `src/agy-acp-adapter.ts` under Node
+(`AGY_PATH`, `ELECTRON_RUN_AS_NODE=1`). Provider identity remains `gemini`; the
+visible provider is Antigravity. The adapter translates ACP v1 into agy's CLI
+stream-json protocol. The official Google kernel is a separate capability probe,
+not a production transport.
+
+Each adapter reserves a FIFO turn before asynchronous discovery. The turn owns
+its process events, tool states and diff finalization until its response is sent.
+Cancellation waits for confirmed process exit before replacement; Windows uses
+hidden `taskkill /T /F`. A termination timeout blocks replacement. Every open tool
+receives a terminal update before a result, cancellation or failure response.
+A successful result without visible text or tool output is an error.
+
+Antigravity executes tools server-side. Its CLI starts with
+`--dangerously-skip-permissions`; the host does not enforce per-tool approval.
+The existing plan-review bridge handles `x.ai/exit_plan_mode`. Generic permission
+and question handlers remain available to other ACP backends but do not imply
+that agy emits those requests. Raw tool parameters become universal diffs through
+[src/diff-synthesize.ts](../src/diff-synthesize.ts), including transcript replay.
+Billing usage stays prompt usage; it does not become context occupancy.
+
+Tool guidance defaults to transient prompt instructions. Global `GEMINI.md`
+creation requires the explicit `toolRules=global` setting and never overwrites an
+existing file. Workspace/user skills populate `available_commands_update` and
+explicit skill requests add file-reading instructions. Replay is deduplicated by
+record position and content hash within each session generation.
+
+Optional idle watchdog and extension-host admission are disabled by default.
+Human question, permission and plan waits pause the watchdog. Admission is shared
+by sidebar, Crew and subagent clients in one extension host, with cancellable FIFO
+waiters and permit release on all prompt outcomes. See
+[Antigravity stability and kernel spike](../research/agy-acp-stability.md).
 
 Grok supplies the mandatory `fs/*` and `terminal/*` callbacks, native
 `x.ai/exit_plan_mode` / `x.ai/ask_user_question`, and its private notification
@@ -491,7 +509,7 @@ The extension host build uses `esbuild` (`scripts/build.mjs`) to bundle `src/ext
 | [src/acp.ts](../src/acp.ts) | Provider-neutral ACP client — spawns the selected backend, manages session lifecycle, normalizes through its backend hooks, and emits the extension's established events. `interject` (#52 Steer; `{sessionId, text}` plus additive `content` for images, omitted when text-only), `forkSession` (#48), `submitFeedback` (#114), and worktree RPCs (P2-8) call the unadvertised `_x.ai/*` methods, returning `"unsupported"` on -32601 rather than throwing |
 | [src/feedback.ts](../src/feedback.ts) | Pure thumbs-feedback helpers (#114) — availability plus `grok.thumbsFeedback` opt-in (default off), snake_case params, no `turn_number` (agent attributes the current turn); see [research/turn-feedback.md](../research/turn-feedback.md) |
 | [src/acp-backend.ts](../src/acp-backend.ts) / [src/grok-backend.ts](../src/grok-backend.ts) / [src/codex-backend.ts](../src/codex-backend.ts) / [src/claude-backend.ts](../src/claude-backend.ts) / [src/gemini-backend.ts](../src/gemini-backend.ts) | Backend contract, Grok identity, Codex/Claude/Gemini host normalization. Codex uses `session/set_config_option`; Claude and Gemini map `configOptions` into the host model picker, list sessions with `{ cwd }`, and map Agent/Auto-accept onto native permission modes. Claude's and Gemini's normalizers also synthesize a diff block onto tool calls that arrive without one (see `src/diff-synthesize.ts` above) |
-| [src/gemini-cli-locator.ts](../src/gemini-cli-locator.ts) / [src/agy-acp-adapter.ts](../src/agy-acp-adapter.ts) | Locates `gemini`/Antigravity's `agy` binary (`isAntigravityCli`); the adapter is a standalone ACP-over-stdio bridge in front of `agy`'s own stream-json protocol — tool-call mapping, plan-review bridging (`x.ai/exit_plan_mode`), session listing from agy's SQLite + a JSON resume-id store, transcript-based `session/load` replay, and universal-diff synthesis for `write_to_file` / `replace_file_content` / `multi_replace_file_content` |
+| [src/gemini-cli-locator.ts](../src/gemini-cli-locator.ts) / [src/agy-acp-adapter.ts](../src/agy-acp-adapter.ts) | Locates Antigravity's `agy` binary; the adapter is a standalone ACP-over-stdio bridge in front of `agy`'s own stream-json protocol — tool-call mapping, plan-review bridging (`x.ai/exit_plan_mode`), session listing from agy's SQLite + a JSON resume-id store, transcript-based `session/load` replay, and universal-diff synthesis for `write_to_file` / `replace_file_content` / `multi_replace_file_content` |
 | [src/codex-model-cache.ts](../src/codex-model-cache.ts) / [src/claude-model-cache.ts](../src/claude-model-cache.ts) | Short-lived connect warm-up that caches adapter models from a scratch `session/new`, deletes the temporary adapter-owned session, and cleans up the client/cwd |
 | [src/provider-ui.ts](../src/provider-ui.ts) | Pure provider presentation/state policy — Grok-first model grouping, empty-model default sentinel, normalized project defaults, adapter listing-time freeze (`adapterActivityAt` pins Codex and Claude to the host-observed clock), clear-all refresh guard (`adapterEntriesEligibleForClear`), and mixed-provider recency merge |
 | [src/provider-capabilities.ts](../src/provider-capabilities.ts) | Single source of truth for companion capabilities across 5 providers (`grok`, `codex`, `claude`, `gemini`, `muse`) and 15 features (`steer`, `rewind`, `fork`, `worktree`, `planMode`, `clientPlanGate`, `vision`, `manualCompact`, `questionRpc`, `feedback`, `subagents`, `structuredPlan`, `hostMcp`, `companionSubagentTarget`, `delegationShim`) with runtime probe overlays, user-facing tooltip reason strings, and webview broadcast |
@@ -561,6 +579,9 @@ The extension host build uses `esbuild` (`scripts/build.mjs`) to bundle `src/ext
 | [src/telemetry.ts](../src/telemetry.ts) | Anonymous Aptabase telemetry — pure payload builders + allowlisted `session_start` snapshot (opt-out via `grok.telemetry.enabled`; see [privacy.md](privacy.md)) |
 | [src/device-login.ts](../src/device-login.ts) / [src/device-login-run.ts](../src/device-login-run.ts) / [src/github-device-login.ts](../src/github-device-login.ts) / [src/github-auth.ts](../src/github-auth.ts) | Headless agent sign-in, plus GitHub connection state. The agent plan names argv **and** flow shape (`needsCode` for Claude paste-code `auth login`; Grok/Codex device-code poll). The runner streams pipes, opens stdin only for paste-code, and confirms Claude with `claude auth status` `{ loggedIn: true }`. GitHub device login is the same runner with `gh auth login --web` then `gh auth setup-git`. `github-auth.ts` reads `gh api user --jq .login` (exit code, then the login) into a Settings row (`githubState`); `GH_TOKEN` / `GITHUB_TOKEN` on the host process is `envTokenInForce`, so a failed call with an env token set is named rather than looking disconnected. It lists repositories for the clone combobox, signs out, and stores a pasted token via `gh auth login --with-token` (stdin only — never logged, never echoed; refused up front when an env token is already in force). See [provider-login.md](provider-login.md) |
 | [src/muse-backend.ts](../src/muse-backend.ts) / [src/muse-cli-locator.ts](../src/muse-cli-locator.ts) / [adapters/muse/](../adapters/muse/) | Muse Code (Meta), the fifth provider — the backend spawns our own ACP adapter (`out/muse-adapter/main.mjs`, built by `tsconfig.muse-adapter.json` over `@muse-code/sdk`) with the located CLI in `MUSE_CODE_EXECUTABLE`; the locator adds the POSIX home-bin fallback |
+| [src/agy-lifecycle.ts](../src/agy-lifecycle.ts) / [src/agy-capabilities.ts](../src/agy-capabilities.ts) | Abortable turn waits, confirmed process shutdown, ACP-v1 terminal tool updates and CLI mode aliases |
+| [src/agy-skills.ts](../src/agy-skills.ts) | Bounded workspace/user skill discovery, command collisions and explicit skill-file instructions |
+| [src/prompt-admission.ts](../src/prompt-admission.ts) | Cancellable FIFO admission shared across Antigravity clients within one extension host |
 | [src/gemini-model-cache.ts](../src/gemini-model-cache.ts) | Gemini/Antigravity counterpart of the Codex/Claude model caches — reads models from a scratch `session/new` |
 | [src/provider-config.ts](../src/provider-config.ts) | Each provider CLI's own global config file (honouring `GROK_HOME` / `CODEX_HOME`), listed beside the AP-04 rule files and opened as a normal editor tab |
 | [src/cli-update-plan.ts](../src/cli-update-plan.ts) | Update a CLI the way it was installed — an npm global install gets its prefix from where the binary actually lives, not from npm's configured prefix |

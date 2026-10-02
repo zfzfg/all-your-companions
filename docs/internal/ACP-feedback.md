@@ -697,3 +697,16 @@ account or spending many delegated turns: the 429 `retry_after_secs` gap in §5 
 cross-product settings merge in §9 (0.2.99–0.2.101), the 403 classification in §10 (0.2.101), and
 restore/subagent normalization in §11 (0.2.112 / 0.2.101). Those four are the only claims here not
 confirmed on the current build, and they are labelled in place.
+
+## Antigravity CLI translation boundary
+
+Antigravity uses our Node ACP-v1 adapter over CLI stream-json, not native
+`gemini --acp` or the official Google kernel. Turn reservation, confirmed
+process cancellation, terminal tool updates, transient tool guidance and
+position/hash replay deduplication are client workarounds. CLI billing remains
+prompt usage and is not a context-occupancy signal. The host's generic permission
+and question handlers do not constitute a native agy permission bridge. No
+cancel-and-replace behavior is advertised as mid-turn steering. The optional
+kernel probe sends initialize and, on request, session/new and cancel only;
+production remains on the CLI. Evidence and limitations:
+[Antigravity stability](../../research/agy-acp-stability.md).

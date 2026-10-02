@@ -21,6 +21,16 @@ State the rule, name the function / constant / config-key an agent would grep fo
 
 Grok context-window choices use `AcpClient.contextWindowSelection` and the identity-checked `setContextWindow` control. The model picker and context popup follow confirmed native session state; `/context-window` is host-routed. ContextObservation separates active capacity and effective input budget from independently sourced occupancy; only fresh matching native data draws a ratio, while estimates and historical usage appear as text. Capacity without occupancy appears as text; fully unknown context hides the toolbar indicator. Codex chat shows only matching native ACP last-request tokens without a capacity or ring; its catalog limit is labelled estimated in model settings. The composer settings button displays the selected model and effort. See [context budgets](research/context-budgets.md#native-grok-context-selection).
 
+Antigravity (`gemini` identity) always uses `GeminiBackend` → the Node
+`agy-acp-adapter` → CLI stream-json. FIFO turn ownership includes diff finalization;
+cancellation confirms child exit before replacement. `agy-capabilities.ts` pins
+ACP v1, `agy-lifecycle.ts` owns abort/termination helpers, `agy-skills.ts` publishes
+workspace/user commands, and `prompt-admission.ts` coordinates clients in one
+extension host. `companions.antigravity.*` controls transient/global/off tool rules,
+optional idle watchdog and admission (both off by default). Billing is not context
+occupancy. Official kernel investigation is probe-only. See
+[Antigravity stability](research/agy-acp-stability.md).
+
 ## Where the detail lives
 
 This file is rules and orientation. Reference material that used to live here
@@ -43,7 +53,7 @@ you are deciding something, not on every turn.
 
 ```bash
 npm install
-npm test         # 6,552 passing tests (344 files; 4 existing skips), ~1 min, vitest — all binary-free (incl. happy-dom DOM tests + fake-CLI ACP integration tests)
+npm test         # 6,627 passing tests (352 files; 4 existing skips), ~1 min, vitest — all binary-free (incl. happy-dom DOM tests + fake-CLI ACP integration tests)
 npm run test:perf # opt-in session-history perf simulation (NOT in npm test/CI; see § History pagination)
 npm run test:integration # real VS Code Extension Host, 22 tests (~1 min). NOT part of `npm test`; CI runs it as a second required job.
 npm run ui:screens # screenshot harness: every companion surface × Dark/Light/HC → .screens/ui/<label>/index.html (Electron, no browser download; --only, --theme, --label)
@@ -60,7 +70,7 @@ Provider capability questions use `provider-capabilities.ts`; backend modes use 
 
 There are **three** kinds of tests, and it matters which is which:
 
-1. **`npm test` — binary-free unit/DOM/integration suite (6,552 passing tests in 344 files; 4 existing skips).** Pure logic, happy-dom tests that drive the real `media/chat.js`, a real-shell TerminalManager smoke, and a fake-CLI ACP integration suite (`test/fixtures/fake-grok-acp.cjs`). **Never spawns the real `grok` binary.** Runs in a few seconds with no network, no login, no subscription. This is the floor — every change keeps it green. (Two separate opt-in suites live outside `npm test`: `npm run test:perf` runs the session-history perf simulation — `test/*.perf.ts` via `vitest.perf.config.ts` — and `npm run test:integration` runs the `@vscode/test-electron` smoke below; both are matched only by their own config so they stay out of `npm test`.)
+1. **`npm test` — binary-free unit/DOM/integration suite (6,627 passing tests in 352 files; 4 existing skips).** Pure logic, happy-dom tests that drive the real `media/chat.js`, a real-shell TerminalManager smoke, and a fake-CLI ACP integration suite (`test/fixtures/fake-grok-acp.cjs`). **Never spawns the real `grok` binary.** Runs in a few seconds with no network, no login, no subscription. This is the floor — every change keeps it green. (Two separate opt-in suites live outside `npm test`: `npm run test:perf` runs the session-history perf simulation — `test/*.perf.ts` via `vitest.perf.config.ts` — and `npm run test:integration` runs the `@vscode/test-electron` smoke below; both are matched only by their own config so they stay out of `npm test`.)
 2. **CI — the *same* suite, plus a REQUIRED Electron smoke.** `.github/workflows/ci.yml`'s `test` job runs `npm ci && npm run compile && npm test` on a **matrix of `ubuntu-latest`, `macos-latest` and `windows-latest`** (`fail-fast: false`; the VSIX is packaged once, on Ubuntu) — **CI's `test` job ≡ layer 1, verbatim** (no `grok` binary, no auth, no subscription, so it *cannot* touch the real CLI — the whole reason layer 1 is grok-free). A second job, `integration`, runs the `@vscode/test-electron` smoke under `xvfb` (`npm run test:integration` — activate the extension, assert commands registered, resolve the webview via the *missing-CLI* onboarding path, then provision `test/fixtures/fake-grok-acp.cjs` through `provisionFakeGrok` so remote resume/`session/load` and matching-sessionId worktree tests run without a real CLI). Test-mode `activate` calls `isolateFromInstalledGrok` before any view can resolve; that latches `testForceMissingGrokCli` so `locateProvider("grok")` will not search config or PATH (an explicit provisioned path still wins). Resume assertions require a distinctive `updates.jsonl` marker to reach the client, `waitForSessionLoad` to settle, and a live ACP session afterward — `initialized` / a reserved session id / replay-before-the-RPC-result are not enough. (`startSession` swallows a failed load and still resolves the reservation.) It's a **required gate** (validated passing against a real VS Code Extension Host before landing; if a Linux/xvfb quirk ever surfaces, fix it rather than demoting the gate). The smoke is still grok-binary-free — it exercises host glue (activation, `getHtml`/CSP, `localResourceRoots`, command registration, hermetic ACP resume) the unit suite structurally can't reach. Compiles in isolation (`integration/tsconfig.json` → `out-integration/`), so it's out of `npm test` and the extension build.
 3. **`npm run test:live` — on-demand pre-release suite against REAL grok (`scripts/live-tests.cjs`).** It covers the real handshake, capability drift, prompt/cancel/interject, fork/parallel/restore, plan enforcement, rewind, usage, and generative surfaces. The plan lane now uses native verdicts: its first same-turn `exit_plan_mode` response is `cancelled`, the second is `approved`, and the gate is lowered inside that response callback before implementation continues; `plan-cancel-rewind` uses native `abandoned` with no primer or marker turns. It reuses the compiled dispatch/gate/rewind modules and shipped webview helpers. It needs a logged-in grok and burns credits, so it is run deliberately before a release and never belongs in `npm test` or CI. A SKIP does not fail the gate; research probes remain manual one-offs.
 
