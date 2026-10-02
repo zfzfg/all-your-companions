@@ -473,6 +473,9 @@ export class SessionStart {
     session.keepTranscriptOnStart = false;
     if (!keepTranscript) session.buffer = [];
     session.subscriptionUsage = undefined;
+    session.companionsMcpInjected = undefined;
+    session.companionsSkipReason = undefined;
+    session.companionsSkipAnnounced = false;
     session.status = "idle";
     session.turnToken = undefined;
 
@@ -543,7 +546,7 @@ export class SessionStart {
 
 
     if (configAutoApprove) this.deps.eventOps.noticeAlwaysApproveOnce(this.deps.sessionCwd(session));
-    if (resumeId) this.deps.emit(session, { type: "clearMessages" });
+    if (resumeId || !keepTranscript) this.deps.emit(session, { type: "clearMessages" });
 
     this.deps.emit(session, { type: "setBusy", value: true, locked: true });
 

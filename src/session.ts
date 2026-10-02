@@ -369,7 +369,7 @@ export class Session {
   companionsMcpInjected?: boolean;
   /** Why the server was withheld, when {@link companionsMcpInjected} is not true. */
   companionsSkipReason?: CompanionsSkipReason;
-  /** The surprising skip was already shown as a hostNotice this process. */
+  /** The surprising skip was already shown as a hostNotice for this startup. */
   companionsSkipAnnounced?: boolean;
 
   /**

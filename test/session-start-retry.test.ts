@@ -167,6 +167,22 @@ function onboardings(sidebar: any): HostMsg[] {
 }
 
 describe("startSession bounded spawn retry", () => {
+  it.each([false, true])("refreshes delegation notices on restart (keep transcript: %s)", async (keepTranscript) => {
+    const sidebar = makeSidebar("/repo");
+    const session = sidebar.focused;
+    session.companionsMcpInjected = false;
+    session.companionsSkipReason = "host-mcp-unproven";
+    session.companionsSkipAnnounced = true;
+    session.keepTranscriptOnStart = keepTranscript;
+    sidebar.spawnCompanionsServerForSession = vi.fn(async () => undefined);
+
+    await sidebar.startSession(undefined, session);
+
+    expect(session.companionsSkipReason).toBeUndefined();
+    expect(session.companionsSkipAnnounced).toBe(false);
+    expect(sidebar.posted.some((msg: HostMsg) => msg.type === "clearMessages")).toBe(!keepTranscript);
+  });
+
   beforeEach(() => {
     startControl.failuresRemaining = 0;
     startControl.failWith = "Internal error";
