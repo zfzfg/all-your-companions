@@ -1,6 +1,17 @@
 # Changelog
 
-## Unreleased
+## [0.3.2] - 2026-10-03
+
+- Fail closed on worktree creation and concurrency limits: requested worktrees no longer fall back to the shared checkout on failure, path aliases share unified file claims, uncommitted changes are included during apply, and a full writer pool queues callers instead of spawning redundant writers.
+- Coordinate Crew runs with a dedicated mailbox (`CrewMailbox`) for parent/child and inter-stage notes with deduplication and TTL expiration, slot-ledger concurrency controls (`HostSlotLedger`, `RootRunBudget`), three-way text merging for non-overlapping edits, and adaptive failover that backs off on rate limits and switches only on exhausted quota.
+- Introduce Workflow schema version 2 with explicit fork/join execution graphs, rejecting schema 1 documents with invalid fork structures. Follow workflow progress with interactive steppers, collapsible completed step groups, active phase tracking, and in-place pause/resume controls.
+- Stabilize Antigravity process and turn lifecycle: enforce strict FIFO turn ownership (queued → claimed → running → finalizing → terminal) with cancellation throughout, clean turn-bounded diff emission, hidden process-tree termination, and persistent child tracking until exit confirmation.
+- Configure Antigravity behaviors via `companions.antigravity.*` settings (`toolRules`, `watchdogIdleTimeoutMs`, `maxActiveTurns`, and `minStartSpacingMs`), discover skills across workspace and user directories with bounded file reads, and update Gemini companion branding to the official Antigravity arch silhouette.
+- Attach specific companion subagent models per message using `@subagent:` directives or composer chips; validate models against the provider cache and roster allow-list before sending, and preserve model directives across drafts, queued sends, and session replays.
+- Keep composer model and reasoning effort legible directly on the gear button with balanced 14px typography, and refresh stale delegation warnings on provider restarts.
+- Ensure Review Center accuracy by calculating exact net line diffs (`countLineDiff`) across edit chains instead of summing incremental deltas, canonicalizing relative and absolute file paths, capturing reliable pre-edit baseline snapshots, and compacting error failure stacks in the webview.
+- Keep Codex catalog estimates out of chat and expose them in settings/popovers, while retaining native ACP request usage tokens without false verified context occupancy claims.
+- Add PowerShell release scripts for version bumping (`scripts/bump-version.ps1`), compilation (`scripts/compile.ps1`), packaging (`scripts/package.ps1`), and Open VSX publishing (`scripts/release-ovsx.ps1`).
 
 ## [0.3.1] - 2026-10-01
 
