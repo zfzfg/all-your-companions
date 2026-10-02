@@ -15,6 +15,10 @@ describe("provider logo assets", () => {
     expect(source).toContain("M9.27 15.29l7.978-5.897");
     expect(source).toContain("M9.205 8.658v-2.26");
     expect(source).toContain("M4.709 15.955l4.72-2.647.08-.23-.08-.128");
+    // Gemini uses the Antigravity arch, not the four-point sparkle. The three
+    // copies stay on the same silhouette.
+    expect(source).toContain("M20.346 20.774C21.488 21.631");
+    expect(source).not.toContain("M12 0C12 6.627");
     const providerSvgs = source.match(/<svg class="provider-logo"[^>]*>/g) ?? [];
     expect(providerSvgs.length).toBeGreaterThan(0);
     expect(providerSvgs.every((svg) => !svg.includes("style="))).toBe(true);
