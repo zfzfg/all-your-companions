@@ -65,6 +65,34 @@ describe("assignStep (18.4)", () => {
     expect(stripRoleTag("[fixer] npm test is red")).toBe("npm test is red");
   });
 
+  it("assigns a short signal as a whole word", () => {
+    const tester: AgentRole[] = [{
+      ...roles.find((r) => r.name === "implementer")!,
+      name: "tester",
+      whenToUse: "Write unit tests for auth and the api.",
+    }];
+    const hit = assignStep({ title: "Write unit test for auth", files: [] }, tester);
+    expect(hit.kind).toBe("assigned");
+    const miss = assignStep({ title: "Recapitalise the heading", files: [] }, [{
+      ...tester[0],
+      whenToUse: "Touch the api client.",
+    }]);
+    expect(miss.kind).toBe("none");
+  });
+
+  it("honours an explicit short keyword and does not match inside another word", () => {
+    const custom: AgentRole[] = [{
+      ...roles.find((r) => r.name === "implementer")!,
+      name: "api-owner",
+      whenToUse: "unused prose",
+    }];
+    const rules = [{ role: "api-owner", keywords: ["api"] }];
+    const hit = assignStep({ title: "Update the api", files: [] }, custom, rules);
+    const miss = assignStep({ title: "Recapitalise headings", files: [] }, custom, rules);
+    expect(hit.kind).toBe("assigned");
+    expect(miss.kind).toBe("none");
+  });
+
   it("an unknown tag is none, not a guess", () => {
     const a = assignStep({ title: "[wizard] cast fireball", files: [] }, roles);
     expect(a.kind).toBe("none");

@@ -21,10 +21,10 @@ describe("checkBudget", () => {
 });
 
 describe("parallelSlotCap", () => {
-  it("is derived from the pool, never guessed, and at least 1", () => {
+  it("is derived from the pool, and zero when the pool is full", () => {
     expect(parallelSlotCap({ maxLive: 8, unreapable: 3 })).toBe(5);
-    expect(parallelSlotCap({ maxLive: 8, unreapable: 8 })).toBe(1);
-    expect(parallelSlotCap({ maxLive: 8, unreapable: 20 })).toBe(1);
+    expect(parallelSlotCap({ maxLive: 8, unreapable: 8 })).toBe(0);
+    expect(parallelSlotCap({ maxLive: 8, unreapable: 20 })).toBe(0);
   });
 });
 

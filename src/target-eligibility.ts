@@ -187,6 +187,7 @@ export type RefusalCode =
   | "no-eligible-target"
   | "timeout"
   | "child-crashed"
+  | "isolation-failed"
   // S-01: a file the child would edit is held by another writer.
   | "file-claimed"
   // S-04: a follow-up for a child whose session is no longer live.

@@ -92,7 +92,7 @@ describe("the twelve rules", () => {
   });
 
   it("rejects an unknown schemaVersion", () => {
-    const def = { ...IDEA_TO_DONE, schemaVersion: 2 as 1 };
+    const def = { ...IDEA_TO_DONE, schemaVersion: 9 as 1 };
     const result = validateWorkflowDefinition(def, ctx());
     expect(result.valid).toBe(false);
     expect(result.errors[0]?.pointer).toBe("/schemaVersion");

@@ -17,7 +17,7 @@ import type { WorkflowRunView } from "./protocol";
 import {
   type HandoffPacket,
   type HandoffStatus,
-  highestFindingSeverity,
+  packetHighestSeverity,
   verdictUnreadable,
   verifyForTransitions,
   verifyStatus,
@@ -101,6 +101,11 @@ export interface WorkflowRun {
   cwd: string;
   worktree?: string;
   verify?: string;
+  /**
+   * Bumped when a stage is cancelled or restarted. A result from an older
+   * generation must not mark the new attempt done.
+   */
+  generation?: number;
   status: WorkflowRunStatus;
   checkpointTurnId?: string;
   executed: ExecutedStage[];
@@ -115,6 +120,8 @@ export interface WorkflowRun {
     allowAnywhere?: boolean;
     /** The gate's notes, carried into the stage (the gate itself is gone). */
     userNotes?: string;
+    /** `run.generation` at the moment this attempt started. */
+    generation?: number;
   };
   gate?: WorkflowGate;
   pausedAt?: PauseSnapshot;
@@ -290,6 +297,9 @@ export function forcedManualReasons(
   const contract = stage ? def.contracts[stage.contract] : undefined;
   if (verdictUnreadable(packet, contract)) reasons.push("unreadable-verdict");
   if (packet.unreported.length) reasons.push("unreported-edits");
+  if (packet.findingsAccount?.complete === false && !packet.findingsAccount.highest) {
+    reasons.push("findings-incomplete");
+  }
   // F-08 / C-16: a stage that ran on another companion after a limit always
   // stops, so the switch is seen before anything builds on it.
   if (packet.switchedFrom) reasons.push("provider-switched");
@@ -356,7 +366,7 @@ function whenMatches(
     if (!when.verify.includes(status)) return false;
   }
   if (when.findingsAtLeast) {
-    const highest = highestFindingSeverity(packet.findings);
+    const highest = packetHighestSeverity(packet);
     if (severityRank(highest) < severityRank(when.findingsAtLeast)) return false;
   }
   if (when.status) {
@@ -489,6 +499,7 @@ export function startStage(
     ...(opts?.target ? { target: opts.target } : {}),
     ...(opts?.allowAnywhere ? { allowAnywhere: true } : {}),
     ...(run.gate?.userNotes?.trim() ? { userNotes: run.gate.userNotes.trim() } : {}),
+    generation: run.generation ?? 0,
   };
   delete next.gate;
   delete next.pausedAt;
@@ -584,6 +595,7 @@ export function applyGateAction(
     const next = copyRun(run);
     next.status = "cancelled";
     next.stoppedReason = action.reason || "Cancelled.";
+    next.generation = (run.generation ?? 0) + 1;
     delete next.current;
     delete next.gate;
     return next;
@@ -661,7 +673,9 @@ export function applyGateAction(
   if (action.type === "rerun" || action.type === "restart") {
     const stageId = lastExecuted(run)?.stageId ?? run.current?.stageId;
     if (!stageId) return run;
-    return startStage(run, stageId, now, { target: action.target });
+    const bumped = copyRun(run);
+    bumped.generation = (run.generation ?? 0) + 1;
+    return startStage(bumped, stageId, now, { target: action.target });
   }
   if (action.type === "anotherRound") {
     // C-11: one more round is a granted visit, recorded on the run — not a
@@ -1172,6 +1186,7 @@ export function toWorkflowView(opts: {
         ...(lastPacket?.verify ? { verify: lastPacket.verify } : {}),
         ...(lastPacket?.verdict ? { verdict: lastPacket.verdict } : {}),
         ...(lastPacket?.findings?.length ? { findings: lastPacket.findings } : {}),
+        ...(lastPacket?.findingsAccount?.omitted ? { findingsOmitted: lastPacket.findingsAccount.omitted } : {}),
         ...(lastPacket?.openQuestions?.length ? { openQuestions: lastPacket.openQuestions } : {}),
         proposedNext: run.gate.proposedNext.map((id) => ({
           id,

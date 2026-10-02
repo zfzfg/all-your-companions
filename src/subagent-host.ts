@@ -61,16 +61,23 @@ import {
   COMPANIONS_LIST_TOOL,
   COMPANIONS_SPAWN_TOOL,
   COMPANIONS_AWAIT_TOOL,
+  COMPANIONS_SEND_TOOL,
+  COMPANIONS_READ_TOOL,
   COMPANIONS_REVIEW_HINT,
   capInlineText,
   normalizeListArguments,
   normalizeSpawnArguments,
   normalizeAwaitArguments,
+  normalizeSendArguments,
+  normalizeReadArguments,
   refusalPayload,
   type ListArguments,
   type SpawnArguments,
   type AwaitArguments,
+  type SendArguments,
 } from "./companions-protocol";
+import { RootRunBudget } from "./crew-budget";
+import { CrewMailbox } from "./crew-mailbox";
 import { CompanionsHostServer, type CompanionsCall } from "./companions-server";
 import { FileClaimStore } from "./file-claims";
 import { type Host, type HostContext } from "./host";
@@ -188,6 +195,8 @@ export class SubagentHost {
   private pendingSubagentApprovals?: Map<string, (answer: { approved: boolean; adjusted?: Record<string, unknown> }) => void>;
   public subagentDeadlines?: Map<string, PausableDeadline>;
   private subagentTimers?: Map<string, ReturnType<typeof setTimeout>>;
+  private rootBudgets?: Map<string, RootRunBudget>;
+  private crewMailbox?: CrewMailbox;
 
   public state?: SubagentState;
 
@@ -1010,6 +1019,72 @@ export class SubagentHost {
     return String(session.userMessageCount);
   }
 
+  private rootBudgetFor(session: Session): RootRunBudget {
+    if (!this.rootBudgets) this.rootBudgets = new Map();
+    const root = this.visibleAncestorOf(session);
+    const key = root.activeSessionId || "root";
+    let budget = this.rootBudgets.get(key);
+    if (!budget) {
+      const maxActive = Math.max(0, Number(this.deps.companionsSetting("subagents.limits.maxConcurrent", 3)) || 0);
+      const maxStarts = Math.max(0, Number(this.deps.companionsSetting("subagents.limits.maxPerSession", 20)) || 0);
+      budget = new RootRunBudget({ maxActive, maxStarts });
+      this.rootBudgets.set(key, budget);
+    }
+    return budget;
+  }
+
+  private mailbox(): CrewMailbox {
+    return this.crewMailbox ?? (this.crewMailbox = new CrewMailbox({ now: () => Date.now() }));
+  }
+
+  /**
+   * The sender is this session, never the tool argument. The target must be a
+   * subagent of the same visible ancestor, still on the attempt the note names.
+   */
+  public companionsSend(session: Session, args: SendArguments): unknown {
+    const target = this.subagents.get(args.to);
+    const root = this.visibleAncestorOf(session);
+    const from = session.pendingHiddenChild?.subagentId
+      ?? this.deps.sessionTypeMetaFor(session)?.subagentId
+      ?? `parent:${root.activeSessionId ?? "root"}`;
+    if (!target) return { ok: false, reason: "unknown subagent" };
+    const targetRoot = target.parentSessionId;
+    const senderRoot = root.activeSessionId ?? "";
+    const sameRun = target.parentSessionId === (session.activeSessionId ?? "")
+      || target.parentSessionId === senderRoot
+      || target.subagentId === from;
+    if (!sameRun && targetRoot !== senderRoot) return { ok: false, reason: "that subagent is not in this run" };
+    if (isTerminalSubagentStatus(target.status)) {
+      return { ok: false, reason: "that subagent has finished; a note does not start another turn" };
+    }
+    const sent = this.mailbox().send({
+      id: args.id || `mail-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+      from,
+      to: target.subagentId,
+      rootRunId: senderRoot || target.parentSessionId,
+      attemptId: target.attemptId || "1",
+      type: args.type || "note",
+      body: args.body,
+    });
+    if (!sent.ok) return sent;
+    return { ok: true, id: sent.mail.id, state: sent.mail.state };
+  }
+
+  public companionsRead(session: Session, args: { after?: number; limit?: number }): unknown {
+    const selfId = session.pendingHiddenChild?.subagentId
+      ?? this.deps.sessionTypeMetaFor(session)?.subagentId;
+    if (!selfId) return { messages: [], reason: "only a subagent reads its mailbox" };
+    const record = this.subagents.get(selfId);
+    if (!record) return { messages: [], reason: "unknown subagent" };
+    const messages = this.mailbox().read(selfId, {
+      rootRunId: record.parentSessionId,
+      attemptId: record.attemptId || "1",
+      ...(args.after !== undefined ? { after: args.after } : {}),
+      ...(args.limit !== undefined ? { limit: args.limit } : {}),
+    });
+    return { messages };
+  }
+
   public async handleCompanionsCall(session: Session, call: CompanionsCall): Promise<void> {
     try {
       const hidden = session.pendingHiddenChild?.hiddenReason
@@ -1038,6 +1113,15 @@ export class SubagentHost {
           await this.companionsAwait(session, parsed.value, call);
           return;
         }
+        case COMPANIONS_SEND_TOOL: {
+          const parsed = normalizeSendArguments(call.args);
+          if (!parsed.ok) { call.fail(parsed.error); return; }
+          call.resolve(this.companionsSend(session, parsed.value));
+          return;
+        }
+        case COMPANIONS_READ_TOOL:
+          call.resolve(this.companionsRead(session, normalizeReadArguments(call.args)));
+          return;
         default:
           call.fail(`Unknown tool: ${call.tool}`);
       }
@@ -1206,10 +1290,22 @@ export class SubagentHost {
       ...(verdict.effortClamped ? { effortClamped: verdict.effortClamped } : {}),
       ...(verdict.profileDowngraded ? { profileDowngraded: verdict.profileDowngraded } : {}),
       ...(adjustedByUser ? { adjustedByUser } : {}),
+      attemptId: "1",
     });
     this.rememberSubagentRun(session, runId);
     this.postSubagentCard(session, subagentId);
 
+    const budget = this.rootBudgetFor(session);
+    const reserved = budget.tryStart();
+    if (!reserved.ok) {
+      this.subagents.update(subagentId, { status: "refused", errorCode: "limit-reached", refusalMessage: `Root run budget: ${reserved.reason}.` }, Date.now());
+      this.postSubagentCard(session, subagentId);
+      call.resolve({
+        subagentId,
+        ...refusalPayload("limit-reached", `The shared run budget has no ${reserved.reason} left.`, []),
+      });
+      return;
+    }
     const running = this.runCompanionSubagent(session, subagentId, args, verdict, roleTemplate);
 
     if (args.wait === "none") {
@@ -1352,16 +1448,27 @@ export class SubagentHost {
     const timer = { clear: () => this.clearSubagentDeadline(subagentId) };
 
     let childCwd: string | undefined;
+    let isolationBlocked = false;
+    try {
     if (verdict.profile !== "read-only" && this.deps.companionsSetting<string>("subagents.writeIsolation", "shared") === "worktree") {
       const wt = await this.deps.worktreeOps.createCrewWorktree(this.deps.sessionCwd(session), `sa-${record.runId.slice(-12)}`);
       if ("error" in wt) {
-        this.deps.host.appendLine(`[companions] ${subagentId}: no worktree (${wt.error}); running in the shared tree`);
+        const fallback = this.deps.companionsSetting<string>("subagents.isolationFallback", "fail");
+        if (fallback === "shared") {
+          this.deps.host.appendLine(`[companions] ${subagentId}: worktree failed (${wt.error}); isolation fallback is shared, so this writer runs in the shared checkout`);
+          this.deps.agentNotice(session, "warning", `Worktree failed (${wt.error}). This subagent is writing in the shared checkout because isolation fallback is shared.`);
+        } else {
+          isolationBlocked = true;
+          this.deps.host.appendLine(`[companions] ${subagentId}: worktree failed (${wt.error}); the writer was not started`);
+          timer.clear();
+          this.subagents.update(subagentId, { status: "failed", errorCode: "isolation-failed", refusalMessage: wt.error }, Date.now());
+        }
       } else {
         childCwd = wt.path;
         this.subagents.update(subagentId, { worktree: { ...wt, state: "pending" } }, Date.now());
       }
     }
-    try {
+      if (isolationBlocked) return;
       const outcome = await this.deps.runAgentRole(
         role,
         {
@@ -1413,6 +1520,7 @@ export class SubagentHost {
       this.deps.host.appendLine(`[companions] ${subagentId} crashed: ${(error as Error).message}`);
       this.subagents.update(subagentId, { status: "failed", errorCode: "child-crashed" }, Date.now());
     } finally {
+      try { this.rootBudgetFor(session).finish(this.outcomes.get(subagentId)?.totalTokens); } catch { /* the reservation still has to drop */ }
       try { this.deps.crewFileClaims().releaseRun(record.runId); } catch { /* claims are a lock, not the run */ }
       this.persistSubagentRecord(subagentId);
       this.postSubagentCard(session, subagentId);
@@ -1429,10 +1537,14 @@ export class SubagentHost {
         claim = this.deps.crewFileClaims().tryClaim({ path: file, runId, step: 1, role: label, at: Date.now() });
       } catch (error) {
         this.deps.host.appendLine(`[companions] could not claim ${file}: ${(error as Error).message}`);
-        continue;
+        try { this.deps.crewFileClaims().releaseRun(runId); } catch { /* */ }
+        return `Could not claim ${file} (${(error as Error).message}). This subagent will not start, so a claim-store failure does not become a shared write.`;
       }
       if (!claim.ok) {
         try { this.deps.crewFileClaims().releaseRun(runId); } catch { /* */ }
+        if (claim.reason !== "held") {
+          return `Could not claim ${file} (${claim.message}). This subagent will not start, so a claim-store failure does not become a shared write.`;
+        }
         return `${file} is being edited by ${claim.heldBy.role} (run ${claim.heldBy.runId}). Wait for it to finish, or give this subagent other files.`;
       }
     }
@@ -1456,8 +1568,11 @@ export class SubagentHost {
       let claim;
       try {
         claim = this.deps.crewFileClaims().tryClaim({ path: rel, runId: record.runId, step: record.step, role: record.label, at: Date.now() });
-      } catch {
-        continue;
+      } catch (error) {
+        return `Claims are unavailable for ${rel} (${(error as Error).message}). The edit is not auto-approved.`;
+      }
+      if (!claim.ok && claim.reason !== "held") {
+        return `Claims are unavailable for ${rel} (${claim.message}). The edit is not auto-approved.`;
       }
       if (!claim.ok && claim.heldBy.runId !== record.runId) {
         return `${rel} is being edited by ${claim.heldBy.role}.`;
@@ -1764,10 +1879,13 @@ export class SubagentHost {
         continue;
       }
       if (claim.ok) continue;
+      const detail = claim.reason === "held"
+        ? `${file} is held by ${claim.heldBy.role} (step ${claim.heldBy.step}). `
+          + `The subagent has already changed it — review the diff before keeping it.`
+        : `The claim for ${file} could not be recorded (${claim.message}). Review the diff before keeping it.`;
       await this.deps.confirmInChat(session, {
         title: "File already claimed",
-        body: `${file} is held by ${claim.heldBy.role} (step ${claim.heldBy.step}). `
-          + `The subagent has already changed it — review the diff before keeping it.`,
+        body: detail,
         confirmLabel: "Understood",
       });
     }

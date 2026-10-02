@@ -764,6 +764,19 @@
           "default": true,
           "description": "Show a VS Code notification when a crew stage or subagent waits for your approval or answer while the window is not focused."
         },
+        "companions.subagents.isolationFallback": {
+          "type": "string",
+          "enum": [
+            "fail",
+            "shared"
+          ],
+          "enumDescriptions": [
+            "If a requested worktree cannot be created, the writer does not start.",
+            "If a requested worktree cannot be created, say so and run that writer in the shared checkout."
+          ],
+          "default": "fail",
+          "description": "What to do when worktree isolation was requested and the worktree cannot be created. The shared fallback is visible. A parallel wave never falls back silently."
+        },
         "companions.subagents.writeIsolation": {
           "type": "string",
           "enum": [

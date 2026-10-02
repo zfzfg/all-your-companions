@@ -2445,7 +2445,7 @@ get host() { return self.host; },
     session: Session,
     wt: { path: string; label: string; sourceGitRoot: string },
   ): Promise<void> {
-    return this.delegateSidebarMethod("applyCrewWorktree", () => this.workflowStageRunner.applyCrewWorktree(session, wt));
+    await this.delegateSidebarMethod("applyCrewWorktree", () => this.workflowStageRunner.applyCrewWorktree(session, wt));
   }
 
   private finishWorkflowRun(session: Session, def: WorkflowDefinition): void {
@@ -2726,6 +2726,7 @@ get host() { return self.host; },
       "crew.onLimit": this.companionsSetting<string>("crew.onLimit", "ask"),
       "crew.defaultAutonomy": this.companionsSetting<string>("crew.defaultAutonomy", "step"),
       "subagents.writeIsolation": this.companionsSetting<string>("subagents.writeIsolation", "shared"),
+      "subagents.isolationFallback": this.companionsSetting<string>("subagents.isolationFallback", "fail"),
       "grok.subagents.enabled": grokSubagents,
       "grok.subagents.maxConcurrent": Number(this.companionsSetting<number>("grok.subagents.maxConcurrent", 0)) || 0,
       bothDelegationsHint: bothDelegationsHint(grokSubagents !== "off", this.subagentsEnabledGlobally()) ?? ""
@@ -2740,6 +2741,7 @@ get host() { return self.host; },
     "crew.onLimit": (v) => v === "ask" || v === "switch",
     "crew.defaultAutonomy": (v) => v === "step" || v === "stop-on-problems" || v === "autopilot",
     "subagents.writeIsolation": (v) => v === "shared" || v === "worktree",
+    "subagents.isolationFallback": (v) => v === "fail" || v === "shared",
     "grok.subagents.enabled": (v) => v === "default" || v === "on" || v === "off",
     "grok.subagents.maxConcurrent": (v) => typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= 16
   };
@@ -3983,7 +3985,7 @@ ${detail}`,
     sourceGitRoot: string,
     label: string,
   ): Promise<void> {
-    return this.delegateSidebarMethod("applyWorktreeViaLocalGit", () => this.worktreeHost.applyWorktreeViaLocalGit(session, worktreePath, sourceGitRoot, label));
+    await this.delegateSidebarMethod("applyWorktreeViaLocalGit", () => this.worktreeHost.applyWorktreeViaLocalGit(session, worktreePath, sourceGitRoot, label));
   }
 
   async removeFocusedWorktree(session: Session = this.focused, skipConfirm = false): Promise<void> {

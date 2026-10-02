@@ -142,14 +142,13 @@ describe("companions MCP server over a real pipe", () => {
     expect(h.calls).toHaveLength(0);
   });
 
-  it("advertises exactly three tools — cancel and read are await actions", async () => {
-    // §2.1 point 2. Six tools was the alternative, and it costs schema budget
-    // in every parent turn for three verbs that are one argument.
+  it("advertises the delegation tools — cancel and read stay await actions", async () => {
+    // Cancel and read are still arguments of await, not their own tools.
     const h = await boot();
     h.send({ jsonrpc: "2.0", id: 1, method: "tools/list" });
     const tools = await h.reply(1);
     const names: string[] = tools.result.tools.map((t: any) => t.name);
-    expect(names).toHaveLength(3);
+    expect(names).toHaveLength(COMPANIONS_TOOL_NAMES.length);
     expect(names).not.toContain("companions_cancel_subagent");
     expect(names).not.toContain("companions_read_subagent_result");
     expect(names).not.toContain("companions_subagent_status");
@@ -262,7 +261,7 @@ describe("companions MCP server over a real pipe", () => {
     expect(h.calls).toHaveLength(0);
     // Still answering, so the CLI never sees a dead MCP server.
     h.send({ jsonrpc: "2.0", id: 2, method: "tools/list" });
-    expect((await h.reply(2)).result.tools).toHaveLength(3);
+    expect((await h.reply(2)).result.tools).toHaveLength(COMPANIONS_TOOL_NAMES.length);
   });
 
   it("keeps serving when no address was configured at all", async () => {

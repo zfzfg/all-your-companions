@@ -32,6 +32,7 @@ import {
   worktreeStatusIsForCreate,
   worktreeStatusVerdict,
 } from "./worktree";
+import type { CrewApplyOutcome } from "./crew-apply";
 import { LocalGitWorktrees, nodeGitRunner, nodeWorktreeFs } from "./worktree-local";
 
 export const SESSION_META_KEY = "grok.sessionMeta";
@@ -781,9 +782,9 @@ export class WorktreeHost {
     worktreePath: string,
     sourceGitRoot: string,
     label: string,
-  ): Promise<void> {
+  ): Promise<CrewApplyOutcome> {
     try {
-      const first = await this.worktreeLocal().apply({ worktreePath, sourceGitRoot });
+      const first = await this.worktreeLocal().apply({ worktreePath, sourceGitRoot, textMerge: true });
       if ("conflicts" in first && first.conflicts.length) {
         const listed = first.conflicts.map((f) => `• ${f}`).join("\n");
         const ok = await this.confirmInChat(session, {
@@ -794,31 +795,40 @@ export class WorktreeHost {
         });
         if (!ok) {
           this.host.appendLine(`[worktree] apply ${worktreePath}: refused ${first.conflicts.length} conflict(s), no write`);
-          return;
+          return { kind: "declined", files: first.conflicts };
         }
         const second = await this.worktreeLocal().apply({ worktreePath, sourceGitRoot, overwrite: true });
-        if ("error" in second && !("conflicts" in second)) {
-          return void this.host.showErrorMessage(`Apply worktree failed: ${second.error}`);
+        if ("conflicts" in second && second.conflicts.length) {
+          return { kind: "conflict", files: second.conflicts };
         }
-        if ("files" in second) {
-          const n = second.files.length;
-          this.host.appendLine(`[worktree] apply ${worktreePath}: ${n} file(s), status=${second.status} (overwrite)`);
-          void this.host.showInformationMessage(
-            n ? `Applied ${n} file${n === 1 ? "" : "s"} from worktree "${label}".` : `Worktree "${label}" applied (no file changes).`,
-          );
+        if ("error" in second) {
+          void this.host.showErrorMessage(`Apply worktree failed: ${second.error}`);
+          const appliedFiles = "appliedFiles" in second && Array.isArray(second.appliedFiles) ? second.appliedFiles : [];
+          return { kind: "failed", message: second.error, appliedFiles };
         }
-        return;
+        const files = second.files.map((file) => file.path);
+        const n = files.length;
+        this.host.appendLine(`[worktree] apply ${worktreePath}: ${n} file(s), status=${second.status} (overwrite)`);
+        void this.host.showInformationMessage(
+          n ? `Applied ${n} file${n === 1 ? "" : "s"} from worktree "${label}".` : `Worktree "${label}" applied (no file changes).`,
+        );
+        return n ? { kind: "applied", files } : { kind: "unchanged", files: [] };
       }
       if ("error" in first) {
-        return void this.host.showErrorMessage(`Apply worktree failed: ${first.error}`);
+        void this.host.showErrorMessage(`Apply worktree failed: ${first.error}`);
+        const appliedFiles = "appliedFiles" in first && Array.isArray(first.appliedFiles) ? first.appliedFiles : [];
+        return { kind: "failed", message: first.error, appliedFiles };
       }
       const n = first.files?.length ?? 0;
       this.host.appendLine(`[worktree] apply ${worktreePath}: ${n} file(s), status=${first.status}`);
       void this.host.showInformationMessage(
         n ? `Applied ${n} file${n === 1 ? "" : "s"} from worktree "${label}".` : `Worktree "${label}" applied (no file changes).`,
       );
+      return n ? { kind: "applied", files: first.files.map((file) => file.path) } : { kind: "unchanged", files: [] };
     } catch (e: any) {
-      void this.host.showErrorMessage(`Apply worktree failed: ${e?.message ?? e}`);
+      const message = e?.message ?? String(e);
+      void this.host.showErrorMessage(`Apply worktree failed: ${message}`);
+      return { kind: "failed", message, appliedFiles: [] };
     }
   }
 

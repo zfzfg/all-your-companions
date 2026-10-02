@@ -14,7 +14,14 @@
  * Pure: no vscode, no fs, no clock.
  */
 
-import type { FindingSeverity, HandoffFinding, HandoffPacket, HandoffStatus } from "./workflow-handoff";
+import {
+  packetHighestSeverity,
+  type FindingSeverity,
+  type FindingsAccount,
+  type HandoffFinding,
+  type HandoffPacket,
+  type HandoffStatus,
+} from "./workflow-handoff";
 
 const VERDICT_RANK: Record<string, number> = { pass: 1, changes_requested: 2, blocked: 3 };
 const SEVERITY_RANK: Record<FindingSeverity, number> = { nit: 1, minor: 2, major: 3, blocker: 4 };
@@ -76,7 +83,12 @@ export function mergeReviewPackets(
     }
   });
   merged.sort((a, b) => SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity] || (b.reporters?.length ?? 0) - (a.reporters?.length ?? 0));
-  merged.forEach((f, i) => { f.id = `F${i + 1}`; });
+  merged.forEach((finding, index) => {
+    const origin = finding.id.includes("::") ? finding.id : `F${index + 1}`;
+    const reporters = (finding.reporters ?? []).join("+");
+    finding.id = reporters && !origin.includes("@") ? `${origin}::${reporters}` : origin;
+  });
+  const account = mergedFindingsAccount(packets, merged.length);
   const verdict = strictestVerdict(packets.map((p) => p.verdict));
   const union = (pick: (p: HandoffPacket) => readonly string[]) => [...new Set(packets.flatMap(pick))];
   const tokens = packets.every((p) => typeof p.tokens === "number")
@@ -88,6 +100,7 @@ export function mergeReviewPackets(
     summary: packets.map((p, i) => `${reviewers[i] ?? `Reviewer ${i + 1}`}: ${p.summary || "(no summary)"}`).join("\n"),
     ...(verdict ? { verdict } : { verdict: undefined }),
     findings: merged,
+    findingsAccount: account,
     openQuestions: union((p) => p.openQuestions ?? []),
     filesReported: union((p) => p.filesReported),
     filesObserved: union((p) => p.filesObserved),
@@ -99,8 +112,31 @@ export function mergeReviewPackets(
       reviewer: reviewers[i] ?? `reviewer ${i + 1}`,
       target: p.target,
       ...(p.verdict ? { verdict: p.verdict } : {}),
-      findings: p.findings?.length ?? 0,
+      findings: p.findingsAccount?.total ?? p.findings?.length ?? 0,
     })),
+  };
+}
+
+function mergedFindingsAccount(packets: readonly HandoffPacket[], shown: number): FindingsAccount {
+  let total = 0;
+  let complete = true;
+  let highest = packetHighestSeverity(packets[0] ?? { findings: [] });
+  for (const packet of packets) {
+    if (packet.findingsAccount) {
+      total += packet.findingsAccount.total;
+      if (!packet.findingsAccount.complete) complete = false;
+    } else {
+      total += packet.findings?.length ?? 0;
+    }
+    const next = packetHighestSeverity(packet);
+    if (next && (!highest || SEVERITY_RANK[next] > SEVERITY_RANK[highest])) highest = next;
+  }
+  if (!total) total = shown;
+  return {
+    total,
+    omitted: Math.max(0, total - shown),
+    ...(highest ? { highest } : {}),
+    complete,
   };
 }
 

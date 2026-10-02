@@ -22,6 +22,8 @@ export type CrewStepStatus = "pending" | "assigned" | "running" | "done" | "fail
 export interface CrewStep {
   /** 1-based, and the `step-NN` on disk. */
   index: number;
+  /** Stable id for `dependsOn`. The index stays the on-disk key. */
+  id?: string;
   /** From PlanEntry.content. */
   title: string;
   /** AP-02 id — a hint to re-recognise, NEVER the key. */
@@ -32,6 +34,16 @@ export interface CrewStep {
   sessionId?: string;
   filesReported: string[];
   filesObserved: string[];
+  /** Known reads. Empty plus `readOnly` is still read-only. */
+  reads?: string[];
+  /** Known writes. `planSteps.files` is a hint, not this set. */
+  writes?: string[];
+  /** Another step id, plan hint, or index that must finish first. */
+  dependsOn?: string[];
+  /** The effective permission profile allows no writes. */
+  readOnly?: boolean;
+  /** The host does not know what this step will touch. */
+  accessUnknown?: boolean;
   costUsdTicks?: number;
   durationMs?: number;
   detail?: string;
@@ -149,6 +161,9 @@ function copyRun(run: CrewRun): CrewRun {
       ...s,
       filesReported: [...s.filesReported],
       filesObserved: [...s.filesObserved],
+      ...(s.reads ? { reads: [...s.reads] } : {}),
+      ...(s.writes ? { writes: [...s.writes] } : {}),
+      ...(s.dependsOn ? { dependsOn: [...s.dependsOn] } : {}),
     })),
   };
 }

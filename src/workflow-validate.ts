@@ -68,9 +68,26 @@ export function validateWorkflowDefinition(
   const warn = (pointer: string, message: string) => warnings.push({ pointer, message });
 
   // 1. schemaVersion known
-  if (def.schemaVersion !== 1) {
-    err("/schemaVersion", `Unknown schemaVersion ${String(def.schemaVersion)}. Only 1 is supported.`);
+  if (def.schemaVersion !== 1 && def.schemaVersion !== 2) {
+    err("/schemaVersion", `Unknown schemaVersion ${String(def.schemaVersion)}. Only 1 and 2 are supported.`);
   }
+  def.stages.forEach((stage, i) => {
+    if (!stage.fork) return;
+    if (def.schemaVersion !== 2) {
+      err(`/stages/${i}/fork`, "fork requires schemaVersion 2.");
+    }
+    if (stage.fork.join !== "all") err(`/stages/${i}/fork/join`, "Only join \"all\" is supported.");
+    if (stage.fork.branches.length < 2) err(`/stages/${i}/fork/branches`, "A fork needs at least two branches.");
+    const seen = new Set<string>();
+    stage.fork.branches.forEach((branch, j) => {
+      if (seen.has(branch.id)) err(`/stages/${i}/fork/branches/${j}/id`, `Duplicate branch id \`${branch.id}\`.`);
+      seen.add(branch.id);
+      if (!findStage(def, branch.stageId)) {
+        err(`/stages/${i}/fork/branches/${j}/stageId`, `Branch \`${branch.id}\` names unknown stage \`${branch.stageId}\`.`);
+      }
+      if (branch.stageId === stage.id) err(`/stages/${i}/fork/branches/${j}/stageId`, "A branch cannot name its own fork stage.");
+    });
+  });
 
   // 2. name
   if (!workflowNameOk(def.name)) {

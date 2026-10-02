@@ -37,6 +37,57 @@ const STOP = new Set([
   "than", "then", "when", "which", "who", "not", "no", "any", "own", "out",
 ]);
 
+/**
+ * Short tokens that are real role signals. Anything shorter is dropped unless
+ * it is in this set. Broad words such as `code` stay out: they match too much.
+ * Automatic keywords and explicit `AssignmentRule.keywords` both use this set.
+ */
+export const SHORT_ROLE_SIGNALS = [
+  "test", "tests", "spec", "docs", "fix", "bug", "lint", "api", "auth",
+  "db", "sql", "ui", "css", "rust", "java",
+] as const;
+
+const SHORT_SIGNAL = new Set<string>(SHORT_ROLE_SIGNALS);
+
+/**
+ * Singular/plural and a few German terms. The alias is what gets matched,
+ * so `tests` and `testen` both hit a rule that says `test`.
+ */
+const KEYWORD_ALIASES: Record<string, string> = {
+  tests: "test",
+  specs: "spec",
+  bugs: "bug",
+  fixes: "fix",
+  apis: "api",
+  fehler: "bug",
+  testen: "test",
+  dokumentation: "docs",
+  doku: "docs",
+  schnittstelle: "api",
+  authentifizierung: "auth",
+  datenbank: "db",
+};
+
+function normalizeKeyword(word: string): string {
+  const lower = word.toLowerCase();
+  return KEYWORD_ALIASES[lower] ?? lower;
+}
+
+function isSignal(word: string): boolean {
+  return word.length >= 5 || SHORT_SIGNAL.has(word);
+}
+
+/** Tokens of a title, plus their aliases, so matching is by word and not by substring. */
+function titleTokens(title: string): Set<string> {
+  const tokens = new Set<string>();
+  for (const raw of String(title ?? "").toLowerCase().split(/[^a-z0-9äöüß]+/)) {
+    if (!raw) continue;
+    tokens.add(raw);
+    tokens.add(normalizeKeyword(raw));
+  }
+  return tokens;
+}
+
 export function explicitRoleTag(title: string): string | undefined {
   const m = EXPLICIT_RE.exec(title ?? "");
   return m ? m[1].toLowerCase() : undefined;
@@ -47,18 +98,31 @@ export function stripRoleTag(title: string): string {
 }
 
 function keywordsFrom(text: string): string[] {
-  return String(text ?? "")
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter((w) => w.length >= 5 && !STOP.has(w));
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of String(text ?? "").toLowerCase().split(/[^a-z0-9äöüß]+/)) {
+    if (!raw || STOP.has(raw)) continue;
+    const word = normalizeKeyword(raw);
+    if (!isSignal(word) && !isSignal(raw)) continue;
+    if (seen.has(word)) continue;
+    seen.add(word);
+    out.push(word);
+  }
+  return out;
 }
 
+/**
+ * Word match. `api` does not hit `capital`. A keyword shorter than five
+ * characters counts only when it is one of {@link SHORT_ROLE_SIGNALS}
+ * (or an alias of one). Longer keywords match a whole token, not a substring.
+ */
 function titleHits(title: string, keywords: readonly string[]): string[] {
-  const hay = ` ${title.toLowerCase()} `;
+  const tokens = titleTokens(title);
   const hits: string[] = [];
-  for (const k of keywords) {
-    if (k.length < 5) continue;
-    if (hay.includes(k.toLowerCase())) hits.push(k);
+  for (const raw of keywords) {
+    const word = normalizeKeyword(String(raw ?? ""));
+    if (!word || !isSignal(word)) continue;
+    if (tokens.has(word) || tokens.has(String(raw).toLowerCase())) hits.push(String(raw));
   }
   return hits;
 }

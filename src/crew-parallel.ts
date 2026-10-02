@@ -48,21 +48,75 @@ function stepFiles(step: CrewStep): string[] {
 /** True when two steps cannot safely share a worktree wave. */
 export function stepsConflict(a: CrewStep, b: CrewStep): boolean {
   if (a.index === b.index) return true;
-  const fa = stepFiles(a);
-  const fb = stepFiles(b);
-  if (!fa.length || !fb.length) return true;
-  return fa.some((x) => fb.some((y) => pathsOverlap(x, y)));
+  // Serial roles stay serial even when a later check would call them read-only.
+  if (isSerialRole(a.role) || isSerialRole(b.role)) return true;
+  if (stepsDepend(a, b)) return true;
+  if (a.accessUnknown || b.accessUnknown) return true;
+  if (isEffectivelyReadOnly(a) && isEffectivelyReadOnly(b)) return false;
+  const aWrites = accessPaths(a, "writes");
+  const bWrites = accessPaths(b, "writes");
+  const aReads = accessPaths(a, "reads");
+  const bReads = accessPaths(b, "reads");
+  if (!aWrites.length && !aReads.length) return true;
+  if (!bWrites.length && !bReads.length) return true;
+  const overlap = (left: string[], right: string[]) => left.some((x) => right.some((y) => pathsOverlap(x, y)));
+  if (overlap(aWrites, bWrites) || overlap(aWrites, bReads) || overlap(bWrites, aReads)) return true;
+  return false;
+}
+
+/** Pending steps whose `dependsOn` is not satisfied. An unknown id counts as unmet. */
+export function unmetDependencies(run: CrewRun): CrewStep[] {
+  return run.steps.filter((step) =>
+    (step.status === "pending" || step.status === "assigned") && !predecessorsDone(run, step),
+  );
 }
 
 export function isSerialRole(role: string | undefined): boolean {
   return !!role && SERIAL_ROLES.has(role);
 }
 
+function named(step: CrewStep): string[] {
+  return [step.id, step.planEntryHint, String(step.index)].filter((value): value is string => !!value);
+}
+
+function stepsDepend(a: CrewStep, b: CrewStep): boolean {
+  const aNames = new Set(named(a));
+  const bNames = new Set(named(b));
+  return (a.dependsOn ?? []).some((id) => bNames.has(id)) || (b.dependsOn ?? []).some((id) => aNames.has(id));
+}
+
+function predecessorsDone(run: CrewRun, step: CrewStep): boolean {
+  for (const id of step.dependsOn ?? []) {
+    const pred = run.steps.find((other) => other.index !== step.index && named(other).includes(id));
+    if (!pred || (pred.status !== "done" && pred.status !== "skipped")) return false;
+  }
+  return true;
+}
+
+/**
+ * Effective read-only: the step's permission profile says so, and it does not
+ * name writes or an unknown access set. Plan mode and a role name are not a
+ * profile. A serial role is never treated as free to overlap.
+ */
+export function isEffectivelyReadOnly(step: CrewStep): boolean {
+  if (isSerialRole(step.role)) return false;
+  if (step.readOnly !== true || step.accessUnknown === true) return false;
+  return !(step.writes && step.writes.length);
+}
+
+function accessPaths(step: CrewStep, kind: "reads" | "writes"): string[] {
+  const named = kind === "reads" ? step.reads : step.writes;
+  if (named && named.length) return named;
+  if (kind === "writes" && step.readOnly === true) return [];
+  return stepFiles(step);
+}
+
 export function nextIndependentSteps(
   run: CrewRun,
   opts: { parallel?: boolean; cap: number },
 ): CrewStep[] {
-  const cap = Number.isFinite(opts.cap) ? Math.max(1, Math.floor(opts.cap)) : 1;
+  const cap = Number.isFinite(opts.cap) ? Math.max(0, Math.floor(opts.cap)) : 0;
+  if (cap <= 0) return [];
   if (!opts.parallel) {
     const one = nextRunnableStep(run);
     return one ? [one] : [];
@@ -83,6 +137,7 @@ export function nextIndependentSteps(
   for (const step of run.steps) {
     if (picked.length >= cap) break;
     if (step.status !== "pending" && step.status !== "assigned") continue;
+    if (!predecessorsDone(run, step)) continue;
     if (isSerialRole(step.role)) {
       const blocked = run.steps.some(
         (s) => s.index < step.index && s.status !== "done" && s.status !== "skipped",

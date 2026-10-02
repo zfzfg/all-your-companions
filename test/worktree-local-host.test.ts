@@ -165,6 +165,7 @@ describe("LocalGitWorktrees.apply", () => {
     { match: (a) => a[0] === "rev-parse" && a[1] === "HEAD", result: { code: 0, stdout: "wt-head\n", stderr: "" } },
     { match: (a) => a[0] === "merge-base", result: { code: 0, stdout: "base-sha\n", stderr: "" } },
     { match: (a) => a[0] === "diff" && a.includes("--name-status"), result: { code: 0, stdout: "M\tsrc/a.ts\n", stderr: "" } },
+    { match: (a) => a[0] === "ls-files", result: { code: 0, stdout: "", stderr: "" } },
     { match: (a) => a[0] === "show" && a[1] === "base-sha:src/a.ts", result: { code: 0, stdout: "old\n", stderr: "", bytes: enc("old\n") } },
   ];
 
@@ -208,6 +209,30 @@ describe("LocalGitWorktrees.apply", () => {
     const r = await ops.apply({ worktreePath: "/wt/feat", sourceGitRoot: "/repos/app", overwrite: true });
     expect(r).toMatchObject({ status: "success" });
     expect(dec(fs.files.get("/repos/app/src/a.ts")!)).toBe("new\n");
+  });
+
+  it("applies an uncommitted edit and an untracked file when HEAD did not move", async () => {
+    const git = fakeGit([
+      ...inspectOk,
+      { match: (a) => a[0] === "rev-parse" && a[1] === "HEAD", result: { code: 0, stdout: "same\n", stderr: "" } },
+      { match: (a) => a[0] === "merge-base", result: { code: 0, stdout: "same\n", stderr: "" } },
+      { match: (a) => a[0] === "diff" && a.includes("same") && a.includes("HEAD") && !a.includes("--cached") && a.filter((part) => part === "HEAD" || part === "same").length === 2, result: { code: 0, stdout: "", stderr: "" } },
+      { match: (a) => a[0] === "diff" && a.includes("--cached"), result: { code: 0, stdout: "", stderr: "" } },
+      { match: (a) => a[0] === "diff" && a.includes("--name-status") && a.includes("HEAD") && !a.includes("--cached"), result: { code: 0, stdout: "M\tsrc/a.ts\n", stderr: "" } },
+      { match: (a) => a[0] === "ls-files", result: { code: 0, stdout: "src/new.ts\0", stderr: "" } },
+      { match: (a) => a[0] === "show" && String(a[1] ?? "").includes("src/new.ts"), result: { code: 128, stdout: "", stderr: "missing" } },
+      { match: (a) => a[0] === "show", result: { code: 0, stdout: "old\n", stderr: "", bytes: enc("old\n") } },
+    ]);
+    const fs = memFs({
+      "/wt/feat/src/a.ts": "edited\n",
+      "/wt/feat/src/new.ts": "fresh\n",
+      "/repos/app/src/a.ts": "old\n",
+    });
+    const ops = new LocalGitWorktrees({ git, fs, join: posixJoin });
+    const r = await ops.apply({ worktreePath: "/wt/feat", sourceGitRoot: "/repos/app" });
+    expect(r).toMatchObject({ status: "success" });
+    expect(dec(fs.files.get("/repos/app/src/a.ts")!)).toBe("edited\n");
+    expect(dec(fs.files.get("/repos/app/src/new.ts")!)).toBe("fresh\n");
   });
 
   it("surfaces a non-zero git diff as an error and writes nothing", async () => {

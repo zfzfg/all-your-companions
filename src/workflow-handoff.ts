@@ -4,8 +4,9 @@
  * A packet is what the next stage's briefing is built from, and what the gate
  * displays. Building it is pure. Caps exist so stage N does not spend the
  * briefing's savings on instruction tax: summary 2 000 characters, findings
- * 40, verify tail 2 000; path lists uncapped. The previous `result.md` body
- * never travels — only `resultPath`.
+ * 40 shown, verify tail 2 000. The cap is presentation only. Severity, totals
+ * and the verify ending are decided on the full text first. The previous
+ * `result.md` body never travels — only `resultPath`.
  *
  * Recipe R7: no vscode, no fs, no clock. The caller stamps `durationMs`.
  */
@@ -47,12 +48,35 @@ export interface HandoffPlanStep {
   title: string;
   acceptance?: string;
   files?: string[];
+  dependsOn?: string[];
+  reads?: string[];
+  writes?: string[];
 }
 
 export interface HandoffVerify {
   command: string;
   exitCode: number;
+  /** End of the verify log, never the head. The ellipsis counts toward the cap. */
   outputTail: string;
+  /** Characters dropped from the front when `outputTail` was clipped. */
+  omittedChars?: number;
+  truncated?: boolean;
+  /** Host path of the full verify log, when the caller stored one. */
+  logRef?: string;
+  /** A short extract of error-like lines, in addition to the tail. */
+  errorExcerpt?: string;
+}
+
+/**
+ * Semantic account of every finding, including ones the card does not show.
+ * Gates read `highest` from here so a cap cannot hide a later blocker.
+ */
+export interface FindingsAccount {
+  total: number;
+  omitted: number;
+  highest?: FindingSeverity;
+  /** False when the host cannot prove it saw every finding. */
+  complete: boolean;
 }
 
 export interface HandoffPacket {
@@ -68,6 +92,8 @@ export interface HandoffPacket {
   planSteps?: HandoffPlanStep[];
   verdict?: string;
   findings?: HandoffFinding[];
+  /** Full-list account. Absent on a v1 packet that was stored before it existed. */
+  findingsAccount?: FindingsAccount;
   openQuestions?: string[];
   filesReported: string[];
   filesObserved: string[];
@@ -111,10 +137,82 @@ export function extractCompanionsResult(markdown: string): CompanionsResultBlock
   return extractCompanionsResultJson(markdown) as CompanionsResultBlock | undefined;
 }
 
+const SEVERITY_RANK: Record<FindingSeverity, number> = { blocker: 4, major: 3, minor: 2, nit: 1 };
+
 function clip(text: string, cap: number): string {
-  const value = String(text ?? "");
-  if (value.length <= cap) return value;
-  return `${value.slice(0, Math.max(0, cap - 1)).trimEnd()}…`;
+  const chars = Array.from(String(text ?? ""));
+  if (chars.length <= cap) return chars.join("");
+  return `${chars.slice(0, Math.max(0, cap - 1)).join("").trimEnd()}…`;
+}
+
+/**
+ * Keep the end of `text`. Code points, not UTF-16 units, so a clip never
+ * splits a surrogate pair. Clipping a result that is already within `cap`
+ * returns it unchanged, so a second cap is idempotent.
+ */
+export function clipTail(text: string, cap: number): { text: string; omittedChars: number; truncated: boolean } {
+  const chars = Array.from(String(text ?? ""));
+  if (cap <= 0) return { text: "", omittedChars: chars.length, truncated: chars.length > 0 };
+  if (chars.length <= cap) return { text: chars.join(""), omittedChars: 0, truncated: false };
+  const keep = Math.max(0, cap - 1);
+  return {
+    text: `…${chars.slice(chars.length - keep).join("")}`,
+    omittedChars: chars.length - keep,
+    truncated: true,
+  };
+}
+
+export function qualifyFindingId(
+  id: string,
+  origin: { stageId: string; visit: number; reporter?: string },
+): string {
+  const raw = String(id ?? "").trim() || "F";
+  if (raw.includes("::")) return raw;
+  const stage = String(origin.stageId ?? "").trim() || "stage";
+  const visit = Number.isFinite(origin.visit) ? Math.max(0, Math.floor(origin.visit)) : 0;
+  const reporter = origin.reporter?.trim() ? `${origin.reporter.trim()}@` : "";
+  return `${stage}#v${visit}::${reporter}${raw}`;
+}
+
+/** Highest severity first, original order inside one severity. */
+export function prioritizeFindings(findings: readonly HandoffFinding[], cap: number): HandoffFinding[] {
+  const limit = Number.isFinite(cap) ? Math.max(0, Math.floor(cap)) : 0;
+  const indexed = findings.map((finding, index) => ({ finding, index }));
+  indexed.sort((a, b) => SEVERITY_RANK[b.finding.severity] - SEVERITY_RANK[a.finding.severity] || a.index - b.index);
+  return indexed.slice(0, limit).map((row) => row.finding);
+}
+
+export function findingsAccountOf(
+  findings: readonly HandoffFinding[],
+  shown: number,
+  complete: boolean,
+): FindingsAccount {
+  return {
+    total: findings.length,
+    omitted: Math.max(0, findings.length - shown),
+    ...(highestFindingSeverity(findings) ? { highest: highestFindingSeverity(findings) } : {}),
+    complete,
+  };
+}
+
+function errorExcerpt(output: string): string | undefined {
+  const lines = String(output ?? "").split(/\r?\n/).filter((line) => /error|fail|exception|fatal/i.test(line));
+  if (!lines.length) return undefined;
+  const text = clipTail(lines.slice(-8).join("\n"), 500).text;
+  return text || undefined;
+}
+
+function capVerify(verify: HandoffVerify): HandoffVerify {
+  const clipped = clipTail(verify.outputTail, VERIFY_TAIL_CAP);
+  const excerpt = verify.errorExcerpt ? clipTail(verify.errorExcerpt, 500).text : undefined;
+  return {
+    ...verify,
+    outputTail: clipped.text,
+    ...(clipped.truncated
+      ? { truncated: true, omittedChars: (verify.omittedChars ?? 0) + clipped.omittedChars }
+      : {}),
+    ...(excerpt ? { errorExcerpt: excerpt } : {}),
+  };
 }
 
 function asStringList(value: unknown): string[] {
@@ -185,6 +283,12 @@ export function parsePlanSteps(value: unknown): HandoffPlanStep[] {
     if (typeof obj.acceptance === "string" && obj.acceptance.trim()) step.acceptance = obj.acceptance.trim();
     const files = asStringList(obj.files);
     if (files.length) step.files = files;
+    const dependsOn = asStringList(obj.dependsOn);
+    if (dependsOn.length) step.dependsOn = dependsOn;
+    const reads = asStringList(obj.reads);
+    if (reads.length) step.reads = reads;
+    const writes = asStringList(obj.writes);
+    if (writes.length) step.writes = writes;
     out.push(step);
   }
   return out;
@@ -215,22 +319,40 @@ export function verifyStatus(verify: HandoffVerify | undefined): "passed" | "fai
 
 export function highestFindingSeverity(findings: readonly HandoffFinding[] | undefined): FindingSeverity | undefined {
   if (!findings?.length) return undefined;
-  const rank: Record<FindingSeverity, number> = { blocker: 4, major: 3, minor: 2, nit: 1 };
   let best: FindingSeverity | undefined;
   for (const finding of findings) {
-    if (!best || rank[finding.severity] > rank[best]) best = finding.severity;
+    if (!best || SEVERITY_RANK[finding.severity] > SEVERITY_RANK[best]) best = finding.severity;
   }
   return best;
 }
 
+/**
+ * Severity the gate must use. A stored account wins over the visible slice,
+ * so presentation caps cannot change the decision. An incomplete account
+ * with no highest severity is unknown — the caller stops rather than guessing.
+ */
+export function packetHighestSeverity(packet: Pick<HandoffPacket, "findings" | "findingsAccount">): FindingSeverity | undefined {
+  const account = packet.findingsAccount;
+  if (account) {
+    if (account.complete === false && !account.highest) return undefined;
+    if (account.highest) return account.highest;
+  }
+  return highestFindingSeverity(packet.findings);
+}
+
 export function capHandoffPacket(packet: HandoffPacket): HandoffPacket {
+  const all = packet.findings ?? [];
+  const shown = prioritizeFindings(all, FINDINGS_CAP);
+  const account = packet.findingsAccount ?? (all.length ? findingsAccountOf(all, shown.length, true) : undefined);
+  const keptAccount = account
+    ? { ...account, omitted: Math.max(account.omitted, Math.max(0, account.total - shown.length)) }
+    : undefined;
   return {
     ...packet,
     summary: clip(packet.summary, SUMMARY_CAP),
-    ...(packet.findings ? { findings: packet.findings.slice(0, FINDINGS_CAP) } : {}),
-    ...(packet.verify
-      ? { verify: { ...packet.verify, outputTail: clip(packet.verify.outputTail, VERIFY_TAIL_CAP) } }
-      : {}),
+    ...(all.length ? { findings: shown } : {}),
+    ...(keptAccount ? { findingsAccount: keptAccount } : {}),
+    ...(packet.verify ? { verify: capVerify(packet.verify) } : {}),
   };
 }
 
@@ -246,7 +368,7 @@ export function buildHandoffPacket(input: {
   filesReported?: readonly string[];
   filesObserved?: readonly string[];
   reconciliation?: FileReconciliation;
-  verify?: { command: string; exitCode: number; output: string };
+  verify?: { command: string; exitCode: number; output: string; logRef?: string };
   userNotes?: string;
   tokens?: number;
   durationMs: number;
@@ -295,11 +417,18 @@ export function buildHandoffPacket(input: {
       provenance.push(`${input.role} returned no ${missing.join(", ")} block.`);
     }
   }
+  const qualified = findings.map((finding) => ({
+    ...finding,
+    id: qualifyFindingId(finding.id, { stageId: input.stageId, visit: input.visit, reporter: input.role }),
+  }));
+  const excerpt = input.verify ? errorExcerpt(input.verify.output ?? "") : undefined;
   const verify = input.verify
     ? {
         command: input.verify.command,
         exitCode: input.verify.exitCode,
-        outputTail: clip(input.verify.output ?? "", VERIFY_TAIL_CAP),
+        outputTail: input.verify.output ?? "",
+        ...(input.verify.logRef ? { logRef: input.verify.logRef } : {}),
+        ...(excerpt ? { errorExcerpt: excerpt } : {}),
       }
     : undefined;
   return capHandoffPacket({
@@ -319,9 +448,9 @@ export function buildHandoffPacket(input: {
     summary: clip(summary, SUMMARY_CAP),
     ...(planSteps.length ? { planSteps } : {}),
     ...(verdict ? { verdict } : {}),
-    ...(findings.length ? { findings: findings.slice(0, FINDINGS_CAP) } : {}),
+    ...(qualified.length ? { findings: qualified, findingsAccount: findingsAccountOf(qualified, qualified.length, true) } : {}),
     ...(openQuestions.length ? { openQuestions } : {}),
-    ...(asStringList(block?.questions).length ? { questions: asStringList(block?.questions).slice(0, 5) } : {}),
+    ...(asStringList(block?.questions).length ? { questions: asStringList(block?.questions) } : {}),
     filesReported,
     filesObserved,
     unreported: [...recon.unreported],
@@ -455,11 +584,13 @@ function fieldFromPacket(packet: HandoffPacket, field: string): { text?: string;
   }
   if (field === "findings") {
     if (!packet.findings?.length) return { note: `${packet.role} reported no findings` };
+    const omitted = packet.findingsAccount?.omitted ?? 0;
+    const note = omitted > 0 ? `\n${omitted} more finding(s) are in the stage result and not copied here.` : "";
     return {
       text: packet.findings.slice(0, FINDINGS_CAP).map((finding) => {
         const loc = [finding.file, finding.line != null ? `:${finding.line}` : ""].join("");
         return `- [${finding.severity}] ${finding.id}${loc ? ` ${loc}` : ""} ${finding.text}`;
-      }).join("\n"),
+      }).join("\n") + note,
     };
   }
   if (field === "findings.files") {
@@ -481,9 +612,11 @@ function fieldFromPacket(packet: HandoffPacket, field: string): { text?: string;
   }
   if (field === "verify") {
     if (!packet.verify) return { note: "no verify command ran" };
-    const tail = clip(packet.verify.outputTail, VERIFY_TAIL_CAP);
+    const tail = clipTail(packet.verify.outputTail, VERIFY_TAIL_CAP).text;
+    const cut = packet.verify.truncated ? ` (${packet.verify.omittedChars ?? 0} characters omitted from the start)` : "";
+    const ref = packet.verify.logRef ? `\nFull log: ${packet.verify.logRef}` : "";
     return {
-      text: `\`${packet.verify.command}\` exited ${packet.verify.exitCode}${tail ? `:\n${tail}` : "."}`,
+      text: `\`${packet.verify.command}\` exited ${packet.verify.exitCode}${cut}${tail ? `:\n${tail}` : "."}${ref}`,
     };
   }
   if (field === "openQuestions") {

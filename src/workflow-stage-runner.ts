@@ -35,8 +35,11 @@ import {
 } from "./crew";
 import { assignStep } from "./crew-assign";
 import { briefingForCrewStep, fixerTitle, verifyInsertsFixer } from "./crew-run";
-import { checkBudget, countUnreapable, nextFailoverProvider, parallelSlotCap, repeatedFailingTool } from "./crew-budget";
-import { nextIndependentSteps } from "./crew-parallel";
+import { crewApplyFiles, type CrewApplyOutcome, IntegrationQueue, normalizeCrewApplyOutcome } from "./crew-apply";
+import { checkBudget, countUnreapable, HostSlotLedger, parallelSlotCap, repeatedFailingTool } from "./crew-budget";
+import { diagnosisLine } from "./crew-diagnosis";
+import { decideFailover } from "./crew-failover";
+import { nextIndependentSteps, unmetDependencies } from "./crew-parallel";
 import {
   findCrewPreset,
   presetRoles,
@@ -84,6 +87,7 @@ import {
   type HandoffStatus,
   type StageScope,
 } from "./workflow-handoff";
+import { createForkGroup, joinDecision, markBranch, noteJoined, type ForkGroup } from "./workflow-fork";
 import {
   formatDurationShort,
   formatTokenCount,
@@ -174,6 +178,13 @@ export class WorkflowStageRunner {
 
   private static readonly LINEUP_KEY = "companions.crew.lineups";
   private static readonly MAX_LIVE_SESSIONS = 5;
+  private readonly slotLedger = new HostSlotLedger(() => parallelSlotCap({
+    maxLive: WorkflowStageRunner.MAX_LIVE_SESSIONS,
+    unreapable: this.crewUnreapableCount(),
+  }));
+  private readonly integrationQueue = new IntegrationQueue();
+  private readonly inflightGeneration = new Map<string, number>();
+  private diagnosisSeq = 0;
 
   constructor(private readonly deps: WorkflowStageRunnerDeps) {}
 
@@ -1023,9 +1034,14 @@ export class WorkflowStageRunner {
 
     const current = run.current;
     if (!current) return;
+    this.inflightGeneration.set(run.runId, run.generation ?? 0);
     const stage = findStage(def, current.stageId);
     if (!stage) return;
     const hint = targetHint ?? current.target;
+    if (!opts?.continue && stage.fork) {
+      await this.executeForkStage(session, def, run, stage, hint);
+      return;
+    }
     if (!opts?.continue && stage.fanOut && stage.fanOut.count > 1 && stage.profile === "read-only") {
       await this.executePanelStage(session, def, run, stage, hint);
       return;
@@ -1076,13 +1092,35 @@ export class WorkflowStageRunner {
       const exhaustedRun = markExhausted(session.workflowRun ?? run, role.provider);
       session.workflowRun = { ...exhaustedRun, exhaustedAt: { ...(exhaustedRun.exhaustedAt ?? {}), [role.provider]: Date.now() } };
       const onLimit = this.companionsSetting<string>("crew.onLimit", "ask") === "switch" ? "switch" : "ask";
-      const next = onLimit === "switch" ? nextFailoverProvider(session.workflowRun.exhausted, this.usableProviders()) : undefined;
-      if (next) {
+      const decision = decideFailover({
+        kind: limitKind,
+        policy: onLimit,
+        attempt: 1,
+        maxAttempts: 3,
+        exhausted: session.workflowRun.exhausted,
+        usable: this.usableProviders(),
+      });
+      if (decision.action === "switch") {
+        const next = decision.provider as AcpProvider;
         const text = `${stage.title} ran on ${providerDisplayName(next)} after ${providerDisplayName(role.provider)} hit its usage limit.`;
         this.emit(session, { type: "hostNotice", level: "warning", text });
         switchedFrom = role.provider;
         role = { ...role, provider: next, model: undefined, effort: role.effort };
         outcome = await this.runStageRole(session, run, stage, current, role, prepared, undefined, undefined);
+      } else if (decision.action === "wait") {
+        const sleep = this.deps.getOverride?.<(ms: number) => Promise<void>>("crewSlotSleep")
+          ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
+        this.host.appendLine(diagnosisLine({
+          runId: run.runId,
+          seq: ++this.diagnosisSeq,
+          reason: `${decision.reason} (${decision.waitMs}ms)`,
+        }));
+        await sleep(decision.waitMs);
+        outcome = await this.runStageRole(session, run, stage, current, role, prepared, undefined, undefined);
+        if (outcome.outcome === "failed") {
+          await this.stopAtLimitGate(session, def, run, stage, current, role.provider, outcome);
+          return;
+        }
       } else {
         await this.stopAtLimitGate(session, def, run, stage, current, role.provider, outcome);
         return;
@@ -1226,10 +1264,44 @@ export class WorkflowStageRunner {
   async finishWorkflowStage(session: Session, def: WorkflowDefinition, packet: HandoffPacket): Promise<void> {
     const live = session.workflowRun;
     if (!live) return;
+    const startedGeneration = this.inflightGeneration.get(live.runId);
+    if (startedGeneration !== undefined && startedGeneration !== (live.generation ?? 0)) {
+      this.host.appendLine(diagnosisLine({
+        runId: live.runId,
+        seq: ++this.diagnosisSeq,
+        reason: `ignoring stale result for ${packet.stageId}`,
+      }));
+      return;
+    }
+    if (live.status === "cancelled") {
+      this.host.appendLine(diagnosisLine({
+        runId: live.runId,
+        seq: ++this.diagnosisSeq,
+        reason: `ignoring result for ${packet.stageId} after cancel`,
+      }));
+      return;
+    }
     try {
       this.workflowRuns().writeHandoff(live.runId, packet.stageOrdinal, packet);
     } catch (error) {
-      this.host.appendLine(`[workflow] could not write handoff: ${(error as Error).message}`);
+      const message = (error as Error).message;
+      this.host.appendLine(`[workflow] could not write handoff: ${message}`);
+      const stopped: WorkflowRun = {
+        ...live,
+        status: "at-gate",
+        gate: {
+          proposedNext: [packet.stageId, "$pause", "$cancel"],
+          nextStageId: packet.stageId,
+          reason: `The stage result could not be saved (${message}). It is not treated as done.`,
+          kind: "interrupted",
+          forcedManual: ["handoff-unpersisted"],
+        },
+      };
+      delete stopped.current;
+      session.workflowRun = stopped;
+      this.persistWorkflowRun(session);
+      this.emitWorkflowRun(session);
+      return;
     }
     this.workflowStore().packets.set(`${live.runId}:${packet.stageOrdinal}`, packet);
     this.stageStepProgress.delete(live.runId);
@@ -1308,6 +1380,10 @@ export class WorkflowStageRunner {
         status: "pending" as const,
         filesReported: [...(s.files ?? [])],
         filesObserved: [],
+        ...(s.dependsOn?.length ? { dependsOn: [...s.dependsOn] } : {}),
+        ...(s.reads?.length ? { reads: [...s.reads] } : {}),
+        ...(s.writes?.length ? { writes: [...s.writes] } : {}),
+        ...(stage.profile === "read-only" ? { readOnly: true } : {}),
       })),
       parallel: stage.parallel === true,
     });
@@ -1316,72 +1392,161 @@ export class WorkflowStageRunner {
     let failed = false;
     let role: AgentRole | undefined;
     let modelVerified = false;
+    let parallelVerified = false;
     while (walker.status === "running") {
-      const cap = parallelSlotCap({ maxLive: WorkflowStageRunner.MAX_LIVE_SESSIONS, unreapable: this.crewUnreapableCount() });
-      const wave = nextIndependentSteps(walker, { parallel: stage.parallel === true, cap });
-      if (!wave.length) break;
+      const pending = walker.steps.some((s) => s.status === "pending" || s.status === "assigned");
+      const granted = this.slotLedger.tryAcquire(pending ? WorkflowStageRunner.MAX_LIVE_SESSIONS : 0);
+      let wave: CrewStep[] = [];
+      try {
+        wave = nextIndependentSteps(walker, { parallel: stage.parallel === true, cap: granted });
+        if (granted > wave.length) this.slotLedger.release(granted - wave.length);
+        if (!wave.length) {
+          const unmet = unmetDependencies(walker);
+          if (granted <= 0 && pending) {
+            this.stageStepProgress.set(run.runId, "waiting for a free session");
+            this.emitWorkflowRun(session);
+            const waited = await this.waitForCrewSlot(session);
+            if (waited === "stopped") failed = true;
+            if (waited === "stopped") break;
+            continue;
+          }
+          if (unmet.length) {
+            failed = true;
+            this.host.appendLine(diagnosisLine({
+              runId: run.runId,
+              seq: ++this.diagnosisSeq,
+              reason: `steps still waiting: ${unmet.map((step) => step.index).join(", ")}`,
+            }));
+          }
+          break;
+        }
+      } catch (error) {
+        this.slotLedger.release(granted);
+        throw error;
+      }
       const doneCount = walker.steps.filter((s) => s.status === "done").length;
       this.stageStepProgress.set(run.runId, `step ${doneCount + 1}/${steps.length}`);
       this.emitWorkflowRun(session);
-      const runOne = async (crewStep: typeof wave[number]) => {
+      const parallelWave = stage.parallel === true && wave.length > 1;
+      const runOne = async (crewStep: CrewStep) => {
         const planStep = steps[crewStep.index - 1]!;
-        const prepared = this.prepareStageRun(session, def, run, stage, hint, {
-          scopeGlobs: planStep.files ?? [],
-          task: `Do ONLY plan step ${planStep.id}: ${planStep.title}.${planStep.acceptance ? ` Done when: ${planStep.acceptance}.` : ""} `
-            + "The whole plan is below for context; the other steps are someone else's.",
-        });
-        if ("error" in prepared) return { crewStep, planStep, error: prepared.error };
-        role = prepared.role;
-        modelVerified = prepared.modelVerified;
-        let stepCwd = run.worktree ?? run.cwd;
-        let wt: { path: string; label: string; sourceGitRoot: string } | undefined;
-        if (stage.parallel && wave.length > 1) {
-          const made = await this.createCrewWorktree(stepCwd, `crew-${run.runId.slice(-8)}-${current.ordinal}-${crewStep.index}`);
-          if (!("error" in made)) {
+        try {
+          const prepared = this.prepareStageRun(session, def, run, stage, hint, {
+            scopeGlobs: planStep.files ?? [],
+            task: `Do ONLY plan step ${planStep.id}: ${planStep.title}.${planStep.acceptance ? ` Done when: ${planStep.acceptance}.` : ""} `
+              + "The whole plan is below for context; the other steps are someone else's.",
+          });
+          if ("error" in prepared) return { crewStep, planStep, error: prepared.error };
+          role = prepared.role;
+          modelVerified = prepared.modelVerified;
+          let stepCwd = run.worktree ?? run.cwd;
+          let wt: { path: string; label: string; sourceGitRoot: string } | undefined;
+          if (parallelWave) {
+            const made = await this.createCrewWorktree(stepCwd, `crew-${run.runId.slice(-8)}-${current.ordinal}-${crewStep.index}`);
+            if ("error" in made) {
+              this.host.appendLine(diagnosisLine({
+                runId: run.runId,
+                seq: ++this.diagnosisSeq,
+                reason: `worktree for step ${crewStep.index} failed: ${made.error}`,
+              }));
+              return { crewStep, planStep, isolationError: made.error };
+            }
             wt = made;
             stepCwd = made.path;
           }
+          const outcome = await this.runStageRole(session, run, stage, current, prepared.role, prepared, undefined, undefined, {
+            step: current.ordinal * 100 + crewStep.index,
+            cwd: stepCwd,
+          });
+          let verify: { command: string; exitCode: number; output: string } | undefined;
+          if (run.verify && stage.verifyEach && outcome.outcome === "completed") {
+            const where = parallelWave ? stepCwd : (run.worktree ?? run.cwd);
+            const checked = await this.runCrewVerify(run.verify, where);
+            verify = { command: run.verify, exitCode: checked.code, output: checked.output };
+          }
+          return { crewStep, planStep, outcome, verify, wt };
+        } catch (error) {
+          return { crewStep, planStep, thrown: (error as Error).message };
         }
-        const outcome = await this.runStageRole(session, run, stage, current, prepared.role, prepared, undefined, undefined, {
-          step: current.ordinal * 100 + crewStep.index,
-          cwd: stepCwd,
-        });
-        if (wt) await this.applyCrewWorktree(session, wt);
-        let verify: { command: string; exitCode: number; output: string } | undefined;
-        if (run.verify && stage.verifyEach && outcome.outcome === "completed") {
-          const r = await this.runCrewVerify(run.verify, run.worktree ?? run.cwd);
-          verify = { command: run.verify, exitCode: r.code, output: r.output };
-        }
-        return { crewStep, planStep, outcome, verify };
       };
       for (const s of wave) walker = startCrewStep(walker, s.index);
-      const settled = await Promise.all(wave.map(runOne));
-      for (const r of settled) {
-        if ("error" in r && r.error) {
-          walker = applyStepOutcome(walker, r.crewStep.index, { status: "failed", detail: r.error });
+      let settled: Array<Awaited<ReturnType<typeof runOne>>> = [];
+      try {
+        settled = await Promise.all(wave.map(runOne));
+      } finally {
+        this.slotLedger.release(wave.length);
+      }
+      const ready: Array<{ crewStep: CrewStep; planStep: HandoffPlanStep; outcome: Awaited<ReturnType<WorkflowStageRunner["runAgentRole"]>>; verify?: { command: string; exitCode: number; output: string }; wt?: { path: string; label: string; sourceGitRoot: string } }> = [];
+      for (const item of settled) {
+        if ("isolationError" in item && item.isolationError) {
+          walker = applyStepOutcome(walker, item.crewStep.index, { status: "failed", detail: item.isolationError });
           failed = true;
           continue;
         }
-        const outcome = (r as { outcome: Awaited<ReturnType<WorkflowStageRunner["runAgentRole"]>> }).outcome;
-        const verify = (r as { verify?: { command: string; exitCode: number; output: string } }).verify;
-        results.push({ step: r.planStep, outcome, ...(verify ? { verify } : {}) });
+        if ("thrown" in item && item.thrown) {
+          walker = applyStepOutcome(walker, item.crewStep.index, { status: "failed", detail: item.thrown });
+          failed = true;
+          continue;
+        }
+        if ("error" in item && item.error) {
+          walker = applyStepOutcome(walker, item.crewStep.index, { status: "failed", detail: item.error });
+          failed = true;
+          continue;
+        }
+        const outcome = item.outcome;
+        if (!outcome) {
+          walker = applyStepOutcome(walker, item.crewStep.index, { status: "failed", detail: "the step returned no outcome" });
+          failed = true;
+          continue;
+        }
+        const verify = item.verify;
         const ok = outcome.outcome === "completed" && (!verify || verify.exitCode === 0);
-        walker = applyStepOutcome(walker, r.crewStep.index, {
-          status: ok ? "done" : outcome.outcome === "cancelled" ? "cancelled" : "failed",
-          filesReported: outcome.filesReported,
-          filesObserved: outcome.filesObserved,
-          durationMs: outcome.durationMs,
-          ...(outcome.sessionId ? { sessionId: outcome.sessionId } : {}),
-        });
-        if (!ok) failed = true;
+        if (!ok || !item.wt) {
+          results.push({ step: item.planStep, outcome, ...(verify ? { verify } : {}) });
+          walker = applyStepOutcome(walker, item.crewStep.index, {
+            status: ok ? "done" : outcome.outcome === "cancelled" ? "cancelled" : "failed",
+            filesReported: outcome.filesReported,
+            filesObserved: outcome.filesObserved,
+            durationMs: outcome.durationMs,
+            ...(outcome.sessionId ? { sessionId: outcome.sessionId } : {}),
+            ...(!ok && item.wt ? { detail: `worktree kept at ${item.wt.path}` } : {}),
+          });
+          if (!ok) failed = true;
+          continue;
+        }
+        ready.push({ crewStep: item.crewStep, planStep: item.planStep, outcome, ...(verify ? { verify } : {}), wt: item.wt });
       }
+      for (const item of ready) {
+        const applied = await this.applyCrewWorktree(session, item.wt!);
+        const integrated = applied.kind === "applied" || applied.kind === "unchanged";
+        results.push({ step: item.planStep, outcome: item.outcome, ...(item.verify ? { verify: item.verify } : {}) });
+        walker = applyStepOutcome(walker, item.crewStep.index, {
+          status: integrated ? "done" : "failed",
+          filesReported: item.outcome.filesReported,
+          filesObserved: integrated ? crewApplyFiles(applied) : item.outcome.filesObserved,
+          durationMs: item.outcome.durationMs,
+          ...(item.outcome.sessionId ? { sessionId: item.outcome.sessionId } : {}),
+          ...(!integrated ? { detail: `integration ${applied.kind}` } : {}),
+        });
+        if (!integrated) {
+          failed = true;
+          this.host.appendLine(diagnosisLine({
+            runId: run.runId,
+            seq: ++this.diagnosisSeq,
+            reason: `integration ${applied.kind} for step ${item.crewStep.index}`,
+          }));
+          break;
+        }
+      }
+      if (parallelWave) parallelVerified = true;
       if (failed) break;
     }
     const lastVerify = [...results].reverse().find((r) => r.verify)?.verify;
-    let finalVerify = lastVerify;
-    if (!failed && run.verify && !stage.verifyEach) {
+    let finalVerify = parallelVerified ? undefined : lastVerify;
+    if (!failed && run.verify && (!stage.verifyEach || parallelVerified)) {
       const r = await this.runCrewVerify(run.verify, run.worktree ?? run.cwd);
       finalVerify = { command: run.verify, exitCode: r.code, output: r.output };
+      if (r.code !== 0) failed = true;
     }
     const cancelled = results.some((r) => r.outcome.outcome === "cancelled");
     const union = (pick: (o: Awaited<ReturnType<WorkflowStageRunner["runAgentRole"]>>) => readonly string[]) =>
@@ -1467,21 +1632,43 @@ export class WorkflowStageRunner {
       return;
     }
     const eligible = listEligibleTargets(this.crewEligibilityInput(session), {}).targets.map((t) => ({ provider: t.provider }));
-    const cap = Math.max(1, parallelSlotCap({ maxLive: WorkflowStageRunner.MAX_LIVE_SESSIONS, unreapable: this.crewUnreapableCount() }));
+    const cap = this.slotLedger.tryAcquire(fan.count);
+    if (cap <= 0) {
+      this.agentNotice(session, "warning", `${stage.title} is waiting for a free session and was not started.`);
+      await this.finishWorkflowStage(session, def, buildHandoffPacket({
+        runId: run.runId,
+        stageId: stage.id,
+        stageOrdinal: current.ordinal,
+        visit: current.visit,
+        role: stage.role,
+        target: { provider: first.role.provider, modelVerified: first.modelVerified },
+        status: "interrupted",
+        rawReply: "No free session slot. The panel did not start.",
+        durationMs: 0,
+        resultPath: this.deps.agentRuns.resultPath(run.runId, current.ordinal, "stage"),
+      }));
+      return;
+    }
     const targets = panelTargets({ provider: first.role.provider }, eligible, Math.min(fan.count, cap), fan.distinctProviders);
+    if (cap > targets.length) this.slotLedger.release(cap - targets.length);
     if (targets.length < fan.count) {
       this.agentNotice(session, "info", `${stage.title}: ${targets.length} of ${fan.count} reviewers can run (companions or free sessions are short).`);
     }
     this.setStatus(session, "working");
     const started = Date.now();
-    const members = await Promise.all(targets.map(async (target, i) => {
-      const prepared = i === 0 ? first : this.prepareStageRun(session, def, run, stage, target);
-      if ("error" in prepared) return undefined;
-      const outcome = await this.runStageRole(session, run, stage, current, prepared.role, prepared, undefined, undefined, {
-        step: current.ordinal * 100 + i + 1,
-      });
-      return { role: prepared.role, outcome, modelVerified: prepared.modelVerified };
-    }));
+    let members: Array<{ role: AgentRole; outcome: Awaited<ReturnType<WorkflowStageRunner["runAgentRole"]>>; modelVerified: boolean } | undefined>;
+    try {
+      members = await Promise.all(targets.map(async (target, i) => {
+        const prepared = i === 0 ? first : this.prepareStageRun(session, def, run, stage, target);
+        if ("error" in prepared) return undefined;
+        const outcome = await this.runStageRole(session, run, stage, current, prepared.role, prepared, undefined, undefined, {
+          step: current.ordinal * 100 + i + 1,
+        });
+        return { role: prepared.role, outcome, modelVerified: prepared.modelVerified };
+      }));
+    } finally {
+      this.slotLedger.release(targets.length);
+    }
     const ran = members.filter((m): m is NonNullable<typeof m> => !!m);
     const packets = ran.map((m, i) => buildHandoffPacket({
       runId: run.runId,
@@ -1923,7 +2110,7 @@ export class WorkflowStageRunner {
     session.crewRun = setCrewStatus(run, "running");
     this.emit(session, { type: "crewRun", run: session.crewRun ?? null });
 
-    const worktrees: Array<{ path: string; label: string; sourceGitRoot: string }> = [];
+    const worktrees: Array<{ path: string; label: string; sourceGitRoot: string; step: number }> = [];
     while (session.crewRun && session.crewRun.status === "running") {
       const currentRun = session.crewRun;
       const nextUnassigned = currentRun.steps.find((s) => s.status === "pending" && !s.role);
@@ -1947,10 +2134,26 @@ export class WorkflowStageRunner {
         continue;
       }
 
-      const cap = parallelSlotCap({ maxLive: WorkflowStageRunner.MAX_LIVE_SESSIONS, unreapable: this.crewUnreapableCount() });
-      const nextSteps = nextIndependentSteps(session.crewRun, { parallel: preset.parallel === true, cap });
+      const pending = session.crewRun.steps.some((step) => step.status === "pending" || step.status === "assigned");
+      const granted = this.slotLedger.tryAcquire(pending ? WorkflowStageRunner.MAX_LIVE_SESSIONS : 0);
+      const nextSteps = nextIndependentSteps(session.crewRun, { parallel: preset.parallel === true, cap: granted });
+      if (granted > nextSteps.length) this.slotLedger.release(granted - nextSteps.length);
       if (!nextSteps.length) {
-        session.crewRun = setCrewStatus(session.crewRun, "review");
+        const unmet = unmetDependencies(session.crewRun);
+        if (granted <= 0 && pending) {
+          const waited = await this.waitForCrewSlot(session);
+          if (waited === "stopped") {
+            session.crewRun = cancelCrewRun(session.crewRun, "Stopped while waiting for a free session.");
+            this.emit(session, { type: "crewRun", run: session.crewRun ?? null });
+          }
+          if (waited === "stopped") break;
+          continue;
+        }
+        if (unmet.length) {
+          session.crewRun = setCrewStatus(session.crewRun, "failed", `Steps still waiting: ${unmet.map((step) => step.index).join(", ")}`);
+        } else {
+          session.crewRun = setCrewStatus(session.crewRun, "review");
+        }
         this.emit(session, { type: "crewRun", run: session.crewRun ?? null });
         break;
       }
@@ -1979,7 +2182,7 @@ export class WorkflowStageRunner {
             this.emit(session, { type: "crewRun", run: session.crewRun ?? null });
             continue;
           }
-          worktrees.push(created);
+          worktrees.push({ ...created, step: step.index });
           stepCwd = created.path;
         }
         const brief = briefingForCrewStep({
@@ -2005,18 +2208,38 @@ export class WorkflowStageRunner {
         });
       };
 
-      if (preset.parallel && prepared.length > 1) {
-        await Promise.all(prepared.map(runOne));
-      } else {
-        for (const p of prepared) {
-          await runOne(p);
-          if (session.crewRun?.status !== "running") break;
+      try {
+        if (preset.parallel && prepared.length > 1) {
+          await Promise.all(prepared.map(runOne));
+        } else {
+          for (const p of prepared) {
+            await runOne(p);
+            if (session.crewRun?.status !== "running") break;
+          }
         }
+      } finally {
+        this.slotLedger.release(nextSteps.length);
       }
     }
 
     for (const wt of worktrees) {
-      await this.applyCrewWorktree(session, wt);
+      const step = session.crewRun?.steps.find((item) => item.index === wt.step);
+      if (step && step.status !== "done") {
+        this.host.appendLine(diagnosisLine({
+          runId,
+          seq: ++this.diagnosisSeq,
+          reason: `keeping worktree for step ${wt.step} at ${wt.path}`,
+        }));
+        continue;
+      }
+      const applied = await this.applyCrewWorktree(session, wt);
+      if (applied.kind === "conflict" || applied.kind === "declined" || applied.kind === "failed") {
+        if (session.crewRun) {
+          session.crewRun = setCrewStatus(session.crewRun, "failed", `integration ${applied.kind}`);
+          this.emit(session, { type: "crewRun", run: session.crewRun ?? null });
+        }
+        break;
+      }
     }
     if (preset.parallel) {
       this.emit(session, { type: "setBusy", value: false });
@@ -2050,16 +2273,30 @@ export class WorkflowStageRunner {
     const exhausted: AcpProvider[] = [];
     let provider: AcpProvider = role.provider;
     let result = await this.runAgentRole({ ...role, provider }, brief, "crew-step", session, coords);
-    while (
-      result.outcome === "failed"
-      && (() => {
-        const kind = classifyLimitError(provider, result.detail || "");
-        return kind === "quota" || kind === "rate";
-      })()
-      && session.crewRun
-    ) {
+    let attempt = 1;
+    while (result.outcome === "failed" && session.crewRun && attempt < 3) {
+      const kind = classifyLimitError(provider, result.detail || "");
+      if (kind !== "quota" && kind !== "rate") break;
+      const decision = decideFailover({
+        kind,
+        policy: this.companionsSetting<string>("crew.onLimit", "ask") === "switch" ? "switch" : "ask",
+        legacyAutoSwitch: true,
+        attempt,
+        maxAttempts: 3,
+        exhausted,
+        usable: this.usableProviders(),
+      });
+      if (decision.action === "stop") break;
+      if (decision.action === "wait") {
+        const sleep = this.deps.getOverride?.<(ms: number) => Promise<void>>("crewSlotSleep")
+          ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
+        await sleep(decision.waitMs);
+        attempt += 1;
+        result = await this.runAgentRole({ ...role, provider }, brief, "crew-step", session, coords);
+        continue;
+      }
       exhausted.push(provider);
-      const next = nextFailoverProvider(exhausted, this.usableProviders());
+      const next = decision.provider as AcpProvider;
       if (!next) break;
       try {
         this.agentRuns.appendLog({
@@ -2088,6 +2325,15 @@ export class WorkflowStageRunner {
       const claim = this.crewFileClaims().tryClaim({
         path: file, runId, step: step.index, role: role.name, at: Date.now(),
       });
+      if (!claim.ok && claim.reason !== "held") {
+        session.crewRun = applyStepOutcome(session.crewRun, step.index, {
+          status: "failed",
+          detail: `claim store failed for ${file}: ${claim.message}`,
+          filesObserved: result.filesObserved,
+        });
+        this.emit(session, { type: "crewRun", run: session.crewRun ?? null });
+        return {};
+      }
       if (!claim.ok) {
         const keep = await this.confirmInChat(session, {
           title: "File already claimed",
@@ -2247,6 +2493,13 @@ export class WorkflowStageRunner {
     const root = path.join(resolveGrokHome(), "worktrees");
     const created = await this.worktreeHost.worktreeLocal().create({ sourcePath, label, root });
     if ("error" in created) return created;
+    const local = this.worktreeHost.worktreeLocal() as { readStartBasis?: (path: string) => Promise<{ commit: string } | { error: string }> };
+    if (local.readStartBasis) {
+      const basis = await local.readStartBasis(created.sourceGitRoot || sourceGitRoot);
+      if (!("error" in basis)) {
+        this.host.appendLine(`[worktree] start basis ${basis.commit}; uncommitted files in the source checkout are not copied into the worktree`);
+      }
+    }
     return {
       path: created.worktreePath,
       label: label || path.basename(created.worktreePath),
@@ -2257,14 +2510,136 @@ export class WorkflowStageRunner {
   async applyCrewWorktree(
     session: Session,
     wt: { path: string; label: string; sourceGitRoot: string },
-  ): Promise<void> {
-    const override = this.deps.getOverride?.<any>("applyCrewWorktree")
-      ?? this.deps.getOverride?.<any>("crewWorktreeApply");
-    if (override) {
-      return override.length > 1 ? override(session, wt) : override(wt);
+  ): Promise<CrewApplyOutcome> {
+    return this.integrationQueue.run(wt.sourceGitRoot || wt.path, async () => {
+      const override = this.deps.getOverride?.<any>("applyCrewWorktree")
+        ?? this.deps.getOverride?.<any>("crewWorktreeApply");
+      if (override) {
+        const result = await (override.length > 1 ? override(session, wt) : override(wt));
+        return normalizeCrewApplyOutcome(result);
+      }
+      if (this.crewWorktreeApply) return normalizeCrewApplyOutcome(await this.crewWorktreeApply(wt));
+      return this.worktreeHost.applyWorktreeViaLocalGit(session, wt.path, wt.sourceGitRoot, wt.label);
+    });
+  }
+
+  /** Poll until a slot frees or the run is cancelled. Does not start a worker. */
+  private async waitForCrewSlot(session: Session): Promise<"ready" | "stopped"> {
+    const sleep = this.deps.getOverride?.<(ms: number) => Promise<void>>("crewSlotSleep")
+      ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
+    for (;;) {
+      const crew = session.crewRun?.status;
+      const workflow = session.workflowRun?.status;
+      if (crew === "cancelled" || crew === "failed" || workflow === "cancelled" || workflow === "failed") return "stopped";
+      if (parallelSlotCap({ maxLive: WorkflowStageRunner.MAX_LIVE_SESSIONS, unreapable: this.crewUnreapableCount() }) > 0) {
+        return "ready";
+      }
+      await sleep(200);
     }
-    if (this.crewWorktreeApply) return this.crewWorktreeApply(wt);
-    await this.worktreeHost.applyWorktreeViaLocalGit(session, wt.path, wt.sourceGitRoot, wt.label);
+  }
+
+  /**
+   * Run a schema-2 fork group. Branches run together when the stage is
+   * parallel, each writer in a worktree. Join `all` runs once. Required
+   * failures stop the stage. Successful worktrees integrate one at a time.
+   */
+  private async executeForkStage(
+    session: Session,
+    def: WorkflowDefinition,
+    run: WorkflowRun,
+    stage: WorkflowStage,
+    hint: { provider: AcpProvider; model?: string; effort?: string } | undefined,
+  ): Promise<void> {
+    const current = run.current!;
+    const fork = stage.fork!;
+    let group: ForkGroup = createForkGroup({
+      runId: run.runId,
+      groupId: fork.id,
+      iteration: current.visit,
+      branches: fork.branches,
+    });
+    const started = Date.now();
+    const branchResults: Array<{ id: string; summary: string; status: HandoffPacket["status"]; files: string[] }> = [];
+    const worktrees: Array<{ id: string; path: string; label: string; sourceGitRoot: string; ok: boolean }> = [];
+    const runBranch = async (branch: ForkGroup["branches"][number]) => {
+      const child = findStage(def, branch.stageId);
+      if (!child) {
+        group = markBranch(group, branch.id, "failed", current.visit);
+        branchResults.push({ id: branch.id, summary: `unknown stage ${branch.stageId}`, status: "failed", files: [] });
+        return;
+      }
+      group = markBranch(group, branch.id, "running", current.visit);
+      const prepared = this.prepareStageRun(session, def, run, child, hint);
+      if ("error" in prepared) {
+        group = markBranch(group, branch.id, "failed", current.visit);
+        branchResults.push({ id: branch.id, summary: prepared.error, status: "failed", files: [] });
+        return;
+      }
+      let cwd = run.worktree ?? run.cwd;
+      let wt: { path: string; label: string; sourceGitRoot: string } | undefined;
+      if (stage.parallel && isWriteProfile(child.profile)) {
+        const made = await this.createCrewWorktree(cwd, `fork-${fork.id}-${branch.id}`);
+        if ("error" in made) {
+          group = markBranch(group, branch.id, "failed", current.visit);
+          branchResults.push({ id: branch.id, summary: made.error, status: "failed", files: [] });
+          return;
+        }
+        wt = made;
+        cwd = made.path;
+      }
+      try {
+        const outcome = await this.runStageRole(session, run, child, current, prepared.role, prepared, undefined, undefined, {
+          step: current.ordinal * 100 + branchResults.length + 1,
+          cwd,
+        });
+        const ok = outcome.outcome === "completed";
+        group = markBranch(group, branch.id, ok ? "succeeded" : outcome.outcome === "cancelled" ? "cancelled" : "failed", current.visit);
+        if (wt) worktrees.push({ id: branch.id, ...wt, ok });
+        branchResults.push({
+          id: branch.id,
+          summary: outcome.summary || outcome.outcome,
+          status: ok ? "done" : "failed",
+          files: [...outcome.filesObserved],
+        });
+      } catch (error) {
+        group = markBranch(group, branch.id, "failed", current.visit);
+        branchResults.push({ id: branch.id, summary: (error as Error).message, status: "failed", files: [] });
+      }
+    };
+    if (stage.parallel) await Promise.all(group.branches.map((branch) => runBranch(branch)));
+    else for (const branch of [...group.branches]) await runBranch(branch);
+    const decision = joinDecision(group);
+    group = noteJoined(group);
+    let failed = !decision.ok;
+    if (decision.ok) {
+      for (const wt of worktrees) {
+        if (!wt.ok) continue;
+        const applied = await this.applyCrewWorktree(session, wt);
+        if (applied.kind !== "applied" && applied.kind !== "unchanged") {
+          failed = true;
+          branchResults.push({ id: wt.id, summary: `integration ${applied.kind}`, status: "failed", files: crewApplyFiles(applied) });
+          break;
+        }
+      }
+    }
+    const summary = [
+      decision.reason,
+      ...branchResults.map((row) => `- ${row.id}: ${row.summary}`),
+    ].join("\n");
+    await this.finishWorkflowStage(session, def, buildHandoffPacket({
+      runId: run.runId,
+      stageId: stage.id,
+      stageOrdinal: current.ordinal,
+      visit: current.visit,
+      role: stage.role,
+      target: { provider: hint?.provider ?? session.provider, modelVerified: false },
+      status: failed ? "failed" : "done",
+      rawReply: ["```companions-result", JSON.stringify({ summary }), "```"].join("\n"),
+      durationMs: Date.now() - started,
+      resultPath: this.deps.agentRuns.resultPath(run.runId, current.ordinal, "stage"),
+      contract: def.contracts[stage.contract],
+    }));
+    void group;
   }
 
   crewUnreapableCount(): number {

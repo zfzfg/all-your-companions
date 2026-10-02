@@ -11,8 +11,11 @@
 
 export type ChildStatus =
   | "queued"
+  | "waiting-for-slot"
   | "running"
   | "needs-you"
+  | "awaiting-integration"
+  | "verifying"
   | "stalled"
   | "completed"
   | "failed"
@@ -20,14 +23,18 @@ export type ChildStatus =
   | "refused";
 
 export const CHILD_STATUSES: readonly ChildStatus[] = [
-  "queued", "running", "needs-you", "stalled", "completed", "failed", "cancelled", "refused",
+  "queued", "waiting-for-slot", "running", "needs-you", "awaiting-integration", "verifying",
+  "stalled", "completed", "failed", "cancelled", "refused",
 ];
 
 /** The words and tone each status is shown with — the single source. */
 export const CHILD_STATUS_VIEW: Record<ChildStatus, { word: string; tone: "muted" | "info" | "warn" | "ok" | "danger" }> = {
   queued: { word: "Queued", tone: "muted" },
+  "waiting-for-slot": { word: "Waiting for a slot", tone: "muted" },
   running: { word: "Running", tone: "info" },
   "needs-you": { word: "Needs you", tone: "warn" },
+  "awaiting-integration": { word: "Awaiting integration", tone: "info" },
+  verifying: { word: "Verifying", tone: "info" },
   stalled: { word: "Stalled", tone: "warn" },
   completed: { word: "Done", tone: "ok" },
   failed: { word: "Failed", tone: "danger" },
@@ -50,6 +57,9 @@ export function subagentChildStatus(status: string, opts: { needsYou?: boolean; 
 export function stageChildStatus(status: string): ChildStatus {
   switch (status) {
     case "running": return "running";
+    case "waiting-for-slot": return "waiting-for-slot";
+    case "awaiting-integration": return "awaiting-integration";
+    case "verifying": return "verifying";
     case "needs-you": return "needs-you";
     case "stalled": return "stalled";
     case "done":

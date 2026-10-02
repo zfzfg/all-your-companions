@@ -411,8 +411,19 @@ export interface CrewStartOptions {
   startNow?: boolean;
 }
 
-/** E-02: queued | running | needs-you | stalled | completed | failed | cancelled | refused. */
-export type ChildStatusView = "queued" | "running" | "needs-you" | "stalled" | "completed" | "failed" | "cancelled" | "refused";
+/** E-02, plus the crew states from the integration queue. */
+export type ChildStatusView =
+  | "queued"
+  | "waiting-for-slot"
+  | "running"
+  | "needs-you"
+  | "awaiting-integration"
+  | "verifying"
+  | "stalled"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "refused";
 
 /** C-04: one stage of a proposed / chosen lineup. */
 export interface WorkflowLineupView {
@@ -501,6 +512,8 @@ export interface WorkflowRunView {
     verify?: { command: string; exitCode: number; outputTail: string };
     verdict?: string;
     findings?: Array<{ id: string; severity: string; file?: string; line?: number; text: string; reporters?: string[]; selected?: boolean }>;
+    /** Findings kept off the card. The gate decision still saw them. */
+    findingsOmitted?: number;
     /** C-13: reviewers in the panel, when the stage fanned out. */
     panelSize?: number;
     /** C-03 */

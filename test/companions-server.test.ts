@@ -21,7 +21,9 @@ import {
   COMPANIONS_MAX_AWAIT_IDS,
   COMPANIONS_MIN_TIMEOUT_SEC,
   COMPANIONS_PRIMER,
+  COMPANIONS_READ_TOOL,
   COMPANIONS_REVIEW_HINT,
+  COMPANIONS_SEND_TOOL,
   COMPANIONS_SERVER_NAME,
   COMPANIONS_SPAWN_TOOL,
   COMPANIONS_TOKEN_ENV,
@@ -40,12 +42,14 @@ import {
 } from "../src/companions-protocol";
 import { ASK_USER_SERVER_NAME } from "../src/ask-user-protocol";
 
-describe("companions protocol — the three tools", () => {
-  it("names exactly the three tools the spec pins", () => {
+describe("companions protocol — delegation tools", () => {
+  it("keeps the three delegation tools and adds the mailbox", () => {
     expect([...COMPANIONS_TOOL_NAMES]).toEqual([
       "companions_list_subagent_targets",
       "companions_spawn_subagent",
       "companions_await_subagents",
+      "companions_send_to_subagent",
+      "companions_read_messages",
     ]);
     expect(COMPANIONS_TOOLS.map((t) => t.name)).toEqual([...COMPANIONS_TOOL_NAMES]);
   });
@@ -277,6 +281,8 @@ describe("the shipped script restates the constants exactly", () => {
       ["COMPANIONS_LIST_TOOL", COMPANIONS_LIST_TOOL],
       ["COMPANIONS_SPAWN_TOOL", COMPANIONS_SPAWN_TOOL],
       ["COMPANIONS_AWAIT_TOOL", COMPANIONS_AWAIT_TOOL],
+      ["COMPANIONS_SEND_TOOL", COMPANIONS_SEND_TOOL],
+      ["COMPANIONS_READ_TOOL", COMPANIONS_READ_TOOL],
       ["COMPANIONS_ADDRESS_ENV", COMPANIONS_ADDRESS_ENV],
       ["COMPANIONS_TOKEN_ENV", COMPANIONS_TOKEN_ENV],
     ];

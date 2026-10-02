@@ -48,8 +48,8 @@ export function checkBudget(
  * How many parallel role sessions a crew may start, given the pool.
  *
  * `working` / `needs-you` are never harvested, so the cap is `maxLive` minus
- * the sessions that cannot be reaped. A crew that would exceed this waits
- * rather than overbooking — and never reaps its own running roles.
+ * the sessions that cannot be reaped. Zero is a real answer: a full pool
+ * starts nothing and the run waits. It does not borrow a slot.
  */
 export function parallelSlotCap(opts: {
   maxLive: number;
@@ -58,7 +58,83 @@ export function parallelSlotCap(opts: {
 }): number {
   const max = Number.isFinite(opts.maxLive) ? Math.max(0, Math.floor(opts.maxLive)) : 0;
   const busy = Number.isFinite(opts.unreapable) ? Math.max(0, Math.floor(opts.unreapable)) : 0;
-  return Math.max(1, max - busy);
+  return Math.max(0, max - busy);
+}
+
+/**
+ * Reservations that are not yet visible as live sessions.
+ *
+ * Two runs can read the same free-slot count before either one starts a
+ * process. The ledger closes that gap inside one host: `tryAcquire` is
+ * synchronous, and every path releases in `finally`. `free` is the count
+ * {@link parallelSlotCap} would return right now, without this ledger.
+ */
+export class HostSlotLedger {
+  private held = 0;
+
+  constructor(private readonly free: () => number) {}
+
+  tryAcquire(want: number): number {
+    const asked = Number.isFinite(want) ? Math.max(0, Math.floor(want)) : 0;
+    const room = Math.max(0, Math.floor(this.free()) - this.held);
+    const take = Math.min(asked, room);
+    this.held += take;
+    return take;
+  }
+
+  release(count: number): void {
+    const n = Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
+    this.held = Math.max(0, this.held - n);
+  }
+
+  get heldCount(): number {
+    return this.held;
+  }
+}
+
+/**
+ * One budget for a root run, shared by its children and grandchildren.
+ *
+ * Each caller reserves with `tryStart` and releases with `finish`. A second
+ * spawn in the same turn sees the first reservation. Carving a child's limits
+ * does not mint a second copy of this budget.
+ */
+export interface RootBudgetLimits {
+  maxActive: number;
+  maxStarts: number;
+  maxTokens?: number;
+}
+
+export class RootRunBudget {
+  private active = 0;
+  private starts = 0;
+  private tokens = 0;
+
+  constructor(private readonly limits: RootBudgetLimits) {}
+
+  tryStart(): { ok: true } | { ok: false; reason: "active-children" | "starts" | "tokens" } {
+    if (this.active >= Math.max(0, this.limits.maxActive)) return { ok: false, reason: "active-children" };
+    if (this.starts >= Math.max(0, this.limits.maxStarts)) return { ok: false, reason: "starts" };
+    if (typeof this.limits.maxTokens === "number" && this.tokens >= this.limits.maxTokens) {
+      return { ok: false, reason: "tokens" };
+    }
+    this.active += 1;
+    this.starts += 1;
+    return { ok: true };
+  }
+
+  finish(tokens?: number): void {
+    this.active = Math.max(0, this.active - 1);
+    if (typeof tokens === "number" && Number.isFinite(tokens) && tokens > 0) this.tokens += tokens;
+  }
+
+  get activeCount(): number {
+    return this.active;
+  }
+
+  get startCount(): number {
+    return this.starts;
+  }
 }
 
 /**

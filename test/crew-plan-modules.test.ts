@@ -149,7 +149,7 @@ describe("review panel (C-13)", () => {
     const merged = mergeReviewPackets([a, b], ["Claude", "Codex"]);
     expect(merged.verdict).toBe("changes_requested");
     expect(merged.findings).toHaveLength(2);
-    expect(merged.findings![0]).toMatchObject({ id: "F1", severity: "major", reporters: ["Claude", "Codex"] });
+    expect(merged.findings![0]).toMatchObject({ id: "F1::Claude+Codex", severity: "major", reporters: ["Claude", "Codex"] });
     expect(consensusLabel(merged.findings![0]!, 2)).toBe("2/2 reviewers");
     expect(merged.panel).toHaveLength(2);
   });

@@ -19,6 +19,8 @@ import { isAcpProvider } from "./acp-backend";
 import { isEffortLevel, isPermissionProfile, type PermissionProfile, type Target } from "./target-eligibility";
 
 export const WORKFLOW_SCHEMA_VERSION = 1 as const;
+/** Fork/join groups. A v1 document that contains them is rejected, not stripped. */
+export const WORKFLOW_FORK_SCHEMA_VERSION = 2 as const;
 
 /** Introduces the machine-readable stage graph inside a crew-preset Markdown file. */
 export const STAGES_MARKER = "<!-- companions:stages v1 -->";
@@ -136,6 +138,25 @@ export interface WorkflowStage {
    * packets (strictest verdict, de-duplicated findings). Opt-in per workflow.
    */
   fanOut?: { count: number; distinctProviders: boolean };
+  /**
+   * Schema 2. A parallel group of branches joined with `all`. A v1 workflow
+   * cannot carry this; the parser rejects the document instead of dropping it.
+   */
+  fork?: WorkflowFork;
+}
+
+export interface WorkflowForkBranch {
+  id: string;
+  /** Stage id this branch runs. */
+  stageId: string;
+  /** Default true. A failed required branch stops the join. */
+  required?: boolean;
+}
+
+export interface WorkflowFork {
+  id: string;
+  join: "all";
+  branches: WorkflowForkBranch[];
 }
 
 export interface WorkflowCompiler {
@@ -146,7 +167,7 @@ export interface WorkflowCompiler {
 }
 
 export interface WorkflowDefinition {
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
   name: string;
   title: string;
   description?: string;
@@ -313,10 +334,19 @@ export function workflowFromStagesJson(
     const parsed = parseContract(value);
     if (parsed) contracts[key] = parsed;
   }
+  const schemaVersion = obj.schemaVersion === 2 ? 2 : 1;
   const stagesRaw = Array.isArray(obj.stages) ? obj.stages : [];
+  if (schemaVersion !== 2) {
+    for (const entry of stagesRaw) {
+      const item = asObject(entry);
+      if (item && (item.fork !== undefined || item.join !== undefined)) {
+        return { ok: false, error: "fork/join requires schemaVersion 2 and is not discarded" };
+      }
+    }
+  }
   const stages: WorkflowStage[] = [];
   for (const entry of stagesRaw) {
-    const parsed = parseStage(entry, contracts);
+    const parsed = parseStage(entry, contracts, schemaVersion);
     if (parsed) stages.push(parsed);
   }
   if (!stages.length) return { ok: false, error: "workflow has no stages" };
@@ -325,7 +355,7 @@ export function workflowFromStagesJson(
   return {
     ok: true,
     workflow: {
-      schemaVersion: 1,
+      schemaVersion,
       name,
       title: clean(obj.title) || name,
       ...(clean(obj.description) ? { description: clean(obj.description) } : {}),
@@ -394,7 +424,28 @@ function parseContract(raw: unknown): PromptContract | undefined {
   };
 }
 
-function parseStage(raw: unknown, contracts: Record<string, PromptContract>): WorkflowStage | undefined {
+function parseFork(raw: unknown): WorkflowFork | undefined {
+  const obj = asObject(raw);
+  if (!obj || obj.join !== "all") return undefined;
+  const id = clean(obj.id);
+  const branchesRaw = Array.isArray(obj.branches) ? obj.branches : [];
+  const branches: WorkflowForkBranch[] = [];
+  for (const entry of branchesRaw) {
+    const item = asObject(entry);
+    const branchId = clean(item?.id);
+    const stageId = clean(item?.stageId);
+    if (!branchId || !stageId) continue;
+    branches.push({
+      id: branchId,
+      stageId,
+      ...(item?.required === false ? { required: false } : {}),
+    });
+  }
+  if (!id || branches.length < 2) return undefined;
+  return { id, join: "all", branches };
+}
+
+function parseStage(raw: unknown, contracts: Record<string, PromptContract>, schemaVersion: 1 | 2 = 1): WorkflowStage | undefined {
   const obj = asObject(raw);
   if (!obj) return undefined;
   const id = clean(obj.id);
@@ -444,6 +495,7 @@ function parseStage(raw: unknown, contracts: Record<string, PromptContract>): Wo
     ...(obj.verifyEach === true ? { verifyEach: true } : {}),
     ...(obj.parallel === true ? { parallel: true } : {}),
     ...(parseFanOut(obj.fanOut) ? { fanOut: parseFanOut(obj.fanOut) } : {}),
+    ...(schemaVersion === 2 && parseFork(obj.fork) ? { fork: parseFork(obj.fork) } : {}),
   };
 }
 

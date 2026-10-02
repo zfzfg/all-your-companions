@@ -8,7 +8,9 @@ import {
   briefingFromContract,
   buildHandoffPacket,
   capHandoffPacket,
+  clipTail,
   extractCompanionsResult,
+  packetHighestSeverity,
   parsePlanStepsFromProse,
   stageReturnFormat,
   verdictUnreadable,
@@ -99,7 +101,10 @@ describe("buildHandoffPacket", () => {
     }));
     expect(packet.summary.length).toBeLessThanOrEqual(SUMMARY_CAP);
     expect(packet.findings).toHaveLength(FINDINGS_CAP);
+    expect(packet.findingsAccount?.total).toBe(50);
+    expect(packet.findingsAccount?.highest).toBe("nit");
     expect(packet.verify?.outputTail.length).toBeLessThanOrEqual(VERIFY_TAIL_CAP);
+    expect(packet.verify?.outputTail.endsWith("E")).toBe(true);
     expect(packet.resultPath).toBe("/runs/run-1/stage-03.result.md");
     expect(JSON.stringify(packet)).not.toContain("## Summary");
   });
@@ -117,6 +122,40 @@ describe("buildHandoffPacket", () => {
     const steps = parsePlanStepsFromProse("1. Add the parser\n2. Wire the host\n- skip tiny");
     expect(steps.map((s) => s.title)).toContain("Add the parser");
     expect(steps.map((s) => s.title)).toContain("Wire the host");
+  });
+});
+
+describe("caps do not decide the gate", () => {
+  it("keeps a blocker that arrives after 40 nits", () => {
+    const findings = [
+      ...Array.from({ length: 40 }, (_, i) => ({ id: `N${i + 1}`, severity: "nit" as const, text: `n${i}` })),
+      { id: "B1", severity: "blocker" as const, text: "data loss" },
+    ];
+    const packet = packetOver({
+      rawReply: [
+        "```companions-result",
+        JSON.stringify({ summary: "Many nits and one blocker.", verdict: "changes_requested", findings }),
+        "```",
+      ].join("\n"),
+    });
+    expect(packet.findings).toHaveLength(FINDINGS_CAP);
+    expect(packet.findings?.some((finding) => finding.text === "data loss")).toBe(true);
+    expect(packetHighestSeverity(packet)).toBe("blocker");
+    expect(packet.findingsAccount).toMatchObject({ total: 41, omitted: 1, highest: "blocker", complete: true });
+  });
+
+  it("keeps the end of a verify log, including a multibyte character", () => {
+    const output = `${"a".repeat(VERIFY_TAIL_CAP)}TAIL-🙂-END`;
+    const clipped = clipTail(output, VERIFY_TAIL_CAP);
+    expect(clipped.text.endsWith("TAIL-🙂-END")).toBe(true);
+    expect(clipped.text.length).toBeLessThanOrEqual(VERIFY_TAIL_CAP + 1);
+    expect(clipTail(clipped.text, VERIFY_TAIL_CAP).text).toBe(clipped.text);
+    const packet = packetOver({
+      verify: { command: "npm test", exitCode: 1, output, logRef: "/tmp/verify.log" },
+    });
+    expect(packet.verify?.outputTail.endsWith("TAIL-🙂-END")).toBe(true);
+    expect(packet.verify?.logRef).toBe("/tmp/verify.log");
+    expect(packet.verify?.truncated).toBe(true);
   });
 });
 

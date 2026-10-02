@@ -64,6 +64,32 @@ describe("nextIndependentSteps", () => {
     expect(nextIndependentSteps(after, { parallel: true, cap: 8 }).map((s) => s.index)).toEqual([2]);
   });
 
+  it("returns nothing when the pool has no free slot", () => {
+    const run = assign(assign(runOf(["Write src/a.ts", "Write src/b.ts"]), 1, "implementer"), 2, "implementer");
+    expect(nextIndependentSteps(run, { parallel: true, cap: 0 })).toEqual([]);
+    expect(nextIndependentSteps(run, { parallel: false, cap: 0 })).toEqual([]);
+  });
+
+  it("runs two read-only steps together and keeps a reviewer serial", () => {
+    const run = assign(assign(runOf(["Read src/a.ts", "Read src/a.ts again"]), 1, "researcher"), 2, "researcher");
+    run.steps[0].readOnly = true;
+    run.steps[1].readOnly = true;
+    run.steps[0].reads = ["src/a.ts"];
+    run.steps[1].reads = ["src/a.ts"];
+    expect(nextIndependentSteps(run, { parallel: true, cap: 4 }).map((step) => step.index)).toEqual([1, 2]);
+    const mixed = runOf(["Write src/a.ts", "Review src/a.ts"]);
+    assign(assign(mixed, 1, "implementer"), 2, "reviewer");
+    mixed.steps[1].readOnly = true;
+    expect(nextIndependentSteps(mixed, { parallel: true, cap: 4 }).map((step) => step.index)).toEqual([1]);
+  });
+
+  it("waits for dependsOn even when the files do not overlap", () => {
+    const run = assign(assign(runOf(["Write src/a.ts", "Write src/b.ts"]), 1, "implementer"), 2, "implementer");
+    run.steps[1].id = "s2";
+    run.steps[1].dependsOn = ["1"];
+    expect(nextIndependentSteps(run, { parallel: true, cap: 4 }).map((step) => step.index)).toEqual([1]);
+  });
+
   it("does not start a ninth role while the cap is 1 — it waits", () => {
     const titles = ["Write src/a.ts", "Write src/b.ts", "Write src/c.ts"];
     let run = runOf(titles);

@@ -76,6 +76,8 @@ export interface SubagentRecord {
   modelVerified?: boolean;
   profileDowngraded?: string;
   sameProviderAsParent?: boolean;
+  /** Attempt of this logical subagent. A restart uses a new id here. */
+  attemptId?: string;
   /** P6 §6.6 point 8 — the user kept this child as a session of its own. The
    *  card stays where it is; the delegation still happened. */
   promoted?: boolean;

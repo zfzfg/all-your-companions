@@ -28,6 +28,7 @@
 import { execFile as nodeExecFile } from "node:child_process";
 import * as nodePath from "node:path";
 import * as nodeFs from "node:fs";
+import { threeWayTextMerge } from "./worktree-merge";
 import {
   parseGitWorktreeList,
   sanitizeWorktreeLabel,
@@ -72,7 +73,24 @@ export interface LocalWorktreeOpsOptions {
 export type LocalApplyConflict = {
   error: string;
   conflicts: string[];
+  appliedFiles?: string[];
 };
+
+export type LocalApplyFailure = {
+  error: string;
+  /** Files already copied when a later write failed. Empty when nothing was written. */
+  appliedFiles?: string[];
+  /** Expected paths that were not in the change manifest. */
+  missing?: string[];
+};
+
+/** Where a manifest row came from. Ignored files are never listed. */
+export type ChangeOrigin = "committed" | "staged" | "unstaged" | "untracked";
+
+export interface ChangeManifestEntry {
+  path: string;
+  origin: ChangeOrigin;
+}
 
 export interface LocalWorktreeOps {
   create(o: { sourcePath: string; label?: string; root: string }): Promise<WorktreeCreateResult | { error: string }>;
@@ -82,7 +100,14 @@ export interface LocalWorktreeOps {
     sourceGitRoot: string;
     /** When true, conflicting files are overwritten. Default is refuse. */
     overwrite?: boolean;
-  }): Promise<WorktreeApplyResult | LocalApplyConflict | { error: string }>;
+    /**
+     * Try a line-level three-way merge for a text conflict. A clean merge is
+     * copied. A conflict, a binary, or a rename/delete is not written.
+     */
+    textMerge?: boolean;
+    /** Paths the caller expected to transfer. Success with none of them is a failure. */
+    expectedFiles?: readonly string[];
+  }): Promise<WorktreeApplyResult | LocalApplyConflict | LocalApplyFailure>;
   remove(o: { worktreePath: string; force: boolean }): Promise<WorktreeRemoveResult | { error: string }>;
 }
 
@@ -94,6 +119,15 @@ const BRANCH_PREFIX = "companions/";
 
 function defaultJoin(...parts: string[]): string {
   return parts.join("/").replace(/\/{2,}/g, "/");
+}
+
+function hasNul(bytes: Uint8Array): boolean {
+  for (let i = 0; i < bytes.length; i += 1) if (bytes[i] === 0) return true;
+  return false;
+}
+
+function decodeBytes(bytes: Uint8Array): string {
+  return new TextDecoder().decode(bytes);
 }
 
 function bytesEqual(a: Uint8Array | null, b: Uint8Array | null): boolean {
@@ -336,7 +370,9 @@ export class LocalGitWorktrees implements LocalWorktreeOps {
     worktreePath: string;
     sourceGitRoot: string;
     overwrite?: boolean;
-  }): Promise<WorktreeApplyResult | LocalApplyConflict | { error: string }> {
+    textMerge?: boolean;
+    expectedFiles?: readonly string[];
+  }): Promise<WorktreeApplyResult | LocalApplyConflict | LocalApplyFailure> {
     const unsupported = await this.inspectUnsupported(o.sourceGitRoot);
     if (unsupported) return { error: unsupported };
 
@@ -352,12 +388,22 @@ export class LocalGitWorktrees implements LocalWorktreeOps {
     if (base.code !== 0) return { error: gitError(base.stderr, base.stdout, "could not find a merge-base") };
     const mergeBase = base.stdout.trim();
 
-    const diff = await this.gitText(["diff", "--name-status", mergeBase, "HEAD"], o.worktreePath);
-    if (diff.code !== 0) return { error: gitError(diff.stderr, diff.stdout, "git diff failed") };
-    const files = planLocalApply(diff.stdout);
+    const manifest = await this.changeManifest(o.worktreePath, mergeBase);
+    if (manifest.error) return { error: manifest.error };
+    const files = manifest.files;
+    const expected = (o.expectedFiles ?? []).map((file) => file.replace(/\\/g, "/")).filter(Boolean);
+    const present = new Set(files.map((file) => file.path.replace(/\\/g, "/")));
+    const missing = expected.filter((file) => !present.has(file));
+    if (missing.length) {
+      return {
+        error: `expected changes were not in the worktree: ${missing.join(", ")}`,
+        missing,
+        appliedFiles: [],
+      };
+    }
 
     const conflicts: string[] = [];
-    const writes: { relPath: string; bytes: Uint8Array }[] = [];
+    const writes: { relPath: string; bytes: Uint8Array; current: Uint8Array | null }[] = [];
     const deletes: string[] = [];
     const applied: WorktreeApplyFile[] = [];
 
@@ -370,6 +416,14 @@ export class LocalGitWorktrees implements LocalWorktreeOps {
       const srcBytes = this.readIfExists(srcAbs);
       const decision = decideLocalApplyFile({ base: baseBytes, worktree: wtBytes, current: srcBytes });
       if (decision === "skip") continue;
+      if (decision === "conflict" && o.textMerge && !o.overwrite) {
+        const merged = this.mergeTextConflict(baseBytes, srcBytes, wtBytes);
+        if (merged) {
+          writes.push({ relPath: rel, bytes: merged, current: srcBytes });
+          applied.push(file);
+          continue;
+        }
+      }
       if (decision === "conflict" && !o.overwrite) {
         conflicts.push(rel);
         continue;
@@ -380,7 +434,7 @@ export class LocalGitWorktrees implements LocalWorktreeOps {
         continue;
       }
       if (wtBytes) {
-        writes.push({ relPath: rel, bytes: wtBytes });
+        writes.push({ relPath: rel, bytes: wtBytes, current: srcBytes });
         applied.push(file);
       }
     }
@@ -393,19 +447,97 @@ export class LocalGitWorktrees implements LocalWorktreeOps {
     }
 
     // Writes happen only after the whole plan is conflict-free (or overwrite
-    // was explicit). A half-applied worktree is the failure mode this exists
-    // to prevent.
-    for (const w of writes) {
-      const abs = this.join(o.sourceGitRoot, ...w.relPath.split("/"));
-      this.fs.mkdirSync(this.dirname(abs), { recursive: true });
-      this.fs.writeFileSync(abs, w.bytes);
-    }
-    for (const rel of deletes) {
-      const abs = this.join(o.sourceGitRoot, ...rel.split("/"));
-      if (this.fs.existsSync(abs)) this.fs.unlinkSync(abs);
+    // was explicit). Each target is read again immediately before the copy:
+    // a foreign edit since the plan is a conflict, not a silent overwrite.
+    const appliedFiles: string[] = [];
+    try {
+      for (const w of writes) {
+        const abs = this.join(o.sourceGitRoot, ...w.relPath.split("/"));
+        const again = this.readIfExists(abs);
+        if (!bytesEqual(again, w.current)) {
+          return {
+            error: "source files changed since the worktree branched",
+            conflicts: [w.relPath],
+            appliedFiles,
+          };
+        }
+        this.fs.mkdirSync(this.dirname(abs), { recursive: true });
+        this.fs.writeFileSync(abs, w.bytes);
+        appliedFiles.push(w.relPath);
+      }
+      for (const rel of deletes) {
+        const abs = this.join(o.sourceGitRoot, ...rel.split("/"));
+        if (this.fs.existsSync(abs)) this.fs.unlinkSync(abs);
+        appliedFiles.push(rel);
+      }
+    } catch (error) {
+      return {
+        error: error instanceof Error ? error.message : String(error),
+        appliedFiles,
+      };
     }
 
     return { status: "success", files: applied, gitRoot: o.sourceGitRoot };
+  }
+
+  /**
+   * Commit the source checkout is at. `git worktree add` starts from this
+   * commit and does not copy uncommitted or untracked files from the source.
+   */
+  async readStartBasis(sourcePath: string): Promise<{ commit: string } | { error: string }> {
+    const head = await this.gitText(["rev-parse", "HEAD"], sourcePath);
+    if (head.code !== 0) return { error: gitError(head.stderr, head.stdout, "source HEAD is unreadable") };
+    const commit = head.stdout.trim();
+    if (!commit) return { error: "source HEAD is empty" };
+    return { commit };
+  }
+
+  /**
+   * Commit, index, worktree and allowed untracked files. Ignored files stay
+   * out (`--exclude-standard`). Nothing is staged and nothing is committed.
+   */
+  private async changeManifest(
+    worktreePath: string,
+    mergeBase: string,
+  ): Promise<{ files: WorktreeApplyFile[]; entries: ChangeManifestEntry[]; error?: string }> {
+    const committed = await this.gitText(["diff", "--name-status", "--find-renames", mergeBase, "HEAD"], worktreePath);
+    if (committed.code !== 0) return { files: [], entries: [], error: gitError(committed.stderr, committed.stdout, "git diff failed") };
+    const unstaged = await this.gitText(["diff", "--name-status", "--find-renames", "HEAD"], worktreePath);
+    if (unstaged.code !== 0) return { files: [], entries: [], error: gitError(unstaged.stderr, unstaged.stdout, "git diff failed") };
+    const staged = await this.gitText(["diff", "--name-status", "--find-renames", "--cached", "HEAD"], worktreePath);
+    if (staged.code !== 0) return { files: [], entries: [], error: gitError(staged.stderr, staged.stdout, "git diff failed") };
+    const untracked = await this.gitText(["ls-files", "--others", "--exclude-standard", "-z"], worktreePath);
+    if (untracked.code !== 0) return { files: [], entries: [], error: gitError(untracked.stderr, untracked.stdout, "git ls-files failed") };
+
+    const files = planLocalApply([committed.stdout, unstaged.stdout, staged.stdout].filter(Boolean).join("\n"));
+    const entries: ChangeManifestEntry[] = [];
+    const push = (origin: ChangeOrigin, list: WorktreeApplyFile[]) => {
+      for (const file of list) entries.push({ path: file.path, origin });
+    };
+    push("committed", planLocalApply(committed.stdout));
+    push("unstaged", planLocalApply(unstaged.stdout));
+    push("staged", planLocalApply(staged.stdout));
+    const seen = new Set(files.map((file) => file.path));
+    for (const raw of untracked.stdout.split("\0")) {
+      const path = raw.replace(/\\/g, "/").trim();
+      if (!path || seen.has(path)) continue;
+      seen.add(path);
+      files.push({ path, type: "added", additions: 0, deletions: 0 });
+      entries.push({ path, origin: "untracked" });
+    }
+    return { files, entries };
+  }
+
+  private mergeTextConflict(
+    base: Uint8Array | null,
+    current: Uint8Array | null,
+    worktree: Uint8Array | null,
+  ): Uint8Array | undefined {
+    if (!base || !current || !worktree) return undefined;
+    if (hasNul(base) || hasNul(current) || hasNul(worktree)) return undefined;
+    const merged = threeWayTextMerge(decodeBytes(base), decodeBytes(current), decodeBytes(worktree));
+    if (!merged.clean) return undefined;
+    return new TextEncoder().encode(merged.text);
   }
 
   async remove(o: { worktreePath: string; force: boolean }): Promise<WorktreeRemoveResult | { error: string }> {

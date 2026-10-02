@@ -38,7 +38,7 @@ describe("FileClaimStore", () => {
     const b = store.tryClaim({ path: "src/a.ts", runId: "run-2", step: 1, role: "fixer", at: 1001 });
     expect(a).toEqual({ ok: true });
     expect(b.ok).toBe(false);
-    if (!b.ok) expect(b.heldBy.role).toBe("implementer");
+    if (!b.ok && b.reason === "held") expect(b.heldBy.role).toBe("implementer");
   });
 
   it("releaseRun drops the claims so a later run can take the path", () => {
@@ -60,6 +60,43 @@ describe("FileClaimStore", () => {
     now = 2000;
     const again = store.tryClaim({ path: "src/a.ts", runId: "run-2", step: 1, role: "fixer", at: 2000 });
     expect(again).toEqual({ ok: true });
+  });
+
+  it("folds case and dot aliases on a case-insensitive checkout, and keeps repositories apart", () => {
+    const fs = memFs();
+    const store = new FileClaimStore({
+      dir: "/claims", fs, now: () => 1000, join: (...p) => p.join("/"), caseSensitive: false,
+    });
+    expect(store.tryClaim({ path: "./src/A.ts", runId: "run-1", step: 1, role: "implementer", at: 1000, checkout: "/repo" }).ok).toBe(true);
+    const again = store.tryClaim({ path: "src/a.ts", runId: "run-2", step: 1, role: "fixer", at: 1001, checkout: "/repo" });
+    expect(again.ok).toBe(false);
+    const other = store.tryClaim({ path: "src/a.ts", runId: "run-3", step: 1, role: "fixer", at: 1001, checkout: "/other" });
+    expect(other.ok).toBe(true);
+  });
+
+  it("does not steal a live lease, and does not overwrite a corrupt claim", () => {
+    let now = 1000;
+    const fs = memFs();
+    const store = new FileClaimStore({
+      dir: "/claims", fs, now: () => now, join: (...p) => p.join("/"), staleMs: 50,
+    });
+    store.tryClaim({ path: "src/a.ts", runId: "run-1", step: 1, role: "implementer", at: 1000, leaseUntil: 5000 });
+    now = 2000;
+    const live = store.tryClaim({ path: "src/a.ts", runId: "run-2", step: 1, role: "fixer", at: 2000 });
+    expect(live.ok).toBe(false);
+    const file = [...fs.files.keys()][0]!;
+    fs.files.set(file, "{");
+    const corrupt = store.tryClaim({ path: "src/a.ts", runId: "run-2", step: 1, role: "fixer", at: 2000 });
+    expect(corrupt).toMatchObject({ ok: false, reason: "corrupt" });
+    expect(fs.files.get(file)).toBe("{");
+  });
+
+  it("a second claim by the same owner refreshes instead of blocking", () => {
+    const fs = memFs();
+    const store = new FileClaimStore({ dir: "/claims", fs, now: () => 1000, join: (...p) => p.join("/") });
+    store.tryClaim({ path: "src/a.ts", runId: "run-1", step: 1, role: "implementer", at: 1000 });
+    const again = store.tryClaim({ path: "src/a.ts", runId: "run-1", step: 1, role: "implementer", at: 1500 });
+    expect(again).toEqual({ ok: true, idempotent: true });
   });
 
   it("claim file names cannot escape the store", () => {

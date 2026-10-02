@@ -9390,7 +9390,8 @@
           h("span", { class: "cx-finding-text" }, f.text || "", loc ? h("span", { class: "cx-finding-where" }, " — ", loc) : null),
           gate.panelSize && f.reporters ? h("span", { class: "cx-pill cx-pill--outline gate-consensus" }, f.reporters.length + "/" + gate.panelSize + " reviewers") : null);
       }));
-      body.appendChild(gateSection("Findings (" + findings.length + ")", "", list));
+      const omitted = Number(gate.findingsOmitted) || 0;
+      body.appendChild(gateSection("Findings (" + findings.length + (omitted ? ", " + omitted + " more in the result" : "") + ")", "", list));
     }
     if (Array.isArray(gate.openQuestions) && gate.openQuestions.length) {
       body.appendChild(gateSection("Open questions", "", h("ul", { class: "cx-list" }, gate.openQuestions.map((q) => h("li", {}, q)))));
@@ -13133,7 +13134,9 @@
   // E-02: every child (crew stage, companion subagent, Grok's own) speaks
   // this one vocabulary; the words and colours live here and nowhere else.
   const CHILD_STATUS = {
-    queued: ["Queued", "muted"], running: ["Running", "info"], "needs-you": ["Needs you", "warn"],
+    queued: ["Queued", "muted"], "waiting-for-slot": ["Waiting for a slot", "muted"],
+    running: ["Running", "info"], "needs-you": ["Needs you", "warn"],
+    "awaiting-integration": ["Awaiting integration", "info"], verifying: ["Verifying", "info"],
     stalled: ["Stalled", "warn"], completed: ["Done", "ok"], failed: ["Failed", "danger"],
     cancelled: ["Cancelled", "muted"], refused: ["Refused", "danger"],
   };
