@@ -6526,7 +6526,7 @@ select option {
 
 .cx-rail.is-collapsed .workflow-stepper { display: none; }
 
-#gear-btn.composer-model-btn { display: inline-flex; width: auto; min-width: 0; max-width: 220px; gap: 6px; padding: 3px 5px; font-size: 16px; }
+#gear-btn.composer-model-btn { display: inline-flex; width: auto; min-width: 0; max-width: 160px; gap: 5px; padding: 3px 5px; font-size: 14px; }
 .composer-model-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; font-weight: 700; }
 .composer-model-effort { flex: none; color: var(--vscode-descriptionForeground); }
 .toolbar-left { min-width: 0; flex-wrap: wrap; }
