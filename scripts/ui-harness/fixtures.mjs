@@ -81,6 +81,12 @@ const contextDemo = async (send) => {
   } });
 };
 export const CHAT_SCENARIOS = {
+  "codex-context-model": { run: async ({ send }) => {
+    await send({ type: "initialState", effort: "high" });
+    await send({ type: "session", provider: "codex", sessionId: "codex-demo", currentModelId: "gpt-test", models: [{ modelId: "gpt-test", name: "GPT Test", totalContextTokens: 400000 }] });
+    await send({ type: "contextUsage", context: { provider: "codex", access: "fixture", sessionId: "codex-demo", modelId: "gpt-test", generation: 1,
+      source: "session", usageSource: "session", usageSemantics: "last-request", usageQuality: "unknown", limitQuality: "verified", observedAt: Date.now(), used: 32000, limits: { effectiveContextTokens: 400000 } } });
+  } },
   "subagents-menu": { run: async ({ send, page }) => {
     await send({ type: "sessionType", sessionId: "s", sessionType: "agent", locked: true });
     await send({ type: "sessionDelegation", value: "auto", needsRestart: true });

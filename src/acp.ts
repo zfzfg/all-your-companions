@@ -1785,11 +1785,11 @@ export class AcpClient extends EventEmitter {
       }
       // A backend that reports occupancy directly (Muse) wins over the envelope.
       const native = normalized.contextObservation;
-      const used = contextUsed(native?.usageSemantics === "current-context" ? native.used
+      const used = contextUsed(native?.usageSemantics === "current-context" || (this.provider === "codex" && native?.usageSemantics === "last-request") ? native.used
         : this.provider === "grok" ? contextUsedFromUpdateEnvelope(meta) : undefined);
       const usedChanged = used !== undefined && used !== this.lastContextUsed;
-      if (usedChanged) this.observeContext({ source: "session", limitQuality: "unknown",
-        usageQuality: native?.usageQuality ?? MODEL_CONTEXT_QUALITY[this.provider], usageSemantics: "current-context", used,
+      if (usedChanged || (used !== undefined && this.provider === "codex" && native?.usageSemantics === "last-request")) this.observeContext({ source: "session", limitQuality: "unknown",
+        usageQuality: native?.usageQuality ?? MODEL_CONTEXT_QUALITY[this.provider], usageSemantics: native?.usageSemantics ?? "current-context", used,
         ...(native?.runtime ? { runtime: native.runtime } : {}),
         limits: {} });
       if (usedChanged || normalized.contextWindow !== undefined) {

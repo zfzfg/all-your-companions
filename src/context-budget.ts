@@ -95,7 +95,10 @@ export const DOCUMENTED_CONTEXT: Partial<Record<AcpProvider, Record<string, Mode
 /** Independent priority for usage and limit: catalog refresh must not erase usage. */
 export function mergeContextObservation(previous: ContextObservation | undefined, incoming: ContextObservation): ContextObservation {
   const next = { ...incoming, limits: validContextLimits(incoming.limits), used: contextUsed(incoming.used) };
-  if (next.usageSemantics && next.usageSemantics !== "current-context" && next.usageSemantics !== "estimated-context") next.used = undefined;
+  const codexRequest = next.provider === "codex" && next.usageSemantics === "last-request"
+    && (next.usageSource ?? next.source) === "session";
+  if (codexRequest) next.usageQuality = "unknown";
+  if (next.usageSemantics && next.usageSemantics !== "current-context" && next.usageSemantics !== "estimated-context" && !codexRequest) next.used = undefined;
   if (next.source === "documented") next.limits = {};
   if (!previous || previous.generation !== next.generation || previous.access !== next.access
     || previous.sessionId !== next.sessionId || previous.modelId !== next.modelId

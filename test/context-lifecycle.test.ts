@@ -10,7 +10,13 @@ function observation(overrides: Partial<ContextObservation> = {}): ContextObserv
 }
 
 describe("context lifecycle and semantics", () => {
-  it.each(["billing", "subscription", "turn-cumulative", "session-cumulative", "last-request"] as const)(
+  it("retains Codex native request tokens without claiming verified current occupancy", () => {
+    const next = mergeContextObservation(undefined, observation({ usageSemantics: "last-request" }));
+    expect(next.used).toBe(80000);
+    expect(next.usageSemantics).toBe("last-request");
+    expect(next.usageQuality).toBe("unknown");
+  });
+  it.each(["billing", "subscription", "turn-cumulative", "session-cumulative"] as const)(
     "%s does not become native context occupancy", usageSemantics => {
       expect(mergeContextObservation(undefined, observation({ usageSemantics })).used).toBeUndefined();
     });

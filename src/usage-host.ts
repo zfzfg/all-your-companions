@@ -193,7 +193,9 @@ export class UsageHost {
     if (typeof event.occupancy === "number") {
       const current = session.client?.contextBudget;
       // Adapter turn occupancy is an estimate unless the native session reports it.
-      if (!(current?.usageQuality === "verified" && current.used === next.contextUsed)) {
+      const codexNativeRequest = session.provider === "codex" && current?.usageSource === "session"
+        && current.usageSemantics === "last-request" && !current.usageStale;
+      if (!codexNativeRequest && !(current?.usageQuality === "verified" && current.used === next.contextUsed)) {
         session.client?.observeContext?.({ source: "adapter", limitQuality: "unknown", limits: {},
           used: next.contextUsed, usageQuality: event.authoritative ? "verified" : "estimated",
           usageSemantics: event.authoritative ? "current-context" : "estimated-context" });

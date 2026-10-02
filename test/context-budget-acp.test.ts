@@ -15,6 +15,15 @@ function clientWithCounter(count: (prompt: readonly any[]) => Promise<ContextPro
 }
 
 describe("the common ACP send guard", () => {
+  it("preserves Codex ACP usage as a native last-request count, including repeated counts", () => {
+    const client = new AcpClient({ cliPath: "fake", cwd: "/", log: () => {}, backend: new CodexBackend() });
+    client.sessionId = "session-one";
+    client.currentModelId = "gpt-test";
+    for (const used of [32000, 32000, 0]) {
+      (client as any).handleSessionUpdate({ sessionUpdate: "usage_update", used, size: 400000 }, {}, "session-one");
+      expect(client.contextBudget).toMatchObject({ used, usageSource: "session", usageSemantics: "last-request", usageStale: false });
+    }
+  });
   it("blocks before a prompt RPC when the complete request is verifiably too large", async () => {
     const { client, request } = clientWithCounter(async () => ({ tokens: 258401, quality: "verified", complete: true }));
     await expect(client.prompt("oversized")).rejects.toBeInstanceOf(ContextBudgetExceededError);

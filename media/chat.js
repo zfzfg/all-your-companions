@@ -1182,7 +1182,7 @@
   historyBtn.innerHTML = ICON.clock;
   ensureVisibleNewSession();
   updateSendButton(); // spinner by default — session is starting up (busy+locked)
-  gearBtn.innerHTML = ICON.gear;
+  renderComposerModel();
   addBtn.innerHTML = ICON.plus;
   scrollBottomBtn.innerHTML = `${ICON.arrowDown}<span class="scroll-bottom-label">Scroll to bottom</span>`;
   // Previous prompt (upstream #150): built here, a sibling of the scroll pill.
@@ -2172,10 +2172,11 @@
     };
 
     const observation = state.contextObservation;
-    const used = observation && typeof observation.used === "number" ? observation.used : undefined;
+    const used = state.activeProvider === "codex" ? codexContextUsed()
+      : observation && typeof observation.used === "number" ? observation.used : undefined;
     const native = hasNativeContextRatio();
     const pct = native ? Math.round(used / state.contextWindow * 100) : undefined;
-    info("Context used", used === undefined ? "Unknown" : native
+    info("Context used", used === undefined ? "Unknown" : state.activeProvider === "codex" ? `${tok(used)} tokens (ACP)` : native
       ? `${tok(used)} / ${tok(state.contextWindow)} (${pct}%)${used > state.contextWindow ? " — exceeds reported capacity" : ""}`
       : `≈ ${tok(used)} tokens${observation.usageStale || observation.stale ? " (stale)" : " (estimated)"}`);
 
@@ -2192,33 +2193,36 @@
     };
     contextPopover.appendChild(act);
 
-    appendContextWindowChoices(contextPopover);
-    const activeGrokWindow = state.activeProvider === "grok" && state.contextWindowSelection?.selectedSize;
-    const limits = observation?.limits || {};
-    info(activeGrokWindow ? "Active Grok context window" : "Native context capacity",
-      activeGrokWindow ? `${tok(activeGrokWindow)} tokens` : state.contextWindow > 0 ? `${tok(state.contextWindow)} tokens` : "Unknown");
-    if (limits.modelMaximum) info("Catalog maximum", `${tok(limits.modelMaximum)} tokens`);
-    if (limits.configuredWindow && !activeGrokWindow) info("Configured window", `${tok(limits.configuredWindow)} tokens`);
-    if (limits.activeWindow && !activeGrokWindow) info("Confirmed active window", `${tok(limits.activeWindow)} tokens`);
-    info("Effective input budget", limits.effectiveContextTokens || limits.inputTokenLimit
-      ? `${tok(limits.effectiveContextTokens || limits.inputTokenLimit)} tokens` : "Unknown");
-    if (limits.autoCompactAtTokens) info("Auto-compact threshold", `${tok(limits.autoCompactAtTokens)} tokens`);
-    if (used !== undefined) info("Usage source", `${observation.usageSource || observation.source || "unknown"}${observation.usageStale ? " (stale)" : ""}`);
-    if (observation) {
-      info("Limit source", `${observation.source || "unknown"}${observation.stale ? " (stale)" : ""}`);
-      if (observation.observedAt > 0) {
-        const timeLabel = observation.source === "catalog" ? "Catalog updated" : "Observed";
-        info(timeLabel, new Date(observation.observedAt).toLocaleString());
+    if (state.activeProvider !== "codex") {
+      appendContextWindowChoices(contextPopover);
+      const activeGrokWindow = state.activeProvider === "grok" && state.contextWindowSelection?.selectedSize;
+      const limits = observation?.limits || {};
+      info(activeGrokWindow ? "Active Grok context window" : "Native context capacity",
+        activeGrokWindow ? `${tok(activeGrokWindow)} tokens` : state.contextWindow > 0 ? `${tok(state.contextWindow)} tokens` : "Unknown");
+      if (limits.modelMaximum) info("Catalog maximum", `${tok(limits.modelMaximum)} tokens`);
+      if (limits.configuredWindow && !activeGrokWindow) info("Configured window", `${tok(limits.configuredWindow)} tokens`);
+      if (limits.activeWindow && !activeGrokWindow) info("Confirmed active window", `${tok(limits.activeWindow)} tokens`);
+      info("Effective input budget", limits.effectiveContextTokens || limits.inputTokenLimit
+        ? `${tok(limits.effectiveContextTokens || limits.inputTokenLimit)} tokens` : "Unknown");
+      if (limits.autoCompactAtTokens) info("Auto-compact threshold", `${tok(limits.autoCompactAtTokens)} tokens`);
+      if (used !== undefined) info("Usage source", `${observation.usageSource || observation.source || "unknown"}${observation.usageStale ? " (stale)" : ""}`);
+      if (observation) {
+        info("Limit source", `${observation.source || "unknown"}${observation.stale ? " (stale)" : ""}`);
+        if (observation.observedAt > 0) {
+          const timeLabel = observation.source === "catalog" ? "Catalog updated" : "Observed";
+          info(timeLabel, new Date(observation.observedAt).toLocaleString());
+        }
+        if (observation.limits && observation.limits.contextWindow && observation.limits.contextWindow !== state.contextWindow) {
+          info("Model window", tok(observation.limits.contextWindow));
+        }
+      } else {
+        info("Limit source", "Unknown");
       }
-      if (observation.limits && observation.limits.contextWindow && observation.limits.contextWindow !== state.contextWindow) {
-        info("Model window", tok(observation.limits.contextWindow));
-      }
-    } else {
-      info("Limit source", "Unknown");
-    }
+
+    } else if (used !== undefined) info("Usage source", "ACP session · last request");
 
     // Where compaction happens and how often it did (K-03, K-06).
-    if (state.compactThresholdPct) {
+    if (state.compactThresholdPct && state.activeProvider !== "codex") {
       const t = state.compactThresholdPct;
       const approx = state.contextWindow > 0 ? ` (≈ ${toK(Math.round(state.contextWindow * t / 100))} tokens)` : "";
       const isEnv = state.thresholdSource === "env";
@@ -2330,7 +2334,7 @@
       breakdown.freeTokens != null ||
       (breakdown.categories && breakdown.categories.length)
     );
-    if (hasBreakdown) {
+    if (hasBreakdown && state.activeProvider !== "codex") {
       // Same split as the CLI TUI: legend rows fill the bar; informational
       // rows sit below it because their tokens are already in those addends
       // (tool definitions in Reasoning/overhead, usage categories in Messages).
@@ -3245,6 +3249,11 @@
         : (settingsLocked ? `${modelName} — available once the session is ready` : `${modelName} — click to change`));
     if (!settingsLocked && modelLoaded) nameBtn.onclick = (e) => { e.stopPropagation(); renderModelPicker(); };
     row.appendChild(nameBtn);
+    const currentModel = ownModels.find(m => m.modelId === state.currentModelId);
+    if (state.activeProvider === "codex" && currentModel?.totalContextTokens > 0) {
+      gearPopover.appendChild(h("div", { class: "popover-fineprint codex-context-estimate" },
+        `Estimated context limit (catalog): ${Number(currentModel.totalContextTokens).toLocaleString()} tokens`));
+    }
 
     const dotsEl = document.createElement("span");
     dotsEl.className = "effort-dots" + (settingsLocked || !modelLoaded ? " disabled" : "");
@@ -3272,6 +3281,7 @@
         if (!settingsLocked) dot.onclick = (e) => {
           e.stopPropagation();
           state.effort = state.effort === id ? "" : id;
+          renderComposerModel();
           vscode.postMessage({ type: "setEffort", level: state.effort });
           renderGearMain();
           gearPopover.hidden = false;
@@ -4069,14 +4079,23 @@
    * everything (VS Code, which has no rail). Derived from `railGearLive()`,
    * not from a host flag.
    */
+  function renderComposerModel() {
+    const ownModels = state.availableModels.filter(m => !m.provider || m.provider === state.activeProvider);
+    const name = state.currentModelId ? modelDisplayName(state.currentModelId, ownModels) || state.currentModelId : "Model…";
+    const effort = state.effort || "default";
+    gearBtn.classList.add("composer-model-btn");
+    gearBtn.innerHTML = `<span class="composer-model-name">${escapeHtml(name)}</span><span class="composer-model-effort">${escapeHtml(effort)}</span>`;
+    gearBtn.title = `${name} · ${effort} — Model, effort and settings`;
+    gearBtn.setAttribute("aria-label", gearBtn.title);
+  }
+
   function syncGearPlacement() {
     const railGear = ensureRailGear();
     ensureRailResizer();
     const split = railGearLive();
     gearBtn.hidden = false;
-    gearBtn.innerHTML = split ? ICON.settings2 : ICON.gear;
-    gearBtn.title = split ? "Model, effort and session" : "Settings";
-    gearBtn.setAttribute("aria-label", gearBtn.title);
+    renderComposerModel();
+
     if (railGear) railGear.hidden = !split;
   }
 
@@ -16299,7 +16318,17 @@
       usageQuality: "estimated", used, limits: o?.limits || { contextWindow: state.contextWindow } };
   }
 
+  function codexContextUsed() {
+    const o = state.contextObservation;
+    return o && !o.stale && !o.usageStale && o.provider === "codex"
+      && o.sessionId === state.contextSelectionSessionId && o.modelId === state.currentModelId
+      && (o.usageSource || o.source) === "session"
+      && ["last-request", "current-context"].includes(o.usageSemantics)
+      && Number.isSafeInteger(o.used) && o.used >= 0 ? o.used : undefined;
+  }
+
   function hasNativeContextRatio() {
+    if (state.activeProvider === "codex") return false;
     const o = state.contextObservation;
     if (!o || o.stale || o.usageStale || o.usageSemantics !== "current-context"
         || o.usageQuality !== "verified" || typeof o.used !== "number" || !(state.contextWindow > 0)) return false;
@@ -16333,17 +16362,20 @@
     donutArc.setAttribute("stroke", color);
     paintDonutThresholdMark(max > 0 ? threshold : undefined);
     const observation = state.contextObservation;
-    const measured = observation && typeof observation.used === "number" ? observation.used : undefined;
+    const measured = state.activeProvider === "codex" ? codexContextUsed()
+      : observation && typeof observation.used === "number" ? observation.used : undefined;
     const native = hasNativeContextRatio();
     donutEl.classList.toggle("context-text-only", !native);
     donutArc.style.display = native ? "" : "none";
     if (donutArc.parentNode?.style) donutArc.parentNode.style.display = native ? "" : "none";
     paintDonutThresholdMark(native ? threshold : undefined);
-    donutEl.hidden = measured === undefined && !(max > 0);
+    const showCapacity = state.activeProvider !== "codex" && max > 0;
+    donutEl.hidden = measured === undefined && !showCapacity;
     if (donutEl.hidden) contextPopover.hidden = true;
-    donutLabel.textContent = measured === undefined ? (max > 0 ? `${toK(max)} context` : "") : native
+    donutLabel.textContent = measured === undefined ? (showCapacity ? `${toK(max)} context` : "") : state.activeProvider === "codex" ? toK(measured) : native
       ? `${toK(measured)}/${toK(max)}` : `≈ ${toK(measured)}`;
-    const usageDetail = measured === undefined ? (max > 0 ? `${max.toLocaleString()} tokens capacity; current occupancy unknown` : "") : native
+    const usageDetail = measured === undefined ? (showCapacity ? `${max.toLocaleString()} tokens capacity; current occupancy unknown` : "")
+      : state.activeProvider === "codex" ? `${measured.toLocaleString()} context tokens reported by ACP (last request)` : native
       ? `${measured.toLocaleString()} / ${max.toLocaleString()} tokens${measured > max ? " — exceeds reported capacity" : ""}`
       : `Estimated context: ${measured.toLocaleString()} tokens${observation.usageStale || observation.stale ? " (stale)" : ""}`;
     donutLabel.title = usageDetail;
@@ -17978,6 +18010,7 @@
         state.museSettings = msg.museSettings;
         state.useCtrlEnter = msg.useCtrlEnter;
         state.effort = msg.effort || "";
+        renderComposerModel();
         state.cwd = msg.cwd || "";
         state.extVersion = msg.extVersion || "";
         // Field presence, not a version check: an older host sends neither, and
@@ -18611,6 +18644,7 @@
             usageQuality: "unknown", limits: m.contextLimits || { contextWindow: m.totalContextTokens } } : undefined;
         }
         updateDonut(preserveContext ? undefined : 0);
+        renderComposerModel();
         break;
       }
       case "sessionName": {
@@ -18655,6 +18689,7 @@
       }
       case "modelChanged": {
         state.currentModelId = msg.modelId;
+        renderComposerModel();
         if (state.contextObservation && !modelsMatch(state.contextObservation.modelId, msg.modelId)) {
           state.contextObservation = undefined;
           state.usedTokens = 0;

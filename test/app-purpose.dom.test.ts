@@ -370,7 +370,7 @@ describe("rail gear placement (DOM)", () => {
     expect(railGear.hidden).toBe(false);
     // ...but it must not be a SECOND gear: sliders (lucide settings-2) vs gear.
     // circle+circle is settings-2's signature; the gear has exactly one.
-    expect((composerGear.innerHTML.match(/<circle/g) || []).length).toBe(2);
+    expect(composerGear.querySelector(".composer-model-name")).not.toBeNull();
     expect(composerGear.innerHTML).not.toContain("M12.22 2h-.44");
   });
 
@@ -496,7 +496,7 @@ describe("rail gear placement (DOM)", () => {
     });
     dispatch(h.window, { type: "sessionName", sessionId: "active", name: "Active", cwd: "/w" });
     const composerGear = h.doc.getElementById("gear-btn")!;
-    expect(composerGear.innerHTML).toContain("M12.22 2h-.44");
+    expect(composerGear.querySelector(".composer-model-effort")).not.toBeNull();
     openGear(h);
     // Nothing is split without a rail to split into.
     expect(gearText(h)).toContain("Model and Effort");
