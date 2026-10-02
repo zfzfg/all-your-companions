@@ -1964,7 +1964,9 @@ export class AgyAcpAdapterServer {
     });
     proc.on("error", (error) => {
       if (this.agyProc !== proc) return;
-      this.agyProc = undefined;
+      // A post-spawn error (for example a failed kill) does not prove exit.
+      // Only a child that never received a PID can be forgotten immediately.
+      if (proc.pid === undefined) this.agyProc = undefined;
       this.pendingPrompt?.reject(error);
     });
 

@@ -34,6 +34,7 @@ it("streams through a real command shim with spaces and awaits child teardown", 
     server.start(); input.write(JSON.stringify({ id: 1, method: "session/prompt", params: { text: "fixture" } }) + "\n");
     expect((await reply).result.stopReason).toBe("end_turn");
     const closed = new Promise<void>(resolve => { proc!.once("close", () => resolve()); });
+    proc!.emit("error", new Error("post-spawn fixture error does not prove exit"));
     await server.shutdown();
     await closed;
     expect(proc).toBeDefined();
