@@ -1580,7 +1580,7 @@ hasProviderConsent: (...args) => self.hasProviderConsent(...args),
     return createProviderSession({
       get host() { return self.host; },
       get state() { return self.state; },
-      get context() { return { extensionVersion: self.context?.extensionVersion ?? "0.3.1" }; },
+      get context() { return { extensionVersion: self.context?.extensionVersion ?? "0.3.2" }; },
       getOverride: (name: string) => self.sidebarTestOverride(name),
       getFocused: () => self.focused,
       setFocused: (session) => { self.focused = session; },
