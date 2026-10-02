@@ -131,7 +131,7 @@ export interface TurnEditAuthLimitOps {
   startSession(id?: string, session?: Session): Promise<any>;
   handleSend(text: string, force?: boolean, session?: Session): Promise<void>;
   setProviderNeedsLogin(provider: AcpProvider, needs: boolean): void;
-  startTurnGitBaseline(session: Session, turn: any): void;
+  startTurnGitBaseline(session: Session, turn: any): void | Promise<void>;
   setStatus(session: Session, status: any): void;
   emitAbandonedSend(session: Session): void;
   turnEndFields(session: Session, status: any): any;
@@ -906,7 +906,7 @@ export class TurnEdit {
     }
     this.emit(session, { type: "agentStart" });
     const turn = beginTurn(session);
-    this.deps.authLimitOps.startTurnGitBaseline(session, turn);
+    await this.deps.authLimitOps.startTurnGitBaseline(session, turn);
     this.setStatus(session, "working");
     session.adapterTurnCallUsed = [];
     try {

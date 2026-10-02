@@ -1256,55 +1256,7 @@
     return n / z;
   }
 
-  function computeLineDiff(oldText, newText, opts) {
-    const maxProduct = (opts && opts.maxProduct) || 4000000; // ~2000×2000 line cap
-    const norm = (t) => (t == null ? "" : String(t).replace(/\r\n?/g, "\n"));
-    const o = norm(oldText);
-    const n = norm(newText);
-    const oldLines = o === "" ? [] : o.split("\n");
-    const newLines = n === "" ? [] : n.split("\n");
-    const m = oldLines.length;
-    const k = newLines.length;
-    if (m * k > maxProduct) {
-      const lines = [];
-      for (const t of oldLines) lines.push({ type: "del", text: t });
-      for (const t of newLines) lines.push({ type: "add", text: t });
-      return { lines, added: k, removed: m, truncated: true };
-    }
-    // LCS length table, filled from the bottom-right so a forward backtrack emits
-    // lines in source order.
-    const dp = [];
-    for (let i = 0; i <= m; i++) dp.push(new Int32Array(k + 1));
-    for (let i = m - 1; i >= 0; i--) {
-      const row = dp[i];
-      const next = dp[i + 1];
-      for (let j = k - 1; j >= 0; j--) {
-        row[j] = oldLines[i] === newLines[j]
-          ? next[j + 1] + 1
-          : (next[j] >= row[j + 1] ? next[j] : row[j + 1]);
-      }
-    }
-    const lines = [];
-    let added = 0;
-    let removed = 0;
-    let i = 0;
-    let j = 0;
-    while (i < m && j < k) {
-      if (oldLines[i] === newLines[j]) {
-        lines.push({ type: "ctx", text: oldLines[i] });
-        i++; j++;
-      } else if (dp[i + 1][j] >= dp[i][j + 1]) {
-        lines.push({ type: "del", text: oldLines[i] });
-        removed++; i++;
-      } else {
-        lines.push({ type: "add", text: newLines[j] });
-        added++; j++;
-      }
-    }
-    while (i < m) { lines.push({ type: "del", text: oldLines[i] }); removed++; i++; }
-    while (j < k) { lines.push({ type: "add", text: newLines[j] }); added++; j++; }
-    return { lines, added, removed, truncated: false };
-  }
+  const computeLineDiff = shared.computeLineDiff;
 
   // Session → Markdown. Consumes the same host→webview event shapes the
   // renderer already sees (userMessage / messageChunk / toolCall / …), so an

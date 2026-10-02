@@ -28,6 +28,7 @@ export type AcpDiffBlock = {
   oldText: string;
   newText: string;
   _meta?: {
+    oldTextMissing?: boolean;
     old_line?: number;
     new_line?: number;
     details?: AcpDiffDetail[];

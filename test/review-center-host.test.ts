@@ -156,3 +156,63 @@ describe("reviewRevertAll uses the checkpoint, not N reverts", () => {
     expect(readFileSync(join(h.workspace, "src", "a.ts"), "utf8")).toBe("before-a\n");
   });
 });
+
+describe("net review snapshots", () => {
+  it("corrects a missing Write before-side and restores the matching scope baseline", async () => {
+    const h = harness();
+    h.sidebar.beginCheckpointTurn(h.session, "write");
+    h.sidebar.snapshotRelOrAbsPaths(h.session, ["src/a.ts"], h.workspace);
+    writeFileSync(join(h.workspace, "src/a.ts"), "after-a\n");
+    h.sidebar.noteReviewToolCall(h.session, { toolCallId: "write", status: "completed", kind: "edit",
+      content: [{ type: "diff", path: "src/a.ts", oldText: null, newText: "after-a\n" }] });
+    await Promise.resolve();
+    const block = h.session.reviewBlocks[0];
+    expect(block.reviewBefore).toMatchObject({ text: "before-a\n", existed: true, source: "checkpoint" });
+    expect(block.reviewAfter).toMatchObject({ text: "after-a\n", existed: true });
+    expect(h.posted).toContainEqual(expect.objectContaining({ type: "toolCallUpdate", call: expect.objectContaining({
+      content: [expect.objectContaining({ oldText: "before-a\n", newText: "after-a\n" })],
+    }) }));
+    expect(h.sidebar.checkpointStore.loadReviewState("sess-1")[0]).toMatchObject({ reviewBefore: block.reviewBefore });
+    const resumed = new Session(); resumed.activeSessionId = "sess-1"; resumed.userMessageCount = 1; resumed.replaying = true;
+    h.sidebar.noteReviewToolCall(resumed, editCall("write", "src/a.ts", "", "after-a\n"));
+    expect(resumed.reviewBlocks[0].reviewBefore).toEqual(block.reviewBefore);
+    const other = new Session(); other.activeSessionId = "sess-1"; other.userMessageCount = 1; other.replaying = true;
+    const differentRoot = tempDir("rc-other-root-");
+    h.sidebar.sessionCwd = (session: Session) => session === other ? differentRoot : h.workspace;
+    h.sidebar.noteReviewToolCall(other, editCall("write", "src/a.ts", "", "after-a\n"));
+    expect(other.reviewBlocks[0].reviewBefore).toBeUndefined();
+    h.sidebar.host.fs = { writeFile: async (_uri: unknown, data: Uint8Array) => writeFileSync(join(h.workspace, "src/a.ts"), data) };
+    await h.sidebar.reviewRevertFile(h.session, "src/a.ts", "turn");
+    expect(readFileSync(join(h.workspace, "src/a.ts"), "utf8")).toBe("before-a\n");
+  });
+  it("discards the complete session baseline after turn checkpoints have been pruned", async () => {
+    const h = harness();
+    h.session.reviewBlocks = [{ path: "src/a.ts", oldText: "before-a\n", newText: "after\n", sites: [],
+      toolCallId: "old", turnId: "1", status: "completed", reviewBefore: { text: "before-a\n", existed: true, source: "git" },
+      reviewAfter: { text: "after\n", existed: true } }];
+    h.session.userMessageCount = 30;
+    writeFileSync(join(h.workspace, "src/a.ts"), "after\n");
+    await h.sidebar.reviewRevertAll(h.session, "session");
+    expect(readFileSync(join(h.workspace, "src/a.ts"), "utf8")).toBe("before-a\n");
+    expect(h.session.reviewBlocks).toEqual([]);
+  });
+  it("deduplicates absolute and relative spellings of the same file", () => {
+    const h = harness();
+    h.sidebar.noteReviewToolCall(h.session, editCall("first", join(h.workspace, "src/a.ts"), "before", "middle"));
+    h.sidebar.noteReviewToolCall(h.session, editCall("second", "src/a.ts", "middle", "after"));
+    const snapshots = h.posted.filter((m: any) => m.type === "reviewCenter") as any[];
+    expect(snapshots.at(-1).files).toHaveLength(1);
+    expect(snapshots.at(-1).files[0].path).toBe("src/a.ts");
+  });
+  it("refuses a net discard after a foreign change", async () => {
+    const h = harness();
+    h.sidebar.beginCheckpointTurn(h.session, "edit");
+    h.sidebar.snapshotRelOrAbsPaths(h.session, ["src/a.ts"], h.workspace);
+    writeFileSync(join(h.workspace, "src/a.ts"), "after-a\n");
+    h.sidebar.noteReviewToolCall(h.session, editCall("edit", "src/a.ts", "before-a\n", "after-a\n"));
+    writeFileSync(join(h.workspace, "src/a.ts"), "foreign\n");
+    await h.sidebar.reviewRevertFile(h.session, "src/a.ts", "session");
+    expect(readFileSync(join(h.workspace, "src/a.ts"), "utf8")).toBe("foreign\n");
+    expect(h.posted).toContainEqual(expect.objectContaining({ type: "toolEditReverted", ok: false, reason: expect.stringContaining("changed") }));
+  });
+});

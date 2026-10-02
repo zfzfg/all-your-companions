@@ -3,7 +3,7 @@
  *
  * Diffs in chat are per tool-call. This module folds them into a per-file
  * list with `+N −M`, path-deduped: a file edited three times is one row
- * whose counts are the SUM of the inline diffs, not a net whole-file diff.
+ * whose counts compare the scope baseline with its latest observed result.
  *
  * Pure — no vscode, no fs, no clock. The host tracks the blocks; the webview
  * only renders the snapshot. "Discard file" runs {@link planFileRevert}
@@ -12,6 +12,7 @@
  * against conflicts.
  */
 
+import { computeLineDiff } from "./shared/line-diff";
 import { planEditRevert, type DiffSite, type EditRevertPlan } from "./diff-view";
 
 export type ReviewScope = "turn" | "session";
@@ -27,6 +28,7 @@ export interface ReviewDiffSite {
 
 export interface ReviewDiffBlock {
   path: string;
+  nativePath?: string;
   oldText: string;
   newText: string;
   sites: ReviewDiffSite[];
@@ -34,10 +36,17 @@ export interface ReviewDiffBlock {
   toolCallId: string;
   turnId: string;
   status: ReviewBlockStatus;
+  reviewRoot?: string;
+  reviewBefore?: { text: string; existed: boolean; source: "git" | "checkpoint" | "native" };
+  reviewSessionBefore?: ReviewDiffBlock["reviewBefore"];
+  reviewAfter?: { text: string; existed: boolean };
+  oldTextMissing?: boolean;
+  fileOperation?: "add" | "delete" | "update";
 }
 
 export interface ReviewFileDiffPayload {
   toolCallId: string;
+  net?: boolean;
   oldText: string;
   newText: string;
   replaceAll?: boolean;
@@ -46,6 +55,11 @@ export interface ReviewFileDiffPayload {
 
 export interface ReviewCenterFileView {
   path: string;
+  countsKnown?: boolean;
+  turnCountsKnown?: boolean;
+  netAvailable?: boolean;
+  turnNetAvailable?: boolean;
+  baselineSource?: string;
   added: number;
   removed: number;
   turnAdded: number;
@@ -59,70 +73,21 @@ export interface ReviewCenterFileView {
 }
 
 export interface ReviewSummary {
+  countsKnown?: boolean;
   files: ReviewCenterFileView[];
   fileCount: number;
   added: number;
   removed: number;
 }
 
-/** Same ceiling as `computeLineDiff` in media/webview-helpers.js. */
-const LINE_DIFF_MAX_PRODUCT = 4_000_000;
-
 export function normalizeReviewPath(path: string): string {
-  return String(path || "").replace(/\\/g, "/").replace(/^\.\//, "").trim();
+  const normalized = String(path || "").replace(/\\/g, "/").replace(/^\.\//, "").trim();
+  return /^[a-z]:\//i.test(normalized) ? normalized.toLowerCase() : normalized;
 }
-
-/**
- * LCS added/removed counts, identical to `computeLineDiff` (CRLF-normalized,
- * empty region = 0 lines). The lines themselves stay in the webview; the
- * review panel only needs the magnitudes, and those must match the inline
- * `+N −M` pills.
- */
-export function countLineDiff(oldText: string, newText: string): { added: number; removed: number } {
-  const norm = (t: string | null | undefined) => (t == null ? "" : String(t).replace(/\r\n?/g, "\n"));
-  const o = norm(oldText);
-  const n = norm(newText);
-  const oldLines = o === "" ? [] : o.split("\n");
-  const newLines = n === "" ? [] : n.split("\n");
-  const m = oldLines.length;
-  const k = newLines.length;
-  if (m * k > LINE_DIFF_MAX_PRODUCT) return { added: k, removed: m };
-  const dp: Int32Array[] = [];
-  for (let i = 0; i <= m; i++) dp.push(new Int32Array(k + 1));
-  for (let i = m - 1; i >= 0; i--) {
-    const row = dp[i];
-    const next = dp[i + 1];
-    for (let j = k - 1; j >= 0; j--) {
-      row[j] = oldLines[i] === newLines[j]
-        ? next[j + 1] + 1
-        : (next[j] >= row[j + 1] ? next[j] : row[j + 1]);
-    }
-  }
-  let added = 0;
-  let removed = 0;
-  let i = 0;
-  let j = 0;
-  while (i < m && j < k) {
-    if (oldLines[i] === newLines[j]) {
-      i++;
-      j++;
-    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
-      removed++;
-      i++;
-    } else {
-      added++;
-      j++;
-    }
-  }
-  while (i < m) {
-    removed++;
-    i++;
-  }
-  while (j < k) {
-    added++;
-    j++;
-  }
-  return { added, removed };
+export function countLineDiff(oldText: string, newText: string): { added: number; removed: number; countsKnown?: boolean } {
+  const result = computeLineDiff(oldText, newText);
+  return result.countsKnown ? { added: result.added, removed: result.removed }
+    : { added: 0, removed: 0, countsKnown: false };
 }
 
 /**
@@ -185,16 +150,6 @@ function isUsefulSites(oldText: string, newText: string, sites: readonly ReviewD
   return sites.some((s) => s && s.oldText !== s.newText);
 }
 
-function siteCounts(sites: readonly ReviewDiffSite[]): { added: number; removed: number } {
-  let added = 0;
-  let removed = 0;
-  for (const site of sites) {
-    const n = countLineDiff(site.oldText, site.newText);
-    added += n.added;
-    removed += n.removed;
-  }
-  return { added, removed };
-}
 
 function payloadFrom(block: ReviewDiffBlock): ReviewFileDiffPayload {
   return {
@@ -255,7 +210,8 @@ export function ingestReviewToolCall(
   };
   const toolCallId = typeof c.toolCallId === "string" ? c.toolCallId : "";
   if (!toolCallId) return existing.slice();
-  const status = normalizeReviewStatus(c.status);
+  const prior = existing.find(b => b.toolCallId === toolCallId);
+  const status = c.status === undefined && prior ? prior.status : normalizeReviewStatus(c.status);
   if (status === "failed") return existing.filter((b) => b.toolCallId !== toolCallId);
 
   const replaceAll = c.rawInput?.replace_all === true || c.rawInput?.replaceAll === true;
@@ -270,16 +226,18 @@ export function ingestReviewToolCall(
     return existing.slice();
   }
 
-  const next = existing.filter((b) => b.toolCallId !== toolCallId);
-  const tid = String(turnId || "");
+  const next = existing.map(b => b.toolCallId === toolCallId && status === "completed" ? { ...b, status } : b);
+  const tid = prior?.turnId ?? String(turnId || "");
   for (const d of diffs) {
     const path = normalizeReviewPath(typeof d.path === "string" ? d.path : "");
     if (!path) continue;
     const oldText = typeof d.oldText === "string" ? d.oldText : "";
     const newText = typeof d.newText === "string" ? d.newText : "";
     const sites = extractReviewSites({ oldText, newText, _meta: d._meta });
+    const index = next.findIndex(b => b.toolCallId === toolCallId && normalizeReviewPath(b.path) === path);
+    const previous = index >= 0 ? next[index] : undefined;
     if (!isUsefulSites(oldText, newText, sites)) continue;
-    next.push({
+    const replacement: ReviewDiffBlock = {
       path,
       oldText,
       newText,
@@ -288,7 +246,17 @@ export function ingestReviewToolCall(
       toolCallId,
       turnId: tid,
       status,
-    });
+      nativePath: (d._meta as { reviewOriginalPath?: string } | undefined)?.reviewOriginalPath ?? previous?.nativePath,
+      fileOperation: ["add", "delete", "update"].includes((d._meta as { kind?: string } | undefined)?.kind ?? "")
+        ? (d._meta as { kind: "add" | "delete" | "update" }).kind : undefined,
+      oldTextMissing: (d.oldText == null && (d._meta as { kind?: string } | undefined)?.kind !== "add") || (d._meta as { oldTextMissing?: boolean } | undefined)?.oldTextMissing === true,
+      ...(previous?.reviewRoot ? { reviewRoot: previous.reviewRoot } : {}),
+      ...(previous?.reviewBefore ? { reviewBefore: previous.reviewBefore } : {}),
+      ...(previous?.reviewSessionBefore ? { reviewSessionBefore: previous.reviewSessionBefore } : {}),
+      ...(previous?.oldText === oldText && previous.newText === newText && previous.reviewAfter ? { reviewAfter: previous.reviewAfter } : {}),
+    };
+    if (index >= 0) next[index] = replacement;
+    else next.push(replacement);
   }
   return next;
 }
@@ -338,35 +306,50 @@ export function aggregateReviewChanges(
   }
   const files: ReviewCenterFileView[] = [];
   for (const [path, list] of [...byPath.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
-    const sessionCounts = { added: 0, removed: 0 };
-    const turnCounts = { added: 0, removed: 0 };
-    let last = list[list.length - 1];
-    let turnLast: ReviewDiffBlock | undefined;
-    let completed = false;
-    let turnCompleted = false;
-    for (const block of list) {
-      const n = siteCounts(block.sites.length ? block.sites : [{ oldText: block.oldText, newText: block.newText }]);
-      sessionCounts.added += n.added;
-      sessionCounts.removed += n.removed;
-      last = block;
-      if (block.status === "completed") completed = true;
-      if (currentTurnId !== undefined && block.turnId === currentTurnId) {
-        turnCounts.added += n.added;
-        turnCounts.removed += n.removed;
-        turnLast = block;
-        if (block.status === "completed") turnCompleted = true;
+    const scopeDiff = (entries: ReviewDiffBlock[], sessionScope = false) => {
+      if (!entries.length) return undefined;
+      const first = entries[0], last = entries[entries.length - 1];
+      const baseline = sessionScope ? first.reviewSessionBefore ?? first.reviewBefore : first.reviewBefore;
+      if (baseline && last.reviewAfter) {
+        const oldText = baseline.text, newText = last.reviewAfter.text;
+        return { oldText, newText, source: baseline.source, net: true,
+          counts: countLineDiff(oldText, newText),
+          payload: { toolCallId: last.toolCallId, oldText, newText, sites: [], net: true } };
       }
-    }
+      if (entries.length === 1 && !first.oldTextMissing && first.sites.length > 1) {
+        const counts = first.sites.map(site => countLineDiff(site.oldText, site.newText));
+        return { oldText: first.oldText, newText: first.newText, source: "native", net: true,
+          counts: { added: counts.reduce((sum, n) => sum + n.added, 0), removed: counts.reduce((sum, n) => sum + n.removed, 0),
+            countsKnown: counts.every(n => n.countsKnown !== false) }, payload: payloadFrom(first) };
+      }
+      // An exact chain of region edits is also a reconstructible comparison.
+      const chain = entries.every((block, i) => !block.oldTextMissing && !block.replaceAll
+        && block.sites.length <= 1 && (!i || entries[i - 1].newText === block.oldText)
+        && (!i || entries[i - 1].sites[0]?.newLine === block.sites[0]?.oldLine));
+      if (chain) {
+        const oldText = first.oldText, newText = last.newText;
+        return { oldText, newText, source: "native", net: true,
+          counts: countLineDiff(oldText, newText), payload: { ...payloadFrom(last), oldText, newText,
+            sites: [{ oldText, newText, oldLine: first.sites[0]?.oldLine, newLine: last.sites[0]?.newLine }] } };
+      }
+      return { oldText: first.oldText, newText: last.newText, source: "unknown", net: false,
+        counts: { added: 0, removed: 0, countsKnown: false }, payload: payloadFrom(last) };
+    };
+    const sessionDiff = scopeDiff(list, true)!;
+    const turnList = list.filter(block => block.turnId === currentTurnId);
+    const turnDiff = scopeDiff(turnList);
+    if (sessionDiff.net && sessionDiff.oldText === sessionDiff.newText
+      && (!turnDiff || (turnDiff.net && turnDiff.oldText === turnDiff.newText))) continue;
     files.push({
-      path,
-      added: sessionCounts.added,
-      removed: sessionCounts.removed,
-      turnAdded: turnCounts.added,
-      turnRemoved: turnCounts.removed,
-      completed,
-      turnCompleted,
-      diff: payloadFrom(last),
-      ...(turnLast ? { turnDiff: payloadFrom(turnLast) } : {}),
+      path, added: sessionDiff.counts.added, removed: sessionDiff.counts.removed,
+      turnAdded: turnDiff?.counts.added ?? 0, turnRemoved: turnDiff?.counts.removed ?? 0,
+      countsKnown: sessionDiff.counts.countsKnown !== false,
+      turnCountsKnown: turnDiff ? turnDiff.counts.countsKnown !== false : true,
+      netAvailable: sessionDiff.net, turnNetAvailable: turnDiff?.net ?? false,
+      baselineSource: sessionDiff.source,
+      completed: list.every(block => block.status === "completed"),
+      turnCompleted: turnList.length > 0 && turnList.every(block => block.status === "completed"),
+      diff: sessionDiff.payload, ...(turnDiff ? { turnDiff: turnDiff.payload } : {}),
     });
   }
   let added = 0;
@@ -375,7 +358,7 @@ export function aggregateReviewChanges(
     added += f.added;
     removed += f.removed;
   }
-  return { files, fileCount: files.length, added, removed };
+  return { files, fileCount: files.length, added, removed, ...(files.some(file => file.countsKnown === false) ? { countsKnown: false } : {}) };
 }
 
 export function reviewCenterSnapshot(
@@ -394,8 +377,8 @@ export function filesForScope(
   files: readonly ReviewCenterFileView[],
   scope: ReviewScope,
 ): ReviewCenterFileView[] {
-  if (scope === "session") return files.filter((f) => f.added !== 0 || f.removed !== 0);
-  return files.filter((f) => f.turnAdded !== 0 || f.turnRemoved !== 0);
+  if (scope === "session") return files.filter((f) => f.countsKnown === false || f.added !== 0 || f.removed !== 0);
+  return files.filter((f) => (f.turnCountsKnown === false && !!f.turnDiff) || f.turnAdded !== 0 || f.turnRemoved !== 0);
 }
 
 export function headlineForScope(
@@ -413,7 +396,8 @@ export function headlineForScope(
     fileCount: rows.length,
     added,
     removed,
-    text: formatReviewHeadline(rows.length, added, removed),
+    text: rows.some(file => (scope === "turn" ? file.turnCountsKnown : file.countsKnown) === false)
+      ? `${rows.length} files · changes unavailable` : formatReviewHeadline(rows.length, added, removed),
   };
 }
 

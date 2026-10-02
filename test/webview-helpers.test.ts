@@ -1592,13 +1592,13 @@ describe("computeLineDiff", () => {
     expect(r.removed).toBe(0);
   });
 
-  it("falls back to a flat replace (flagged truncated) past the size cap", () => {
+  it("reports unknown counts when the work budget is exceeded", () => {
     const big = Array.from({ length: 40 }, (_, i) => "l" + i).join("\n");
     const big2 = Array.from({ length: 40 }, (_, i) => "m" + i).join("\n");
     const r = computeLineDiff(big, big2, { maxProduct: 100 }); // 40*40=1600 > 100
     expect(r.truncated).toBe(true);
-    expect(r.removed).toBe(40);
-    expect(r.added).toBe(40);
+    expect(r.countsKnown).toBe(false);
+    expect(r.lines).toEqual([]);
   });
 });
 

@@ -6530,3 +6530,13 @@ select option {
 .composer-model-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; font-weight: 700; }
 .composer-model-effort { flex: none; color: var(--vscode-descriptionForeground); }
 .toolbar-left { min-width: 0; flex-wrap: wrap; }
+
+.tool-error-summary { flex-basis: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; max-width: 100%; font-size: 11px; color: var(--vscode-errorForeground); }
+.tool-error { max-height: 240px; overflow: auto; user-select: text; }
+.session-error-details { min-width: 0; }
+.session-error-details > summary { cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+#context-popover { width: min(350px, calc(100vw - 16px)); }
+#context-popover .popover-info { align-items: flex-start; }
+#context-popover .popover-info > :first-child { flex: 1 1 50%; }
+#context-popover .popover-info > :last-child { flex: 1 1 50%; overflow-wrap: normal; }

@@ -30,6 +30,7 @@ import {
   makeQuestionCancelledResponse,
   makeQuestionResponse,
   makeRequest,
+  adapterContextOccupancy,
   parseAcpLine,
   parseSessionInfoRpcResult,
   resolveModelId,
@@ -1115,6 +1116,14 @@ export class AcpClient extends EventEmitter {
     if (this.provider === "grok" && promptGeneration === this.contextGeneration && contextTokens(meta.totalTokens)) {
       this.observeContext({ source: "session", limits: {}, limitQuality: "unknown", usageQuality: "verified",
         usageSemantics: "current-context", used: meta.totalTokens });
+    }
+    if (this.provider === "codex" && promptGeneration === this.contextGeneration) {
+      const inputUsed = contextUsed(adapterContextOccupancy(meta.usage));
+      if (inputUsed !== undefined) {
+        this.observeContext({ source: "session", limits: {}, limitQuality: "unknown", usageQuality: "verified",
+          usageSemantics: "last-request", used: inputUsed });
+        this.emit("contextUsage", this.lastContextUsed, this.lastContextWindow);
+      }
     }
     this.emit("promptComplete", meta);
     return meta;

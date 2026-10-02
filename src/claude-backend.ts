@@ -145,11 +145,9 @@ export function normalizeClaudePromptResult(result: any): any {
  * (docs/UNIVERSAL_DIFF_SUPPORT_PLAN.md § 4.2). Claude's Edit tool reports
  * `old_string`/`new_string`/`file_path`(/`replace_all`); its Write tool
  * reports `file_path`/`content` with no prior text at all. The Write side
- * therefore always synthesizes `oldText: ""` — a real disk read would need an
- * async host hook this synchronous normalizer cannot make, so an overwrite
- * renders as a pure add here and gets corrected only if Claude's own
- * completed update later carries a real diff (idempotency rule: a native
- * diff for the path always wins).
+ * therefore marks its empty before-side as missing. The host corrects it
+ * from a trustworthy baseline; a useful native diff for the path wins.
+
  */
 function synthesizeClaudeDiff(rawInput: any): AcpDiffBlock | undefined {
   if (!rawInput || typeof rawInput !== "object") return undefined;
@@ -166,7 +164,9 @@ function synthesizeClaudeDiff(rawInput: any): AcpDiffBlock | undefined {
   const path = rawInput.file_path ?? rawInput.path;
   const content = rawInput.content ?? rawInput.contents;
   if (typeof path === "string" && path && typeof content === "string") {
-    return synthesizeEditDiff({ path, oldText: "", newText: content });
+    const diff = synthesizeEditDiff({ path, oldText: "", newText: content });
+    if (diff) diff._meta = { ...diff._meta, oldTextMissing: true };
+    return diff;
   }
   return undefined;
 }

@@ -101,7 +101,7 @@ export function normalizeCodexPromptResult(result: any): any {
       ...(result?._meta ?? {}),
       contextUsageSemantics: "last-request",
       // Last request input partitions; this is not a current session snapshot.
-      totalTokens: adapterContextOccupancy(normalizedUsage) ?? finiteNumber(usage.totalTokens),
+      totalTokens: adapterContextOccupancy(normalizedUsage),
       inputTokens: finiteNumber(usage.inputTokens),
       outputTokens: finiteNumber(usage.outputTokens),
       cachedReadTokens: finiteNumber(usage.cachedReadTokens),
@@ -116,7 +116,7 @@ function normalizeDiffContent(content: unknown): unknown {
   if (!Array.isArray(content)) return content;
   return content.map((block) => {
     if (!block || typeof block !== "object" || (block as any).type !== "diff") return block;
-    return (block as any).oldText === null ? { ...(block as any), oldText: "" } : block;
+    return (block as any).oldText === null ? { ...(block as any), oldText: "", _meta: { ...(block as any)._meta, oldTextMissing: (block as any)._meta?.kind !== "add" } } : block;
   });
 }
 

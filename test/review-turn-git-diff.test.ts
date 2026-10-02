@@ -66,6 +66,13 @@ describe("Review Center turn diff against a git baseline", () => {
     expect(opts).toMatchObject({ preview: false });
   });
 
+  it("awaits capture before the caller can begin the first edit", async () => {
+    const root = repo();
+    const { sidebar, session } = harness(root);
+    await sidebar.startTurnGitBaseline(session, {});
+    expect(sidebar.turnGitBaselines.get(session).pending).toBe(false);
+    expect(sidebar.turnGitBaselines.get(session).baseline).toBeDefined();
+  });
   it("treats a file the turn created as empty before", async () => {
     const root = repo();
     const { sidebar, session, contents } = harness(root);

@@ -1,0 +1,9 @@
+# Net review and compact failure validation — 2026-10-02
+
+The full-replacement counts were caused by the host and browser LCS product ceiling: files above 4,000,000 line pairs were counted as entirely removed/added. The shared Myers implementation removes common prefixes/suffixes and independently bounds search work and traceback memory. Budget exhaustion is explicit unavailable data.
+
+Review uses turn/session baselines and observed results; native tool diffs remain separate. Git capture is awaited before sending. Dirty tracked files and captured untracked files retain their pre-turn content. Skipped untracked content is unknown. Scope snapshots persist separately from pruned rewind checkpoints and are restored by matching tool/turn/path identities. A historical comparison without a complete baseline or exact region chain remains unknown.
+
+Provider evidence comes from the installed packages, not new live captures: Codex ACP 1.11.0 emits add/update/delete diffs but drops turn/diff/updated and rename-source metadata; Claude ACP 0.76.0 emits region edits and null-before Write bodies; Muse SDK 1.3.0 exposes stored patch references without defining their document body in its types. Grok and Antigravity retain their established native and synthesis pipelines. No paid model calls or upstream adapter changes were made.
+
+Regression coverage includes sparse changes in 6,000/11,000-line files, independent LCS cross-checks, edit chains and complete undo, missing Write content, update ordering, checkpoint correction, replay persistence, conflicting foreign writes, awaited Git capture, compact multiline errors and Codex input/cache accounting. Electron screenshots cover the revised error, review and context surfaces in Dark, Light and High Contrast. Verification logs and screenshots live in ignored .verification/ and .screens/ directories.

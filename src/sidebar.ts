@@ -5964,7 +5964,7 @@ ${detail}`,
   private removeCheckpoints(sessionId: string): void {
     return this.delegateSidebarMethod("removeCheckpoints", () => this.reviewHost.removeCheckpoints(sessionId));
   }
-  private startTurnGitBaseline(session: Session, turn: object): void {
+  private startTurnGitBaseline(session: Session, turn: object): Promise<void> {
     return this.delegateSidebarMethod("startTurnGitBaseline", () => this.reviewHost.startTurnGitBaseline(session, turn));
   }
   private async openTurnGitDiff(session: Session, relPath: string): Promise<boolean> {

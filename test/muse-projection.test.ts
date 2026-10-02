@@ -3,6 +3,13 @@ import { Projection } from "../adapters/muse/projection.mts";
 import { commandOutputForToolCall } from "../src/acp-dispatch";
 
 describe("Muse raw notification projection", () => {
+  it("identifies file writes so the host can capture and review their baseline", () => {
+    const updates: any[] = [];
+    const projection = new Projection(u => updates.push(u), () => {});
+    projection.accept("item/started", { item: { itemId: "write", kind: "toolCall", tool: "write_file", revision: 1,
+      status: "inProgress", args: JSON.stringify({ path: "a.ts", content: "new" }) } });
+    expect(updates[0]).toMatchObject({ kind: "edit", rawInput: { path: "a.ts", content: "new" } });
+  });
   it("appends live text and authoritative suffixes without duplicating or rewriting a prefix", () => {
     const updates: any[] = [], logs: string[] = [];
     const projection = new Projection(u => updates.push(u), m => logs.push(m));

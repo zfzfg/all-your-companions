@@ -710,3 +710,12 @@ cancel-and-replace behavior is advertised as mid-turn steering. The optional
 kernel probe sends initialize and, on request, session/new and cancel only;
 production remains on the CLI. Evidence and limitations:
 [Antigravity stability](../../research/agy-acp-stability.md).
+
+
+## Native diff and Codex usage boundaries (2026-10-02)
+
+The host prefers provider ACP diff blocks and supplements missing before-content with captured scope baselines. Grok can send positioned region diffs; Codex ACP 1.11.0 emits whole-file add/update/delete blocks; Claude ACP 0.76.0 emits Edit regions and Write blocks with `oldText: null`. Null alone does not establish creation. The installed Codex adapter explicitly ignores `turn/diff/updated` and does not preserve the source path of a moved file in its projected update diff. No dependency files are patched; richer turn/rename presentation needs a supported adapter contract.
+
+Muse SDK 1.3.0 exposes `patchRef`, `patchSummary`, and the read-only `item/readOutput` path. Its TypeScript contract describes reference fetching and summary counts, but not the stored patch body's per-file schema. The current projection classifies identifiable file writes for the host baseline fallback; it does not guess a patch schema or treat summary totals as full diffs. Antigravity retains its native/transcript/edit-parameter synthesis routes.
+
+Codex `usage_update.used` is the last request's totalTokens, not an input-only context count. The prompt response supplies disjoint input/cache partitions; the host counts these once and excludes output/reasoning from the ring numerator. That verified measurement uses catalog/native capacity and remains labelled last-prompt input. Model/session/compaction invalidation and uncertain raw ACP totals retain their provenance. No paid provider probe was run for this change.

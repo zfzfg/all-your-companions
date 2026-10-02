@@ -124,7 +124,7 @@ describe("ingestReviewToolCall", () => {
 });
 
 describe("aggregateReviewChanges", () => {
-  it("dedupes by path and sums the inline site counts", () => {
+  it("dedupes by path and counts an exact edit chain once", () => {
     const a1 = block({
       path: "src/a.ts",
       oldText: "foo",
@@ -149,12 +149,8 @@ describe("aggregateReviewChanges", () => {
     const summary = aggregateReviewChanges([a1, a2, other], { currentTurnId: "1" });
     expect(summary.fileCount).toBe(2);
     const rowA = summary.files.find((f) => f.path === "src/a.ts")!;
-    const inlineA = [
-      computeLineDiff("foo", "bar"),
-      computeLineDiff("bar", "baz"),
-    ];
-    expect(rowA.added).toBe(inlineA[0].added + inlineA[1].added);
-    expect(rowA.removed).toBe(inlineA[0].removed + inlineA[1].removed);
+    expect(rowA.added).toBe(countLineDiff("foo", "baz").added);
+    expect(rowA.removed).toBe(countLineDiff("foo", "baz").removed);
     expect(summary.added).toBe(rowA.added + summary.files.find((f) => f.path === "src/b.ts")!.added);
     expect(summary.removed).toBe(rowA.removed + summary.files.find((f) => f.path === "src/b.ts")!.removed);
   });
@@ -194,7 +190,7 @@ describe("aggregateReviewChanges", () => {
     const t2 = block({ path: "a.ts", oldText: "b", newText: "c", turnId: "2", toolCallId: "2" });
     const snap = reviewCenterSnapshot([t1, t2], "2");
     expect(snap).toHaveLength(1);
-    expect(snap[0].added).toBe(countLineDiff("a", "b").added + countLineDiff("b", "c").added);
+    expect(snap[0].added).toBe(countLineDiff("a", "c").added);
     expect(snap[0].turnAdded).toBe(countLineDiff("b", "c").added);
     expect(filesForScope(snap, "turn")).toHaveLength(1);
     expect(filesForScope(reviewCenterSnapshot([t1, t2], "3"), "turn")).toHaveLength(0);

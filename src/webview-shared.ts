@@ -43,3 +43,5 @@ export function queuedSendsChips(entries: readonly QueueView[] = []): ContextChi
   return chips;
 }
 export { parseSubagentAttachments } from "./shared/subagent-chip";
+
+export { computeLineDiff } from "./shared/line-diff";

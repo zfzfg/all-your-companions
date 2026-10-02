@@ -24,6 +24,13 @@ describe("the common ACP send guard", () => {
       expect(client.contextBudget).toMatchObject({ used, usageSource: "session", usageSemantics: "last-request", usageStale: false });
     }
   });
+  it("publishes prompt input including cache once, without output and reasoning", async () => {
+    const { client, request } = clientWithCounter(async () => ({ tokens: 1, quality: "estimated" }));
+    request.mockResolvedValue({ stopReason: "end_turn", usage: { inputTokens: 120, cachedReadTokens: 80,
+      outputTokens: 40, thoughtTokens: 20, totalTokens: 240 } } as any);
+    await client.prompt("hello");
+    expect(client.contextBudget).toMatchObject({ used: 200, usageQuality: "verified", usageSemantics: "last-request" });
+  });
   it("blocks before a prompt RPC when the complete request is verifiably too large", async () => {
     const { client, request } = clientWithCounter(async () => ({ tokens: 258401, quality: "verified", complete: true }));
     await expect(client.prompt("oversized")).rejects.toBeInstanceOf(ContextBudgetExceededError);

@@ -7,7 +7,7 @@ import * as path from "node:path";
 import { ExitPlanRequest } from "./acp";
 import { parsePlanEntries } from "./plan-entries";
 import { completedBlocksForPath, dropReviewPath, ingestReviewToolCall, normalizeReviewPath, planDiscardAll, planFileRevert, reviewCenterSnapshot } from "./review-center";
-import type { ReviewScope } from "./review-center";
+import type { ReviewDiffBlock, ReviewScope } from "./review-center";
 import { extractPermissionFacts, normalizePermissionKind } from "./permission-rules";
 import { providerDisplayName } from "./provider-ui";
 import { CHECKPOINT_MAX_FILE_BYTES, checkpointId, checkpointRelPath, mergeCheckpoints, planRestoreDetailed, previewUserMessage, restoreActions, sha256Bytes, snapshotFromBytes, survivingAfterClientRewind } from "./checkpoints";
@@ -50,6 +50,135 @@ export interface ReviewHostDeps {
 
 export class ReviewHost {
   constructor(private readonly deps: ReviewHostDeps) {}
+  private readonly sessionGitBaseline = new WeakMap<Session, { root: string; baseline: GitTurnBaseline }>();
+  private readonly savedReview = new WeakMap<Session, { sid?: string; blocks: ReviewDiffBlock[] }>();
+
+  private reviewPath(session: Session, filePath: string): string {
+    const abs = this.resolveDiffFilePath(session, filePath);
+    const rel = abs ? checkpointRelPath(abs, this.sessionCwd(session)) : undefined;
+    const normalized = normalizeReviewPath(rel ?? filePath);
+    return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+  }
+
+  private storedReview(session: Session): ReviewDiffBlock[] {
+    const sid = session.activeSessionId ?? session.client?.sessionId;
+    const cached = this.savedReview.get(session);
+    if (cached && cached.sid === sid) return cached.blocks;
+    const blocks = ((sid ? this.checkpointStore?.loadReviewState?.(sid) ?? [] : []) as ReviewDiffBlock[])
+      .filter(b => b && typeof b === "object" && typeof b.path === "string" && typeof b.toolCallId === "string"
+        && typeof b.reviewBefore?.text === "string" && typeof b.reviewAfter?.text === "string");
+    this.savedReview.set(session, { sid, blocks });
+    return blocks;
+  }
+
+  private persistReview(session: Session): void {
+    if (session.replaying) return;
+    const sid = session.activeSessionId ?? session.client?.sessionId;
+    if (sid) this.checkpointStore?.saveReviewState?.(sid, session.reviewBlocks);
+  }
+
+  private reviewCheckpoint(session: Session, scope: ReviewScope, sid: string): Checkpoint | undefined {
+    const blocks = session.reviewBlocks.filter(b => scope === "session" || b.turnId === String(session.userMessageCount));
+    if (!blocks.length || blocks.some(b => b.status !== "completed")) return;
+    const files: Checkpoint["files"] = [];
+    for (const filePath of new Set(blocks.map(b => b.path))) {
+      const entries = blocks.filter(b => b.path === filePath), first = entries[0], last = entries[entries.length - 1];
+      const before = scope === "session" ? first.reviewSessionBefore ?? first.reviewBefore : first.reviewBefore;
+      const abs = this.resolveDiffFilePath(session, filePath);
+      const rel = abs ? checkpointRelPath(abs, this.sessionCwd(session)) : undefined;
+      if (!before || !last.reviewAfter || !rel || (first.reviewRoot && !pathsEqual(first.reviewRoot, this.sessionCwd(session)))) return;
+      const snapshot = snapshotFromBytes(rel, before.existed ? Buffer.from(before.text, "utf8") : null, { maxBytes: MAX_DIFF_EXPAND_BYTES });
+      if (snapshot.kind !== "file") return;
+      if (last.reviewAfter.existed) snapshot.file.afterSha256 = sha256Bytes(Buffer.from(last.reviewAfter.text, "utf8"));
+      files.push(snapshot.file);
+    }
+    return { id: checkpointId(sid, String(session.userMessageCount)), sessionId: sid, turnId: String(session.userMessageCount),
+      createdAt: Date.now(), userMessagePreview: "", files, skipped: [], bytes: files.reduce((sum, file) => sum + Buffer.byteLength(file.blob, "utf8"), 0) };
+  }
+
+  private async hydrateReview(session: Session, block: ReviewDiffBlock, originalContent: unknown = []): Promise<void> {
+    const abs = this.resolveDiffFilePath(session, block.path);
+    if (!abs) return;
+    const root = this.sessionCwd(session);
+    const rel = checkpointRelPath(abs, root);
+    if (!rel) return;
+    const sid = session.activeSessionId ?? session.client?.sessionId;
+    const stored = this.storedReview(session).find(b => b.toolCallId === block.toolCallId && b.turnId === block.turnId
+      && normalizeReviewPath(b.path) === normalizeReviewPath(block.path));
+    if (session.replaying) {
+      if (stored?.reviewBefore && stored.reviewAfter && stored.reviewRoot && pathsEqual(stored.reviewRoot, root)) {
+        block.reviewRoot = root; block.reviewBefore = stored.reviewBefore; block.reviewSessionBefore = stored.reviewSessionBefore; block.reviewAfter = stored.reviewAfter;
+      }
+      return;
+    }
+    // Capture the after side synchronously, before another tool can overwrite it.
+    let after: string | undefined, existed = true;
+    try { after = this.readFileForDiff(session, abs); }
+    catch { return; }
+    if (after === undefined) {
+      if (fs.existsSync(abs)) return;
+      after = ""; existed = false;
+    }
+    if (after.includes("\0")) return;
+    const checkpoint = session.checkpointTurn?.turnId === block.turnId ? session.checkpointTurn
+      : sid ? this.checkpointStore?.load?.(sid, block.turnId) : undefined;
+    const file = checkpoint?.files.find(f => normalizeReviewPath(f.relPath) === normalizeReviewPath(rel));
+    if (file && !(file.blob === after && block.oldText !== block.newText)) block.reviewBefore = { text: file.blob, existed: file.existedBefore, source: "checkpoint" };
+    const entry = this.turnGitBaselines?.get(session);
+    if (entry?.baseline && !entry.pending && entry.turnId === block.turnId) {
+      const before = await readGitTurnFileBefore(entry.root, rel, entry.baseline);
+      if (before.ok && !before.text.includes("\0")) block.reviewBefore = { text: before.text, existed: before.existed !== false, source: "git" };
+    }
+    if (!block.reviewBefore && block.fileOperation && !block.oldText.includes("\0")) {
+      const first = session.reviewBlocks.find(b => b.turnId === block.turnId
+        && normalizeReviewPath(b.path) === normalizeReviewPath(block.path) && b.reviewBefore);
+      block.reviewBefore = first?.reviewBefore ?? { text: block.oldText, existed: block.fileOperation !== "add", source: "native" };
+    }
+    if (!block.reviewBefore) {
+      block.reviewBefore = session.reviewBlocks.find(b => b !== block && b.turnId === block.turnId
+        && normalizeReviewPath(b.path) === normalizeReviewPath(block.path) && b.reviewBefore)?.reviewBefore;
+    }
+    // Outside Git, reverse a completed, unambiguous edit against its observed result.
+    if (!block.reviewBefore && !block.oldTextMissing) {
+      const turnBlocks = session.reviewBlocks.filter(b => b.turnId === block.turnId
+        && normalizeReviewPath(b.path) === normalizeReviewPath(block.path) && b.status === "completed");
+      const positioned = turnBlocks.every(b => (b.sites.length ? b.sites : [{ oldText: b.oldText, newText: b.newText }])
+        .every(site => (typeof site.newLine === "number" && site.newLine >= 1)
+          || (site.newText !== "" && after!.indexOf(site.newText) >= 0 && after!.indexOf(site.newText) === after!.lastIndexOf(site.newText)
+            && (after!.indexOf(site.newText) === 0 || after![after!.indexOf(site.newText) - 1] === "\n")
+            && (site.newText.endsWith("\n") || after!.indexOf(site.newText) + site.newText.length === after!.length
+              || /[\r\n]/.test(after![after!.indexOf(site.newText) + site.newText.length])))));
+      const reverse = positioned ? planFileRevert(turnBlocks, after) : { action: "conflict" as const };
+      if (reverse.action === "write") block.reviewBefore = { text: reverse.text, existed: true, source: "native" };
+      else if (reverse.action === "delete") block.reviewBefore = { text: "", existed: false, source: "native" };
+    }
+    const sessionBaseline = this.sessionGitBaseline.get(session);
+    if (sessionBaseline && pathsEqual(root, sessionBaseline.root)) {
+      const before = await readGitTurnFileBefore(root, rel, sessionBaseline.baseline);
+      if (before.ok && !before.text.includes("\0")) block.reviewSessionBefore = { text: before.text, existed: before.existed !== false, source: "git" };
+    }
+    if (!session.reviewBlocks.includes(block)) return;
+    block.reviewRoot = root;
+    block.reviewAfter = { text: after, existed };
+    if (block.oldTextMissing && block.reviewBefore) {
+      const previous = session.reviewBlocks.slice(0, session.reviewBlocks.indexOf(block)).reverse()
+        .find(b => normalizeReviewPath(b.path) === normalizeReviewPath(block.path) && b.reviewAfter);
+      block.oldText = previous?.reviewAfter?.text ?? block.reviewBefore.text;
+      block.newText = after;
+      block.sites = [];
+      block.oldTextMissing = false;
+      this.emit(session, { type: "toolCallUpdate", call: { toolCallId: block.toolCallId, status: "completed",
+        content: [
+          ...(Array.isArray(originalContent) ? originalContent.filter(b => b?.type !== "diff") : []),
+          ...session.reviewBlocks.filter(b => b.toolCallId === block.toolCallId).map(b => ({ type: "diff", path: b.nativePath ?? b.path,
+            oldText: b.oldText, newText: b.newText, _meta: { oldTextMissing: b.oldTextMissing,
+              details: b.sites.map(site => ({ old_string: site.oldText, new_string: site.newText, old_line: site.oldLine, new_line: site.newLine })) } })),
+        ] } });
+    }
+    this.persistReview(session);
+    this.emitReviewCenter(session);
+  }
+
 
   private get diffSeq() { return this.deps.diffSeq; }
   private set diffSeq(value) { this.deps.diffSeq = value; }
@@ -262,13 +391,31 @@ export class ReviewHost {
    */
   noteReviewToolCall(session: Session, call: unknown): void {
     const turnId = String(session.userMessageCount || 0);
-    const next = ingestReviewToolCall(session.reviewBlocks, call, turnId);
+    let tool = call as { toolCallId?: string; status?: string; kind?: string; content?: unknown; rawInput?: unknown };
+    if (Array.isArray(tool?.content)) {
+      tool = { ...tool, content: tool.content.map(b => b?.type === "diff" && typeof b.path === "string"
+        ? { ...b, path: this.reviewPath(session, b.path), _meta: { ...b._meta, reviewOriginalPath: b.path } } : b) };
+    }
+    let next = ingestReviewToolCall(session.reviewBlocks, tool, turnId);
+    if (!session.replaying && tool?.status === "completed" && normalizePermissionKind(tool.kind) === "edit"
+      && !next.some(block => block.toolCallId === tool.toolCallId)) {
+      const content = extractPermissionFacts(tool).paths.flatMap(filePath => {
+        const text = this.readFileForDiff(session, filePath);
+        return text === undefined ? [] : [{ type: "diff", path: this.reviewPath(session, filePath), oldText: null, newText: text, _meta: { reviewOriginalPath: filePath } }];
+      });
+      if (content.length) next = ingestReviewToolCall(next, { ...tool, content }, turnId);
+    }
     if (next === session.reviewBlocks) return;
     if (next.length === session.reviewBlocks.length
       && next.every((b, i) => b === session.reviewBlocks[i])) return;
     const had = session.reviewBlocks.length > 0;
     session.reviewBlocks = next;
     if (!had && !next.length) return;
+    for (const block of next) {
+      if (block.status === "completed" && !block.reviewAfter) {
+        void this.hydrateReview(session, block, tool?.content).catch(error => this.host.appendLine(`[review] ${(error as Error).message}`));
+      }
+    }
     if (!session.replaying) this.emitReviewCenter(session);
   }
 
@@ -286,13 +433,13 @@ export class ReviewHost {
     filePath: string,
     opts?: { turnId?: string; toolCallId?: string },
   ): void {
-    const next = dropReviewPath(session.reviewBlocks, filePath, opts);
+    const next = dropReviewPath(session.reviewBlocks, this.reviewPath(session, filePath), opts);
     if (next.length === session.reviewBlocks.length) return;
     session.reviewBlocks = next;
     this.emitReviewCenter(session);
   }
 
-  ackReviewReverted(session: Session, blocks: { toolCallId: string; path: string }[]): void {
+  ackReviewReverted(session: Session, blocks: { toolCallId: string; path: string; nativePath?: string }[]): void {
     const seen = new Set<string>();
     for (const b of blocks) {
       const key = `${b.toolCallId}|${b.path}`;
@@ -301,7 +448,7 @@ export class ReviewHost {
       this.emit(session, {
         type: "toolEditReverted",
         toolCallId: b.toolCallId,
-        path: b.path,
+        path: b.nativePath ?? b.path,
         ok: true,
       });
     }
@@ -314,7 +461,7 @@ export class ReviewHost {
    */
   async reviewRevertFile(session: Session, filePath: string, scope: ReviewScope): Promise<void> {
     const currentTurnId = String(session.userMessageCount);
-    const blocks = completedBlocksForPath(session.reviewBlocks, filePath, scope, currentTurnId);
+    const blocks = completedBlocksForPath(session.reviewBlocks, this.reviewPath(session, filePath), scope, currentTurnId);
     const fail = (reason: string) => {
       const first = blocks[0];
       if (first) {
@@ -344,7 +491,19 @@ export class ReviewHost {
     } catch {
       currentText = undefined;
     }
-    const plan = planFileRevert(blocks, currentText);
+    const first = blocks[0], last = blocks[blocks.length - 1];
+    const baseline = scope === "session" ? first.reviewSessionBefore ?? first.reviewBefore : first.reviewBefore;
+    const netPlan = baseline && last.reviewAfter
+      ? currentText === (last.reviewAfter.existed ? last.reviewAfter.text : undefined)
+        ? baseline.existed ? { action: "write" as const, text: baseline.text }
+          : { action: "delete" as const }
+        : { action: "conflict" as const }
+      : undefined;
+    if (!netPlan && blocks.some(block => block.oldTextMissing)) {
+      fail("The original file content is unavailable; this file can't be safely discarded.");
+      return;
+    }
+    const plan = netPlan ?? planFileRevert(blocks, currentText);
     switch (plan.action) {
       case "unreadable":
         fail("File could not be read.");
@@ -386,6 +545,11 @@ export class ReviewHost {
       pathForDisk,
       scope === "turn" ? { turnId: currentTurnId } : undefined,
     );
+    if (scope === "turn" && baseline) {
+      const remaining = [...session.reviewBlocks].reverse().find(b => b.path === pathForDisk);
+      if (remaining) remaining.reviewAfter = { text: baseline.text, existed: baseline.existed };
+    }
+    this.persistReview(session);
     this.emitReviewCenter(session);
     this.ackReviewReverted(session, blocks);
   }
@@ -412,7 +576,9 @@ export class ReviewHost {
     }
 
     let merged: Checkpoint;
-    if (plan.mode === "turn") {
+    const netCheckpoint = this.reviewCheckpoint(session, scope, sid);
+    if (netCheckpoint) merged = netCheckpoint;
+    else if (plan.mode === "turn") {
       const cp = this.checkpointStore.load(sid, plan.turnId);
       if (!cp || cp.disabled || (!cp.files.length && !cp.skipped.length)) {
         this.emit(session, {
@@ -429,6 +595,11 @@ export class ReviewHost {
       const later = this.checkpointStore.loadFrom(sid, 0);
       if (!later.length) {
         this.emit(session, { type: "hostNotice", level: "warning", text: "Can't discard all — there is no checkpoint for this conversation." });
+        return;
+      }
+      const oldest = Math.min(...later.map(cp => Number(cp.turnId)));
+      if (session.reviewBlocks.some(b => Number(b.turnId) < oldest)) {
+        this.emit(session, { type: "hostNotice", level: "warning", text: "Can't discard all — the original session baseline is unavailable." });
         return;
       }
       merged = mergeCheckpoints(later);
@@ -535,6 +706,12 @@ export class ReviewHost {
           : `Discarded.${skip}`,
       });
     }
+    for (const rel of restored) {
+      const remaining = [...session.reviewBlocks].reverse().find(b => normalizeReviewPath(b.path) === normalizeReviewPath(rel));
+      const before = merged.files.find(file => normalizeReviewPath(file.relPath) === normalizeReviewPath(rel));
+      if (remaining && before) remaining.reviewAfter = { text: before.blob, existed: before.existedBefore };
+    }
+    this.persistReview(session);
     this.emitReviewCenter(session);
     const restoredSet = new Set(restored.map((rel) => normalizeReviewPath(rel)));
     const ackBlocks = failed.length
@@ -644,7 +821,7 @@ export class ReviewHost {
     }
   }
 
-  startTurnGitBaseline(session: Session, turn: object): void {
+  async startTurnGitBaseline(session: Session, turn: object): Promise<void> {
     // Prototype-built test sidebars have no fields; a real one always does.
     if (session.replaying || !this.turnGitBaselines || !this.gitRunGate) return;
     const root = this.sessionCwd(session);
@@ -655,9 +832,12 @@ export class ReviewHost {
     this.turnGitBaselines.set(session, entry);
     // Skip a busy repo rather than queue a snapshot of a later working tree.
     if (!this.gitRunGate.tryAcquire(root)) { entry.pending = false; return; }
-    void captureGitTurnBaseline(root).then((captured) => {
+    await captureGitTurnBaseline(root).then((captured) => {
       if (entry.pending && entry.turn === turn && this.turnGitBaselines.get(session) === entry) {
         entry.baseline = captured;
+        if (captured && session.userMessageCount === 1 && !this.sessionGitBaseline.has(session)) {
+          this.sessionGitBaseline.set(session, { root, baseline: captured });
+        }
       }
     }).catch(() => {
       // Best effort: no baseline keeps the Review Center's tool-call diff.

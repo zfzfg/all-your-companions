@@ -97,7 +97,7 @@ export function mergeContextObservation(previous: ContextObservation | undefined
   const next = { ...incoming, limits: validContextLimits(incoming.limits), used: contextUsed(incoming.used) };
   const codexRequest = next.provider === "codex" && next.usageSemantics === "last-request"
     && (next.usageSource ?? next.source) === "session";
-  if (codexRequest) next.usageQuality = "unknown";
+
   if (next.usageSemantics && next.usageSemantics !== "current-context" && next.usageSemantics !== "estimated-context" && !codexRequest) next.used = undefined;
   if (next.source === "documented") next.limits = {};
   if (!previous || previous.generation !== next.generation || previous.access !== next.access

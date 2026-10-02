@@ -113,6 +113,33 @@ export const CHAT_SCENARIOS = {
     await send({ type: "sessionType", sessionId: "s", sessionType: "agent", locked: true });
     await send({ type: "sessionDelegation", value: "read-only-auto" });
   } },
+  "review-fixes-errors": { run: async ({ send }) => {
+    await send({ type: "toolCall", call: { toolCallId: "failure", kind: "execute", title: "Run test", rawInput: { command: "test" } } });
+    await send({ type: "toolCallUpdate", call: { toolCallId: "failure", status: "failed", rawOutput: { message: "Command failed\n" + "source code line\n".repeat(3000) } } });
+    await send({ type: "messageChunk", text: "The command failed. Expand its details to inspect the output." });
+    await send({ type: "error", text: "Connection failed\n" + "Session diagnostic\n".repeat(2000) });
+  } },
+  "review-fixes-errors-expanded": { run: async ({ send, page }) => {
+    await CHAT_SCENARIOS["review-fixes-errors"].run({ send, page });
+    await page.click(".tool-flat.has-details");
+    await page.click(".session-error-details > summary");
+  } },
+  "review-fixes-net": { run: async ({ send }) => {
+    await send({ type: "reviewCenter", currentTurnId: "1", files: [{ path: "src/acp.ts", added: 2, removed: 2, turnAdded: 2, turnRemoved: 2,
+      countsKnown: true, turnCountsKnown: true, completed: true, turnCompleted: true,
+      diff: { toolCallId: "edit", oldText: "before", newText: "after", sites: [], net: true },
+      turnDiff: { toolCallId: "edit", oldText: "before", newText: "after", sites: [], net: true } },
+      { path: "legacy.ts", added: 0, removed: 0, turnAdded: 0, turnRemoved: 0, countsKnown: false, turnCountsKnown: false,
+        completed: true, turnCompleted: true, diff: { toolCallId: "old", oldText: "", newText: "body", sites: [] },
+        turnDiff: { toolCallId: "old", oldText: "", newText: "body", sites: [] } }] });
+  } },
+  "review-fixes-codex-context": { run: async ({ send, page }) => {
+    await send({ type: "session", sessionId: "codex", provider: "codex", currentModelId: "gpt-test", models: [{ modelId: "gpt-test", name: "GPT Test", totalContextTokens: 400000 }] });
+    await send({ type: "contextUsage", context: { provider: "codex", sessionId: "codex", modelId: "gpt-test", access: "fixture", generation: 1,
+      source: "session", usageSource: "session", usageSemantics: "last-request", usageQuality: "verified", limitQuality: "verified",
+      used: 320000, observedAt: Date.now(), limits: { contextWindow: 400000 } } });
+    await page.click("#donut");
+  } },
   "context-capacity": { run: async ({ send }) => {
     await send({ type: "session", sessionId: "capacity", provider: "grok", currentModelId: "known",
       models: [{ modelId: "known", name: "Known model", totalContextTokens: 500000 }] });

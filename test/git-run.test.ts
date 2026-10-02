@@ -341,7 +341,7 @@ describe.runIf(gitAvailable)("readGitStatus against real git", () => {
     const index = fs.readFileSync(path.join(root, ".git", "index"));
     const refs = await git(root, "show-ref");
     const { io, calls } = observedGit();
-    expect(await readGitTurnFileBefore(root, name, baseline!, { io })).toEqual({ ok: true, text: oldText });
+    expect(await readGitTurnFileBefore(root, name, baseline!, { io })).toEqual({ ok: true, text: oldText, existed: kind !== "created" });
     expect(fs.readFileSync(file, "utf8")).toBe(newText);
     expect(fs.readFileSync(path.join(root, ".git", "index"))).toEqual(index);
     expect(await git(root, "show-ref")).toBe(refs);
@@ -357,8 +357,8 @@ describe.runIf(gitAvailable)("readGitStatus against real git", () => {
     await git(root, "add", "-A");
     await git(root, "commit", "-m", "literal filenames");
     const baseline = await captureGitTurnBaseline(root);
-    expect(await readGitTurnFileBefore(root, "a[1].txt", baseline!)).toEqual({ ok: true, text: "a[1].txt\n" });
-    expect(await readGitTurnFileBefore(root, "a[2].txt", baseline!)).toEqual({ ok: true, text: "" });
+    expect(await readGitTurnFileBefore(root, "a[1].txt", baseline!)).toEqual({ ok: true, text: "a[1].txt\n", existed: true });
+    expect(await readGitTurnFileBefore(root, "a[2].txt", baseline!)).toEqual({ ok: true, text: "", existed: false });
     expect(await readGitTurnFileBefore(root, "new.txt", { sha: "f".repeat(40) }))
       .toMatchObject({ ok: false, reason: expect.any(String) });
   });

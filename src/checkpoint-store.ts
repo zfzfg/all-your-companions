@@ -103,6 +103,27 @@ export class CheckpointStore {
     this.maxBytes = opts.maxBytes ?? CHECKPOINT_RETENTION_BYTES;
   }
 
+  /** Review baselines have independent retention: pruning turn checkpoints must not invent a session baseline. */
+  saveReviewState(sessionId: string, blocks: unknown[]): boolean {
+    try {
+      const data = JSON.stringify(blocks);
+      if (Buffer.byteLength(data, "utf8") > 20 * 1024 * 1024) return false;
+      const dir = this.sessionDir(sessionId);
+      this.fs.mkdirSync(dir, { recursive: true });
+      this.fs.writeFileSync(nodePath.join(dir, "review.json"), data);
+      return true;
+    } catch { return false; }
+  }
+
+  loadReviewState(sessionId: string): unknown[] {
+    try {
+      const file = nodePath.join(this.sessionDir(sessionId), "review.json");
+      if (this.fs.statSync(file).size > 20 * 1024 * 1024) return [];
+      const result = JSON.parse(Buffer.from(this.fs.readFileSync(file)).toString("utf8"));
+      return Array.isArray(result) ? result : [];
+    } catch { return []; }
+  }
+
   /** Every path the store touches must stay under its root; throws otherwise. */
   private inside(target: string): string {
     const root = nodePath.resolve(this.root) + nodePath.sep;

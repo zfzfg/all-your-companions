@@ -2177,7 +2177,7 @@
       : observation && typeof observation.used === "number" ? observation.used : undefined;
     const native = hasNativeContextRatio();
     const pct = native ? Math.round(used / state.contextWindow * 100) : undefined;
-    info("Context used", used === undefined ? "Unknown" : state.activeProvider === "codex" ? `${tok(used)} tokens (ACP)` : native
+    info("Context used", used === undefined ? "Unknown" : native
       ? `${tok(used)} / ${tok(state.contextWindow)} (${pct}%)${used > state.contextWindow ? " — exceeds reported capacity" : ""}`
       : `≈ ${tok(used)} tokens${observation.usageStale || observation.stale ? " (stale)" : " (estimated)"}`);
 
@@ -2194,7 +2194,7 @@
     };
     contextPopover.appendChild(act);
 
-    if (state.activeProvider !== "codex") {
+    {
       appendContextWindowChoices(contextPopover);
       const activeGrokWindow = state.activeProvider === "grok" && state.contextWindowSelection?.selectedSize;
       const limits = observation?.limits || {};
@@ -2220,10 +2220,11 @@
         info("Limit source", "Unknown");
       }
 
-    } else if (used !== undefined) info("Usage source", "ACP session · last request");
+    }
+    if (state.activeProvider === "codex" && used !== undefined) contextPopover.appendChild(h("div", { class: "popover-fineprint" }, observation?.usageQuality === "verified" ? "Last prompt input · cache counted once · output excluded" : "ACP last-request total · input breakdown pending"));
 
     // Where compaction happens and how often it did (K-03, K-06).
-    if (state.compactThresholdPct && state.activeProvider !== "codex") {
+    if (state.compactThresholdPct) {
       const t = state.compactThresholdPct;
       const approx = state.contextWindow > 0 ? ` (≈ ${toK(Math.round(state.contextWindow * t / 100))} tokens)` : "";
       const isEnv = state.thresholdSource === "env";
@@ -2335,7 +2336,7 @@
       breakdown.freeTokens != null ||
       (breakdown.categories && breakdown.categories.length)
     );
-    if (hasBreakdown && state.activeProvider !== "codex") {
+    if (hasBreakdown) {
       // Same split as the CLI TUI: legend rows fill the bar; informational
       // rows sit below it because their tokens are already in those addends
       // (tool definitions in Reasoning/overhead, usage categories in Messages).
@@ -3252,8 +3253,8 @@
     row.appendChild(nameBtn);
     const currentModel = ownModels.find(m => m.modelId === state.currentModelId);
     if (state.activeProvider === "codex" && currentModel?.totalContextTokens > 0) {
-      gearPopover.appendChild(h("div", { class: "popover-fineprint codex-context-estimate" },
-        `Estimated context limit (catalog): ${Number(currentModel.totalContextTokens).toLocaleString()} tokens`));
+      gearPopover.appendChild(h("div", { class: "popover-fineprint codex-context-capacity" },
+        `Context limit (catalog): ${Number(currentModel.totalContextTokens).toLocaleString()} tokens`));
     }
 
     const dotsEl = document.createElement("span");
@@ -8685,8 +8686,8 @@
    */
   function reviewRowsForScope() {
     const files = Array.isArray(state.reviewFiles) ? state.reviewFiles : [];
-    if (state.reviewScope === "session") return files;
-    return files.filter((f) => (f.turnAdded || 0) !== 0 || (f.turnRemoved || 0) !== 0);
+    if (state.reviewScope === "session") return files.filter(f => f.countsKnown === false || (f.added || 0) !== 0 || (f.removed || 0) !== 0);
+    return files.filter((f) => f.turnCountsKnown === false && !!f.turnDiff || (f.turnAdded || 0) !== 0 || (f.turnRemoved || 0) !== 0);
   }
 
   function reviewFileDiff(file) {
@@ -8712,16 +8713,17 @@
       added += state.reviewScope === "turn" ? (f.turnAdded || 0) : (f.added || 0);
       removed += state.reviewScope === "turn" ? (f.turnRemoved || 0) : (f.removed || 0);
     }
+    const countsKnown = rows.every(f => (state.reviewScope === "turn" ? f.turnCountsKnown : f.countsKnown) !== false);
     const collapsed = railCollapsed("reviewCenter");
     reviewCenter.hidden = false;
     paintRailFold(reviewCenter, reviewCenterToggle, reviewCenterBody, collapsed, "changes");
     if (reviewCenterCount) {
       reviewCenterCount.textContent = "";
       reviewCenterCount.appendChild(document.createTextNode(rows.length + (rows.length === 1 ? " file " : " files ")));
-      reviewCenterCount.appendChild(h("span", { class: "diff-stat-add" }, "+" + added));
+      reviewCenterCount.appendChild(h("span", { class: countsKnown ? "diff-stat-add" : "context-unavailable" }, countsKnown ? "+" + added : "Changes unavailable"));
       reviewCenterCount.appendChild(document.createTextNode(" "));
-      reviewCenterCount.appendChild(h("span", { class: "diff-stat-del" }, "−" + removed));
-      reviewCenterCount.setAttribute("aria-label", formatReviewHeadline
+      reviewCenterCount.appendChild(h("span", { class: "diff-stat-del" }, countsKnown ? "−" + removed : ""));
+      reviewCenterCount.setAttribute("aria-label", !countsKnown ? `${rows.length} files · changes unavailable` : formatReviewHeadline
         ? formatReviewHeadline(rows.length, added, removed)
         : (rows.length + " files · +" + added + " −" + removed));
     }
@@ -8765,6 +8767,10 @@
       const stat = h("span", { class: "cx-row-end review-file-stat" },
         h("span", { class: "diff-stat-add" }, "+" + a), " ",
         h("span", { class: "diff-stat-del" }, "−" + r));
+      if ((state.reviewScope === "turn" ? file.turnCountsKnown : file.countsKnown) === false) {
+        stat.textContent = "Changes unavailable";
+        stat.title = "Net comparison unavailable: no reliable baseline or diff budget exceeded";
+      }
       const actions = h("span", { class: "cx-row-actions review-file-actions" });
       const open = h("button", { class: "cx-btn cx-btn--ghost cx-btn--icon review-open", type: "button",
         title: "Open diff", "aria-label": "Open diff of " + path, html: ICON.eye });
@@ -8781,7 +8787,7 @@
         };
         // Turn scope asks the host for ONE diff of everything this turn did
         // to the file (git baseline); it falls back to this tool-call diff.
-        if (state.reviewScope === "turn" && !hostPreviewsInApp()) {
+        if (state.reviewScope === "turn" && !diff.net && !hostPreviewsInApp()) {
           vscode.postMessage({ ...openDiffMessage(payload), turnScope: true });
         } else {
           requestDiffPreview(payload);
@@ -11911,6 +11917,9 @@
     const lineCap = opts && opts.full ? 20000 : MAX_INLINE_DIFF_LINES;
     const wrap = document.createElement("div");
     wrap.className = "tool-diff-region";
+    if (hunks.some(h => h.result.countsKnown === false)) {
+      wrap.appendChild(h("div", { class: "diff-unavailable" }, "Diff preview unavailable — original content is missing or the calculation budget was exceeded."));
+    }
     let widest = 0;
     let rendered = 0;
     let total = 0;
@@ -12094,18 +12103,20 @@
     // (buildInlineDiffRegion), the counts never are.
     let added = 0;
     let removed = 0;
+    let countsKnown = true;
     const blocks = [];
     for (const diff of diffs) {
       const hunks = [];
       for (const site of diff.sites) {
-        const result = computeLineDiff(site.oldText, site.newText);
+        const result = diff.oldTextMissing ? { lines: [], added: 0, removed: 0, countsKnown: false } : computeLineDiff(site.oldText, site.newText);
+        countsKnown = countsKnown && result.countsKnown !== false;
         added += result.added;
         removed += result.removed;
         hunks.push({ site, result });
       }
       blocks.push({ diff, hunks });
     }
-    item._diffStat = { added, removed, path: diffs[0] && diffs[0].path };
+    item._diffStat = { added, removed, countsKnown, path: diffs[0] && diffs[0].path };
     const diffPath = diffs[0] && diffs[0].path;
     if (diffPath && item._call && !toolFilePath(item._call)) {
       item._call.rawInput = { ...(item._call.rawInput || {}), path: diffPath };
@@ -12124,6 +12135,7 @@
 
     // Always-visible +A −R on the row (and the roll-up onto the group header).
     const stat = makeDiffStat(added, removed);
+    if (!countsKnown) stat.textContent = "Changes unavailable";
     const prevStat = item.querySelector(".diff-stat");
     if (prevStat) prevStat.replaceWith(stat);
     else item.appendChild(stat);
@@ -12204,11 +12216,12 @@
   function recomputeGroupDiffTotals(item) {
     const group = item.closest && item.closest(".tool-group");
     if (!group) return;
-    const t = { added: 0, removed: 0, files: new Set() };
+    const t = { added: 0, removed: 0, countsKnown: true, files: new Set() };
     let anon = 0;
     for (const row of group.querySelectorAll(".tool-item")) {
       const s = row._diffStat;
       if (!s) continue;
+      t.countsKnown = t.countsKnown && s.countsKnown !== false;
       t.added += s.added;
       t.removed += s.removed;
       t.files.add(s.path || "__anon" + anon++);
@@ -12234,11 +12247,11 @@
     const prev = labelEl.querySelector(".tool-group-diff-totals");
     if (prev) prev.remove();
     const t = group._diffTotals;
-    if (!t || (t.added === 0 && t.removed === 0)) return;
+    if (!t || (t.countsKnown && t.added === 0 && t.removed === 0)) return;
     const slot = document.createElement("span");
     slot.className = "tool-group-diff-totals";
     slot.appendChild(document.createTextNode(" · "));
-    slot.appendChild(makeDiffStat(t.added, t.removed));
+    slot.appendChild(t.countsKnown ? makeDiffStat(t.added, t.removed) : document.createTextNode("Changes unavailable"));
     labelEl.appendChild(slot);
   }
 
@@ -12355,6 +12368,7 @@
         const newText = diffItem.newText ?? "";
         diffs.push({
           path: diffItem.path,
+          oldTextMissing: (diffItem.oldText == null && diffItem._meta?.kind !== "add") || diffItem._meta?.oldTextMissing === true,
           oldText, // block-level: the "open diff →" payload + the permission card's line count
           newText,
           sites: extractDiffSites(diffItem._meta, oldText, newText),
@@ -12368,15 +12382,30 @@
     attachDiffPreviewToToolItem(call.toolCallId, diffs, status);
   }
 
-  // Render a tool failure on its row: the row goes error-colored and the reason
-  // (grok's "image reference not readable: …" etc.) shows beneath it. Idempotent.
+  // Keep the compact failure summary on the row and reuse its collapsible full reason.
   function applyToolFailure(rowEl, message) {
-    if (!rowEl || rowEl.classList.contains("tool-failed")) return;
+    if (!rowEl) return;
     rowEl.classList.add("tool-failed");
-    const err = document.createElement("div");
-    err.className = "tool-error";
+    let details = rowEl.querySelector(".tool-item-details");
+    const carrier = details?.classList.contains("tool-read-carrier");
+    if (!details) {
+      details = h("div", { class: "tool-item-details" });
+      details.hidden = true;
+      rowEl.appendChild(h("span", { class: "tool-chevron", "aria-hidden": "true", html: ICON.chevronRight }));
+      rowEl.appendChild(details);
+      wireCommandToggle(rowEl, details);
+    }
+    if (carrier) {
+      details.classList.remove("tool-read-carrier");
+      rowEl.insertBefore(h("span", { class: "tool-chevron", "aria-hidden": "true", html: ICON.chevronRight }), details);
+      wireCommandToggle(rowEl, details);
+    }
+    let summary = rowEl.querySelector(".tool-error-summary");
+    if (!summary) { summary = h("span", { class: "tool-error-summary" }); rowEl.insertBefore(summary, details); }
+    summary.textContent = String(message || "Tool failed").split(/\r?\n/).find(line => line.trim())?.slice(0, 180) || "Tool failed";
+    let err = details.querySelector(".tool-error");
+    if (!err) { err = h("pre", { class: "tool-error" }); details.appendChild(err); }
     err.textContent = message;
-    rowEl.appendChild(err);
   }
 
   function markToolFailed(toolCallId, message) {
@@ -12406,7 +12435,12 @@
     clearWelcome();
     const el = document.createElement("div");
     el.className = "msg error";
-    el.textContent = text;
+    if (String(text).length > 300 || String(text).split(/\r?\n/).length > 3) {
+      const details = h("details", { class: "session-error-details" });
+      details.appendChild(h("summary", {}, String(text).split(/\r?\n/).find(line => line.trim())?.slice(0, 180) || "Session error"));
+      details.appendChild(h("pre", { class: "tool-error" }, text));
+      el.appendChild(details);
+    } else el.textContent = text;
     if (typeof code === "string" && code) el.setAttribute("data-error-code", code);
     appendTranscriptChild(el);
     scrollToBottom();
@@ -16404,9 +16438,8 @@
   }
 
   function hasNativeContextRatio() {
-    if (state.activeProvider === "codex") return false;
     const o = state.contextObservation;
-    if (!o || o.stale || o.usageStale || o.usageSemantics !== "current-context"
+    if (!o || o.stale || o.usageStale || !(o.usageSemantics === "current-context" || (state.activeProvider === "codex" && o.usageSemantics === "last-request"))
         || o.usageQuality !== "verified" || typeof o.used !== "number" || !(state.contextWindow > 0)) return false;
     if (o.provider !== state.activeProvider || !o.sessionId || o.sessionId !== state.contextSelectionSessionId || o.modelId !== state.currentModelId) return false;
     const selected = state.contextWindowSelection;
@@ -16445,15 +16478,18 @@
     donutArc.style.display = native ? "" : "none";
     if (donutArc.parentNode?.style) donutArc.parentNode.style.display = native ? "" : "none";
     paintDonutThresholdMark(native ? threshold : undefined);
-    const showCapacity = state.activeProvider !== "codex" && max > 0;
+    const showCapacity = max > 0;
     donutEl.hidden = measured === undefined && !showCapacity;
     if (donutEl.hidden) contextPopover.hidden = true;
-    donutLabel.textContent = measured === undefined ? (showCapacity ? `${toK(max)} context` : "") : state.activeProvider === "codex" ? toK(measured) : native
+    donutLabel.textContent = measured === undefined ? (showCapacity ? `${toK(max)} context` : "") : native
       ? `${toK(measured)}/${toK(max)}` : `≈ ${toK(measured)}`;
-    const usageDetail = measured === undefined ? (showCapacity ? `${max.toLocaleString()} tokens capacity; current occupancy unknown` : "")
-      : state.activeProvider === "codex" ? `${measured.toLocaleString()} context tokens reported by ACP (last request)` : native
+    let usageDetail = measured === undefined ? (showCapacity ? `${max.toLocaleString()} tokens capacity; current occupancy unknown` : "")
+      : native
       ? `${measured.toLocaleString()} / ${max.toLocaleString()} tokens${measured > max ? " — exceeds reported capacity" : ""}`
       : `Estimated context: ${measured.toLocaleString()} tokens${observation.usageStale || observation.stale ? " (stale)" : ""}`;
+    if (state.activeProvider === "codex" && measured !== undefined) {
+      usageDetail += observation?.usageQuality === "verified" ? "; last prompt input including cache (output excluded)" : "; ACP last-request total, input breakdown pending";
+    }
     donutLabel.title = usageDetail;
     donutEl.title = usageDetail;
     // Occupancy can move without a contextUsage frame (promptComplete,

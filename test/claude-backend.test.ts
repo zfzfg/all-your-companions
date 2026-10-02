@@ -175,14 +175,14 @@ describe("Claude diff synthesis", () => {
     ]);
   });
 
-  it("synthesizes a create diff for a Write tool_call_update with oldText empty", () => {
+  it("marks the unavailable before-side of a Write tool_call_update", () => {
     const result = normalizeClaudeUpdate({
       sessionUpdate: "tool_call_update",
       toolCallId: "t2",
       rawInput: { file_path: "/repo/new.ts", content: "hello\n" },
     });
     expect(result.update.content).toEqual([
-      { type: "diff", path: "/repo/new.ts", oldText: "", newText: "hello\n" },
+      { type: "diff", path: "/repo/new.ts", oldText: "", newText: "hello\n", _meta: { oldTextMissing: true } },
     ]);
   });
 

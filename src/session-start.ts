@@ -183,7 +183,7 @@ export interface SessionStartReviewAndPlanOps {
   beginCheckpointTurn(session: Session, text: string): void;
   finishCheckpointTurn(session: Session): void;
   noteReviewToolCall(session: Session, call: any): void;
-  startTurnGitBaseline(session: Session, turn: any): void;
+  startTurnGitBaseline(session: Session, turn: any): void | Promise<void>;
   settleUnavailablePlanTurn(session: Session, client: AcpClient, gen: number): void;
 }
 
@@ -1734,7 +1734,7 @@ export class SessionStart {
     this.deps.emit(session, { type: "agentStart" });
 
     const turn = beginTurn(session);
-    this.deps.reviewAndPlanOps.startTurnGitBaseline(session, turn);
+    await this.deps.reviewAndPlanOps.startTurnGitBaseline(session, turn);
     this.deps.setStatus(session, "working");
     this.deps.noteSessionActivity(session);
 

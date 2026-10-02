@@ -215,6 +215,8 @@ export type GitDiffRead =
 export interface GitTurnBaseline {
   sha: string;
   untracked?: Map<string, string>;
+  unavailableUntracked?: string[];
+  untrackedUnavailable?: boolean;
 }
 
 /** Caller holds GitRunGate. Never waits on the prompt path or updates refs. */
@@ -236,9 +238,9 @@ export async function captureGitTurnBaseline(
   // Preserve pre-existing untracked content as loose blobs, without touching
   // the index or refs. Ignored build output must never reach hash-object.
   const listed = await runGit(root, ["ls-files", "--others", "--exclude-standard", "-z", "--full-name"], options);
-  if (!listed.ok) return { sha };
+  if (!listed.ok) return { sha, untrackedUnavailable: true };
   const paths = listed.stdout.split("\0").filter(Boolean);
-  if (paths.length > GIT_BASELINE_UNTRACKED_MAX_PATHS) return { sha };
+  if (paths.length > GIT_BASELINE_UNTRACKED_MAX_PATHS) return { sha, unavailableUntracked: paths };
   const survivors: string[] = [];
   for (const path of paths) {
     try {
@@ -250,18 +252,18 @@ export async function captureGitTurnBaseline(
       // A disappeared or unreadable candidate is not a file we can snapshot.
     }
   }
-  if (!survivors.length) return { sha };
+  if (!survivors.length) return { sha, unavailableUntracked: paths };
   // --stdin-paths is line-delimited, not NUL-delimited. Git accepts C-quoted
   // filenames here; octal escapes keep quotes, backslashes and newlines literal.
   const stdin = survivors.map(path => '"' + path.replace(/["\\\x00-\x1f\x7f]/g,
     char => "\\" + char.charCodeAt(0).toString(8).padStart(3, "0")) + '"\n').join("");
   const hashed = await runGit(root, ["hash-object", "-w", "--stdin-paths"], { ...options, stdin });
-  if (!hashed.ok) return { sha };
+  if (!hashed.ok) return { sha, unavailableUntracked: paths };
   const blobs = hashed.stdout.trim().split(/\r?\n/).map(parseGitBaseline);
   // No partial map on a failed or malformed batch: positional pairing is only
   // trustworthy when every input has exactly one complete object id.
-  if (blobs.length !== survivors.length || blobs.some(blob => !blob)) return { sha };
-  return { sha, untracked: new Map(survivors.map((path, i) => [path, blobs[i]!])) };
+  if (blobs.length !== survivors.length || blobs.some(blob => !blob)) return { sha, unavailableUntracked: paths };
+  return { sha, untracked: new Map(survivors.map((path, i) => [path, blobs[i]!])), unavailableUntracked: paths.filter(path => !survivors.includes(path)) };
 }
 
 /**
@@ -316,7 +318,7 @@ export async function readGitTurnFileBefore(
   path: string,
   baseline: GitTurnBaseline,
   opts?: { io?: GitIo; env?: NodeJS.ProcessEnv },
-): Promise<{ ok: true; text: string } | { ok: false; reason: string }> {
+): Promise<{ ok: true; text: string; existed?: boolean } | { ok: false; reason: string }> {
   const fail = (result: GitExecResult) => ({
     ok: false as const,
     reason: result.spawnFailed ? "Git is not installed on this machine."
@@ -329,7 +331,10 @@ export async function readGitTurnFileBefore(
     // a non-zero exit (even with stdout) or diagnostic must never mean empty.
     const entry = await runGit(root, ["--literal-pathspecs", "ls-tree", "-z", "--full-tree", baseline.sha, "--", path], opts);
     if (!entry.ok || entry.stderr) return fail(entry);
-    if (!entry.stdout) return { ok: true, text: "" };
+    if (!entry.stdout) {
+      if (baseline.untrackedUnavailable || baseline.unavailableUntracked?.includes(path)) return { ok: false, reason: "Untracked baseline unavailable." };
+      return { ok: true, text: "", existed: false };
+    }
   }
   // <rev>:<path> names one object, not a pathspec (gitrevisions). Brackets and
   // wildcard characters are literal here, unlike ls-tree's path operand above.
@@ -338,7 +343,7 @@ export async function readGitTurnFileBefore(
   // Unlike --no-index diff, these reads require exit 0: partial stdout on a
   // timeout/buffer failure is not a whole file and must not reach the editor.
   if (!result.ok) return fail(result);
-  return { ok: true, text: result.stdout };
+  return { ok: true, text: result.stdout, existed: true };
 }
 
 export interface GitRunOutcome {

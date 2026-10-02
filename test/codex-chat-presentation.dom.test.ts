@@ -1,22 +1,27 @@
 import { expect, it } from "vitest";
 import { bootWebview, click, dispatch } from "./webview-harness";
 
-it("keeps Codex catalog estimates in settings and shows only native ACP request usage", () => {
+it("shows Codex catalog capacity and draws a ring from verified prompt input", () => {
   const h = bootWebview();
   dispatch(h.window, { type: "session", provider: "codex", sessionId: "s", currentModelId: "gpt-test",
     models: [{ modelId: "gpt-test", name: "GPT Test", totalContextTokens: 400000 }] });
-  expect(h.doc.getElementById("donut")!.hidden).toBe(true);
+  expect(h.doc.getElementById("donut")!.hidden).toBe(false);
+  expect(h.doc.getElementById("donut-label")!.textContent).toBe("400K context");
   click(h.window, h.doc.getElementById("gear-btn")!);
-  expect(h.doc.querySelector(".codex-context-estimate")!.textContent).toContain("Estimated context limit (catalog)");
-  dispatch(h.window, { type: "contextUsage", context: { provider: "codex", sessionId: "s", modelId: "gpt-test",
-    access: "a", generation: 1, source: "session", usageSource: "session", observedAt: 1,
-    limitQuality: "verified", usageQuality: "unknown", usageSemantics: "last-request", used: 32000,
-    limits: { effectiveContextTokens: 400000 } } });
-  expect(h.doc.getElementById("donut-label")!.textContent).toBe("32K");
+  expect(h.doc.querySelector(".codex-context-capacity")!.textContent).toContain("Context limit (catalog)");
+  const context = { provider: "codex" as const, sessionId: "s", modelId: "gpt-test", access: "a", generation: 1,
+    source: "session" as const, usageSource: "session" as const, observedAt: 1, limitQuality: "verified" as const,
+    usageSemantics: "last-request" as const, used: 32000, limits: { effectiveContextTokens: 400000 } };
+  dispatch(h.window, { type: "contextUsage", context: { ...context, usageQuality: "unknown" } });
   expect(h.doc.getElementById("donut-arc")!.style.display).toBe("none");
+  dispatch(h.window, { type: "contextUsage", context: { ...context, usageQuality: "verified" } });
+  expect(h.doc.getElementById("donut-label")!.textContent).toBe("32K/400K");
+  expect(h.doc.getElementById("donut-arc")!.style.display).toBe("");
+  expect(h.doc.getElementById("donut")!.title).toContain("output excluded");
   click(h.window, h.doc.getElementById("donut")!);
-  expect(h.doc.getElementById("context-popover")!.textContent).toContain(`${(32000).toLocaleString()} tokens (ACP)`);
-  expect(h.doc.getElementById("context-popover")!.textContent).not.toContain((400000).toLocaleString());
+  expect(h.doc.getElementById("context-popover")!.textContent).toContain((400000).toLocaleString());
+  dispatch(h.window, { type: "contextUsage", context: { ...context, usageQuality: "unknown", usageStale: true, used: undefined } });
+  expect(h.doc.getElementById("donut-arc")!.style.display).toBe("none");
   dispatch(h.window, { type: "modelChanged", modelId: "other" });
   expect(h.doc.getElementById("donut")!.hidden).toBe(true);
 });

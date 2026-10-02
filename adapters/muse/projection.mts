@@ -152,9 +152,12 @@ export class Projection {
       // has not received output yet, so every run emits its own.
       const printed = typeof item.visibleOutput === "string" ? item.visibleOutput : undefined;
       const visible = status === "completed" ? printed : undefined;
+      const input = parseToolInput(item.args);
+      const edit = input && typeof (input.file_path ?? input.path) === "string"
+        && (typeof input.content === "string" || typeof input.new_string === "string" || typeof input.newText === "string");
       this.emit({ sessionUpdate: first ? "tool_call" : "tool_call_update",
         toolCallId: state.toolCallId!, title: item.tool || "Muse tool",
-        kind: item.tool === "bash" ? "execute" : "other", status, rawInput: parseToolInput(item.args),
+        kind: item.tool === "bash" ? "execute" : edit ? "edit" : "other", status, rawInput: input,
         rawOutput: status === "failed" ? { message: museToolFailureMessage(item), output: printed ?? "" }
           : visible !== undefined ? { output: visible } : undefined,
         ...(visible !== undefined ? { content: [{ type: "content", content: { type: "text", text: visible } }] } : {}),

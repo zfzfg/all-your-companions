@@ -46,7 +46,7 @@ operating controls, not Google account limits. See
 
 ### 3. Universal Diff Inspection & Single-Edit Revert
 Every AI provider proposes code edits differently, but **All your Companions** unifies them under one cohesive, safety-first review system:
-- **Universal Diff Synthesis:** Synthesizes authoritative whole-file diffs across **all five companions** (even Google Antigravity, which emits only raw parameters on the wire).
+- **Universal Diff Review:** Prefers native provider diffs and reconstructs missing before-content from captured baselines. Turn and session reviews show net changes; unavailable historical comparisons are explicit.
 - **Native VS Code Diff Preview:** When any companion proposes an edit, click **Open diff →** to inspect full-file changes directly in VS Code's native side-by-side diff editor before granting permission.
 - **Full Control:** Choose *Allow once*, *Always allow for this session*, or *Reject*. Providers that emit permission requests wait for your approval; Antigravity executes tools server-side.
 - **One-Click Revert (`revert edit ↶`):** Revert any completed edit directly from the card in chat across Antigravity, Grok, Codex, Claude, and Muse.
