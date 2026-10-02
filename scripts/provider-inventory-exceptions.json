@@ -286,5 +286,13 @@
     "category": "Native Muse approval/process policy",
     "reason": "Muse login uses the same credential backend as its adapter on Windows/Linux.",
     "test": "muse-session.test.ts, muse-backend.test.ts, provider-session.test.ts"
+  },
+  {
+    "file": "usage-host.ts",
+    "method": "rememberAdapterContext",
+    "expr": "session.provider === \"codex\"",
+    "category": "Native usage semantics",
+    "reason": "Preserve verified Codex last-request occupancy instead of overwriting it with an adapter turn estimate.",
+    "test": "usage-host.test.ts"
   }
 ]

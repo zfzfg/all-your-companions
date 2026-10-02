@@ -145,4 +145,6 @@ export interface AcpBackend<Provider extends string = AcpProvider> {
    */
   steerDelivered(result: any): boolean;
   sessionNewMeta?(cwd: string): Record<string, unknown> | undefined;
+  promptAdmission?(): { coordinator: import("./prompt-admission").PromptAdmission; policy: import("./prompt-admission").AdmissionPolicy };
+  humanWaitNotification?(sessionId: string, active: boolean): { method: string; params: unknown };
 }

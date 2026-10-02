@@ -94,12 +94,12 @@ describe("AgyAcpAdapterServer", () => {
     input.write(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "session/new", params: {} }) + "\n");
     await new Promise((r) => setTimeout(r, 10));
 
-    expect(responses).toHaveLength(1);
-    expect(responses[0].id).toBe(2);
-    expect(responses[0].result.sessionId).toBeDefined();
-    expect(responses[0].result.models.currentModelId).toBe("gemini-3.8-flash");
-    expect(responses[0].result.models.availableModels.length).toBeGreaterThanOrEqual(4);
-    expect(responses[0].result.configOptions).toHaveLength(3);
+    expect(responses.filter(m => m.id != null)).toHaveLength(1);
+    expect(responses.find(m => m.id != null).id).toBe(2);
+    expect(responses.find(m => m.id != null).result.sessionId).toBeDefined();
+    expect(responses.find(m => m.id != null).result.models.currentModelId).toBe("gemini-3.8-flash");
+    expect(responses.find(m => m.id != null).result.models.availableModels.length).toBeGreaterThanOrEqual(4);
+    expect(responses.find(m => m.id != null).result.configOptions).toHaveLength(3);
 
     server.dispose();
   });
@@ -238,11 +238,7 @@ describe("AgyAcpAdapterServer", () => {
     expect(textNotifications[1].params.update.content.text).toBe("Ready to assist.\n");
 
     const usageNotifications = messages.filter((m) => m.method === "session/update" && m.params?.update?.sessionUpdate === "usage_update");
-    expect(usageNotifications.length).toBeGreaterThanOrEqual(2);
-    expect(usageNotifications[0].params.update.used).toBe(110);
-    expect(usageNotifications[0].params.update.size).toBeUndefined();
-    expect(usageNotifications[1].params.update.used).toBe(125);
-    expect(usageNotifications[1].params.update.size).toBeUndefined();
+    expect(usageNotifications).toHaveLength(0);
 
     const promptRes = messages.find((m) => m.id === 6);
     expect(promptRes).toBeDefined();
@@ -417,7 +413,9 @@ describe("AgyAcpAdapterServer", () => {
       },
     });
 
-    // Test run_command normalization
+    // Test run_command normalization in a fresh turn.
+    input.write(JSON.stringify({ id: 66, method: "session/prompt", params: { text: "run status" } }) + "\n");
+    await new Promise(r => setTimeout(r, 20));
     fakeProc!.stdout.write(JSON.stringify({
       event: "step_update",
       step_update: {
@@ -1597,6 +1595,7 @@ describe("AgyAcpAdapterServer", () => {
     expect(spawnedProcs[0].killed).toBe(false);
     expect(responses.find((m) => m.id === 70)).toBeUndefined();
 
+    spawnedProcs[0].stdout.write(JSON.stringify({ event: "step_update", step_update: { step_type: "agent_response", text_delta: "done" } }) + "\n");
     spawnedProcs[0].stdout.write(JSON.stringify({ event: "result", result: { status: "SUCCESS" } }) + "\n");
     await new Promise((r) => setTimeout(r, 20));
     expect(responses.find((m) => m.id === 70)?.result?.stopReason).toBe("end_turn");
@@ -1683,7 +1682,7 @@ describe("AgyAcpAdapterServer", () => {
     server.dispose();
   });
 
-  it("refuses a second prompt while one is still running", async () => {
+  it("queues a second prompt until the running turn has finalized", async () => {
     const input = new PassThrough();
     const output = new PassThrough();
     const spawnedProcs: FakeProcess[] = [];
@@ -1719,9 +1718,16 @@ describe("AgyAcpAdapterServer", () => {
     await new Promise((r) => setTimeout(r, 20));
 
     expect(spawnedProcs).toHaveLength(1);
-    expect(responses.filter((m) => m.id === 91)).toHaveLength(1);
-    expect(responses.find((m) => m.id === 91)?.error?.message).toMatch(/already running/i);
-    expect(responses.find((m) => m.id === 90)).toBeUndefined();
+    expect(responses.find((m) => m.id === 91)).toBeUndefined();
+    spawnedProcs[0].stdout.write(JSON.stringify({ event: "step_update", step_update: { step_type: "agent_response", text_delta: "first done" } }) + "\n");
+    spawnedProcs[0].stdout.write(JSON.stringify({ event: "result", result: { status: "SUCCESS" } }) + "\n");
+    await new Promise(r => setTimeout(r, 20));
+    expect(responses.filter(m => m.id === 90)).toHaveLength(1);
+    expect(spawnedProcs[0].stdin.read().toString()).toContain("Second");
+    spawnedProcs[0].stdout.write(JSON.stringify({ event: "step_update", step_update: { step_type: "agent_response", text_delta: "second done" } }) + "\n");
+    spawnedProcs[0].stdout.write(JSON.stringify({ event: "result", result: { status: "SUCCESS" } }) + "\n");
+    await new Promise(r => setTimeout(r, 20));
+    expect(responses.filter(m => m.id === 91)).toHaveLength(1);
 
     server.dispose();
   });
@@ -2579,10 +2585,10 @@ describe("AgyAcpAdapterServer", () => {
       input.write(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "session/new", params: {} }) + "\n");
       await new Promise((r) => setTimeout(r, 10));
 
-      expect(responses).toHaveLength(1);
-      expect(responses[0].result.models.currentModelId).toBe("gemini-custom-future");
-      expect(responses[0].result.models.availableModels[0].modelId).toBe("gemini-custom-future");
-      const modelConfig = responses[0].result.configOptions.find((c: any) => c.id === "model");
+      expect(responses.filter(m => m.id != null)).toHaveLength(1);
+      expect(responses.find(m => m.id != null).result.models.currentModelId).toBe("gemini-custom-future");
+      expect(responses.find(m => m.id != null).result.models.availableModels[0].modelId).toBe("gemini-custom-future");
+      const modelConfig = responses.find(m => m.id != null).result.configOptions.find((c: any) => c.id === "model");
       expect(modelConfig.options.some((o: any) => o.value === "gemini-custom-future")).toBe(true);
 
       server.dispose();
@@ -2616,7 +2622,7 @@ describe("AgyAcpAdapterServer", () => {
       expect(capturedArgs).not.toContain("--input-format");
       const pIdx = capturedArgs.indexOf("-p");
       expect(pIdx).toBeGreaterThanOrEqual(0);
-      expect(capturedArgs[pIdx + 1]).toBe("Hello one-shot");
+      expect(capturedArgs[pIdx + 1]).toContain("Hello one-shot");
       expect(capturedArgs).toContain("--output-format");
       expect(capturedArgs[capturedArgs.indexOf("--output-format") + 1]).toBe("stream-json");
 
@@ -2754,13 +2760,13 @@ describe("AgyAcpAdapterServer", () => {
     it("sanitizes Cortex artifact path errors to be user-friendly", () => {
       const rawCortexError = "declaring permissions: cortex tool write_to_file: convert tool call for permissions: model output error: invalid tool call error (invalid_args)\nc:\\test\\sound-tester.html is not a valid artifact path; artifacts must be in C:\\.gemini\\brain\\12345/";
       const sanitized = sanitizeAgyToolErrorMessage(rawCortexError);
-      expect(sanitized).toContain("Artifact Path Error");
+      expect(sanitized).toContain("Tool call rejected");
       expect(sanitized).toContain("ArtifactMetadata");
 
       // Also sanitizes object error envelopes
       const objError = { error: rawCortexError };
       const sanitizedObj = sanitizeAgyToolErrorMessage(objError);
-      expect(sanitizedObj.error).toContain("Artifact Path Error");
+      expect(sanitizedObj.error).toContain("Tool call rejected");
     });
 
     it("sanitizes find_by_name missing Pattern errors", () => {
@@ -2790,6 +2796,7 @@ describe("AgyAcpAdapterServer", () => {
         conversationStorePath: nextStore(),
         inputStream: input,
         outputStream: output,
+        spawnFn: () => new FakeProcess() as any,
       });
       server.start();
 
@@ -2805,22 +2812,13 @@ describe("AgyAcpAdapterServer", () => {
       input.write(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "session/new", params: { cwd: scratchDir } }) + "\n");
       await new Promise((r) => setTimeout(r, 20));
 
-      // Simulate a prompt being in flight by setting pendingPrompt
-      let promptResolved: any;
-      (server as any).pendingPrompt = {
-        id: 99,
-        resolve: (val: any) => {
-          promptResolved = val;
-          (server as any).sendResponse(99, val);
-        },
-        reject: () => {},
-        usage: { inputTokens: 50, outputTokens: 10, thoughtTokens: 5, totalTokens: 65 },
-      };
-
+      input.write(JSON.stringify({ id: 99, method: "session/prompt", params: { text: "working" } }) + "\n");
+      await new Promise(r => setTimeout(r, 20));
       // Send session/cancel
       input.write(JSON.stringify({ jsonrpc: "2.0", id: 3, method: "session/cancel", params: {} }) + "\n");
       await new Promise((r) => setTimeout(r, 20));
 
+      const promptResolved = responses.find(r => r.id === 99)?.result;
       expect(promptResolved).toBeDefined();
       expect(promptResolved.stopReason).toBe("cancelled");
       expect(turnStatusFromPromptResult(promptResolved)).toBe("cancelled");

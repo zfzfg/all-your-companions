@@ -51,6 +51,7 @@ import { filterAdvertisedCommands } from "./slash-filter";
 import { grokCliNeedsShell, probeCliVersion } from "./cli-process";
 import { compareVersionTuple, parseGrokVersion } from "./cli-locator";
 import { resolvedTerminalShellDialect } from "./terminal-manager";
+import { abortable } from "./agy-lifecycle";
 import type { AcpBackend, AcpProvider, BackendSessionListResult, BackendSteeringCapabilities } from "./acp-backend";
 import { providerCapability } from "./provider-capabilities";
 import { grokBackend } from "./grok-backend";
@@ -316,6 +317,7 @@ export class AcpClient extends EventEmitter {
   private readonly backend: AcpBackend;
   private steering: BackendSteeringCapabilities;
   private humanWaitActive = false;
+  private readonly admissionWaiters = new Set<AbortController>();
   private readonly timeouts: AcpTimeouts;
 
   readonly provider: AcpProvider;
@@ -781,6 +783,7 @@ export class AcpClient extends EventEmitter {
   }
 
   async newSession(modelId?: string): Promise<{ sessionId: string }> {
+    for (const waiter of this.admissionWaiters) waiter.abort();
     const meta = await this.resolveSessionMeta();
     const raw = await this.request("session/new", {
       cwd: this.opts.cwd,
@@ -865,6 +868,7 @@ export class AcpClient extends EventEmitter {
   }
 
   async loadSession(sessionId: string, modelId?: string): Promise<{ sessionId: string }> {
+    for (const waiter of this.admissionWaiters) waiter.abort();
     const meta = await this.resolveSessionMeta();
     this.loadingChildSessionIds = new Set();
     let raw: any;
@@ -1065,6 +1069,7 @@ export class AcpClient extends EventEmitter {
 
   async prompt(textOrBlocks: string | PromptContentBlock[]): Promise<PromptResultMeta> {
     if (!this.sessionId) throw new Error("no session");
+    const sessionId = this.sessionId;
     const firstText = typeof textOrBlocks === "string" ? textOrBlocks : textOrBlocks[0]?.type === "text" ? textOrBlocks[0].text : "";
     if (/^\/context-window(?:\s|$)/i.test(firstText) && !this.availableCommands.some(c => c.name === "context-window"))
       throw new Error("Use the native context-window selection; this CLI does not advertise the slash command over ACP.");
@@ -1072,12 +1077,38 @@ export class AcpClient extends EventEmitter {
       typeof textOrBlocks === "string"
         ? [{ type: "text", text: textOrBlocks }]
         : structuredClone(textOrBlocks);
-    await this.checkPromptContext(prompt);
+    const admission = this.backend.promptAdmission?.();
+    const admissionAbort = admission ? new AbortController() : undefined;
+    if (admissionAbort) this.admissionWaiters.add(admissionAbort);
+    try {
+      if (admissionAbort) await abortable(this.checkPromptContext(prompt), admissionAbort.signal);
+      else await this.checkPromptContext(prompt);
+    } catch (error) {
+      if (admissionAbort) this.admissionWaiters.delete(admissionAbort);
+      if (admissionAbort?.signal.aborted) return this.completeCancelledPrompt();
+      throw error;
+    }
     const promptGeneration = this.contextGeneration;
-    const raw = await this.request("session/prompt", {
-      sessionId: this.sessionId,
+    let release = () => {};
+    if (admission) {
+      const abort = admissionAbort!;
+      try {
+        if (admission.policy.maxActiveTurns > 0) this.emit("notice", "Waiting for an Antigravity turn slot.");
+        release = await admission.coordinator.acquire(admission.policy, abort.signal);
+      } catch (error) {
+        if (!abort.signal.aborted) throw error;
+        return this.completeCancelledPrompt();
+      } finally { this.admissionWaiters.delete(abort); }
+      if (abort.signal.aborted || this.sessionId !== sessionId) {
+        release();
+        return this.completeCancelledPrompt();
+      }
+    }
+    let raw: any;
+    try { raw = await this.request("session/prompt", {
+      sessionId,
       prompt,
-    });
+    }); } finally { release(); }
     const result = this.backend.normalizePromptResult(raw);
     const meta = extractPromptMeta(result);
     this.lastMeta = meta;
@@ -1085,6 +1116,13 @@ export class AcpClient extends EventEmitter {
       this.observeContext({ source: "session", limits: {}, limitQuality: "unknown", usageQuality: "verified",
         usageSemantics: "current-context", used: meta.totalTokens });
     }
+    this.emit("promptComplete", meta);
+    return meta;
+  }
+
+  private completeCancelledPrompt(): PromptResultMeta {
+    const meta: PromptResultMeta = { stopReason: "cancelled" };
+    this.lastMeta = meta;
     this.emit("promptComplete", meta);
     return meta;
   }
@@ -1117,6 +1155,7 @@ export class AcpClient extends EventEmitter {
   }
 
   async deleteSession(sessionId: string): Promise<void> {
+    if (this.sessionId === sessionId) for (const waiter of this.admissionWaiters) waiter.abort();
     if (!supportsSessionDeletion(this.provider)) throw new Error("This backend does not support ACP session deletion.");
     await this.request("session/delete", { sessionId });
   }
@@ -1453,6 +1492,7 @@ export class AcpClient extends EventEmitter {
   }
 
   async cancel(reason = "unspecified"): Promise<boolean> {
+    for (const waiter of this.admissionWaiters) waiter.abort();
     if (!this.sessionId) return false;
     // Log every outbound cancel with its trigger — the CLI logs the receipt
     // (`shell.cancel.received … trigger:null`) but not who asked, so when a
@@ -1511,6 +1551,7 @@ export class AcpClient extends EventEmitter {
    * callers can ignore the returned promise — the kill is still initiated now.
    */
   dispose(timeoutMs = 3000): Promise<void> {
+    for (const waiter of this.admissionWaiters) waiter.abort();
     this.contextCatalog?.dispose();
     this.setHumanWaitActive(false);
     this.rl?.close();
@@ -1658,6 +1699,10 @@ export class AcpClient extends EventEmitter {
   setHumanWaitActive(active: boolean): void {
     if (this.humanWaitActive === active) return;
     this.humanWaitActive = active;
+    if (this.sessionId) {
+      const call = this.backend.humanWaitNotification?.(this.sessionId, active);
+      if (call) this.writeLine({ jsonrpc: "2.0", ...call });
+    }
     const now = Date.now();
     for (const p of this.pending.values()) {
       if (!p.isPrompt) continue;

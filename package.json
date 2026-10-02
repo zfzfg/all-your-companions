@@ -1229,6 +1229,34 @@
           "type": "boolean",
           "default": false,
           "description": "Trust the workspace when starting new Muse conversations."
+        },
+        "companions.antigravity.toolRules": {
+          "type": "string",
+          "enum": [
+            "prompt",
+            "off",
+            "global"
+          ],
+          "default": "prompt",
+          "description": "Antigravity tool guidance. Prompt adds temporary instructions to outgoing requests. Off disables them. Global explicitly seeds missing files under ~/.gemini; existing files are never overwritten."
+        },
+        "companions.antigravity.watchdogIdleTimeoutMs": {
+          "type": "integer",
+          "default": 0,
+          "minimum": 0,
+          "description": "Optional Antigravity idle watchdog in milliseconds. 0 disables it; enabled values must be at least 30000. Human permission, question and plan waits pause it. Applies to new adapter processes."
+        },
+        "companions.antigravity.maxActiveTurns": {
+          "type": "integer",
+          "default": 0,
+          "minimum": 0,
+          "description": "Maximum simultaneous Antigravity turns in this extension host, shared with Crew and companion subagents. 0 disables admission. Does not coordinate other editor windows or enforce an account-wide limit."
+        },
+        "companions.antigravity.minStartSpacingMs": {
+          "type": "integer",
+          "default": 2000,
+          "minimum": 0,
+          "description": "Minimum spacing between Antigravity turn starts when admission is enabled. An operating setting, not a Google product limit."
         }
       }
     }

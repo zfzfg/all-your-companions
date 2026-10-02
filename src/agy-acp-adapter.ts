@@ -1,5 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -8,7 +8,10 @@ import { DEFAULT_GEMINI_MODELS, contextWindowForModel, parseAgyModelsOutput, typ
 import { MAX_DIFF_EXPAND_BYTES } from "./diff-view";
 import { mergeDiffIntoContent, synthesizeEditDiff, type AcpDiffBlock } from "./diff-synthesize";
 import { antigravitySettingsPaths } from "./gemini-cli-locator";
-import { grokCliNeedsShell } from "./cli-process";
+import { grokCliNeedsShell, shellSafeCommand } from "./cli-process";
+import { abortable, stopAgyProcess, type AgyTurnState } from "./agy-lifecycle";
+import { AGY_INITIALIZE_RESULT, agyCliMode, agyTerminalToolUpdate } from "./agy-capabilities";
+import { agySkillInstructions, discoverAgySkills, type AgySkillCommand } from "./agy-skills";
 
 /**
  * What `agy` actually does with `--effort`, measured against 1.1.26.
@@ -196,7 +199,7 @@ Follow these strict rules when invoking tools:
       modified = true;
     }
 
-    if (!fs.existsSync(geminiMd) || fs.statSync(geminiMd).size === 0) {
+    if (!fs.existsSync(geminiMd)) {
       fs.writeFileSync(geminiMd, content, "utf8");
       modified = true;
     }
@@ -212,10 +215,10 @@ Follow these strict rules when invoking tools:
 export function sanitizeAgyToolErrorMessage(rawMessage: any): any {
   if (typeof rawMessage === "string") {
     if (/not a valid artifact path/i.test(rawMessage)) {
-      return "Artifact Path Error: TargetFile is in workspace, but model included ArtifactMetadata (only valid for internal brain artifacts). Retrying without ArtifactMetadata...";
+      return "Tool call rejected: ArtifactMetadata is invalid for a workspace file. The model must retry without ArtifactMetadata.";
     }
     if (/missing property ['"]Pattern['"]/i.test(rawMessage)) {
-      return "Invalid Tool Call: Missing required property 'Pattern' (must specify glob pattern like '*'). Retrying...";
+      return "Tool call rejected: Missing required property 'Pattern'. The model must retry with a glob pattern such as '*'.";
     }
     return rawMessage;
   }
@@ -462,13 +465,17 @@ export interface StoredSessionInfo {
 export function cleanPromptTitle(text: string): string {
   if (!text) return "Antigravity Session";
   const m = text.match(/<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/);
-  const raw = m ? m[1] : text;
+  const raw = stripAgyAdapterInstructions(m ? m[1] : text);
   const lines = raw
     .split(/\r?\n/)
     .map((l) => l.replace(/<[^>]+>/g, "").trim())
     .filter((l) => l.length > 0 && !l.startsWith("Currently open") && !l.startsWith("The current local time"));
   const first = lines[0]?.trim();
   return first ? (first.length > 80 ? `${first.slice(0, 77)}…` : first) : "Antigravity Session";
+}
+
+export function stripAgyAdapterInstructions(text: string): string {
+  return text.replace(/^<companions_adapter_instructions>\n[\s\S]*?\n<\/companions_adapter_instructions>\n\n/, "");
 }
 
 export interface AgyAdapterOptions {
@@ -487,6 +494,10 @@ export interface AgyAdapterOptions {
   outputStream?: NodeJS.WritableStream;
   spawnFn?: (command: string, args: string[], options: any) => ChildProcessWithoutNullStreams;
   supportsInputFormat?: boolean;
+  processStopGraceMs?: number;
+  processStopTimeoutMs?: number;
+  toolRules?: "prompt" | "off" | "global";
+  watchdogIdleTimeoutMs?: number;
   /** Overrides for `waitForDiskChangeText`'s retry loop. Production defaults
    *  to (50, 200) — a ~10s budget; tests inject a much smaller budget so the
    *  "the write never lands" cases don't each cost the full production wait. */
@@ -532,6 +543,21 @@ export interface PromptUsage {
   outputTokens: number;
   thoughtTokens: number;
   totalTokens: number;
+}
+
+interface AgyTurn {
+  id: number | string;
+  text: string;
+  state: AgyTurnState;
+  abort: AbortController;
+  usage: PromptUsage;
+  tools: Map<string, "open" | "finishing" | "completed" | "failed">;
+  visible: boolean;
+  resolve: (result: any) => void;
+  reject: (error: Error) => void;
+  done: Promise<void>;
+  finish: () => void;
+  activityAt: number;
 }
 
 export class AgyAcpAdapterServer {
@@ -614,12 +640,20 @@ export class AgyAcpAdapterServer {
    *  still showed a full history for, and every follow-up had to be re-explained. */
   private readonly conversationStorePath: string;
 
-  private pendingPrompt?: {
-    id: number | string;
-    resolve: (result: any) => void;
-    reject: (error: any) => void;
-    usage: PromptUsage;
-  };
+  private pendingPrompt?: AgyTurn;
+  private readonly promptQueue: AgyTurn[] = [];
+  private closing = false;
+  private disposed = false;
+  private stopPromise?: Promise<void>;
+  private processBlocked = false;
+  private readonly stopOptions: { graceMs: number; timeoutMs: number };
+  private readonly toolRules: "prompt" | "off" | "global";
+  private sessionTransition?: Promise<void>;
+  private cancelGeneration = 0;
+  private readonly replaySeen = new Set<string>();
+  private skillCommands: AgySkillCommand[] = [];
+  private readonly watchdogIdleTimeoutMs: number;
+  private humanWaitActive = false;
 
   constructor(options: AgyAdapterOptions = {}) {
     this.agyPath = options.agyPath || process.env.AGY_PATH || process.env.GEMINI_CLI_EXECUTABLE || "agy";
@@ -635,13 +669,19 @@ export class AgyAcpAdapterServer {
     this.input = options.inputStream || process.stdin;
     this.output = options.outputStream || process.stdout;
     this.spawnFn = options.spawnFn || ((cmd, args, opts) => spawn(cmd, args, opts));
+    this.stopOptions = { graceMs: options.processStopGraceMs ?? 1000, timeoutMs: options.processStopTimeoutMs ?? 3000 };
+    this.toolRules = options.toolRules ?? (this.env.AGY_TOOL_RULES as "prompt" | "off" | "global" | undefined) ?? "prompt";
+    if (!["prompt", "off", "global"].includes(this.toolRules)) throw new Error("Invalid Antigravity tool rule policy");
+    this.watchdogIdleTimeoutMs = options.watchdogIdleTimeoutMs ?? Number(this.env.AGY_WATCHDOG_IDLE_TIMEOUT_MS || 0);
+    if (!Number.isSafeInteger(this.watchdogIdleTimeoutMs) || (this.watchdogIdleTimeoutMs !== 0 && this.watchdogIdleTimeoutMs < 30000))
+      throw new Error("Antigravity watchdog timeout must be 0 or at least 30000 milliseconds");
     // Fake long-lived processes must not cause real binary probes in unit tests.
     // Protocol-only cases leave spawnFn unset; under Vitest those must not launch
     // a real `agy models` either. A live CLI delays session/new past the reply
     // the suite waits for, and the suite is binary-free.
     const discoverLiveModels = !options.spawnFn && process.env.VITEST !== "true";
     this.modelDiscovery = options.modelDiscovery ?? (discoverLiveModels ? () => new Promise<string>((resolve, reject) => {
-      const proc = this.spawnFn(this.agyPath, ["models"], { cwd: this.cwd, env: this.env,
+      const proc = this.spawnFn(shellSafeCommand(this.agyPath), ["models"], { cwd: this.cwd, env: this.env,
         stdio: ["pipe", "pipe", "pipe"], shell: grokCliNeedsShell(this.agyPath), windowsHide: true });
       let output = "";
       const timer = setTimeout(() => { proc.kill(); reject(new Error("Model discovery timed out")); }, 3000);
@@ -661,7 +701,7 @@ export class AgyAcpAdapterServer {
     // `agy` process (or the test's own fake, which expects exactly one
     // spawn call: the actual prompt) behind the test's back.
     this.supportsInputFormatStreamJson = options.supportsInputFormat ?? (options.spawnFn ? true : undefined);
-    ensureAntigravityToolRules(this.geminiHome);
+    if (this.toolRules === "global") ensureAntigravityToolRules(this.geminiHome);
   }
 
   private supportsInputFormatStreamJson?: boolean;
@@ -679,11 +719,6 @@ export class AgyAcpAdapterServer {
     } catch { /* Offline/auth failure: retain last listing, with known fallbacks. */ }
   }
 
-  private modelContextWindow(modelId: string): number | undefined {
-    return this.discoveredModels?.find(model => model.modelId === modelId)?._meta.totalContextTokens
-      ?? contextWindowForModel(modelId);
-  }
-
   /**
    * Async on purpose: a synchronous `spawnSync` here (even with `windowsHide:
    * true`) can still flash a console window on Windows when `agyPath` is a
@@ -699,7 +734,7 @@ export class AgyAcpAdapterServer {
       return this.supportsInputFormatStreamJson;
     }
     try {
-      const proc = spawn(this.agyPath, ["--help"], {
+      const proc = spawn(shellSafeCommand(this.agyPath), ["--help"], {
         windowsHide: true,
         shell: process.platform === "win32" && /\.(cmd|bat)$/i.test(this.agyPath),
       });
@@ -733,7 +768,21 @@ export class AgyAcpAdapterServer {
     if (this.effortRequirementOverrides.has(modelId)) {
       return this.effortRequirementOverrides.get(modelId)!;
     }
-    return modelRequiresEffort(modelId);
+    return this.discoveredModels?.find(model => model.modelId === modelId)?._meta.supportsReasoningEffort
+      ?? modelRequiresEffort(modelId);
+  }
+
+  private effortOptions(): Array<{ value: string; name: string }> {
+    const model = this.getAvailableModels().find(model => model.modelId === this.currentModelId);
+    const values = model?._meta?.reasoningEfforts?.map((effort: { value: string }) => effort.value)
+      ?? ["low", "medium", "high"];
+    return values.map((value: string) => ({ value, name: value.charAt(0).toUpperCase() + value.slice(1) }));
+  }
+
+  private effectiveEffort(): string {
+    const values = this.effortOptions().map(option => option.value);
+    return values.includes(this.currentEffort) ? this.currentEffort
+      : values.includes(DEFAULT_AGY_EFFORT) ? DEFAULT_AGY_EFFORT : values[0] || DEFAULT_AGY_EFFORT;
   }
 
   getAvailableModels(): any[] {
@@ -756,14 +805,32 @@ export class AgyAcpAdapterServer {
 
   start(): void {
     this.rl = createInterface({ input: this.input });
-    this.rl.on("line", (line) => { void this.handleClientLine(line); });
+    this.rl.on("line", (line) => { void this.handleClientLine(line).catch(error => {
+      process.stderr.write(`[agy] client request failed: ${(error as Error).message}\n`);
+      this.dispose();
+    }); });
+    this.rl.on("error", () => this.dispose());
+    this.input.on("error", () => this.dispose());
+    this.output.on("error", () => this.dispose());
     this.input.on("end", () => this.dispose());
   }
 
+  private shutdownPromise?: Promise<void>;
+
+  async shutdown(): Promise<void> {
+    this.dispose();
+    await this.shutdownPromise;
+  }
+
   dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.cancelGeneration++;
+    this.closing = true;
+    this.abortQueuedPrompts();
+    this.shutdownPromise = this.cancelActiveTurn();
     this.rl?.close();
     this.rl = undefined;
-    this.killAgyProc();
     this.activeConversationId = undefined;
     this.pendingExitPlanId = undefined;
     this.pendingWriteOldText.clear();
@@ -1011,14 +1078,16 @@ export class AgyAcpAdapterServer {
     const touchedFiles = new Set<string>();
     try {
       const content = fs.readFileSync(transcriptPath, "utf8");
-      const lines = content.split(/\r?\n/).filter(Boolean);
-      const replayToolCallSeq = { n: 0 };
-      for (const line of lines) {
+      const lines = content.split(/\r?\n/);
+      for (const [index, line] of lines.entries()) {
         try {
           const step = JSON.parse(line);
+          const key = `${conversationId}:${index}:${createHash("sha256").update(line).digest("hex")}`;
+          if (this.replaySeen.has(key)) continue;
+          this.replaySeen.add(key);
           if (step.type === "USER_INPUT" && typeof step.content === "string") {
             const m = step.content.match(/<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/);
-            const userText = m ? m[1].trim() : step.content.trim();
+            const userText = stripAgyAdapterInstructions(m ? m[1].trim() : step.content.trim());
             if (userText) {
               this.sendNotification("session/update", {
                 sessionId: this.sessionId,
@@ -1037,7 +1106,7 @@ export class AgyAcpAdapterServer {
               },
             });
           }
-          this.replayToolCalls(step, replayToolCallSeq, touchedFiles);
+          this.replayToolCalls(step, key, touchedFiles);
         } catch {}
       }
 
@@ -1069,9 +1138,9 @@ export class AgyAcpAdapterServer {
    * at, so a wrong assumption here can only leave a tool unreplayed (today's
    * baseline), never render something incorrect.
    */
-  private replayToolCalls(step: any, seq: { n: number }, touchedFiles?: Set<string>): void {
+  private replayToolCalls(step: any, recordId: string, touchedFiles?: Set<string>): void {
     const calls = Array.isArray(step?.tool_calls) ? step.tool_calls : [];
-    for (const tc of calls) {
+    for (const [index, tc] of calls.entries()) {
       if (!tc || typeof tc !== "object") continue;
       const name = tc.name ?? tc.tool_name ?? tc.toolName ?? tc.tool?.name;
       if (typeof name !== "string" || !name) continue;
@@ -1081,7 +1150,7 @@ export class AgyAcpAdapterServer {
         const f = rawParams?.TargetFile || rawParams?.file_path || rawParams?.path;
         if (typeof f === "string" && f) touchedFiles.add(f);
       }
-      const toolCallId = `replay-${seq.n++}`;
+      const toolCallId = `replay-${recordId}:${index}`;
       const content = mergeDiffIntoContent(undefined, synthesizeAgyToolDiff(name, rawParams));
       this.sendNotification("session/update", {
         sessionId: this.sessionId,
@@ -1105,30 +1174,26 @@ export class AgyAcpAdapterServer {
       this.respawnBeforeNextPrompt = true;
       return;
     }
-    this.killAgyProc();
+    void this.killAgyProc().catch(() => {});
   }
 
   /** Stop actually stops. ACP delivers `session/cancel` as a notification, and
    *  before this the adapter dropped it — `agy` ran the turn to completion (up
    *  to `--print-timeout`) while nothing was listening, and billed for it. */
-  private cancelActiveTurn(): void {
-    const pending = this.pendingPrompt;
-    // Taken off the field first so killAgyProc does not reject a turn the
-    // client asked us to end cleanly.
-    this.pendingPrompt = undefined;
-    this.killAgyProc();
-    if (pending) {
-      pending.resolve({ stopReason: "cancelled", usage: pending.usage });
+  private async cancelActiveTurn(): Promise<void> {
+    this.humanWaitActive = false;
+    const turn = this.pendingPrompt;
+    if (turn) {
+      turn.state = "cancelling";
+      turn.abort.abort();
     }
+    try { await this.killAgyProc(); } catch { /* runTurn reports the blocked process */ }
+    if (turn) await turn.done;
   }
 
-  private killAgyProc(): void {
+  private killAgyProc(): Promise<void> {
+    if (this.stopPromise) return this.stopPromise;
     this.pendingExitPlanId = undefined;
-    if (this.pendingPrompt) {
-      const pending = this.pendingPrompt;
-      this.pendingPrompt = undefined;
-      pending.reject(new Error("Session terminated or reset"));
-    }
     if (this.agyRl) {
       this.agyRl.close();
       this.agyRl = undefined;
@@ -1137,15 +1202,36 @@ export class AgyAcpAdapterServer {
       this.agyErrRl.close();
       this.agyErrRl = undefined;
     }
-    if (this.agyProc) {
-      try {
-        this.agyProc.stdin.end();
-      } catch {}
-      try {
-        this.agyProc.kill();
-      } catch {}
-      this.agyProc = undefined;
+    const proc = this.agyProc;
+    if (!proc) return Promise.resolve();
+    this.stopPromise = stopAgyProcess(proc, this.stopOptions).then(() => {
+      if (this.agyProc === proc) this.agyProc = undefined;
+    }, error => {
+      this.processBlocked = true;
+      throw error;
+    }).finally(() => { this.stopPromise = undefined; });
+    return this.stopPromise;
+  }
+
+  private abortQueuedPrompts(): void {
+    for (const turn of this.promptQueue.splice(0)) {
+      turn.abort.abort();
+      turn.state = "terminal";
+      this.sendResponse(turn.id, { stopReason: "cancelled", usage: turn.usage });
+      turn.finish();
     }
+  }
+
+  private async resetSession(): Promise<void> {
+    this.closing = true;
+    this.abortQueuedPrompts();
+    await this.cancelActiveTurn();
+    this.sessionFileBaseline.clear();
+    this.replaySeen.clear();
+    this.pendingWriteOldText.clear();
+    this.pendingEditRecheck = [];
+    this.pendingDiffPromises = [];
+    this.closing = false;
   }
 
   writeJsonRpc(message: any): void {
@@ -1168,7 +1254,7 @@ export class AgyAcpAdapterServer {
   }
 
   getConfigOptions(): any[] {
-    const modelOptions = DEFAULT_GEMINI_MODELS.map((m) => ({
+    const modelOptions = this.getAvailableModels().map((m) => ({
       value: m.modelId,
       name: m.name,
       description: m.description,
@@ -1191,13 +1277,9 @@ export class AgyAcpAdapterServer {
         // The effective level, never "default" — for the models this option is
         // shown on, an absent level is not a state the CLI will start in.
         currentValue: this.effectiveModelRequiresEffort(this.currentModelId)
-          ? this.currentEffort || DEFAULT_AGY_EFFORT
+          ? this.effectiveEffort()
           : "default",
-        options: [
-          { value: "low", name: "Low" },
-          { value: "medium", name: "Medium" },
-          { value: "high", name: "High" },
-        ],
+        options: this.effortOptions(),
       },
       {
         id: "mode",
@@ -1306,6 +1388,36 @@ export class AgyAcpAdapterServer {
   }
 
   async handleClientLine(line: string): Promise<void> {
+    if (this.disposed) return;
+    let request: any;
+    try { request = JSON.parse(line); } catch { return; }
+    if (["session/new", "session/load", "session/delete"].includes(request.method)) {
+      this.cancelGeneration++;
+      this.closing = true;
+      const transition = (this.sessionTransition ?? Promise.resolve()).then(() => this.handleClientRequest(line));
+      this.sessionTransition = transition;
+      try { await transition; } finally {
+        if (this.sessionTransition === transition) {
+          this.sessionTransition = undefined;
+          this.closing = false;
+          this.drainPromptQueue();
+        }
+      }
+      return;
+    }
+    if (request.method === "session/cancel") this.cancelGeneration++;
+    if (request.method === "session/prompt" && this.sessionTransition) {
+      const generation = this.cancelGeneration;
+      await this.sessionTransition;
+      if (generation !== this.cancelGeneration) {
+        this.sendResponse(request.id, { stopReason: "cancelled" });
+        return;
+      }
+    }
+    await this.handleClientRequest(line);
+  }
+
+  private async handleClientRequest(line: string): Promise<void> {
     const trimmed = line.trim();
     if (!trimmed) return;
     let req: any;
@@ -1337,30 +1449,30 @@ export class AgyAcpAdapterServer {
     }
 
     if (!method) return;
+    if (this.sessionId && params?.sessionId && params.sessionId !== this.sessionId
+      && ["session/prompt", "session/cancel", "session/set_mode", "session/set_config_option"].includes(method)) {
+      this.sendError(id, -32602, "Request belongs to another Antigravity session");
+      return;
+    }
 
     switch (method) {
       case "initialize": {
-        this.sendResponse(id, {
-          protocolVersion: 1,
-          agentCapabilities: {
-            loadSession: true,
-          },
-        });
+        this.sendResponse(id, AGY_INITIALIZE_RESULT);
         break;
       }
 
       case "session/new": {
+        await this.resetSession();
         await this.refreshAvailableModels();
+        if (this.disposed) return;
         this.pendingExitPlanId = undefined;
-        ensureAntigravityToolRules(this.geminiHome);
+        if (this.toolRules === "global") ensureAntigravityToolRules(this.geminiHome);
         if (typeof params?.cwd === "string" && params.cwd) {
           this.cwd = params.cwd;
         }
-        if (this.agyProc) {
-          this.killAgyProc();
-        }
         this.activeConversationId = undefined;
         this.sessionId = randomUUID();
+        this.publishSkillCommands();
         this.sendResponse(id, {
           sessionId: this.sessionId,
           models: {
@@ -1373,16 +1485,16 @@ export class AgyAcpAdapterServer {
       }
 
       case "session/load": {
+        await this.resetSession();
         await this.refreshAvailableModels();
+        if (this.disposed) return;
         this.pendingExitPlanId = undefined;
         if (typeof params?.cwd === "string" && params.cwd) {
           this.cwd = params.cwd;
         }
-        if (this.agyProc) {
-          this.killAgyProc();
-        }
         const loadedSessionId = typeof params?.sessionId === "string" ? params.sessionId : randomUUID();
         this.sessionId = loadedSessionId;
+        this.publishSkillCommands();
         // Isolation is per SESSION, not "always start over": the conversation
         // this session owns is resumed, anyone else's is not.
         this.activeConversationId = this.lookupConversation(loadedSessionId);
@@ -1417,11 +1529,7 @@ export class AgyAcpAdapterServer {
           }
         } else if (configId === "mode" && typeof value === "string") {
           const prevMode = this.currentModeId;
-          this.currentModeId = (value === "yolo" || value === "agent-full-access" || value === "bypassPermissions")
-            ? "yolo"
-            : value === "plan"
-              ? "plan"
-              : "agent";
+          this.currentModeId = agyCliMode(value);
           if (prevMode !== this.currentModeId && this.agyProc) {
             this.requestRespawn();
           }
@@ -1434,11 +1542,7 @@ export class AgyAcpAdapterServer {
 
       case "session/set_mode": {
         const rawModeId = typeof params?.modeId === "string" ? params.modeId : "agent";
-        const modeId = (rawModeId === "yolo" || rawModeId === "agent-full-access" || rawModeId === "bypassPermissions")
-          ? "yolo"
-          : rawModeId === "plan"
-            ? "plan"
-            : "agent";
+        const modeId = agyCliMode(rawModeId);
         const prevMode = this.currentModeId;
         this.currentModeId = modeId;
         if (prevMode !== modeId && this.agyProc) {
@@ -1500,23 +1604,26 @@ export class AgyAcpAdapterServer {
           break;
         }
 
-        if (this.pendingPrompt) {
-          // Overwriting it would strand the first request id with no reply ever.
-          this.sendError(id, -32603, "A turn is already running in this session");
+        if (this.closing || this.processBlocked) {
+          this.sendError(id, -32603, "Antigravity session is closing or process restart is blocked");
           break;
         }
-        try {
-          await this.executePrompt(id, promptText);
-        } catch {
-          // executePrompt already answered this id — a second error response
-          // for one request is a protocol violation, not extra safety.
-        }
+        await this.executePrompt(id, promptText);
         break;
       }
 
       case "session/cancel": {
         this.pendingExitPlanId = undefined;
-        this.cancelActiveTurn();
+        await this.cancelActiveTurn();
+        this.sendResponse(id, {});
+        break;
+      }
+
+      case "_companions/human_wait": {
+        if (params?.sessionId === this.sessionId) {
+          this.humanWaitActive = params.active === true;
+          if (this.pendingPrompt) this.pendingPrompt.activityAt = Date.now();
+        }
         this.sendResponse(id, {});
         break;
       }
@@ -1525,8 +1632,9 @@ export class AgyAcpAdapterServer {
         const target = typeof params?.sessionId === "string" ? params.sessionId : this.sessionId;
         if (target) this.forgetConversation(target);
         if (!target || target === this.sessionId) {
-          this.cancelActiveTurn();
+          await this.resetSession();
           this.activeConversationId = undefined;
+          this.sessionId = undefined;
           this.discardStagedImages();
         }
         this.sendResponse(id, {});
@@ -1646,8 +1754,9 @@ export class AgyAcpAdapterServer {
    * replays from `transcript.jsonl` via `synthesizeAgyToolDiff` +
    * `unwrapTranscriptStrings`, which does carry the real before/after text.
    */
-  private async waitForDiskChangeText(file: string, before: string | undefined): Promise<string | undefined> {
+  private async waitForDiskChangeText(file: string, before: string | undefined, turn?: AgyTurn): Promise<string | undefined> {
     for (let i = 0; i < this.diskPollAttempts; i++) {
+      if (turn?.abort.signal.aborted || (turn && this.pendingPrompt !== turn)) return undefined;
       const text = this.readDiskTextForDiff(file);
       if (text !== before) return text;
       await new Promise((resolve) => setTimeout(resolve, this.diskPollDelayMs));
@@ -1674,6 +1783,7 @@ export class AgyAcpAdapterServer {
     rawParams: any,
     phase: "active" | "done" | "error",
     stepIndex?: number,
+    turn?: AgyTurn,
   ): Promise<unknown[] | undefined> {
     if (name !== "write_to_file" && name !== "replace_file_content" && name !== "multi_replace_file_content") {
       return undefined;
@@ -1707,7 +1817,8 @@ export class AgyAcpAdapterServer {
       diffFromTranscript = synthesizeAgyToolDiff(name, transcriptArgs, { diskOldText });
     }
 
-    const diskNewText = await this.waitForDiskChangeText(file, diskOldText);
+    const diskNewText = await this.waitForDiskChangeText(file, diskOldText, turn);
+    if (turn && (turn.abort.signal.aborted || this.pendingPrompt !== turn)) return undefined;
     this.sessionFileBaseline.set(baselineKey, diskNewText);
 
     if (diffFromTranscript) {
@@ -1758,9 +1869,8 @@ export class AgyAcpAdapterServer {
   }
 
   private ensureAgyProc(overridePromptArgs?: string[]): ChildProcessWithoutNullStreams {
-    if (this.respawnBeforeNextPrompt || (overridePromptArgs && overridePromptArgs.length > 0)) {
-      this.respawnBeforeNextPrompt = false;
-      this.killAgyProc();
+    if (this.agyProc && overridePromptArgs) {
+      throw new Error("Antigravity process must be stopped before respawn");
     }
     if (this.agyProc && !this.agyProc.killed && this.agyProc.stdin.writable && !overridePromptArgs) {
       return this.agyProc;
@@ -1792,10 +1902,7 @@ export class AgyAcpAdapterServer {
     // Exactly as many `--effort` flags as this model accepts: one, or none.
     // See modelRequiresEffort for what the CLI rejects.
     if (this.effectiveModelRequiresEffort(this.currentModelId)) {
-      const chosen = this.currentEffort && this.currentEffort !== "default"
-        ? this.currentEffort
-        : DEFAULT_AGY_EFFORT;
-      args.push("--effort", chosen);
+      args.push("--effort", this.effectiveEffort());
     }
     if (this.currentModeId === "plan") {
       args.push("--mode", "plan");
@@ -1812,7 +1919,7 @@ export class AgyAcpAdapterServer {
       args.push("--conversation", this.activeConversationId);
     }
 
-    const proc = this.spawnFn(this.agyPath, args, {
+    const proc = this.spawnFn(shellSafeCommand(this.agyPath), args, {
       cwd: this.cwd,
       env: this.env,
       stdio: ["pipe", "pipe", "pipe"],
@@ -1821,14 +1928,25 @@ export class AgyAcpAdapterServer {
     });
 
     this.agyProc = proc;
+    const ioError = (error: Error) => {
+      if (this.agyProc === proc) this.pendingPrompt?.reject(error);
+    };
+    proc.stdin.on("error", ioError);
+    proc.stdout.on("error", ioError);
+    proc.stderr.on("error", ioError);
     this.agyRl = createInterface({ input: proc.stdout });
-    this.agyRl.on("line", (line) => this.handleAgyLine(line));
+    this.agyRl.on("error", ioError);
+    this.agyRl.on("line", (line) => {
+      if (this.agyProc === proc) this.handleAgyLine(line);
+    });
     // Drained, not just piped: an undrained stderr deadlocks the child once the
     // pipe buffer fills, and the host logs whatever we write to ours.
     if (proc.stderr) {
       this.agyErrRl = createInterface({ input: proc.stderr });
+      this.agyErrRl.on("error", ioError);
       this.agyErrRl.on("line", (line) => {
-        if (line.trim()) {
+        if (this.agyProc === proc && line.trim()) {
+          if (this.pendingPrompt) this.pendingPrompt.activityAt = Date.now();
           this.lastStderrBuffer.push(line);
           if (this.lastStderrBuffer.length > 50) this.lastStderrBuffer.shift();
           process.stderr.write(`[agy] ${line}\n`);
@@ -1837,34 +1955,26 @@ export class AgyAcpAdapterServer {
     }
 
     proc.on("exit", (code) => {
-      if (this.pendingPrompt) {
-        const pending = this.pendingPrompt;
-        this.pendingPrompt = undefined;
-        if (code !== 0) {
-          pending.reject(new Error(`Antigravity CLI exited with code ${code}`));
-        } else {
-          pending.resolve({
-            stopReason: "end_turn",
-            usage: pending.usage,
-          });
-        }
-      }
+      if (this.agyProc !== proc) return;
       this.agyProc = undefined;
+      const turn = this.pendingPrompt;
+      if (turn && turn.state === "running") {
+        turn.reject(new Error(code === 0 ? "Antigravity CLI exited without a turn result" : `Antigravity CLI exited with code ${code}`));
+      }
     });
-
-    proc.on("error", (err) => {
-      if (this.pendingPrompt) {
-        const pending = this.pendingPrompt;
-        this.pendingPrompt = undefined;
-        pending.reject(err);
-      }
+    proc.on("error", (error) => {
+      if (this.agyProc !== proc) return;
       this.agyProc = undefined;
+      this.pendingPrompt?.reject(error);
     });
 
     return proc;
   }
 
   handleAgyLine(line: string): void {
+    const turn = this.pendingPrompt;
+    if (turn) turn.activityAt = Date.now();
+    if (!turn || turn.abort.signal.aborted || turn.state !== "running") return;
     const trimmed = line.trim();
     if (!trimmed) return;
     let ev: any;
@@ -1892,6 +2002,7 @@ export class AgyAcpAdapterServer {
       if (!step) return;
 
       if (step.step_type === "agent_response" && typeof step.text_delta === "string" && step.text_delta) {
+        if (step.text_delta.trim()) turn.visible = true;
         this.sendNotification("session/update", {
           sessionId: this.sessionId,
           update: {
@@ -1913,10 +2024,14 @@ export class AgyAcpAdapterServer {
         const title = toolTitle(name, params);
 
         if (step.state === "ACTIVE") {
+          turn.visible = true;
+          if (turn.tools.has(toolCallId)) return;
+          turn.tools.set(toolCallId, "open");
           // synthesizeAgyDiffContent is async (DONE polls disk — see there),
           // but the ACTIVE path never awaits anything itself, so this still
           // resolves before any later stdout line can be processed.
-          void this.synthesizeAgyDiffContent(toolCallId, name, rawParams, "active", step.step_index).then((content) => {
+          const activeDiff = this.synthesizeAgyDiffContent(toolCallId, name, rawParams, "active", step.step_index, turn).then((content) => {
+            if (turn.abort.signal.aborted || this.pendingPrompt !== turn) return;
             this.sendNotification("session/update", {
               sessionId: this.sessionId,
               update: {
@@ -1930,8 +2045,12 @@ export class AgyAcpAdapterServer {
               },
             });
           });
-        } else {
+          this.pendingDiffPromises.push(activeDiff);
+        } else if (step.state === "DONE" || step.state === "ERROR") {
+          turn.visible = true;
+          if (turn.tools.has(toolCallId) && turn.tools.get(toolCallId) !== "open") return;
           const isError = step.state === "ERROR";
+          turn.tools.set(toolCallId, "finishing");
           const rawOutput = step.tool_info?.output ?? step.tool_info?.error?.message ?? (isError ? "Tool execution failed" : "completed");
           const output = isError ? sanitizeAgyToolErrorMessage(rawOutput) : rawOutput;
           // For an edit tool this polls disk for the write to actually land
@@ -1941,7 +2060,9 @@ export class AgyAcpAdapterServer {
           // alternative (no poll) was a confirmed-live "+0 -0" diff. Tracked
           // in pendingDiffPromises so the turn's "result" handler can await
           // it — the poll can still be running when "result" arrives.
-          const diffPromise = this.synthesizeAgyDiffContent(toolCallId, name, rawParams, isError ? "error" : "done", step.step_index).then((content) => {
+          const diffPromise = this.synthesizeAgyDiffContent(toolCallId, name, rawParams, isError ? "error" : "done", step.step_index, turn).then((content) => {
+            if (turn.abort.signal.aborted || this.pendingPrompt !== turn) return;
+            turn.tools.set(toolCallId, isError ? "failed" : "completed");
             this.sendNotification("session/update", {
               sessionId: this.sessionId,
             update: {
@@ -1994,149 +2115,161 @@ export class AgyAcpAdapterServer {
         this.pendingPrompt.usage.totalTokens = u.total_tokens ?? this.pendingPrompt.usage.totalTokens;
         this.lastUsage = { ...this.pendingPrompt.usage };
 
-        const usedTokens = u.total_tokens ?? ((u.input_tokens ?? 0) + (u.output_tokens ?? 0));
-        if (typeof usedTokens === "number" && usedTokens > 0) {
-          const windowSize = this.modelContextWindow(this.currentModelId);
-          this.sendNotification("session/update", {
-            sessionId: this.sessionId,
-            update: {
-              sessionUpdate: "usage_update",
-              used: usedTokens,
-              size: windowSize,
-            },
-          });
-        }
+
       }
       return;
     }
 
     if (ev.event === "result") {
-      const res = ev.result;
-      if (this.pendingPrompt) {
-        const pending = this.pendingPrompt;
-        this.pendingPrompt = undefined;
-        void (async () => {
-          // Wait for every in-flight edit diff (each up to ~3s of disk
-          // polling — see pendingDiffPromises) to settle before the turn-end
-          // recheck: live evidence showed "result" arriving WHILE a DONE-phase
-          // poll was still running, which left flushPendingEditRechecks with
-          // nothing queued yet (the entry is only pushed once the poll gives
-          // up). This delays turn completion by however long the slowest
-          // still-running poll needs — negligible next to the turn itself.
-          const diffPromises = this.pendingDiffPromises;
-          this.pendingDiffPromises = [];
-          await Promise.allSettled(diffPromises);
-          this.flushPendingEditRechecks();
-
-          if (res?.usage) {
-            pending.usage.inputTokens = res.usage.input_tokens ?? pending.usage.inputTokens;
-            pending.usage.outputTokens = res.usage.output_tokens ?? pending.usage.outputTokens;
-            pending.usage.thoughtTokens = res.usage.thinking_tokens ?? pending.usage.thoughtTokens;
-            pending.usage.totalTokens = res.usage.total_tokens ?? pending.usage.totalTokens;
-            this.lastUsage = { ...pending.usage };
-
-            const usedTokens = res.usage.total_tokens ?? ((res.usage.input_tokens ?? 0) + (res.usage.output_tokens ?? 0));
-            if (typeof usedTokens === "number" && usedTokens > 0) {
-              const windowSize = this.modelContextWindow(this.currentModelId);
-              this.sendNotification("session/update", {
-                sessionId: this.sessionId,
-                update: {
-                  sessionUpdate: "usage_update",
-                  used: usedTokens,
-                  size: windowSize,
-                },
-              });
-            }
-          }
-
-          if (res?.status === "ERROR") {
-            pending.reject(new Error(res.error || "Antigravity reported an error"));
-          } else {
-            const u = pending.usage;
-            // One line per turn, so a quota question has an answer that is not a
-            // guess. Only when the CLI actually reported usage — a zero line says
-            // nothing and would bury the ones that do.
-            if (u.totalTokens > 0) {
-              process.stderr.write(
-                `[agy] turn complete in=${u.inputTokens} out=${u.outputTokens} thinking=${u.thoughtTokens} total=${u.totalTokens}
-`,
-              );
-            }
-            this.lastUsage = { ...pending.usage };
-            pending.resolve({
-              stopReason: "end_turn",
-              usage: pending.usage,
-            });
-          }
-        })();
+      const result = ev.result;
+      turn.state = "finalizing";
+      if (result?.usage) {
+        const u = result.usage;
+        turn.usage.inputTokens = u.input_tokens ?? turn.usage.inputTokens;
+        turn.usage.outputTokens = u.output_tokens ?? turn.usage.outputTokens;
+        turn.usage.thoughtTokens = u.thinking_tokens ?? turn.usage.thoughtTokens;
+        turn.usage.totalTokens = u.total_tokens ?? turn.usage.totalTokens;
       }
+      if (result?.status === "ERROR") turn.reject(new Error(result.error || "Antigravity reported an error"));
+      else turn.resolve({ stopReason: "end_turn", usage: turn.usage });
     }
   }
 
-  private executePrompt(id: number | string, promptText: string, retryAllowed = true): Promise<void> {
-    return new Promise((resolve, reject) => {
-      void (async () => {
-      const useStdin = await this.probeSupportsInputFormat();
-      if (!useStdin) {
-        process.stderr.write("[agy] Antigravity running in compatibility mode (per-turn CLI invocation)\n");
-      }
-      const proc = useStdin
-        ? this.ensureAgyProc()
-        : this.ensureAgyProc(["-p", promptText]);
-
-      this.pendingPrompt = {
-        id,
-        resolve: (val) => {
-          this.sendResponse(id, val);
-          resolve();
-        },
-        reject: (err) => {
-          const errMsg = (err as Error).message || "";
-          const combinedErr = errMsg + "\n" + this.lastStderrBuffer.join("\n");
-          if (retryAllowed) {
-            if (/requires --effort/i.test(combinedErr)) {
-              this.effortRequirementOverrides.set(this.currentModelId, true);
-              this.killAgyProc();
-              this.executePrompt(id, promptText, false).then(resolve, reject);
-              return;
-            } else if (/conflicts with --effort/i.test(combinedErr)) {
-              this.effortRequirementOverrides.set(this.currentModelId, false);
-              this.killAgyProc();
-              this.executePrompt(id, promptText, false).then(resolve, reject);
-              return;
-            }
-          }
-          this.sendError(id, -32603, errMsg || "Prompt error");
-          reject(err);
-        },
-        usage: {
-          inputTokens: 0,
-          outputTokens: 0,
-          thoughtTokens: 0,
-          totalTokens: 0,
-        },
-      };
-
-      if (useStdin) {
-        const payload = JSON.stringify({
-          event: "user",
-          message: {
-            role: "user",
-            content: promptText,
-          },
-        }) + "\n";
-
-        proc.stdin.write(payload, (err) => {
-          if (err) {
-            this.pendingPrompt = undefined;
-            this.sendError(id, -32603, `Failed to write prompt to Antigravity stdin: ${err.message}`);
-            reject(err);
-          }
-        });
-      }
-      })();
-    });
+  private executePrompt(id: number | string, promptText: string): Promise<void> {
+    let finish!: () => void;
+    const done = new Promise<void>(resolve => { finish = resolve; });
+    const turn: AgyTurn = {
+      id, text: promptText, state: "queued", abort: new AbortController(),
+      usage: { inputTokens: 0, outputTokens: 0, thoughtTokens: 0, totalTokens: 0 },
+      tools: new Map(), visible: false, resolve: () => {}, reject: () => {}, done, finish,
+      activityAt: Date.now(),
+    };
+    this.promptQueue.push(turn);
+    this.drainPromptQueue();
+    return done;
   }
+
+  private drainPromptQueue(): void {
+    if (this.pendingPrompt || this.closing) return;
+    if (this.processBlocked) {
+      for (const turn of this.promptQueue.splice(0)) {
+        this.sendError(turn.id, -32603, "Antigravity process exit was not confirmed; restart blocked");
+        turn.state = "terminal";
+        turn.finish();
+      }
+      return;
+    }
+    const turn = this.promptQueue.shift();
+    if (!turn) return;
+    turn.state = "claimed";
+    this.pendingPrompt = turn;
+    void this.runTurn(turn);
+  }
+
+  private async runTurn(turn: AgyTurn): Promise<void> {
+    const watchdog = this.watchdogIdleTimeoutMs ? setInterval(() => {
+      if (turn.state !== "running" || this.humanWaitActive || this.pendingExitPlanId != null) {
+        turn.activityAt = Date.now();
+        return;
+      }
+      if (Date.now() - turn.activityAt >= this.watchdogIdleTimeoutMs) {
+        turn.state = "finalizing";
+        process.stderr.write("[agy] idle watchdog stopped the turn; next prompt will resume the session\n");
+        turn.reject(new Error("Antigravity idle watchdog stopped an unresponsive turn; send another prompt to resume"));
+      }
+    }, 1000) : undefined;
+    watchdog?.unref();
+    try {
+      const useStdin = await abortable(this.probeSupportsInputFormat(), turn.abort.signal);
+      if (!useStdin && grokCliNeedsShell(this.agyPath))
+        throw new Error("Antigravity compatibility mode on Windows requires a native executable; use agy.exe instead of a .cmd shim");
+      let result: any;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        if (this.stopPromise) await abortable(this.stopPromise, turn.abort.signal);
+        if (this.respawnBeforeNextPrompt || !useStdin) {
+          await abortable(this.killAgyProc(), turn.abort.signal);
+          this.respawnBeforeNextPrompt = false;
+        }
+        if (this.processBlocked) throw new Error("Antigravity restart blocked");
+        this.lastStderrBuffer.length = 0;
+        const response = new Promise<any>((resolve, reject) => { turn.resolve = resolve; turn.reject = reject; });
+        // Observe errors even if a synchronous spawn failure prevents awaiting response.
+        void response.catch(() => {});
+        turn.state = "running";
+        try {
+          this.skillCommands = discoverAgySkills(this.cwd, os.homedir());
+          const instructions = [this.toolRules === "prompt"
+            ? "Antigravity tool rules: use absolute file paths; omit ArtifactMetadata for workspace files; supply Pattern for find_by_name." : "",
+          agySkillInstructions(turn.text, this.skillCommands)].filter(Boolean).join("\n");
+          const text = instructions ? `<companions_adapter_instructions>\n${instructions}\n</companions_adapter_instructions>\n\n${turn.text}` : turn.text;
+          const proc = useStdin ? this.ensureAgyProc() : this.ensureAgyProc(["-p", text]);
+          if (turn.abort.signal.aborted) {
+            await this.killAgyProc();
+            throw new Error("Turn cancelled");
+          }
+          if (useStdin) {
+            proc.stdin.write(JSON.stringify({ event: "user", message: { role: "user", content: text } }) + "\n", error => {
+              if (error && this.pendingPrompt === turn && !turn.abort.signal.aborted) turn.reject(error);
+            });
+          }
+          result = await abortable(response, turn.abort.signal);
+          break;
+        } catch (error) {
+          const message = `${(error as Error).message}\n${this.lastStderrBuffer.join("\n")}`;
+          if (attempt === 0 && !turn.abort.signal.aborted && !turn.visible && /requires --effort|conflicts with --effort/i.test(message)) {
+            this.effortRequirementOverrides.set(this.currentModelId, /requires --effort/i.test(message));
+            turn.state = "claimed";
+            await abortable(this.killAgyProc(), turn.abort.signal);
+            continue;
+          }
+          throw error;
+        }
+      }
+      await abortable(Promise.allSettled(this.pendingDiffPromises), turn.abort.signal);
+      this.flushPendingEditRechecks();
+      if (!turn.visible) {
+        this.sendError(turn.id, -32000, "Antigravity completed the turn without visible assistant or tool output");
+      } else {
+        this.closeTurnTools(turn);
+        this.lastUsage = { ...turn.usage };
+        this.sendResponse(turn.id, result);
+      }
+    } catch (error) {
+      try { await this.killAgyProc(); } catch { /* processBlocked keeps the FIFO closed */ }
+      this.closeTurnTools(turn);
+      if (this.processBlocked) this.sendError(turn.id, -32603, "Antigravity process exit was not confirmed; restart blocked");
+      else if (turn.abort.signal.aborted) this.sendResponse(turn.id, { stopReason: "cancelled", usage: turn.usage });
+      else this.sendError(turn.id, -32603, (error as Error).message || "Prompt error");
+    } finally {
+      clearInterval(watchdog);
+      this.closeTurnTools(turn);
+      this.pendingExitPlanId = undefined;
+      this.humanWaitActive = false;
+      turn.state = "terminal";
+      this.pendingWriteOldText.clear();
+      this.pendingEditRecheck = [];
+      this.pendingDiffPromises = [];
+      if (this.pendingPrompt === turn) this.pendingPrompt = undefined;
+      turn.finish();
+      this.drainPromptQueue();
+    }
+  }
+
+  private closeTurnTools(turn: AgyTurn): void {
+    for (const [id, status] of turn.tools) {
+      if (status !== "open" && status !== "finishing") continue;
+      turn.tools.set(id, "failed");
+      this.sendNotification("session/update", { sessionId: this.sessionId,
+        update: agyTerminalToolUpdate(id, turn.abort.signal.aborted) });
+    }
+  }
+
+  private publishSkillCommands(): void {
+    this.skillCommands = discoverAgySkills(this.cwd, os.homedir());
+    this.sendNotification("session/update", { sessionId: this.sessionId,
+      update: { sessionUpdate: "available_commands_update", availableCommands: this.skillCommands } });
+  }
+
 }
 
 // When invoked directly as a standalone Node script
@@ -2146,11 +2279,9 @@ if (require.main === module) {
   server.start();
 
   process.on("SIGINT", () => {
-    server.dispose();
-    process.exit(0);
+    void server.shutdown().then(() => process.exit(0), () => process.exit(1));
   });
   process.on("SIGTERM", () => {
-    server.dispose();
-    process.exit(0);
+    void server.shutdown().then(() => process.exit(0), () => process.exit(1));
   });
 }

@@ -60,4 +60,17 @@ describe("UsageHost", () => {
     usageHost.restoreUsage(session);
     expect(posted.some((m) => m.type === "usage")).toBe(true);
   });
+
+  it.each(["codex", "claude", "gemini"] as const)("preserves native Codex request occupancy and estimates other adapters (%s)", provider => {
+    const { usageHost } = makeHarness();
+    const session = new Session();
+    session.activeSessionId = "native-context";
+    session.provider = provider;
+    const observeContext = vi.fn();
+    session.client = { contextBudget: { usageSource: "session", usageSemantics: "last-request",
+      usageStale: false, used: 100 }, observeContext } as any;
+    usageHost.rememberAdapterContext(session, { occupancy: 500 });
+    if (provider === "codex") expect(observeContext).not.toHaveBeenCalled();
+    else expect(observeContext).toHaveBeenCalledWith(expect.objectContaining({ usageSemantics: "estimated-context" }));
+  });
 });

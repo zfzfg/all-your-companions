@@ -1,5 +1,6 @@
 import { hostModeSequence, type HostMode } from "./provider-modes";
 import { contextTokens } from "./context-budget";
+import { antigravityAdmission, type AdmissionPolicy } from "./prompt-admission";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { grokCliNeedsShell } from "./cli-process";
@@ -124,8 +125,14 @@ export function parseAgyModelsOutput(output: string): {
           if (typeof modelId !== "string" || !modelId || row.hidden === true) return [];
           const size = contextTokens(row.context_window ?? row.contextLimit ?? row._meta?.totalContextTokens);
           const input = contextTokens(row.inputTokenLimit);
+          const rawEfforts = row.reasoningEfforts ?? row._meta?.reasoningEfforts;
+          const reasoningEfforts = Array.isArray(rawEfforts) ? rawEfforts.flatMap((effort: any) => {
+            const value = typeof effort === "string" ? effort : effort?.value;
+            return typeof value === "string" && value ? [{ value }] : [];
+          }) : [];
           return [{ modelId, name: row.name ?? row.displayName ?? modelId,
-            _meta: { supportsReasoningEffort: row.supportsReasoningEffort === true,
+            _meta: { supportsReasoningEffort: row.supportsReasoningEffort === true || reasoningEfforts.length > 0,
+              ...(reasoningEfforts.length ? { reasoningEfforts } : {}),
               totalContextTokens: input ?? size, contextQuality: size || input ? "verified" : "unknown",
               contextLimits: { contextWindow: size, inputTokenLimit: input, outputTokenLimit: contextTokens(row.outputTokenLimit) } } }];
         });
@@ -432,6 +439,9 @@ export interface GeminiBackendOptions {
   args?: string[];
   adapterPath?: string;
   nodePath?: string;
+  toolRules?: "prompt" | "off" | "global";
+  watchdogIdleTimeoutMs?: number;
+  admission?: AdmissionPolicy;
 }
 
 export function resolveAgyAcpAdapterPath(): string {
@@ -467,6 +477,8 @@ export class GeminiBackend implements AcpBackend {
         ...options.env,
         AGY_PATH: cliPath,
         AGY_CWD: options.cwd || "",
+        AGY_TOOL_RULES: this.options.toolRules ?? "prompt",
+        AGY_WATCHDOG_IDLE_TIMEOUT_MS: String(this.options.watchdogIdleTimeoutMs ?? 0),
         ELECTRON_RUN_AS_NODE: "1",
       },
       shell: grokCliNeedsShell(command),
@@ -475,6 +487,15 @@ export class GeminiBackend implements AcpBackend {
 
   normalizeSessionResponse(response: any): any {
     return normalizeGeminiSessionResponse(response);
+  }
+
+  promptAdmission() {
+    return { coordinator: antigravityAdmission,
+      policy: this.options.admission ?? { maxActiveTurns: 0, minStartSpacingMs: 2000 } };
+  }
+
+  humanWaitNotification(sessionId: string, active: boolean) {
+    return { method: "_companions/human_wait", params: { sessionId, active } };
   }
 
   normalizePromptResult(result: any): any {

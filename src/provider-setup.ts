@@ -227,7 +227,15 @@ export class ProviderSetup {
         effort: effort || undefined,
       });
     }
-    if (provider === "gemini") return new GeminiBackend();
+    if (provider === "gemini") {
+      const cfg = this.host?.getConfiguration?.("companions");
+      return new GeminiBackend({
+        toolRules: cfg?.get<"prompt" | "off" | "global">("antigravity.toolRules", "prompt"),
+        watchdogIdleTimeoutMs: cfg?.get<number>("antigravity.watchdogIdleTimeoutMs", 0),
+        admission: { maxActiveTurns: cfg?.get<number>("antigravity.maxActiveTurns", 0) ?? 0,
+          minStartSpacingMs: cfg?.get<number>("antigravity.minStartSpacingMs", 2000) ?? 2000 },
+      });
+    }
     if (provider === "muse") return new MuseBackend();
     return undefined;
   }
@@ -418,6 +426,7 @@ export class ProviderSetup {
     if (!this.hasProviderConsent("gemini")) return false;
     const cliPath = this.locateProvider("gemini");
     if (!cliPath) return false;
+    this.host.appendLine("[antigravity] Third-party access may carry account or service restrictions. Review https://antigravity.google/terms. Authentication stays with agy.");
     const generation = this.credentialGenerations.get("gemini") ?? 0;
     const current = () => this.hasProviderConsent("gemini") && generation === (this.credentialGenerations.get("gemini") ?? 0);
     try {
