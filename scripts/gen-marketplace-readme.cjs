@@ -23,18 +23,18 @@ const header = `# All your Companions - in one Place!
 
 [![License: FSL-1.1-MIT](https://img.shields.io/badge/License-FSL--1.1--MIT-blue.svg)](https://github.com/phuryn/grok-build-vscode/blob/main/LICENSE) ![Companions](https://img.shields.io/badge/Companions-Antigravity%20%C2%B7%20Grok%20%C2%B7%20Codex%20%C2%B7%20Claude%20%C2%B7%20Muse-000000) [![VS Code](https://img.shields.io/badge/VS%20Code-Extension-007ACC?logo=visualstudiocode&logoColor=white)](https://code.visualstudio.com) [![Cursor](https://badgen.net/badge/Cursor/Extension/007ACC)](https://cursor.com)
 
-> **Local-first sidebar for five AI coding companions** — Google Antigravity, Grok Build, OpenAI Codex, Anthropic Claude Code, and Meta Muse Code. Parallel sessions, crews, native diff review, worktrees, and voice.
+> **Local-first sidebar for five AI coding companions** — Google Antigravity, Grok Build, OpenAI Codex, Anthropic Claude Code, and Meta Muse Code. Parallel sessions, fork/join crews, per-message subagents, native context windows, net diff review, fail-closed worktrees, and voice.
 >
 > **Maintainer:** Collin Lerche (zfzfg) | STERRA ([https://sterra.online](https://sterra.online))  
-> **Community Fork:** An independent community fork of *Grok Build for VS Code* (upstream v4.1.8 by Paweł Huryn), redesigned and expanded as a local-first multi-companion sidebar.
+> **Community Fork:** An independent community fork of *Grok Build for VS Code* (upstream v4.1.8 by Paweł Huryn), with a selective port of upstream 4.11–4.14. Remote, phone, and desktop-app work stays out.
 
-The local-first sidebar for five AI coding companions: **Google Antigravity CLI** (Gemini 2.5/3), **Grok Build** (Grok 4.7), **OpenAI Codex**, **Claude Code**, and **Muse Code** — right inside your editor. Drop open files in as \`@\`-context, run **parallel sessions** and **crews**, inspect **native diff previews** with **one-click revert**, isolate edits in **worktrees**, keep **resumable chat history**, typeset **LaTeX & Mermaid diagrams**, and dictate by **voice**.
+The local-first sidebar for five AI coding companions: **Google Antigravity CLI**, **Grok Build** (Grok 4.7 and a native context window), **OpenAI Codex**, **Claude Code**, and **Muse Code** — right inside your editor. Drop open files in as \`@\`-context, run **parallel sessions** and **fork/join crews**, pin a subagent model per message, inspect **native diff previews** with **net review counts**, isolate edits in **fail-closed worktrees**, and dictate by **voice**.
 
 ---
 
 ## Why use this?
 
-If you live in your editor, this puts your AI companions right next to your code in a unified graphical workflow: **native diff preview** on every proposed edit with **one-click revert**, **open files and selection as context**, **parallel sessions** with status dots, **resumable history**, **inline images & video**, and **voice dictation**.
+If you live in your editor, this puts five companions next to your code: **native diff preview** and **net review counts**, **open files and selection as context**, **parallel sessions**, **fork/join crews** with per-message subagents, **fail-closed worktrees**, **native context windows**, and **voice dictation**.
 
 `;
 
@@ -65,7 +65,7 @@ Companions opens in the **Secondary Side Bar** (right side, next to other AI too
 1. **Open** Companions: \`Ctrl/Cmd+;\` (or Command Palette: **Companions: Open**).
 2. **Type a prompt** and press **Enter**. Your companion streams its response and displays live reasoning traces.
 3. **Review actions.** Preview file edits with the native VS Code diff editor. Providers that emit permission requests offer *Allow once*, *Always allow*, or *Reject*; Antigravity executes tools server-side.
-4. **Pick your mode** (Agent / Plan / Auto accept) and **model** from the bottom toolbar.
+4. **Pick your mode** (Agent / Plan / Auto accept). The gear under the composer shows the selected model and reasoning effort.
 5. **Resume anytime** — the clock icon lists past sessions.
 
 ---
@@ -77,11 +77,11 @@ const companionBlock = `## Companion apps
 
 All your Companions is completely standalone and local-first — no external relay servers or third-party cloud brokers required. It natively coordinates:
 
-- **Google Antigravity CLI (\`agy\`)** — Gemini 2.5 Pro/Flash and Gemini 3 with massive context, multimodal vision, and streaming reasoning traces.
-- **xAI Grok Build (\`grok\`)** — Grok 4.7, SuperGrok, and xAI API integration.
-- **OpenAI Codex CLI (\`codex\`)** — High-speed ACP JSON-RPC bridge.
-- **Anthropic Claude Code CLI (\`claude\`)** — Full ACP terminal and session integration.
-- **Meta Muse Code CLI (\`muse\`)** — Native approval modes, shell sandbox, account usage windows, and workflow cards.
+- **Google Antigravity CLI (\`agy\`)** — the Gemini models your installed CLI reports, with vision, plan-review cards, and skill discovery. Tools run server-side.
+- **xAI Grok Build (\`grok\`)** — Grok 4.7 and a native per-session context window, kept separate from an optional input budget.
+- **OpenAI Codex CLI (\`codex\`)** — ACP bridge. Catalog size estimates stay in Settings and the context popover, not in the chat.
+- **Anthropic Claude Code CLI (\`claude\`)** — ACP sessions, checkpointing, and permissions. Cumulative usage stays apart from the current context window.
+- **Meta Muse Code CLI (\`muse\`)** — native approval modes, shell sandbox, account usage windows, and workflow cards. Resume snapshots keep their context provenance.
 
 All companion communication runs 100% locally via stdio directly to your installed CLI binaries.
 

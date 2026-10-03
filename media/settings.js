@@ -117,9 +117,10 @@
   const SUPPORT_MAILTO = "mailto:collinlerche@gmail.com";
   const ABOUT_DISCLAIMER =
     "All your Companions v0.3.2 · Community-built · FSL-1.1-MIT | " +
-    "Forked from Grok Build for VS Code (v4.1.8) by Paweł Huryn. " +
+    "Forked from Grok Build for VS Code (v4.1.8) by Paweł Huryn, with a selective port of upstream 4.11–4.14. " +
     "Maintained by Collin Lerche (zfzfg) | STERRA (https://sterra.online). " +
-    "Local-first sidebar for Google Antigravity, Grok Build, OpenAI Codex, Claude Code, and Meta Muse Code. " +
+    "Local-first sidebar for Google Antigravity, Grok Build, OpenAI Codex, Claude Code, and Meta Muse Code: " +
+    "parallel sessions, fork/join crews, per-message subagents, native context windows, and fail-closed worktrees. " +
     "All product names and trademarks belong to their respective owners.";
 
   const TELEMETRY_COPY =

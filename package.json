@@ -1,7 +1,7 @@
 {
   "name": "all-your-companions",
   "displayName": "All your Companions - in one Place!",
-  "description": "Local-first sidebar for five AI coding companions: Google Antigravity, Grok Build, OpenAI Codex, Claude Code, and Meta Muse Code. Parallel sessions, crews, native diff review, worktrees, and voice. Community fork of Grok Build for VS Code by Pawe\u0142 Huryn.",
+  "description": "Local-first sidebar for Google Antigravity, Grok Build, OpenAI Codex, Claude Code, and Meta Muse Code. Parallel sessions, fork/join crews, per-message subagents, native context windows, net diff review, and fail-closed worktrees. Community fork of Grok Build for VS Code by Pawe\u0142 Huryn.",
   "version": "0.3.2",
   "publisher": "zfzfg",
   "author": {
@@ -42,7 +42,11 @@
     "chat",
     "thinking",
     "tool-calls",
-    "sidebar"
+    "sidebar",
+    "crew",
+    "subagent",
+    "worktree",
+    "diff"
   ],
   "icon": "resources/AllYourCompanions-LOGO.png",
   "main": "./out/extension.js",
