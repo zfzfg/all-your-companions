@@ -47,7 +47,12 @@ files (`packetFiles`, `resolveStageScope`).
 ## Watching a child (X-02 … X-05)
 
 - `tapChildActivity` turns a hidden child's stream into `childActivity` frames
-  (transient) on the stage row or the subagent card.
+  (transient) on the stage row or the subagent card. The ancestor's
+  `childActivitySnapshots` retains at most 40 coalesced items per child and 50
+  children; `sessionUiSnapshot` restores replacing feeds on focus or reload.
+- Replay holds companion cards, approvals, trays and notices with the transcript.
+  A companion card's latest snapshot occupies its first event position;
+  unloaded history receives live card updates before it is expanded.
 - `noteChildStarted` records the child session id at `session/new`, so "Open
   transcript" and the stage row work while it runs. A focused hidden child gets
   `childContext` (back button, steer hint).

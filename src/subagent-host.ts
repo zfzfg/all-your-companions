@@ -418,8 +418,16 @@ export class SubagentHost {
     if (!owner || !queued.length) return;
     const ancestor = this.visibleAncestorOf(child);
     if (ancestor === child) return;
-    const items = coalesceActivity(queued);
-    this.deps.emit(ancestor, { type: "childActivity", owner, items, lastLine: activityLastLine(items) });
+    const previous = ancestor.childActivitySnapshots.get(owner.id);
+    const items = coalesceActivity([...(previous?.items ?? []), ...queued]).slice(-40);
+    const snapshot: Extract<HostMsg, { type: "childActivity" }> = {
+      type: "childActivity", owner, items, lastLine: activityLastLine(items), replace: true,
+    };
+    ancestor.childActivitySnapshots.set(owner.id, snapshot);
+    if (ancestor.childActivitySnapshots.size > 50) {
+      ancestor.childActivitySnapshots.delete(ancestor.childActivitySnapshots.keys().next().value!);
+    }
+    this.deps.emit(ancestor, snapshot);
   }
 
   public noteChildStarted(caller: Session, child: Session, subagentId?: string): void {

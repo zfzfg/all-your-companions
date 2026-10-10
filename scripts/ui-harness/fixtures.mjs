@@ -527,6 +527,39 @@ export const CHAT_SCENARIOS = {
       });
     },
   },
+  "subagent-transcript-return": {
+    height: 1000,
+    run: async ({ send, page }) => {
+      const frames = [
+        { type: "userMessage", text: "Inspect the fork and survey its features." },
+        { type: "agentStart" },
+        { type: "messageChunk", text: "I am comparing the fork with upstream and starting a feature survey." },
+        companion({ label: "Fork feature survey", sessionId: "child-survey" }),
+        { type: "toolCall", call: { toolCallId: "read-main", title: "Read manifest.json", kind: "read", status: "pending" } },
+      ];
+      for (const frame of frames) await send(frame);
+      await page.getByRole("button", { name: "Open transcript", exact: true }).click();
+      await send({ type: "clearMessages" });
+      await send({ type: "historyReplay", active: true });
+      await send({ type: "userMessage", text: "Survey the fork's feature surface." });
+      await send({ type: "historyReplay", active: false });
+      await send({ type: "clearMessages" });
+      await send({ type: "historyReplay", active: true });
+      for (const frame of frames) await send(frame);
+      await send(companion({ label: "Fork feature survey", sessionId: "child-survey", needsYou: true }));
+      await send({ type: "historyReplay", active: false });
+      await send({ type: "childActivity", replace: true, owner: { kind: "subagent", id: "sa_1" }, items: [
+        { kind: "tool", id: "git", title: "git diff upstream/master...HEAD", status: "completed" },
+        { kind: "tool", id: "read", title: "Read companionAdapters.mjs", status: "pending" },
+      ], lastLine: "Reading companionAdapters.mjs" });
+      const placement = await page.evaluate(() => {
+        const cards = document.querySelectorAll(".companion-subagent");
+        const user = document.querySelector(".msg.user");
+        return cards.length === 1 && !!user && !!(user.compareDocumentPosition(cards[0]) & Node.DOCUMENT_POSITION_FOLLOWING);
+      });
+      if (!placement) throw new Error("Subagent card lost its position after transcript return");
+    },
+  },
   "companion-subagents": {
     height: 1150,
     run: async ({ send }) => {

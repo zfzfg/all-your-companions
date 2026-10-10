@@ -1065,9 +1065,11 @@ export type HostMsg =
   // Live only; the webview shows one block above the composer.
   | { type: "nearFullPrompt"; used: number; window: number; threshold: number; canCompact: boolean }
   // X-02: live activity of a hidden crew stage / companion subagent, for the
-  // row or card that stands for it. Live only (never buffered).
+  // row or card that stands for it. Not buffered; the UI snapshot restores it.
   | {
       type: "childActivity";
+      /** A bounded current feed, replacing any previously rendered items. */
+      replace?: boolean;
       owner: { kind: "stage" | "subagent"; id: string };
       items: Array<
         | { kind: "prose"; text: string }

@@ -4,8 +4,8 @@
  * A crew stage or companion subagent runs where nobody looks; this turns its
  * stream (prose, tool rows, thoughts, plan progress) into a small, coalesced
  * feed the visible ancestor renders on the stage row / subagent card. Live
- * only: it never enters a replay buffer — after a reload the child's own
- * transcript is the record.
+ * only: it never enters a replay buffer. A bounded ancestor snapshot restores
+ * the feed on focus or webview reload; the child's transcript is the record.
  *
  * Pure: no vscode, no fs, no clock.
  */

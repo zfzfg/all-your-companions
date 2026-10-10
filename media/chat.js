@@ -8378,6 +8378,7 @@
     "autoCompactNotice", "planBlocked", "promptComplete", "commandOutput",
     "agentReset", "agentError", "limitOffer", "limitOfferResolved", "agentResult", "agentEnd", "exit", "sessionContext",
     "xaiNotification", "subagentUpdate", "childStream", "runProgress",
+    "companionSubagent", "subagentApproval", "subagentApprovalResolved", "subagentTray", "childActivity", "hostNotice",
     "summarizing",
   ]);
 
@@ -8388,7 +8389,19 @@
   }
 
   function applyHistoryWindow(held) {
-    const split = splitHistoryWindow(held, historyWindowTurns());
+    // Replacing card snapshots keep their first transcript position, even if
+    // later updates fall in another history page.
+    const frames = flattenHistoryMessages(held);
+    const cards = new Map();
+    for (const m of frames) if (m.type === "companionSubagent") cards.set(m.subagentId, m);
+    const seen = new Set();
+    const replay = [];
+    for (const m of frames) {
+      if (m.type !== "companionSubagent") { replay.push(m); continue; }
+      if (!seen.has(m.subagentId)) replay.push(cards.get(m.subagentId));
+      seen.add(m.subagentId);
+    }
+    const split = splitHistoryWindow(replay, historyWindowTurns());
     state.historyPrefix = split.prefix;
     state.historyPrefixUserCount = split.prefixUserCount;
     if (split.prefixUserCount > 0) {
@@ -9646,7 +9659,7 @@
     const owner = msg.owner || {};
     if (!owner.id) return;
     const store = state.childActivity || (state.childActivity = {});
-    const prev = store[owner.id] || { lines: [], lastLine: "" };
+    const prev = (!msg.replace && store[owner.id]) || { lines: [], lastLine: "" };
     const lines = prev.lines.slice();
     for (const item of msg.items || []) {
       if (item.kind === "tool") {
@@ -9683,7 +9696,7 @@
 
   function paintCompanionActivity(subagentId) {
     const card = state.companionSubagentCards && state.companionSubagentCards.get(subagentId);
-    if (!card || !card.isConnected) return;
+    if (!card || (!card.isConnected && !(historyPark && historyPark.contains(card))) || card.classList.contains("subagent-done")) return;
     const old = card.querySelector(".child-activity");
     if (old) old.remove();
     const block = activityBlock(subagentId, "companion-activity");
@@ -9952,6 +9965,7 @@
     state.mediaGenCallIds.clear();
     state.subagentCards.clear();
     state.companionSubagentCards.clear();
+    renderSubagentTray({ subagents: [] });
     state.workflowRun = null;
     renderCrewChrome();
     state.runProgressCards.clear();
@@ -13150,7 +13164,7 @@
 
   function companionCardFor(subagentId) {
     let el = state.companionSubagentCards.get(subagentId);
-    if (el && el.isConnected) return el;
+    if (el && (el.isConnected || (historyPark && historyPark.contains(el)))) return el;
     closeToolGroup();
     clearWelcome();
     hideGrokking();
@@ -13265,6 +13279,10 @@
   }
 
   function renderCompanionSubagent(msg) {
+    if (!state.historyHydrating) {
+      const at = state.historyPrefix.findIndex((m) => m.type === "companionSubagent" && m.subagentId === msg.subagentId);
+      if (at >= 0) { state.historyPrefix[at] = msg; return; }
+    }
     const el = companionCardFor(msg.subagentId);
     const title = el.querySelector(".subagent-title");
     if (title) {
@@ -13353,9 +13371,12 @@
       }
       if (msg.ranModel) statusEl.appendChild(h("span", { class: "subagent-ran-model", title: "The model that actually ran" }, "ran " + msg.ranModel));
     }
+    el.classList.toggle("subagent-done", terminal);
     if (terminal) {
-      el.classList.add("subagent-done");
       renderCompanionResult(el, msg);
+    } else {
+      const result = el.querySelector(".subagent-result");
+      if (result) { result.hidden = true; result.textContent = ""; }
     }
     renderCompanionActions(el, msg);
     if (!terminal) paintCompanionActivity(msg.subagentId);
@@ -19258,7 +19279,8 @@
         addSubagentApprovalCard(msg);
         break;
       case "subagentApprovalResolved": {
-        const card = liveTranscriptQueryAll(".subagent-approval").find((c) => c.dataset.approvalId === msg.id);
+        const cards = historyPark ? [...historyPark.querySelectorAll(".subagent-approval")] : liveTranscriptQueryAll(".subagent-approval");
+        const card = cards.find((c) => c.dataset.approvalId === msg.id);
         if (card && !card.classList.contains("resolved")) resolveSubagentApprovalCard(card, msg.approved);
         break;
       }

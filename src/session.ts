@@ -687,6 +687,8 @@ export class Session {
   /** X-02: activity items waiting for the next throttled frame upstairs. */
   childActivityQueue?: import("./child-activity").ActivityItem[];
   childActivityTimer?: ReturnType<typeof setTimeout>;
+  /** Current bounded feeds shown in this ancestor's cards, restored on focus. */
+  childActivitySnapshots = new Map<string, Extract<HostMsg, { type: "childActivity" }>>();
   /** X-04: when this hidden child last showed any activity, and whether the
    *  stall warning is currently up for it. */
   lastChildActivityAt?: number;
@@ -1073,6 +1075,7 @@ export function sessionUiSnapshot(
   if (session.workflowView) {
     messages.push({ type: "workflowRun", run: session.workflowView });
   }
+  messages.push(...session.childActivitySnapshots.values());
   messages.push({ type: "feedbackAvailability", available: session.feedbackAvailable });
   if (session.liveFeedbackEligible) {
     messages.push({ type: "turnFeedbackAck", rating: session.turnRating });

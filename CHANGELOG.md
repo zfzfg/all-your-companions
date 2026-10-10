@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Preserve subagent cards and delegation notices in transcript order when returning from a child chat. Keep one card at its original turn with its latest status across paginated history, restore bounded activity previews, reset the running tray per conversation, preserve resolved approvals on history expansion, and clear old results for follow-ups.
+
 ## [0.3.2] - 2026-10-03
 
 - Fail closed on worktree creation and concurrency limits: requested worktrees no longer fall back to the shared checkout on failure, path aliases share unified file claims, uncommitted changes are included during apply, and a full writer pool queues callers instead of spawning redundant writers.

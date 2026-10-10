@@ -6712,7 +6712,10 @@ ${detail}`,
       }
     }
     if (session.suppressContent && GrokSidebar.SUPPRESS_TYPES.has(message.type)) return;
-    if (message.type === "clearMessages") session.buffer = [];
+    if (message.type === "clearMessages") {
+      session.buffer = [];
+      session.childActivitySnapshots.clear();
+    }
     else if (!GrokSidebar.TRANSIENT_TYPES.has(message.type)) session.buffer.push(message);
     if (message.type === "userMessage" && !message.steer) {
       session.liveFeedbackEligible = false;
