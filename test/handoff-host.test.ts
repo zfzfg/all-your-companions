@@ -74,6 +74,7 @@ function harness(options: HarnessOptions = {}) {
     join: (...parts: string[]) => nodePath.join(...parts),
   });
   sidebar.host = { appendLine: (line: string) => { logged.push(line); } };
+  sidebar.post = (message: unknown) => { posted.push(message); };
   sidebar.emit = (_session: Session, message: unknown) => { posted.push(message); };
   sidebar.setStatus = (session: Session, status: string) => { session.status = status as any; };
   sidebar.sessionCwd = () => workspace;

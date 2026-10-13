@@ -1800,3 +1800,14 @@ it("offers extension disconnect separately from CLI sign-out", () => {
   logout.click();
   expect(posted).toContainEqual({ type: "logout", provider: "grok" });
 });
+
+it.each(["grok", "codex", "claude", "gemini", "muse"])("allows disconnecting %s while sign-in is expired", provider => {
+  const { root, posted } = mountAt("providers", {
+    snapshot: { providers: [{ id: provider, connected: true, needsLogin: true }] },
+    env: { providersKnown: true },
+  });
+  const disconnect = root.querySelector('[data-id="disconnect:' + provider + '"] .settings-action') as HTMLButtonElement;
+  expect(disconnect.textContent).toBe("Disconnect");
+  disconnect.click();
+  expect(posted).toContainEqual({ type: "disconnectProvider", provider });
+});

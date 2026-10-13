@@ -122,6 +122,7 @@ export class WebviewHtml {
     const boot = {
       snapshot: {
         appPurpose: this.appPurpose() || DEFAULT_APP_PURPOSE,
+        projectsWorkspaceOnly: cfg.get("projects.workspaceOnly", false),
         showThinking: cfg.get("showThinking", false),
         expandCommandOutputs: cfg.get("expandCommandOutputs", false),
         steerByDefault: cfg.get("steerByDefault", false),
@@ -218,6 +219,7 @@ export class WebviewHtml {
       window.addEventListener("message", function (e) {
         var msg = e.data;
         if (!msg || !msg.type || !surface) return;
+        if (msg.type === "repos") surface.update({ projectsWorkspaceOnly: msg.workspaceOnly === true });
         if (msg.type === "voiceConfigured") {
           surface.update({ voiceConfigured: !!msg.value, voiceBackendState: msg.backendState,
             voiceSendPhrase: msg.sendPhrase, voiceKeyterms: msg.keyterms });

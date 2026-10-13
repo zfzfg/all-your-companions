@@ -117,6 +117,9 @@ export class SidebarViewHost {
       ) {
         this.deps.sidebarOps.actions.postVoiceConfigured();
       }
+      if (e.affectsConfiguration("grok.projects.workspaceOnly")) {
+        this.deps.sidebarOps.actions.postRepoCatalog();
+      }
       if (e.affectsConfiguration("grok.chatFontScale")) {
         this.deps.sidebarOps.actions.postFontScale();
       }
@@ -237,6 +240,7 @@ export class SidebarViewHost {
     const testOverride = this.deps.getOverride?.<typeof this.resolveProjectsRailView>("resolveProjectsRailView");
     if (testOverride) return testOverride(view);
 
+    this.watchCatalogConfiguration();
     this.projectsRail = view;
     view.webview.options = {
       enableScripts: true,
@@ -323,12 +327,19 @@ export class SidebarViewHost {
     this.deps.sidebarOps.actions.postSessionsList();
   }
 
-  /**
-     */
+  /** Keep standalone settings and rail views current before the chat is opened. */
+  private watchCatalogConfiguration(): void {
+    if (this.configWatcher) return;
+    this.configWatcher = this.deps.sidebarOps.state.host.onDidChangeConfiguration?.(event => {
+      if (event.affectsConfiguration("grok.projects.workspaceOnly")) this.deps.sidebarOps.actions.postRepoCatalog();
+    });
+  }
+
   async openSettingsEditor(category?: string): Promise<void> {
     const testOverride = this.deps.getOverride?.<typeof this.openSettingsEditor>("openSettingsEditor");
     if (testOverride) return testOverride(category);
 
+    this.watchCatalogConfiguration();
     const targetCategory = category === "rules" ? "advanced" : category;
     if (this.settingsEditor) {
       this.settingsEditor.reveal();
@@ -416,6 +427,7 @@ export class SidebarViewHost {
     "deletePermissionRule",
     "adoptPermissionRules",
     "openText",
+    "setProjectsWorkspaceOnly",
     "setShowThinking",
     "setAppPurpose",
     "setExpandCommandOutputs",
@@ -440,6 +452,7 @@ export class SidebarViewHost {
     "openSettings",
     "openUrl",
     "moveView",
+    "disconnectProvider",
     "logout",
     "setupGithubCli",
     "githubSignOut",

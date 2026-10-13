@@ -1274,6 +1274,12 @@
           "default": 2000,
           "minimum": 0,
           "description": "Minimum spacing between Antigravity turn starts when admission is enabled. An operating setting, not a Google product limit."
+        },
+        "companions.projects.workspaceOnly": {
+          "type": "boolean",
+          "default": false,
+          "scope": "window",
+          "description": "Show projects, recent and pinned conversations only for folders open in this window. Empty windows show all projects."
         }
       }
     }

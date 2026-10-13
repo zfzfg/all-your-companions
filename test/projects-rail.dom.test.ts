@@ -2644,3 +2644,16 @@ describe("project header is a fold control, not a repo switch", () => {
     expect(posted.filter((p) => p.type === "selectRepo")).toEqual([]);
   });
 });
+
+
+it("filters recent and pinned shortcuts by window roots and restores them on toggle", () => {
+  const h = boot();
+  const entries = [row("a", "/work/alpha", "Alpha pin"), row("b", "/work/beta", "Beta pin")];
+  dispatch(h.window, { type: "pinnedSessions", entries, dots: {} });
+  dispatch(h.window, { type: "repos", entries: repos.slice(0, 1), selectedCwd: "/work/alpha", activeCwd: "/work/beta",
+    workspaceOnly: true, workspaceRoots: ["/work/alpha"] });
+  expect(h.doc.querySelector(".rail-pinned")!.textContent).toContain("Alpha pin");
+  expect(h.doc.querySelector(".rail-pinned")!.textContent).not.toContain("Beta pin");
+  dispatch(h.window, { type: "repos", entries: repos, selectedCwd: "/work/alpha", activeCwd: "/work/beta", workspaceOnly: false });
+  expect(h.doc.querySelector(".rail-pinned")!.textContent).toContain("Beta pin");
+});

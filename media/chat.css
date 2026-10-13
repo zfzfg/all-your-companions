@@ -2665,8 +2665,8 @@ body.thinking-hidden .msg.thinking { display: none; }
   overflow-wrap: normal;
 }
 .tool-cmd.command-full {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+  white-space: pre;
+  overflow-wrap: normal;
 }
 .tool-cmd-output {
   color: var(--vscode-foreground);
@@ -2883,6 +2883,10 @@ body.vscode-light {
 .msg.agent .body h1,
 .msg.agent .body h2,
 .msg.agent .body h3,
+.msg.agent .body h4, .msg.agent .body h5, .msg.agent .body h6,
+.desk-ft-md h4, .files-browse-md h4,
+.desk-ft-md h5, .files-browse-md h5,
+.desk-ft-md h6, .files-browse-md h6,
 .desk-ft-md h1, .files-browse-md h1,
 .desk-ft-md h2, .files-browse-md h2,
 .desk-ft-md h3, .files-browse-md h3 {
@@ -2893,6 +2897,12 @@ body.vscode-light {
 .msg.agent .body h1, .desk-ft-md h1, .files-browse-md h1 { font-size: 1.4em; }
 .msg.agent .body h2, .desk-ft-md h2, .files-browse-md h2 { font-size: 1.25em; }
 .msg.agent .body h3, .desk-ft-md h3, .files-browse-md h3 { font-size: 1.1em; }
+ .msg.agent .body h4, .desk-ft-md h4, .files-browse-md h4 { font-size: 1em; }
+.msg.agent .body h5, .desk-ft-md h5, .files-browse-md h5 { font-size: .95em; }
+.msg.agent .body h6, .desk-ft-md h6, .files-browse-md h6 { font-size: .9em; }
+.msg.agent .body > h4:first-child, .msg.agent .body > h5:first-child, .msg.agent .body > h6:first-child,
+.desk-ft-md > h4:first-child, .desk-ft-md > h5:first-child, .desk-ft-md > h6:first-child,
+.files-browse-md > h4:first-child, .files-browse-md > h5:first-child, .files-browse-md > h6:first-child,
 .msg.agent .body > h1:first-child,
 .msg.agent .body > h2:first-child,
 .msg.agent .body > h3:first-child,
@@ -4546,7 +4556,9 @@ body.session-superseded .msg-edit-btn {
 .card .plan-body h1,
 .card .plan-body h2,
 .card .plan-body h3,
-.card .plan-body h4 { margin: 8px 0 4px; font-size: 1em; font-weight: 600; }
+.card .plan-body h4,
+.card .plan-body h5,
+.card .plan-body h6 { margin: 8px 0 4px; font-size: 1em; font-weight: 600; }
 .card .plan-body code { font-family: var(--vscode-editor-font-family); } /* size: the global 0.92em */
 .card .plan-body pre { margin: 4px 0; }
 .card textarea.plan-feedback {
@@ -6540,3 +6552,16 @@ select option {
 #context-popover .popover-info { align-items: flex-start; }
 #context-popover .popover-info > :first-child { flex: 1 1 50%; }
 #context-popover .popover-info > :last-child { flex: 1 1 50%; overflow-wrap: normal; }
+
+
+pre.command-full {
+  display: block;
+  max-height: 20rem;
+  overflow: auto;
+  white-space: pre;
+  -webkit-line-clamp: unset;
+  overscroll-behavior: contain;
+}
+.command-expand-here { margin-inline-start: 8px; }
+pre.command-full:focus-visible { outline: 1px solid var(--vscode-focusBorder); }
+.md-image-fallback { overflow-wrap: anywhere; }

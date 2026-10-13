@@ -210,7 +210,7 @@
     ));
   }
 
-  /** The same test `message` uses to choose between logout and sign-in. */
+  /** Connected and usable for the provider's main connection action. */
   function providerConnectedNow(snapshot, id) {
     const provider = providerOf(snapshot, id);
     return !!(provider && provider.connected && provider.needsLogin !== true);
@@ -535,6 +535,12 @@
       message: (value) => ({ type: "setProcessingSound", value }),
     },
     {
+      id: "projectsWorkspaceOnly", category: "advanced", title: "Projects in this window only",
+      description: "Limit projects, recent and pinned conversations to open workspace folders. Empty windows show all projects.",
+      kind: "toggle", defaultValue: false, get: s => !!s.projectsWorkspaceOnly,
+      message: value => ({ type: "setProjectsWorkspaceOnly", value }),
+    },
+    {
       id: "providerGrok",
       category: "providers",
       logo: "grok",
@@ -642,6 +648,13 @@
           : { type: "runGrokLogin", provider: "gemini" };
       },
     },
+    ...["grok", "codex", "claude", "gemini", "muse"].map(provider => ({
+      id: "disconnect:" + provider, category: "providers", title: provider + " connection",
+      kind: "action", actionLabel: () => "Disconnect", keepOpen: true,
+      description: "Disconnect this extension while keeping CLI credentials and conversations.",
+      visible: s => !!providerOf(s, provider).connected && providerOf(s, provider).needsLogin === true,
+      message: () => ({ type: "disconnectProvider", provider }),
+    })),
     ...["grok", "codex", "claude", "gemini", "muse"].map(provider => ({
       id: "cliSignout:" + provider, category: "providers", title: provider + " CLI",
       kind: "action", actionLabel: () => "Sign out of CLI", keepOpen: true,

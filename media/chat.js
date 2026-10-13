@@ -1599,7 +1599,10 @@
   // One renderer, one set of behaviours — and it is safe for repo content
   // because `inline()` escapes &, < and > before doing anything else, so raw
   // HTML in a README cannot become live markup.
-  window.__grokRenderMarkdown = (raw) => renderMarkdown(String(raw == null ? "" : raw));
+  window.__grokRenderMarkdown = (raw, base) => {
+    const html = renderMarkdown(String(raw == null ? "" : raw));
+    return base ? `<div data-markdown-base="${escapeHtml(String(base))}">${html}</div>` : html;
+  };
 
   function parseGitHubPullUrl(raw) {
     let url;
@@ -1783,9 +1786,11 @@
           }
           return hold(`<code>${code}</code>`);
         })
-        .replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_, alt, src) => {
-          const safeSrc = /^(?:javascript|vbscript):/i.test(src.trim()) ? "" : src.replace(/"/g, "&quot;");
-          return hold(`<img class="md-image" src="${safeSrc}" alt="${alt.replace(/"/g, "&quot;")}" loading="lazy" />`);
+        .replace(/!\[([^\]]*)\]\((?:&lt;([^\n]*?)&gt;|([^\n)]*))\)/g, (_, alt, angled, plain) => {
+          const src = (angled ?? plain).trim();
+          const safe = /^(?:javascript|vbscript|data):/i.test(src) ? "" : src.replace(/"/g, "&quot;");
+          const label = alt.replace(/"/g, "&quot;");
+          return hold(`<span class="md-image-wrap"><img class="md-image" data-markdown-src="${safe}" alt="${label}" loading="lazy" hidden /><a class="md-image-fallback" href="${safe}">${alt || "Open image"}</a></span>`);
         })
         // A destination with a space stays text — `[see](the docs)` is not a
         // link — except an absolute local path, which may contain spaces and
@@ -2084,7 +2089,33 @@
   // breaks, not <p>) — that half is `unicode-bidi: plaintext` on the
   // containers in chat.css. Code deliberately never gets dir=auto: chat.css
   // pins pre/code LTR. Runs after every innerHTML = renderMarkdown(...).
+  const markdownImages = new Map();
+  let markdownImageSerial = 0;
+  function resolveMarkdownImages(root) {
+    for (const img of root.querySelectorAll("img[data-markdown-src]")) {
+      if (img.dataset.markdownRequested) continue;
+      img.dataset.markdownRequested = "true";
+      const source = img.dataset.markdownSrc;
+      const fallback = img.parentElement.querySelector(".md-image-fallback");
+      if (/^https?:/i.test(source)) {
+        fallback.title = "External images are opened as links; they are not loaded automatically.";
+        img.remove();
+        continue;
+      }
+      if (!source) { img.remove(); continue; }
+      const requestId = "md-image-" + (++markdownImageSerial);
+      markdownImages.set(requestId, { img, fallback, sessionId: state.activeSessionId });
+      vscode.postMessage({ type: "resolveMarkdownImage", requestId, source,
+        ...(img.closest("[data-markdown-base]") ? { base: img.closest("[data-markdown-base]").dataset.markdownBase } : {}) });
+    }
+    for (const [id, pending] of markdownImages) {
+      if (!pending.img.isConnected) markdownImages.delete(id);
+    }
+  }
+  new MutationObserver(() => resolveMarkdownImages(document)).observe(document.body, { childList: true, subtree: true });
+
   function applyAutoDir(root) {
+    resolveMarkdownImages(root);
     for (const el of root.querySelectorAll("blockquote, .md-alert-body, ul, ol, li, h1, h2, h3, h4, h5, h6, td, th")) {
       el.setAttribute("dir", "auto");
     }
@@ -2911,6 +2942,7 @@
   function settingsSnapshot() {
     return {
       appPurpose: state.appPurpose === "coding" ? "coding" : "knowledge",
+      projectsWorkspaceOnly: !!state.projectsWorkspaceOnly,
       showThinking: !!state.showThinking,
       expandCommandOutputs: !!state.expandCommandOutputs,
       steerByDefault: !!state.steerByDefault,
@@ -6134,6 +6166,11 @@
   document.documentElement.addEventListener("pointerleave", () => { railPointerXY = null; railDropHoverHold(); });
   document.addEventListener("pointercancel", () => { railPointerXY = null; railDropHoverHold(); }, true);
 
+  function railWorkspaceVisible(cwd) {
+    return !state.projectsWorkspaceOnly || !state.workspaceRoots?.length
+      || state.workspaceRoots.some(root => cwdKey(root) === cwdKey(cwd));
+  }
+
   function renderRail() {
     const root = rail();
     if (!root) return;
@@ -6173,6 +6210,12 @@
     root.classList.add("rail-rebuilding");
 
     root.innerHTML = "";
+    if (state.activeRepoCwd && !railWorkspaceVisible(state.activeRepoCwd)) {
+      const note = document.createElement("div");
+      note.className = "rail-empty";
+      note.textContent = "Current conversation is outside this window: " + state.activeRepoCwd;
+      root.appendChild(note);
+    }
     syncGearPlacement();
     const q = railFilterText();
     let shownAnything = false;
@@ -6183,7 +6226,7 @@
     // PROJECT ARCHIVE only mounts when ≥1 project qualifies (put-away or age-quiet);
     // an empty section is deliberately omitted rather than an always-on empty state.
     const pinned = uniqueSessionRows(state.pinnedSessions).filter(
-      (s) => railMatches(s.displayName) || railMatches(railRepoLabelFor(s.cwd)),
+      (s) => railWorkspaceVisible(s.cwd) && (railMatches(s.displayName) || railMatches(railRepoLabelFor(s.cwd))),
     );
     if (pinned.length) {
       root.appendChild(railStaticGroupHead("Pinned"));
@@ -6201,7 +6244,7 @@
     // partition. Dedupe is PER GROUP only (owner, 2026-08-13): a cross-group
     // claim made a session vanish from under its project while Recent held it.
     const recentAll = railRecentRows().filter(
-      (s) => railMatches(s.displayName) || railMatches(railRepoLabelFor(s.cwd)),
+      (s) => railWorkspaceVisible(s.cwd) && (railMatches(s.displayName) || railMatches(railRepoLabelFor(s.cwd))),
     );
     if (recentAll.length) {
       const forcedOpen = !!q;
@@ -11552,6 +11595,13 @@
     container.appendChild(pre);
     let viewAll = null;
     let expanded = false;
+    let expandHere = null;
+    const collapse = () => {
+      expanded = false;
+      pre.classList.remove("command-full");
+      pre.classList.add("command-preview-capped");
+      if (expandHere) { expandHere.textContent = "Expand here"; expandHere.setAttribute("aria-expanded", "false"); expandHere.focus(); }
+    };
     let previewLabel = logicalPreview.truncated
       ? `View all (${logicalPreview.lineCount} lines) →`
       : "View all →";
@@ -11593,6 +11643,26 @@
         vscode.postMessage(message);
       };
       container.appendChild(viewAll);
+      expandHere = document.createElement("button");
+      expandHere.type = "button";
+      expandHere.className = "preview-link command-expand-here";
+      expandHere.textContent = "Expand here";
+      expandHere.setAttribute("aria-expanded", "false");
+      pre.tabIndex = 0;
+      expandHere.onclick = e => {
+        e.stopPropagation();
+        if (expanded) { collapse(); return; }
+        expanded = true;
+        pre.classList.remove("command-preview-capped");
+        pre.classList.add("command-full");
+        expandHere.textContent = "Collapse";
+        expandHere.setAttribute("aria-expanded", "true");
+        pre.focus();
+      };
+      const onEscape = e => { if (e.key === "Escape" && expanded) { e.preventDefault(); e.stopPropagation(); collapse(); } };
+      pre.addEventListener("keydown", onEscape);
+      expandHere.addEventListener("keydown", onEscape);
+      container.appendChild(expandHere);
       return viewAll;
     };
 
@@ -11611,9 +11681,11 @@
         pre.classList.remove("command-preview-capped");
       }
       const overflowing = visible && className === "tool-cmd" && pre.clientWidth > 0 && pre.scrollWidth > pre.clientWidth;
-      if (truncated || overflowing) ensureViewAll();
+      if (truncated || overflowing || expanded) ensureViewAll();
       else if (viewAll && viewAll.getAttribute("aria-expanded") !== "true") {
         viewAll.remove();
+        expandHere?.remove();
+        expandHere = null;
         viewAll = null;
       }
     };
@@ -18132,7 +18204,7 @@
     "initialState", "showThinking", "appPurpose", "expandCommandOutputs",
     "steerByDefault", "steerUnavailable", "soundNotifications", "processingSound",
     "readRepliesAloud", "summarizeRepliesAloud", "fontScale", "voiceConfigured",
-    "providerState", "githubState", "mcpServers", "mcpConnectors", "telemetryEnabled", "thumbsFeedback", "grokUpdateStatus", "initialized", "ruleFiles", "permissionRules", "agentRoles",
+    "repos", "providerState", "githubState", "mcpServers", "mcpConnectors", "telemetryEnabled", "thumbsFeedback", "grokUpdateStatus", "initialized", "ruleFiles", "permissionRules", "agentRoles",
   ]);
 
   function handleHostMessage(msg) {
@@ -20023,7 +20095,20 @@
         renderRail();
         break;
       }
+      case "markdownImage": {
+        const pending = markdownImages.get(msg.requestId);
+        markdownImages.delete(msg.requestId);
+        if (!pending || !pending.img.isConnected || pending.sessionId !== state.activeSessionId) break;
+        if (!/^data:image\/(?:png|jpeg|gif|webp|bmp);base64,/.test(msg.src || "")) break;
+        pending.img.onload = () => { pending.fallback.hidden = true; };
+        pending.img.onerror = () => { pending.img.hidden = true; pending.fallback.hidden = false; };
+        pending.img.src = msg.src;
+        pending.img.hidden = false;
+        break;
+      }
       case "repos": {
+        state.projectsWorkspaceOnly = msg.workspaceOnly === true;
+        state.workspaceRoots = msg.workspaceRoots || [];
         state.reposKnown = true;
         state.repos = Array.isArray(msg.entries) ? msg.entries : [];
         settlePendingRepoColor(state.repos);

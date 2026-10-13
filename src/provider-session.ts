@@ -25,6 +25,7 @@ export interface ProviderSessionSidebarOps {
   setProviderConnectedInMemory: (provider: AcpProvider, connected: boolean) => void;
   resetProviderSessionsAfterLogout: (provider: AcpProvider) => Promise<void>;
   persistProviderConnections: () => Promise<void>;
+  waitForProviderProbes: (provider: AcpProvider) => Promise<void>;
   postSessionsList: (opts?: SessionsListOptions) => void;
   openWorkspaceFolders: () => string[];
   rememberProjectProvider: (cwd: string, provider: AcpProvider, modelId?: string) => Promise<void>;
@@ -1159,11 +1160,20 @@ public async disconnectProvider(provider: AcpProvider): Promise<void> {
       });
     }
     try {
+      for (const session of affected) {
+        if (session.provider !== provider || !session.activeSessionId) continue;
+        const text = queuedSendsText(session.queuedSends);
+        if (text) await this.deps.sessionOps.rememberQueuedDraft(session.activeSessionId, text);
+      }
+    } catch (error) {
+      this.deps.uiOps.notifyUser("error", `Disconnected, but saving queued drafts failed: ${errorDetail(error)}`);
+    }
+    try {
       await this.deps.sidebarOps.persistProviderConnections();
     } catch (error) {
       this.deps.uiOps.notifyUser("error", `Disconnected, but saving connection state failed: ${errorDetail(error)}`);
     }
-    await Promise.allSettled(exits);
+    await Promise.allSettled([...exits, this.deps.sidebarOps.waitForProviderProbes(provider)]);
     this.deps.sidebarOps.postProviderState();
     this.deps.sidebarOps.postSessionsList();
   }

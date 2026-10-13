@@ -55,7 +55,7 @@ describe("shared markdown renderer (window.__grokRenderMarkdown)", () => {
 
   it("renders markdown images as safe img tags", () => {
     const html = render("![Diagram](images/flow.png)\n");
-    expect(html).toContain('<img class="md-image" src="images/flow.png" alt="Diagram" loading="lazy" />');
+    expect(html).toContain('<img class="md-image" data-markdown-src="images/flow.png" alt="Diagram" loading="lazy" hidden />');
   });
 
   it("renders GitHub alerts for NOTE, TIP, WARNING, IMPORTANT, CAUTION", () => {
@@ -315,7 +315,7 @@ describe("blockquotes", () => {
   it("preserves dividers, setext headings and image markup inside quotes", () => {
     const html = render("> Section\n> ---\n>\n> ![Diagram](images/flow.png)\n>\n> * * *\n");
     expect(html).toContain("<blockquote><h2>Section</h2>");
-    expect(html).toContain('<img class="md-image" src="images/flow.png" alt="Diagram" loading="lazy" />');
+    expect(html).toContain('<img class="md-image" data-markdown-src="images/flow.png" alt="Diagram" loading="lazy" hidden />');
     expect(html).toContain("<hr></blockquote>");
   });
 

@@ -746,7 +746,7 @@ export function createVsCodeHost(
     },
 
     onDidChangeConfiguration(listener) {
-      return vscode.workspace.onDidChangeConfiguration((e) => {
+      const config = vscode.workspace.onDidChangeConfiguration((e) => {
         listener({
           // Settings live under `companions.*` with `grok.*` as the legacy
           // fallback (wrapDualConfiguration), and most listeners still ask
@@ -761,6 +761,10 @@ export function createVsCodeHost(
           },
         });
       });
+      const folders = vscode.workspace.onDidChangeWorkspaceFolders(() => listener({
+        affectsConfiguration: section => section === "grok.projects.workspaceOnly" || section === "companions.projects.workspaceOnly",
+      }));
+      return { dispose() { config.dispose(); folders.dispose(); } };
     },
     onDidChangeActiveTextEditor(listener) {
       return vscode.window.onDidChangeActiveTextEditor(() => listener());

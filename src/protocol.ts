@@ -816,6 +816,7 @@ export type HostMsg =
   /** Plan picker gate. `recheckable` means the version probe failed (not a
    *  verified-old CLI) — the row stays clickable so a later pick re-probes. */
   | { type: "planModeAvailability"; available: boolean; reason?: string; recheckable?: boolean }
+  | { type: "markdownImage"; requestId: string; src?: string }
   | { type: "showThinking"; value: boolean }
   /** Live update of the global app-purpose preference (Knowledge work / Coding). */
   | { type: "appPurpose"; value: "knowledge" | "coding" }
@@ -1400,6 +1401,8 @@ export type HostMsg =
   // sees the field paints no control, which is the safe way round.
   | {
       type: "repos";
+      workspaceOnly?: boolean;
+      workspaceRoots?: string[];
       entries: RepoListEntry[];
       selectedCwd: string;
       activeCwd: string;
@@ -1821,6 +1824,7 @@ export type WebviewMsg =
   // which is the only way into a dock a host renders for itself — in Cursor it
   // is the difference between reaching the secondary side bar and not.
   | { type: "moveView"; location: "panel" | "panel-right" | "panel-bottom" | "sidebar" | "auxiliarybar" | "pick" }
+  | { type: "setProjectsWorkspaceOnly"; value: boolean }
   | { type: "setShowThinking"; value: boolean }
   /** Persist the global "Use this app for" preference (Knowledge work / Coding). */
   | { type: "setAppPurpose"; value: "knowledge" | "coding" }
@@ -1900,6 +1904,7 @@ export type WebviewMsg =
    *  `recheckConnection` this never marks a provider connected — it re-runs the
    *  CLI locators and re-probes the credentials of accounts already connected,
    *  so Settings → Providers can be made to tell the truth on demand. */
+  | { type: "resolveMarkdownImage"; requestId: string; source: string; base?: string }
   | { type: "refreshProviders" }
   | { type: "retryProviderSession"; provider?: AcpProvider }
   | { type: "listSessions"; offset?: number; limit?: number; providerCursor?: { grokOffset: number; codexHighWater?: { updatedAt: number; id: string } }; query?: string }
@@ -2075,7 +2080,7 @@ const HOST_MESSAGE_TYPE_MAP: Record<HostMsg["type"], true> = {
   contextOverflow: true,
   compactSummary: true,
   nearFullPrompt: true,
-  initialState: true, moveViewHint: true, welcomeTips: true, projectSetup: true, githubState: true, githubRepos: true, providerState: true, mcpServers: true, mcpConnectors: true, routines: true, codexInstallProgress: true, planModeAvailability: true, showThinking: true, appPurpose: true, fontScale: true, grokUpdateStatus: true, updateAvailable: true, updateReady: true, telemetryEnabled: true, thumbsFeedback: true,
+  markdownImage: true, initialState: true, moveViewHint: true, welcomeTips: true, projectSetup: true, githubState: true, githubRepos: true, providerState: true, mcpServers: true, mcpConnectors: true, routines: true, codexInstallProgress: true, planModeAvailability: true, showThinking: true, appPurpose: true, fontScale: true, grokUpdateStatus: true, updateAvailable: true, updateReady: true, telemetryEnabled: true, thumbsFeedback: true,
   contextWindowSelection: true, initialized: true, cliUpdating: true, session: true, sessionName: true, modelChanged: true,
   startupStatus: true, modeChanged: true, museSettings: true, sessionType: true, companionSubagent: true, subagentTray: true, workflowRun: true, workflowList: true, openModePopover: true, voiceState: true, voiceConfigured: true,
   voicePartial: true, voiceSubmit: true, voiceTranscript: true, voiceError: true,
@@ -2110,12 +2115,12 @@ const WEBVIEW_MESSAGE_TYPE_MAP: Record<WebviewMsg["type"], true> = {
   openProjectConfig: true, listRuleFiles: true, openRuleFile: true, appendRuleFile: true,
   listAgentRoles: true, saveAgentRole: true, deleteAgentRole: true, saveCrewFlow: true, deleteCrewFlow: true, saveWorkflow: true, validateWorkflow: true, generateWorkflow: true, cancelWorkflowGenerate: true, setDefaultWorkflow: true, addWorkflowStagesBlock: true, runWorkflow: true, listMcpServers: true, connectMcpConnector: true, disconnectMcpConnector: true, 
   listRoutines: true, saveRoutine: true, deleteRoutine: true, setRoutinePaused: true, runRoutineNow: true, showLogs: true, toggleDevTools: true, openSettings: true, openSettingsSurface: true, closeSettingsSurface: true, dismissWelcomeTip: true, welcomeTipShown: true, moveView: true,
-  setShowThinking: true, setAppPurpose: true, setExpandCommandOutputs: true, setSteerByDefault: true, setPromptNav: true,
+  setProjectsWorkspaceOnly: true, setShowThinking: true, setAppPurpose: true, setExpandCommandOutputs: true, setSteerByDefault: true, setPromptNav: true,
   setSoundNotifications: true, setProcessingSound: true, setReadRepliesAloud: true, setSummarizeRepliesAloud: true, setVoiceSendPhrase: true, setVoiceKeyterms: true, setTelemetryEnabled: true, setThumbsFeedback: true, summarizeSpeech: true, requestImageOriginal: true, composerFocus: true,
   dropFile: true, permissionAnswer: true, listPermissionRules: true, deletePermissionRule: true, adoptPermissionRules: true, exitPlanAnswer: true, questionAnswer: true, limitOfferAnswer: true,
   questionCancel: true, questionDraft: true, setModel: true, installCodex: true, updateProviderCli: true, cancelCodexInstall: true, runInstallCmd: true, runMuseInstallCmd: true, setMuseSetting: true, runGrokLogin: true,
   
-  disconnectProvider: true, logout: true, checkGrokUpdate: true, updateGrok: true, recheckConnection: true, refreshProviders: true, retryProviderSession: true,
+  resolveMarkdownImage: true, disconnectProvider: true, logout: true, checkGrokUpdate: true, updateGrok: true, recheckConnection: true, refreshProviders: true, retryProviderSession: true,
   listSessions: true, listRepoSessions: true, selectRepo: true, toggleRepoPin: true, toggleSessionPin: true,
   setRepoArchived: true, setRepoColor: true,
   openAgentArtifact: true, openCrewSession: true, stopCrew: true, requestHandoff: true, resumeSession: true, renameSession: true, deleteSession: true,

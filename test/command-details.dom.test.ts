@@ -1401,3 +1401,23 @@ describe("setAllToolDetails (expand/collapse all latch)", () => {
     expect(bodies(doc)[0].hidden).toBe(true);
   });
 });
+
+
+it("expands long commands inline, preserves full editor text, and restores focus on Escape", () => {
+  const h = bootWebview();
+  const command = Array.from({ length: 50 }, (_, i) => `echo line-${i}`).join("\n");
+  dispatch(h.window, exec("inline", command)); close(h.window);
+  const button = h.doc.querySelector(".command-expand-here") as HTMLButtonElement;
+  expect(button).toBeTruthy();
+  click(h.window, button);
+  const pre = h.doc.querySelector("pre.command-full") as HTMLElement;
+  expect(pre.textContent).toBe(command);
+  expect(button.getAttribute("aria-expanded")).toBe("true");
+  expect(h.doc.activeElement).toBe(pre);
+  click(h.window, h.doc.querySelector(".command-view-all")!);
+  expect(h.posted).toContainEqual({ type: "openText", content: command });
+  pre.dispatchEvent(new h.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  expect(button.textContent).toBe("Expand here");
+  expect(h.doc.activeElement).toBe(button);
+  expect(pre.classList.contains("command-preview-capped")).toBe(true);
+});

@@ -150,3 +150,19 @@ describe("context popover width", () => {
     expect(css).toMatch(/#context-popover\s*\{[^}]*max-width:\s*350px/);
   });
 });
+
+
+it.each([false, true])("keeps Muse model identity after a provider frame and reload, multiple=%s", multiple => {
+  const h = bootWebview();
+  const models = [{ provider: "muse", modelId: "muse-model", name: "Muse Model" }];
+  const frame = { type: "session", sessionId: "muse-session", provider: "muse", currentModelId: "muse-model", models };
+  for (const target of [h, bootWebview()]) {
+    dispatch(target.window, { type: "providerState", providers: [ { id: "muse", connected: true }, ...(multiple ? [{ id: "grok", connected: true }] : []) ] });
+    dispatch(target.window, frame);
+    click(target.window, $(target.doc, "gear-btn"));
+    expect(target.doc.querySelector(".model-name-btn")!.textContent).toContain("Muse Model");
+    dispatch(target.window, { type: "sessions", entries: [{ id: "muse-session", provider: "muse", displayName: "Muse conversation", cwd: "/repo", updatedAt: 1 }], activeId: "muse-session", dots: {} });
+    click(target.window, modelBtn(target.doc));
+    expect(pickerItems(target.doc).find(row => row.textContent?.includes("Muse Model"))?.querySelector(".provider-muse")).toBeTruthy();
+  }
+});

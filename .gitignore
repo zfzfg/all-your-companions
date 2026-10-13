@@ -48,3 +48,6 @@ docs/internal/macos-code-signing.md
 
 # Probe output: each research/*-probe.cjs run rewrites its log.
 research/*.log
+
+# Real Extension Host tests write workspace settings into the fixture.
+integration/fixture-workspace/.vscode/settings.json

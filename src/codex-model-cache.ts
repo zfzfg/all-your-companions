@@ -7,6 +7,7 @@ import { CodexBackend, type CodexBackendOptions } from "./codex-backend";
 export interface WarmCodexModelCacheOptions {
   cliPath: string;
   signal?: AbortSignal;
+  trackClient?: (client: AcpClient) => () => void;
   onModels: (models: readonly ModelInfo[], currentModelId?: string) => void | PromiseLike<void>;
   log?: (message: string) => void;
   env?: NodeJS.ProcessEnv;
@@ -26,6 +27,7 @@ async function readModelsIn(cwd: string, options: WarmCodexModelCacheOptions): P
     backend: new CodexBackend(options.backend),
     log: options.log ?? (() => {}),
   });
+  const untrack = options.trackClient?.(client);
   const abort = () => { void client.dispose(); };
   options.signal?.addEventListener("abort", abort, { once: true });
   try {
@@ -47,6 +49,7 @@ async function readModelsIn(cwd: string, options: WarmCodexModelCacheOptions): P
   } finally {
     options.signal?.removeEventListener("abort", abort);
     await client.dispose();
+    untrack?.();
   }
 }
 

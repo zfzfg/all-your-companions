@@ -510,7 +510,12 @@ describe("extension disconnect preserves conversations", () => {
     session.client = { dispose } as any;
     sidebar.drainPendingConfirms = vi.fn();
     sidebar.emitLocalTransient = vi.fn();
+    const probeDispose = vi.fn(async () => {});
+    sidebar.providerSetup.trackProbeClient(provider, { dispose: probeDispose });
+    const controller = sidebar.providerSetup.createProbeController(provider);
     await sidebar.onMessage({ type: "disconnectProvider", provider });
+    expect(controller.signal.aborted).toBe(true);
+    expect(probeDispose).toHaveBeenCalledOnce();
     expect(dispose).toHaveBeenCalledOnce();
     expect(session.client).toBeUndefined();
     expect(session.provider).toBe(provider);
@@ -520,7 +525,20 @@ describe("extension disconnect preserves conversations", () => {
     expect(session.buffer).toContainEqual({ type: "hostNotice", level: "info", text: "history" });
     expect(sidebar.pool.has(session)).toBe(true);
     expect(sidebar.providerConnectionState[provider]).toBe(false);
+    expect(sidebar.state.get("grok.providerConnections.v2", {})[provider]).toBe(false);
+    expect(sidebar.state.get("grok.sessionMeta", {})["keep-me"].queuedDraft).toBe("keep draft");
     expect(sidebar.host.createTerminal).not.toHaveBeenCalled();
     expect(sidebar.locateProvider).not.toHaveBeenCalled();
   });
+});
+
+
+it("keeps consent revoked and reports a failed persistence write after disconnect", async () => {
+  const sidebar = makeSidebar();
+  sidebar.notifyUser = vi.fn();
+  sidebar.emitLocalTransient = vi.fn();
+  sidebar.state.update.mockRejectedValueOnce(new Error("disk full"));
+  await sidebar.onMessage({ type: "disconnectProvider", provider: "grok" });
+  expect(sidebar.providerConnectionState.grok).toBe(false);
+  expect(sidebar.notifyUser).toHaveBeenCalledWith("error", expect.stringContaining("disk full"));
 });

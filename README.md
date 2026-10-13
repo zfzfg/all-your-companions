@@ -73,7 +73,7 @@ When any companion proposes an edit, hit **open diff →** to review the whole f
 <details>
 <summary><strong>Universal Multi-Companion Support</strong> — Antigravity (Gemini), Grok, Codex, Claude & Muse</summary>
 
-Connect any of the five companions in **Settings → Providers**. Each session uses the models its installed CLI reports. Muse adds native approval modes, a shell sandbox, and account usage windows. The gear under the composer shows the selected model and reasoning effort. Change models on the current companion; start a new conversation to change companions after a turn. A message can still pin a subagent model with `@subagent:` or a composer chip. The model is checked against that provider's cached roster before send, and the directive stays with the draft, a queued send, and a replay.
+Connect any of the five companions in **Settings → Providers**. **Disconnect** preserves CLI sign-in and conversations; **Sign out of CLI** separately removes vendor credentials. Each session uses the models its installed CLI reports. Muse adds native approval modes, a shell sandbox, and account usage windows. The gear under the composer shows the selected model and reasoning effort. Change models on the current companion; start a new conversation to change companions after a turn. A message can still pin a subagent model with `@subagent:` or a composer chip. The model is checked against that provider's cached roster before send, and the directive stays with the draft, a queued send, and a replay.
 
 </details>
 

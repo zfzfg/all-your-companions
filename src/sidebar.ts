@@ -1649,6 +1649,7 @@ get state() { return self.state; },
         setProviderConnectedInMemory: (...args) => self.setProviderConnectedInMemory(...args),
         resetProviderSessionsAfterLogout: (...args) => self.resetProviderSessionsAfterLogout(...args),
         persistProviderConnections: (...args) => self.persistProviderConnections(...args),
+        waitForProviderProbes: provider => self.providerSetup.waitForProviderProbes(provider),
         postSessionsList: (...args) => self.postSessionsList(...args),
         openWorkspaceFolders: (...args) => self.openWorkspaceFolders(...args),
         rememberProjectProvider: (...args) => self.rememberProjectProvider(...args),
@@ -6614,6 +6615,7 @@ ${detail}`,
   /** Post to the VS Code webview only (plus catalog mirror to the projects rail). */
   private postLocal(message: HostMsg): void {
     this.postTap?.(message);
+    if (message.type === "repos") void this.settingsEditor?.webview.postMessage(message);
     this.view?.webview.postMessage(message);
     this.mirrorToProjectsRail(message);
   }

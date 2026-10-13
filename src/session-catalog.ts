@@ -1,3 +1,4 @@
+import { railRepoKey } from "./projects-rail";
 const REPO_PREVIEW_SIZE = 3;
 import { gitRootForPath, type WorktreeParentRef, worktreeCwdsForRepo } from "./worktree";
 import {
@@ -318,6 +319,17 @@ export class SessionCatalog {
         }
       }
     }
+    const roots = this.deps.repoOps.openWorkspaceFolders();
+    if (this.deps.host.getConfiguration("grok").get<boolean>("projects.workspaceOnly", false) && roots.length) {
+      const keys = new Set(roots.map(railRepoKey));
+      entries = entries.filter(entry => keys.has(railRepoKey(entry.cwd)))
+        .map(entry => ({ ...entry, archived: false, archivedAt: 0 }));
+      for (const cwd of roots) {
+        if (!entries.some(entry => railRepoKey(entry.cwd) === railRepoKey(cwd))) {
+          entries.push({ cwd, label: path.basename(cwd) || cwd, available: true, pinned: false, updatedAt: 0 });
+        }
+      }
+    }
     return this.applyArchiveCapability(entries);
   }
 
@@ -377,6 +389,8 @@ export class SessionCatalog {
     this.deps.uiOps.postLocal({
       type: "repos",
       entries: localEntries,
+      workspaceOnly: this.deps.host.getConfiguration("grok").get<boolean>("projects.workspaceOnly", false),
+      workspaceRoots: [...this.deps.repoOps.openWorkspaceFolders()],
       selectedCwd: localSelected,
       activeCwd,
       canAddProject: this.deps.repoOps.canAddProjectFolder(),

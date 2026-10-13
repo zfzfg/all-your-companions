@@ -23,6 +23,7 @@ function makeCatalog() {
   const deps: SessionCatalogDeps = {
     host: {
       canSwitchWorkspaceFolder: true,
+      getConfiguration: () => ({ get: (_key: string, fallback: unknown) => fallback }),
       appendLine: vi.fn(),
       showInformationMessage: vi.fn(async () => undefined),
       showWarningMessage: vi.fn(async () => undefined),

@@ -124,7 +124,7 @@ describe("the Accounts cluster for an agent that needs a sign-in", () => {
     const providers = [...h.doc.querySelectorAll("#settings-overlay .settings-nav-item")]
       .find((el) => (el.textContent || "").trim() === "Providers")!;
     click(h.window, providers);
-    expect(h.doc.querySelector('[data-id="providerCodex"]')!.textContent).toContain("Sign out");
+    expect(h.doc.querySelector('[data-id="providerCodex"]')!.textContent).toContain("Disconnect");
     expect(h.doc.querySelector('[data-id="providerCodex"]')!.textContent).not.toContain("Connect");
   });
 });

@@ -1,0 +1,20 @@
+import { expect, it } from "vitest";
+import { Projection } from "../adapters/muse/projection.mts";
+import { bootWebview, dispatch } from "./webview-harness";
+it("shows supplied Muse summaries separately from answers and toggles them after replay", async () => {
+  const h = bootWebview();
+  dispatch(h.window, { type: "appPurpose", value: "coding" });
+  dispatch(h.window, { type: "showThinking", value: false });
+  const p = new Projection((u: any) => dispatch(h.window, { type: u.sessionUpdate === "agent_thought_chunk" ? "thoughtChunk" : "messageChunk", text: u.content.text }), () => {});
+  p.acceptHistory({ itemId: "r", kind: "reasoning", revision: 1, summary: ["Inspect the fixture", "Check its output"] });
+  p.acceptHistory({ itemId: "a", kind: "agentMessage", revision: 1, text: "Final answer" });
+  await new Promise(resolve => setTimeout(resolve, 30));
+  expect(h.doc.body.classList.contains("thinking-hidden")).toBe(true);
+  expect(h.doc.querySelector(".msg.agent .body")!.textContent).toContain("Final answer");
+  expect(h.doc.querySelector(".msg.agent .body")!.textContent).not.toContain("Inspect");
+  dispatch(h.window, { type: "showThinking", value: true });
+  expect(h.doc.body.classList.contains("thinking-hidden")).toBe(false);
+  expect(h.doc.body.textContent).toContain("Inspect the fixture");
+  dispatch(h.window, { type: "showThinking", value: false });
+  expect(h.doc.body.classList.contains("thinking-hidden")).toBe(true);
+});

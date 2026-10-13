@@ -756,6 +756,11 @@
   document.documentElement.addEventListener("pointerleave", () => { railPointer = null; dropHoverHold(); });
   document.addEventListener("pointercancel", () => { railPointer = null; dropHoverHold(); }, true);
 
+  function workspaceVisible(cwd) {
+    return !state.projectsWorkspaceOnly || !state.workspaceRoots?.length
+      || state.workspaceRoots.some(root => cwdKey(root) === cwdKey(cwd));
+  }
+
   function render() {
     const root = document.getElementById("rail-scroll");
     if (!root) return;
@@ -763,6 +768,12 @@
     root.innerHTML = "";
     closeMenu();
 
+    if (state.activeCwd && !workspaceVisible(state.activeCwd)) {
+      const note = document.createElement("div");
+      note.className = "rail-empty";
+      note.textContent = "Current conversation is outside this window: " + state.activeCwd;
+      root.appendChild(note);
+    }
     const q = state.filter.trim();
     let shown = false;
 
@@ -772,7 +783,7 @@
     // group rather than an empty one.
     if (state.pinnedKnown) {
       const pinned = uniqueSessionRows(state.pinnedSessions).filter(
-        (s) => matchesFilter(s.displayName) || matchesFilter(repoLabelFor(s.cwd)),
+        (s) => workspaceVisible(s.cwd) && (matchesFilter(s.displayName) || matchesFilter(repoLabelFor(s.cwd))),
       );
       if (pinned.length) {
         root.appendChild(staticGroupHead("Pinned"));
@@ -792,7 +803,7 @@
     // PER GROUP only (owner, 2026-08-13): a cross-group claim made a session
     // vanish from under its project while Recent held it.
     const recentAll = recentRows().filter(
-      (s) => matchesFilter(s.displayName) || matchesFilter(repoLabelFor(s.cwd)),
+      (s) => workspaceVisible(s.cwd) && (matchesFilter(s.displayName) || matchesFilter(repoLabelFor(s.cwd))),
     );
     if (recentAll.length) {
       const forcedOpen = !!q;
@@ -1690,6 +1701,8 @@
         }
         break;
       case "repos": {
+        state.projectsWorkspaceOnly = msg.workspaceOnly === true;
+        state.workspaceRoots = msg.workspaceRoots || [];
         const leaving = state.currentCwd;
         state.repos = Array.isArray(msg.entries) ? msg.entries : [];
         settlePendingRepoColor(state.repos);

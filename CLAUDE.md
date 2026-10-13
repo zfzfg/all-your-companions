@@ -90,6 +90,8 @@ The native-Windows build (`irm https://x.ai/cli/install.ps1 | iex`) installs fro
 
 See `README.md § Install` for the full per-platform matrix.
 
+Extension connection consent is independent of CLI credentials: Settings → Providers → Disconnect uses `disconnectProvider` to detach clients and revoke probes without resetting conversations; Sign out of CLI uses the vendor logout. Muse `Projection` maps supplied `reasoning.summary` parts to existing ACP thinking chunks for live and resumed sessions. `companions.projects.workspaceOnly` derives window presentation from all open roots while archive and pin storage remain shared. Markdown image requests use the conversation directory (or an explicit file-preview base), existing image authorization and bounded raster reads; external images remain links. Long command/permission previews support a bounded inline scroll area as well as the editor's View all.
+
 ## Known limits
 
 A classified quota or rate-limit turn (`classifyLimitError` in `src/limit-errors.ts`) posts a `limitOffer` card — Continue with another connected companion, Wait and try again, or Dismiss — instead of a generic error. Continue never targets another model of the same provider; the switch is a transcript line (`switchTranscriptLine`). There is no automatic failover.

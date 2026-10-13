@@ -222,5 +222,5 @@ and the relay never sees any of them. See [Privacy](privacy.md).
 ## Signing out
 
 `grok logout`, `codex logout`, `claude auth logout` — or **Settings → Providers
-→ Sign out**, which runs the same command. Signing out of Grok is also the fix
+→ Sign out of CLI**, which runs the same command. **Disconnect** instead revokes extension consent, stops provider clients and login probes, and preserves CLI credentials, conversations and drafts. Signing out of Grok is also the fix
 for a cached OAuth session shadowing an `XAI_API_KEY` you would rather use.

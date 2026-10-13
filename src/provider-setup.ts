@@ -97,6 +97,8 @@ export class ProviderSetup {
   museSessionRefresh = new Map<string, Promise<void>>();
   loginReprobeTimers = new Map<AcpProvider, NodeJS.Timeout>();
   private connectChecks = new Set<AcpProvider>();
+  private probeClients = new Map<AcpProvider, Set<AcpClient>>();
+  private probeExits = new Map<AcpProvider, Promise<unknown>>();
   private probeControllers = new Map<AcpProvider, Set<AbortController>>();
   private credentialGenerations = new Map<AcpProvider, number>();
 
@@ -292,16 +294,17 @@ export class ProviderSetup {
 
   setProviderConnectedInMemory(provider: AcpProvider, connected: boolean): void {
     const current = this.providerConnections();
+    this.providerConnectionState = { ...current, [provider]: connected };
     if (!connected) {
       this.credentialGenerations.set(provider, (this.credentialGenerations.get(provider) ?? 0) + 1);
       for (const controller of this.probeControllers.get(provider) ?? []) controller.abort();
+      this.probeExits.set(provider, Promise.allSettled([...this.probeClients.get(provider) ?? []].map(client => client.dispose())));
       const timer = this.loginReprobeTimers.get(provider);
       if (timer) clearTimeout(timer);
       this.loginReprobeTimers.delete(provider);
     }
     if (connected && !current[provider]) this.providerNeedsLogin = { ...this.providerNeedsLogin, [provider]: true };
     if (!connected || !current[provider]) this.invalidateSubscriptionUsage(provider);
-    this.providerConnectionState = { ...current, [provider]: connected };
     if (!connected && isAdapterProvider(provider)) {
       const history = this.adapterHistory(provider);
       history?.cache.clear();
@@ -370,6 +373,7 @@ export class ProviderSetup {
     const current = () => this.hasProviderConsent("codex") && generation === (this.credentialGenerations.get("codex") ?? 0);
     try {
       await warmCodexModelCache({
+        trackClient: client => this.trackProbeClient("codex", client),
         signal: controller.signal,
         cliPath,
         onModels: (models, currentModelId) => current() ? this.cacheProviderModels("codex", models, currentModelId) : undefined,
@@ -407,6 +411,7 @@ export class ProviderSetup {
     const current = () => this.hasProviderConsent("claude") && generation === (this.credentialGenerations.get("claude") ?? 0);
     try {
       await warmClaudeModelCache({
+        trackClient: client => this.trackProbeClient("claude", client),
         signal: controller.signal,
         cliPath,
         onModels: (models, currentModelId) => current() ? this.cacheProviderModels("claude", models, currentModelId) : undefined,
@@ -442,6 +447,7 @@ export class ProviderSetup {
     const current = () => this.hasProviderConsent("gemini") && generation === (this.credentialGenerations.get("gemini") ?? 0);
     try {
       await warmGeminiModelCache({
+        trackClient: client => this.trackProbeClient("gemini", client),
         signal: controller.signal,
         cliPath,
         onModels: (models, currentModelId) => current() ? this.cacheProviderModels("gemini", models, currentModelId) : undefined,
@@ -466,6 +472,17 @@ export class ProviderSetup {
     } finally {
       this.probeControllers.get("gemini")?.delete(controller);
     }
+  }
+
+  async waitForProviderProbes(provider: AcpProvider): Promise<void> {
+    await this.probeExits.get(provider);
+  }
+
+  private trackProbeClient(provider: AcpProvider, client: AcpClient): () => void {
+    const clients = this.probeClients.get(provider) ?? new Set<AcpClient>();
+    clients.add(client);
+    this.probeClients.set(provider, clients);
+    return () => { clients.delete(client); };
   }
 
   private createProbeController(provider: AcpProvider): AbortController {
@@ -505,6 +522,7 @@ export class ProviderSetup {
       log: (message) => this.host.appendLine(message),
       grokVersion: this.providerCliVersions.grok,
     });
+    const untrack = this.trackProbeClient(provider, client);
     const abort = () => { void client.dispose(); };
     controller.signal.addEventListener("abort", abort, { once: true });
     try {
@@ -526,6 +544,7 @@ export class ProviderSetup {
       this.probeControllers.get(provider)?.delete(controller);
       const probeId = client.sessionId;
       await client.dispose();
+      untrack();
       if (probeId) this.removeSessionFromDisk(probeId, scratch);
       try { fs.rmSync(scratch, { recursive: true, force: true }); } catch { /* leftover temp dir is harmless */ }
     }
@@ -790,6 +809,8 @@ export class ProviderSetup {
       clearTimeout(timer);
     }
     this.loginReprobeTimers.clear();
+    for (const controllers of this.probeControllers.values()) for (const controller of controllers) controller.abort();
+    this.probeControllers.clear();
     this.codexInstallAbort?.abort(new Error("Installation cancelled."));
     this.codexInstallAbort = undefined;
   }

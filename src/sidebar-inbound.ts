@@ -374,6 +374,24 @@ export class SessionInboundRouter {
         this.deps.postLocal({ type: "speechSummary", requestId: msg.requestId, text });
         break;
       }
+      case "resolveMarkdownImage": {
+        const gen = session.gen;
+        let src: string | undefined;
+        try {
+          const raw = decodeURIComponent(msg.source);
+          if (!/^[a-z][a-z0-9+.-]*:/i.test(raw) || /^[a-z]:[\\/]/i.test(raw)) {
+            const source = path.resolve(msg.base || this.deps.sessionCwd(session), raw);
+            if (this.deps.composer.isImagePathAuthorizedNow(source, session)) {
+              src = await this.deps.composer.readOriginalImage(source);
+              if (!this.deps.composer.isImagePathAuthorizedNow(source, session)) src = undefined;
+            }
+          }
+        } catch { /* Missing, forbidden or unreadable images retain their link. */ }
+        if (this.deps.getFocused() === session && session.gen === gen) {
+          this.deps.postLocal({ type: "markdownImage", requestId: msg.requestId, src });
+        }
+        break;
+      }
       case "requestImageOriginal": {
         // Copy image (upstream #150): a webview can DISPLAY a vscode-resource
         // image but not read its pixels back, so the host sends the original
@@ -1397,6 +1415,9 @@ export class SettingsInboundRouter {
         );
         break;
       }
+      case "setProjectsWorkspaceOnly":
+        await this.deps.host.getConfiguration("grok").update("projects.workspaceOnly", !!msg.value, this.deps.workspaceRoot() ? "workspace" : "global");
+        break;
       case "setShowThinking":
         // Persist globally (like the other display prefs); the config watcher
         // re-posts the value, keeping every open webview in sync.

@@ -251,7 +251,8 @@ export class UsageHost {
         used: usage.used,
         limits: { contextWindow: effectiveWindow },
       });
-      this.deps.emit(session, { type: "contextUsage", used: usage.used, window: effectiveWindow });
+      this.deps.emit(session, { type: "contextUsage", used: usage.used, window: effectiveWindow,
+        ...(session.client?.contextBudget ? { context: session.client.contextBudget } : {}) });
     }
   }
 

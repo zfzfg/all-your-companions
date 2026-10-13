@@ -81,6 +81,38 @@ const contextDemo = async (send) => {
   } });
 };
 export const CHAT_SCENARIOS = {
+  "upstream-plan-permission": { run: async ({ send, page }) => {
+    const title = Array.from({ length: 60 }, (_, i) => "echo approval-line-" + i).join("\n");
+    await send({ type: "permissionRequest", req: { id: 19, toolCall: { toolCallId: "long-permission", kind: "execute", title }, options: [
+      { optionId: "once", name: "Allow once", kind: "allow_once" }, { optionId: "reject", name: "Reject", kind: "reject_once" },
+    ] } });
+    await page.locator(".command-expand-here").click();
+    const geometry = await page.evaluate(() => {
+      const pre = document.querySelector("pre.command-full");
+      const action = [...document.querySelectorAll("button")].find(button => button.textContent.includes("Allow once"));
+      return { scrolls: pre.scrollHeight > pre.clientHeight, separate: !pre.contains(action), actionTop: action.getBoundingClientRect().top, preBottom: pre.getBoundingClientRect().bottom };
+    });
+    if (!geometry.scrolls || !geometry.separate || geometry.actionTop < geometry.preBottom) throw new Error("Approval actions must remain outside inline scrolling");
+  } },
+  "upstream-plan-markdown": { height: 1000, run: async ({ send, page }) => {
+    await send({ type: "messageChunk", text: "# Heading 1\n## Heading 2\n### Heading 3\n#### Heading 4\n##### Heading 5\n###### Heading 6\n\n![](images/a b.png)\n\n[External image](https://example.com/image.png)" });
+    await page.waitForTimeout(80);
+    const request = await page.evaluate(() => window.__posted.find(m => m.type === "resolveMarkdownImage"));
+    if (!request) throw new Error("Markdown image request missing");
+    await send({ type: "markdownImage", requestId: request.requestId, src: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j5vQAAAAASUVORK5CYII=" });
+    await page.waitForFunction(() => { const image = document.querySelector("img.md-image"); return image && image.complete && image.naturalWidth === 1; });
+    const sizes = await page.evaluate(() => [4, 5, 6].map(n => parseFloat(getComputedStyle(document.querySelector("h" + n)).fontSize)));
+    if (!(sizes[0] > sizes[1] && sizes[1] > sizes[2])) throw new Error("Heading hierarchy missing");
+  } },
+  "upstream-plan-command": { run: async ({ send, page }) => {
+    const command = Array.from({ length: 100 }, (_, i) => "echo line-" + i + " " + "x".repeat(180)).join("\n");
+    await send({ type: "toolCall", call: { toolCallId: "long", kind: "execute", title: "Long command", rawInput: { command } } });
+    await send({ type: "messageChunk", text: "Inspect the full command inside its card." });
+    await page.locator(".tool-flat.has-details").click();
+    await page.locator(".command-expand-here").first().click();
+    const overflow = await page.locator("pre.command-full").evaluate(el => ({ vertical: el.scrollHeight > el.clientHeight, horizontal: el.scrollWidth > el.clientWidth, height: el.clientHeight }));
+    if (!overflow.vertical || !overflow.horizontal || overflow.height > 400) throw new Error("Inline scroll bounds failed: " + JSON.stringify(overflow));
+  } },
   "subagent-attachment-picker": { run: async ({ send, page }) => {
     await send({ type: "sessionDelegation", value: "auto", targets: [
       { provider: "codex", name: "Codex", eligible: true, models: [{ id: "example-review", label: "Review model" }, { id: "example-fast", label: "Fast model" }] },

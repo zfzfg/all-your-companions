@@ -159,6 +159,28 @@ suite("sessions and history in the local host", () => {
     }
   });
 
+  test("workspace project configuration updates the catalog in the real host", async () => {
+    const cfg = vscode.workspace.getConfiguration("companions");
+    const previous = cfg.inspect<boolean>("projects.workspaceOnly")?.workspaceValue;
+    const posts: any[] = [];
+    hooks.onPost((msg: any) => posts.push(msg));
+    try {
+      await vscode.commands.executeCommand("grok.open");
+      await cfg.update("projects.workspaceOnly", true, vscode.ConfigurationTarget.Workspace);
+      const deadline = Date.now() + 10000;
+      while (!posts.some(m => m.type === "repos" && m.workspaceOnly === true) && Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+      const frame = posts.find(m => m.type === "repos" && m.workspaceOnly === true);
+      assert.ok(frame, "workspace configuration must repost the catalog");
+      assert.deepStrictEqual(frame.workspaceRoots, [hooks.workspaceRoot()]);
+      assert.ok(frame.entries.every((entry: any) => entry.cwd === hooks.workspaceRoot()));
+    } finally {
+      await cfg.update("projects.workspaceOnly", previous, vscode.ConfigurationTarget.Workspace);
+      hooks.onPost(() => {});
+    }
+  });
+
   test("isolateFromInstalledGrok keeps locateProvider off an installed CLI", async () => {
     const decoyDir = fs.mkdtempSync(path.join(os.tmpdir(), "grok-iso-decoy-"));
     const decoy = path.join(decoyDir, process.platform === "win32" ? "grok.cmd" : "grok");

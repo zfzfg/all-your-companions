@@ -253,3 +253,24 @@ describe("ProviderSession (W-15 S4)", () => {
     });
   });
 });
+
+
+it("keeps Muse identity across empty provider switches and persists the selected model", async () => {
+  const deps = makeMockDeps(); const ps = new ProviderSession(deps);
+  const session = deps.getFocused();
+  deps.providerOps.connectedProviders = () => ["grok", "muse"];
+  deps.sessionOps.startSession = vi.fn(async (_id, s = session) => {
+    s.client = { dispose: vi.fn(async () => {}), deleteSession: vi.fn(), setModel: vi.fn() } as any;
+  });
+  session.client = { dispose: vi.fn(async () => {}) } as any;
+  await ps.switchModel("muse-model", session, "muse");
+  expect(session.provider).toBe("muse");
+  expect(deps.sessionOps.rememberProjectProvider).toHaveBeenLastCalledWith("/workspace/test", "muse", "muse-model");
+  await ps.switchModel("grok-2", session, "grok");
+  expect(session.provider).toBe("grok");
+  await ps.switchModel("muse-model", session, "muse");
+  session.hasHistory = true;
+  await ps.switchModel("grok-2", session, "grok");
+  expect(session.provider).toBe("muse");
+  expect(deps.uiOps.notifyUser).toHaveBeenCalledWith("warning", expect.stringContaining("Muse"));
+});

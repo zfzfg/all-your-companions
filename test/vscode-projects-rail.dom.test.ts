@@ -1004,3 +1004,16 @@ describe("VS Code projects rail renderer", () => {
     });
   });
 });
+
+
+it("keeps a visible outside-window context while filtering pinned and recent sessions", () => {
+  const { window, doc } = bootRail(); const api = railApi(window);
+  api.onMessage({ type: "repos", entries: repos.slice(0, 1), selectedCwd: "/work/alpha", activeCwd: "/work/beta",
+    workspaceOnly: true, workspaceRoots: ["/work/alpha"] });
+  api.onMessage({ type: "repoSessions", cwd: "/work/alpha", entries: [row("a", "/work/alpha", "Alpha session")], total: 1, dots: {} });
+  api.onMessage({ type: "pinnedSessions", entries: [row("a", "/work/alpha", "Alpha session"), row("b", "/work/beta", "Beta session")], dots: {} });
+  expect(doc.querySelector("#rail-scroll")!.textContent).toContain("outside this window: /work/beta");
+  expect(doc.querySelector(".rail-pinned")!.textContent).toContain("Alpha session");
+  expect(doc.querySelector(".rail-pinned")!.textContent).not.toContain("Beta session");
+  expect(api.state.activeCwd).toBe("/work/beta");
+});
