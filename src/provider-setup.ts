@@ -97,6 +97,7 @@ export class ProviderSetup {
   museSessionRefresh = new Map<string, Promise<void>>();
   loginReprobeTimers = new Map<AcpProvider, NodeJS.Timeout>();
   private connectChecks = new Set<AcpProvider>();
+  private probeControllers = new Map<AcpProvider, Set<AbortController>>();
   private credentialGenerations = new Map<AcpProvider, number>();
 
   constructor(private readonly deps: ProviderSetupDeps) {}
@@ -293,6 +294,7 @@ export class ProviderSetup {
     const current = this.providerConnections();
     if (!connected) {
       this.credentialGenerations.set(provider, (this.credentialGenerations.get(provider) ?? 0) + 1);
+      for (const controller of this.probeControllers.get(provider) ?? []) controller.abort();
       const timer = this.loginReprobeTimers.get(provider);
       if (timer) clearTimeout(timer);
       this.loginReprobeTimers.delete(provider);
@@ -363,10 +365,12 @@ export class ProviderSetup {
     if (!this.hasProviderConsent("codex")) return false;
     const cliPath = this.locateProvider("codex");
     if (!cliPath) return false;
+    const controller = this.createProbeController("codex");
     const generation = this.credentialGenerations.get("codex") ?? 0;
     const current = () => this.hasProviderConsent("codex") && generation === (this.credentialGenerations.get("codex") ?? 0);
     try {
       await warmCodexModelCache({
+        signal: controller.signal,
         cliPath,
         onModels: (models, currentModelId) => current() ? this.cacheProviderModels("codex", models, currentModelId) : undefined,
         log: (message) => this.host.appendLine(message),
@@ -389,6 +393,8 @@ export class ProviderSetup {
         this.setProviderNeedsLogin("codex", true);
       }
       return false;
+    } finally {
+      this.probeControllers.get("codex")?.delete(controller);
     }
   }
 
@@ -396,10 +402,12 @@ export class ProviderSetup {
     if (!this.hasProviderConsent("claude")) return false;
     const cliPath = this.locateProvider("claude");
     if (!cliPath) return false;
+    const controller = this.createProbeController("claude");
     const generation = this.credentialGenerations.get("claude") ?? 0;
     const current = () => this.hasProviderConsent("claude") && generation === (this.credentialGenerations.get("claude") ?? 0);
     try {
       await warmClaudeModelCache({
+        signal: controller.signal,
         cliPath,
         onModels: (models, currentModelId) => current() ? this.cacheProviderModels("claude", models, currentModelId) : undefined,
         log: (message) => this.host.appendLine(message),
@@ -419,6 +427,8 @@ export class ProviderSetup {
         this.setProviderNeedsLogin("claude", true);
       }
       return false;
+    } finally {
+      this.probeControllers.get("claude")?.delete(controller);
     }
   }
 
@@ -427,10 +437,12 @@ export class ProviderSetup {
     const cliPath = this.locateProvider("gemini");
     if (!cliPath) return false;
     this.host.appendLine("[antigravity] Third-party access may carry account or service restrictions. Review https://antigravity.google/terms. Authentication stays with agy.");
+    const controller = this.createProbeController("gemini");
     const generation = this.credentialGenerations.get("gemini") ?? 0;
     const current = () => this.hasProviderConsent("gemini") && generation === (this.credentialGenerations.get("gemini") ?? 0);
     try {
       await warmGeminiModelCache({
+        signal: controller.signal,
         cliPath,
         onModels: (models, currentModelId) => current() ? this.cacheProviderModels("gemini", models, currentModelId) : undefined,
         log: (message) => this.host.appendLine(message),
@@ -451,7 +463,17 @@ export class ProviderSetup {
         this.setProviderNeedsLogin("gemini", true);
       }
       return false;
+    } finally {
+      this.probeControllers.get("gemini")?.delete(controller);
     }
+  }
+
+  private createProbeController(provider: AcpProvider): AbortController {
+    const controller = new AbortController();
+    const controllers = this.probeControllers.get(provider) ?? new Set<AbortController>();
+    controllers.add(controller);
+    this.probeControllers.set(provider, controllers);
+    return controller;
   }
 
   /** Explicit credential observation. Unlike history refresh this never obeys
@@ -473,6 +495,7 @@ export class ProviderSetup {
     // directory the catalog lists as "Untitled" and the CLI cannot load.
     // Probe in a scratch cwd so a failed cleanup cannot appear in the user's
     // project; still delete the dir after the process exits.
+    const controller = this.createProbeController(provider);
     const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "grok-cred-probe-"));
     const envCwd = this.workspaceRoot() || scratch;
     const client = new AcpClient({
@@ -482,7 +505,10 @@ export class ProviderSetup {
       log: (message) => this.host.appendLine(message),
       grokVersion: this.providerCliVersions.grok,
     });
+    const abort = () => { void client.dispose(); };
+    controller.signal.addEventListener("abort", abort, { once: true });
     try {
+      controller.signal.throwIfAborted();
       await client.start();
       await client.newSession();
       if (!current()) return false;
@@ -496,6 +522,8 @@ export class ProviderSetup {
       }
       return false;
     } finally {
+      controller.signal.removeEventListener("abort", abort);
+      this.probeControllers.get(provider)?.delete(controller);
       const probeId = client.sessionId;
       await client.dispose();
       if (probeId) this.removeSessionFromDisk(probeId, scratch);

@@ -6,6 +6,7 @@ import { GeminiBackend, type GeminiBackendOptions } from "./gemini-backend";
 
 export interface WarmGeminiModelCacheOptions {
   cliPath: string;
+  signal?: AbortSignal;
   onModels: (models: readonly ModelInfo[], currentModelId?: string) => void | PromiseLike<void>;
   log?: (message: string) => void;
   env?: NodeJS.ProcessEnv;
@@ -15,6 +16,7 @@ export interface WarmGeminiModelCacheOptions {
 }
 
 async function readModelsIn(cwd: string, options: WarmGeminiModelCacheOptions): Promise<void> {
+  options.signal?.throwIfAborted();
   const client = new AcpClient({
     cliPath: options.cliPath,
     cwd,
@@ -22,7 +24,10 @@ async function readModelsIn(cwd: string, options: WarmGeminiModelCacheOptions): 
     backend: new GeminiBackend(options.backend),
     log: options.log ?? (() => {}),
   });
+  const abort = () => { void client.dispose(); };
+  options.signal?.addEventListener("abort", abort, { once: true });
   try {
+    options.signal?.throwIfAborted();
     await client.start();
     const created = await client.newSession();
     await options.onModels(client.availableModels, client.currentModelId);
@@ -32,6 +37,7 @@ async function readModelsIn(cwd: string, options: WarmGeminiModelCacheOptions): 
       options.log?.(`[gemini] throwaway session cleanup failed (${(error as Error).message}); models already cached, continuing`);
     }
   } finally {
+    options.signal?.removeEventListener("abort", abort);
     await client.dispose();
   }
 }
@@ -42,7 +48,7 @@ export async function warmGeminiModelCache(options: WarmGeminiModelCacheOptions)
     await readModelsIn(scratch, options);
     return;
   } catch (error) {
-    if (!options.fallbackCwd) throw error;
+    if (options.signal?.aborted || !options.fallbackCwd) throw error;
     options.log?.(
       `[gemini] model-cache warm-up in a scratch dir failed (${(error as Error).message}); retrying in the workspace`,
     );

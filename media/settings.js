@@ -220,7 +220,7 @@
     const connected = provider.connected === true;
     const needsLogin = connected && provider.needsLogin === true;
     if (needsLogin) return "Sign in again";
-    return connected ? "Sign out" : "Connect";
+    return connected ? "Disconnect" : "Connect";
   }
 
   function providerDescription(provider) {
@@ -550,7 +550,7 @@
       message: (s) => {
         const provider = providerOf(s, "grok");
         return provider.connected && provider.needsLogin !== true
-          ? { type: "logout", provider: "grok" }
+          ? { type: "disconnectProvider", provider: "grok" }
           : { type: "runGrokLogin", provider: "grok" };
       },
     },
@@ -570,7 +570,7 @@
       message: (s) => {
         const provider = providerOf(s, "codex");
         return provider.connected && provider.needsLogin !== true
-          ? { type: "logout", provider: "codex" }
+          ? { type: "disconnectProvider", provider: "codex" }
           : { type: "runGrokLogin", provider: "codex" };
       },
     },
@@ -590,7 +590,7 @@
       message: (s) => {
         const provider = providerOf(s, "claude");
         return provider.connected && provider.needsLogin !== true
-          ? { type: "logout", provider: "claude" }
+          ? { type: "disconnectProvider", provider: "claude" }
           : { type: "runGrokLogin", provider: "claude" };
       },
     },
@@ -610,7 +610,7 @@
       message: (s) => {
         const provider = providerOf(s, "muse");
         return provider.connected && provider.needsLogin !== true
-          ? { type: "logout", provider: "muse" }
+          ? { type: "disconnectProvider", provider: "muse" }
           : { type: "runGrokLogin", provider: "muse" };
       },
     },
@@ -638,10 +638,17 @@
       message: (s) => {
         const provider = providerOf(s, "gemini");
         return provider.connected && provider.needsLogin !== true
-          ? { type: "logout", provider: "gemini" }
+          ? { type: "disconnectProvider", provider: "gemini" }
           : { type: "runGrokLogin", provider: "gemini" };
       },
     },
+    ...["grok", "codex", "claude", "gemini", "muse"].map(provider => ({
+      id: "cliSignout:" + provider, category: "providers", title: provider + " CLI",
+      kind: "action", actionLabel: () => "Sign out of CLI", keepOpen: true,
+      description: "Remove the vendor CLI credentials on this machine.",
+      visible: s => !!providerOf(s, provider).connected,
+      message: () => ({ type: "logout", provider }),
+    })),
     {
       id: "githubConnection",
       category: "providers",

@@ -1891,6 +1891,7 @@ export type WebviewMsg =
   | { type: "runMuseInstallCmd" }
   | { type: "setMuseSetting"; key: keyof MuseSettings; value: boolean | string }
   | { type: "runGrokLogin"; provider?: AcpProvider }
+  | { type: "disconnectProvider"; provider: AcpProvider }
   | { type: "logout"; provider?: AcpProvider }
   | { type: "checkGrokUpdate" }
   | { type: "updateGrok" }
@@ -2114,7 +2115,7 @@ const WEBVIEW_MESSAGE_TYPE_MAP: Record<WebviewMsg["type"], true> = {
   dropFile: true, permissionAnswer: true, listPermissionRules: true, deletePermissionRule: true, adoptPermissionRules: true, exitPlanAnswer: true, questionAnswer: true, limitOfferAnswer: true,
   questionCancel: true, questionDraft: true, setModel: true, installCodex: true, updateProviderCli: true, cancelCodexInstall: true, runInstallCmd: true, runMuseInstallCmd: true, setMuseSetting: true, runGrokLogin: true,
   
-  logout: true, checkGrokUpdate: true, updateGrok: true, recheckConnection: true, refreshProviders: true, retryProviderSession: true,
+  disconnectProvider: true, logout: true, checkGrokUpdate: true, updateGrok: true, recheckConnection: true, refreshProviders: true, retryProviderSession: true,
   listSessions: true, listRepoSessions: true, selectRepo: true, toggleRepoPin: true, toggleSessionPin: true,
   setRepoArchived: true, setRepoColor: true,
   openAgentArtifact: true, openCrewSession: true, stopCrew: true, requestHandoff: true, resumeSession: true, renameSession: true, deleteSession: true,

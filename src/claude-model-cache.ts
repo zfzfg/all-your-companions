@@ -6,6 +6,7 @@ import { ClaudeBackend, type ClaudeBackendOptions } from "./claude-backend";
 
 export interface WarmClaudeModelCacheOptions {
   cliPath: string;
+  signal?: AbortSignal;
   onModels: (models: readonly ModelInfo[], currentModelId?: string) => void | PromiseLike<void>;
   log?: (message: string) => void;
   env?: NodeJS.ProcessEnv;
@@ -17,6 +18,7 @@ export interface WarmClaudeModelCacheOptions {
 }
 
 async function readModelsIn(cwd: string, options: WarmClaudeModelCacheOptions): Promise<void> {
+  options.signal?.throwIfAborted();
   const client = new AcpClient({
     cliPath: options.cliPath,
     cwd,
@@ -24,7 +26,10 @@ async function readModelsIn(cwd: string, options: WarmClaudeModelCacheOptions): 
     backend: new ClaudeBackend(options.backend),
     log: options.log ?? (() => {}),
   });
+  const abort = () => { void client.dispose(); };
+  options.signal?.addEventListener("abort", abort, { once: true });
   try {
+    options.signal?.throwIfAborted();
     await client.start();
     const created = await client.newSession();
     await options.onModels(client.availableModels, client.currentModelId);
@@ -38,6 +43,7 @@ async function readModelsIn(cwd: string, options: WarmClaudeModelCacheOptions): 
       options.log?.(`[claude] throwaway session cleanup failed (${(error as Error).message}); models already cached, continuing`);
     }
   } finally {
+    options.signal?.removeEventListener("abort", abort);
     await client.dispose();
   }
 }
@@ -76,7 +82,7 @@ export async function warmClaudeModelCache(options: WarmClaudeModelCacheOptions)
     await readModelsIn(scratch, options);
     return;
   } catch (error) {
-    if (!options.fallbackCwd) throw error;
+    if (options.signal?.aborted || !options.fallbackCwd) throw error;
     options.log?.(
       `[claude] model-cache warm-up in a scratch dir failed (${(error as Error).message}); retrying in the workspace`,
     );

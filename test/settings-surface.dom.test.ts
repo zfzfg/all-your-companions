@@ -1784,3 +1784,19 @@ describe("settings: the GitHub token path matches what the host will accept", ()
   });
 
 });
+
+
+it("offers extension disconnect separately from CLI sign-out", () => {
+  const { root, posted } = mountAt("providers", {
+    snapshot: { providers: [{ id: "grok", connected: true }] },
+    env: { providersKnown: true },
+  });
+  const disconnect = root.querySelector('[data-id="providerGrok"] .settings-action') as HTMLButtonElement;
+  expect(disconnect.textContent).toBe("Disconnect");
+  disconnect.click();
+  expect(posted).toContainEqual({ type: "disconnectProvider", provider: "grok" });
+  const logout = root.querySelector('[data-id="cliSignout:grok"] .settings-action') as HTMLButtonElement;
+  expect(logout.textContent).toBe("Sign out of CLI");
+  logout.click();
+  expect(posted).toContainEqual({ type: "logout", provider: "grok" });
+});

@@ -493,3 +493,34 @@ describe("signing back in after the last provider signed out", () => {
     expect(restored.some((message) => message.type === "restoreComposer")).toBe(false);
   });
 });
+
+
+describe("extension disconnect preserves conversations", () => {
+  it.each(["grok", "codex", "claude", "gemini", "muse"] as const)("disconnects %s without CLI auth or retargeting", async provider => {
+    const sidebar = makeSidebar();
+    sidebar.providerConnectionState = { [provider]: true };
+    const session = sidebar.focused as Session;
+    session.provider = provider;
+    session.hasHistory = true;
+    session.activeSessionId = "keep-me";
+    session.queuedSends = [{ text: "keep draft", chips: [] }];
+    session.buffer = [{ type: "hostNotice", level: "info", text: "history" }];
+    sidebar.pool.add(session);
+    const dispose = vi.fn(async () => {});
+    session.client = { dispose } as any;
+    sidebar.drainPendingConfirms = vi.fn();
+    sidebar.emitLocalTransient = vi.fn();
+    await sidebar.onMessage({ type: "disconnectProvider", provider });
+    expect(dispose).toHaveBeenCalledOnce();
+    expect(session.client).toBeUndefined();
+    expect(session.provider).toBe(provider);
+    expect(session.activeSessionId).toBe("keep-me");
+    expect(session.hasHistory).toBe(true);
+    expect(session.queuedSends[0].text).toBe("keep draft");
+    expect(session.buffer).toContainEqual({ type: "hostNotice", level: "info", text: "history" });
+    expect(sidebar.pool.has(session)).toBe(true);
+    expect(sidebar.providerConnectionState[provider]).toBe(false);
+    expect(sidebar.host.createTerminal).not.toHaveBeenCalled();
+    expect(sidebar.locateProvider).not.toHaveBeenCalled();
+  });
+});

@@ -248,6 +248,7 @@ export interface InboundProviderOps {
   installManagedCodexCli(...args: any[]): any;
   listGithubRepos(...args: any[]): any;
   locateProvider(...args: any[]): any;
+  disconnectProvider(provider: AcpProvider): Promise<void>;
   logout(...args: any[]): any;
   notifyUser(...args: any[]): any;
   postVoiceConfigured(...args: any[]): any;
@@ -1657,6 +1658,9 @@ export class ProjectInboundRouter {
         }
         break;
       }
+      case "disconnectProvider":
+        if (isAcpProvider(msg.provider)) await this.deps.providers.disconnectProvider(msg.provider);
+        break;
       case "logout":
         await this.deps.providers.logout(
           isAcpProvider(msg.provider) ? msg.provider : "grok",

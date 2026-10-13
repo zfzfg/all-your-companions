@@ -1387,6 +1387,7 @@ export class GrokSidebar {
         installManagedCodexCli: (...args: any[]) => (self as any).installManagedCodexCli(...args),
         listGithubRepos: (...args: any[]) => (self as any).listGithubRepos(...args),
         locateProvider: (...args: any[]) => (self as any).locateProvider(...args),
+        disconnectProvider: (provider) => self.providerSession.disconnectProvider(provider),
         logout: (...args: any[]) => (self as any).logout(...args),
         notifyUser: (...args: any[]) => (self as any).notifyUser(...args),
         postVoiceConfigured: (...args: any[]) => (self as any).postVoiceConfigured(...args),

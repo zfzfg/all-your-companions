@@ -1143,6 +1143,31 @@ public modelsForSession(session: Session, ownModels: readonly any[], currentMode
     await this.finishProviderLogout("grok", opts.report);
   }
 
+public async disconnectProvider(provider: AcpProvider): Promise<void> {
+    this.deps.sidebarOps.setProviderConnectedInMemory(provider, false);
+    const affected = new Set([this.deps.getFocused(), ...this.deps.getPool()]);
+    const exits: Promise<void>[] = [];
+    for (const session of affected) {
+      if (session.provider !== provider) continue;
+      const client = this.deps.sessionOps.detachClient(session);
+      if (client) exits.push(client.dispose());
+      session.priming = false;
+      this.deps.uiOps.setStatus(session, "idle");
+      this.deps.uiOps.emit(session, { type: "setBusy", value: false, locked: false });
+      this.deps.uiOps.emitLocalTransient(session, {
+        type: "hostNotice", level: "info", text: `${providerDisplayName(provider)} disconnected. Reconnect in Settings to continue this conversation.`,
+      });
+    }
+    try {
+      await this.deps.sidebarOps.persistProviderConnections();
+    } catch (error) {
+      this.deps.uiOps.notifyUser("error", `Disconnected, but saving connection state failed: ${errorDetail(error)}`);
+    }
+    await Promise.allSettled(exits);
+    this.deps.sidebarOps.postProviderState();
+    this.deps.sidebarOps.postSessionsList();
+  }
+
 public async finishProviderLogout(
     provider: AcpProvider,
     report?: (text: string) => void,
