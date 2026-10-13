@@ -149,3 +149,41 @@ describe("Muse raw notification projection", () => {
     });
   });
 });
+
+
+describe("Muse reasoning summaries", () => {
+  it("streams early deltas and multiple parts without completion duplicates", () => {
+    const updates: any[] = [], logs: string[] = [];
+    const p = new Projection(u => updates.push(u), m => logs.push(m));
+    p.accept("item/delta", { itemId: "r", field: "summary.0", delta: "First" });
+    p.accept("item/started", { item: { itemId: "r", revision: 1, kind: "reasoning", summary: ["First"] } });
+    p.accept("item/delta", { itemId: "r", field: "summary.0", delta: " part" });
+    p.accept("item/delta", { itemId: "r", field: "summary.1", delta: "Second" });
+    const done = { itemId: "r", kind: "reasoning", revision: 2, summary: ["First part", "Second"] };
+    p.acceptHistory(done);
+    p.acceptHistory(done);
+    expect(updates.map(u => u.content.text)).toEqual(["First", " part", "\n\nSecond"]);
+    expect(updates.every(u => u.sessionUpdate === "agent_thought_chunk")).toBe(true);
+    expect(logs).toEqual([]);
+  });
+  it("uses the same projection for resume and ignores empty, stale and changed prefixes", () => {
+    const updates: any[] = [], logs: string[] = [];
+    const p = new Projection(u => updates.push(u), m => logs.push(m));
+    const snapshot = (revision: number, summary: string[]) => p.acceptHistory({ itemId: "r", kind: "reasoning", revision, summary });
+    snapshot(1, ["", "Summary"]);
+    snapshot(0, ["stale"]);
+    snapshot(2, ["", "Rewritten"]);
+    snapshot(3, ["", "Summary complete"]);
+    expect(updates.map(u => u.content.text)).toEqual(["Summary", " complete"]);
+    expect(logs).toHaveLength(1);
+    p.clear(); snapshot(1, ["New"]);
+    expect(updates.at(-1).content.text).toBe("New");
+  });
+  it("does not infer thoughts from tools or unknown kinds", () => {
+    const updates: any[] = [];
+    const p = new Projection(u => updates.push(u), () => {});
+    p.acceptHistory({ itemId: "x", kind: "future", revision: 1, summary: ["not reasoning"] });
+    p.accept("item/delta", { itemId: "x", field: "summary.0", delta: "no" });
+    expect(updates).toEqual([]);
+  });
+});

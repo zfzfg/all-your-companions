@@ -6,6 +6,8 @@ interface ItemState {
   revision: number;
   text: string;
   output: string;
+  summary: Map<number, string>;
+  lastSummaryPart?: number;
   toolCallId?: string;
 }
 
@@ -91,6 +93,20 @@ export class Projection {
     }
   }
 
+  private appendSummary(state: ItemState, id: string, part: number, text: string): void {
+    if (state.kind !== "reasoning" && state.kind !== undefined) return;
+    const previous = state.summary.get(part) ?? "";
+    if (!text || text === previous || previous.startsWith(text)) return;
+    if (!text.startsWith(previous) || (state.lastSummaryPart !== undefined && part < state.lastSummaryPart)) {
+      this.log(`Muse projection: prefix-changing summary.${part} revision for item ${id}`);
+      return;
+    }
+    const separator = state.lastSummaryPart !== undefined && state.lastSummaryPart !== part ? "\n\n" : "";
+    state.summary.set(part, text);
+    state.lastSummaryPart = part;
+    this.emit({ sessionUpdate: "agent_thought_chunk", content: { type: "text", text: separator + text.slice(previous.length) } });
+  }
+
   acceptHistory(item: Record<string, any>): void {
     if (item.kind === "userMessage" && typeof item.text === "string") {
       this.emit({ sessionUpdate: "user_message_chunk", content: { type: "text", text: item.text } });
@@ -110,11 +126,17 @@ export class Projection {
       let state = this.items.get(id);
       if (!state) {
         // Muse may send an answer delta without a preceding item/started.
-        state = { revision: -1, text: "", output: "" };
+        state = { revision: -1, text: "", output: "", summary: new Map() };
         this.items.set(id, state);
       }
       if (state.kind === "reminderChild") return;
       const field: string = params.field ?? "text";
+      const summary = /^summary\.(0|[1-9]\d*)$/.exec(field);
+      if (summary) {
+        const part = Number(summary[1]);
+        if (!Number.isSafeInteger(part)) return;
+        this.appendSummary(state, id, part, (state.summary.get(part) ?? "") + params.delta);
+      }
       if (field === "text" || field === "output") this.append(state, id, field, state[field] + params.delta);
       return;
     }
@@ -124,7 +146,7 @@ export class Projection {
     const id = item.itemId;
     let state = this.items.get(id);
     if (!state) {
-      state = { revision: -1, text: "", output: "" };
+      state = { revision: -1, text: "", output: "", summary: new Map() };
       this.items.set(id, state);
     }
     if (item.revision <= state.revision) return;
@@ -163,6 +185,10 @@ export class Projection {
         ...(visible !== undefined ? { content: [{ type: "content", content: { type: "text", text: visible } }] } : {}),
       });
       if (typeof item.visibleOutput === "string") this.append(state, id, "output", item.visibleOutput);
+    } else if (item.kind === "reasoning" && Array.isArray(item.summary)) {
+      item.summary.forEach((text: unknown, part: number) => {
+        if (typeof text === "string") this.appendSummary(state, id, part, text);
+      });
     } else if (item.kind === "agentMessage" && typeof item.text === "string") {
       this.append(state, id, "text", item.text);
     }
