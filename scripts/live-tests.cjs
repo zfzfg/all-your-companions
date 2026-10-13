@@ -58,7 +58,7 @@ try {
   process.exit(2);
 }
 const { acpClientCapabilities } = acpMod;
-const { isMediaGenToolCall, extractGeneratedMediaPaths, contextUsedFromCompactNotification, resolveModelId } = dispatch;
+const { isMediaGenToolCall, extractGeneratedMediaPaths, contextUsedFromCompactNotification, resolveModelId, parseSessionInfoRpcResult } = dispatch;
 const { shouldBlockWrite } = planGate;
 const { isSubagentToolCall, subagentLabel } = helpers;
 
@@ -358,8 +358,8 @@ async function testTerminalShell() {
   }
 }
 
-// K-01: the compaction threshold follows GROK_AUTO_COMPACT_THRESHOLD_PERCENT
-// over xAI's catalog value. Free — no prompt, only session/info.
+// A user-set compaction environment variable remains CLI-owned. The extension
+// does not set a threshold automatically. Free — no prompt, only session/info.
 async function testCompactThreshold() {
   const read = async (value) => {
     const saved = process.env.GROK_AUTO_COMPACT_THRESHOLD_PERCENT;
@@ -372,7 +372,10 @@ async function testCompactThreshold() {
       assert(!init.error, "initialize errored: " + JSON.stringify(init.error));
       const s = await withTimeout(acp.send("session/new", { cwd, mcpServers: [] }), 60000, "session/new");
       const info = await withTimeout(acp.send("_x.ai/session/info", { sessionId: s.result.sessionId }), 30000, "session/info");
-      return info.result && info.result.context && info.result.context.autoCompactThresholdPercent;
+      assert(!info.error, "session/info errored: " + JSON.stringify(info.error));
+      const context = parseSessionInfoRpcResult(info.result);
+      assert(context, "session/info did not contain a valid context snapshot");
+      return context.autoCompactThresholdPercent;
     } finally {
       acp.kill();
       if (saved === undefined) delete process.env.GROK_AUTO_COMPACT_THRESHOLD_PERCENT;
@@ -381,7 +384,7 @@ async function testCompactThreshold() {
   };
   const base = await read(undefined);
   const set = await read("95");
-  assert(set === 95, `DRIFT: GROK_AUTO_COMPACT_THRESHOLD_PERCENT=95 reported ${set} (baseline 95). companions.grok.autoCompactThresholdPercent no longer applies — see research/compact.md Plan B.`);
+  assert(set === 95, `DRIFT: user-set GROK_AUTO_COMPACT_THRESHOLD_PERCENT=95 reported ${set} (baseline ${base}). See research/compact.md.`);
   return `default=${base}, env95=${set}`;
 }
 

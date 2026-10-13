@@ -116,13 +116,16 @@ xAI's model catalog (`~/.grok/models_cache.json`) pins
 | `…=150` (invalid) | 80 (ignored) |
 | `GROK_CONFIG='{"session":{"auto_compact_threshold_percent":95}}'` | 80 (overlay does not pass `session`) |
 
-The extension sets the env on every Grok spawn from
-`companions.grok.autoCompactThresholdPercent` (default 95, 0 = leave Grok's
-default, max 99), never over a user-set variable (shell or workspace `.env`).
-Every Grok process — main sessions, crew stages, companion subagents, and
-Grok's own subagents inside that process — inherits it. The first
-`session/info` of each process is compared with the requested value; a
-mismatch is logged and shown once per window.
+The extension leaves the threshold to the CLI and injects no automatic
+override. A user-set variable (shell or workspace `.env`) is preserved for
+Grok processes. When `session/info` reports a threshold, the UI displays that
+native value and checks a reported mismatch against an explicit user variable.
+
+On 2026-10-13, native Windows Grok 1.0.50 reported 80 with nothing set and 95
+with `GROK_AUTO_COMPACT_THRESHOLD_PERCENT=95`. Its RPC payload wraps the
+snapshot in `result.result.context`; `parseSessionInfoRpcResult` handles this
+shape. The live canary now uses that production parser instead of assuming
+`result.context`. No global CLI configuration is written by this check.
 
 Why not 100: compaction is itself a model call over the whole history; the
 threshold is checked before a sampling step, so one large tool result between

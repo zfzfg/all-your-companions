@@ -5,8 +5,8 @@
  * Grok compacts at 400k of a 500k window. The env variable
  * `GROK_AUTO_COMPACT_THRESHOLD_PERCENT` outranks the catalog (probe against
  * grok 1.0.41, research/compact.md); a `GROK_CONFIG` overlay does not. The
- * extension therefore sets the variable on every Grok spawn, the same way it
- * sets `GROK_SHELL`.
+ * extension leaves the threshold to the CLI and preserves a variable set by
+ * the user; it never injects an automatic override.
  *
  * Pure: no vscode, no fs, no clock.
  */

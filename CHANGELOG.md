@@ -2,7 +2,23 @@
 
 ## Unreleased
 
-- Preserve subagent cards and delegation notices in transcript order when returning from a child chat. Keep one card at its original turn with its latest status across paginated history, restore bounded activity previews, reset the running tray per conversation, preserve resolved approvals on history expansion, and clear old results for follow-ups.
+## [0.3.3] - 2026-10-13
+
+### Added
+
+- Disconnect any companion from the extension while preserving CLI credentials, conversations and drafts; keep Sign out of CLI as a separate action.
+- Optionally limit Projects, Recent and Pins to this window's workspace folders with `companions.projects.workspaceOnly`, including multi-root workspaces.
+- Expand long command and permission previews inline with bounded scrolling, Escape/Collapse and visible approval buttons; retain View all in the editor.
+
+### Changed
+
+- Complete Markdown H4–H6 styling and load authorized local raster images relative to the conversation or file preview, with fallback links for missing and external images.
+
+### Fixed
+
+- Display supplied Muse reasoning summaries through the existing Thinking UI for live and resumed conversations without duplicate streamed text.
+- Preserve stale context provenance through Grok compact/reload so historical occupancy does not reappear as a fresh percentage.
+- Preserve subagent cards and delegation notices at their original transcript position, with current status, bounded activity previews, resolved approvals and correct follow-up results across history expansion and child-chat navigation.
 
 ## [0.3.2] - 2026-10-03
 
